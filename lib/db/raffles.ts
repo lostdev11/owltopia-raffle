@@ -218,3 +218,111 @@ export async function deleteRaffle(id: string) {
   console.log('Successfully deleted raffle:', id)
   return true
 }
+
+/**
+ * Select a winner for a raffle based on weighted random selection.
+ * Each wallet's chance is proportional to their total ticket quantity.
+ * Only considers confirmed entries.
+ * 
+ * @param raffleId - The ID of the raffle
+ * @returns The winner's wallet address, or null if no valid entries
+ */
+export async function selectWinner(raffleId: string): Promise<string | null> {
+  // Get all confirmed entries for this raffle
+  const entries = await getEntriesByRaffleId(raffleId)
+  const confirmedEntries = entries.filter(e => e.status === 'confirmed')
+
+  if (confirmedEntries.length === 0) {
+    console.warn(`No confirmed entries found for raffle ${raffleId}`)
+    return null
+  }
+
+  // Aggregate ticket quantities by wallet address
+  const walletTickets = new Map<string, number>()
+  for (const entry of confirmedEntries) {
+    const current = walletTickets.get(entry.wallet_address) || 0
+    walletTickets.set(entry.wallet_address, current + entry.ticket_quantity)
+  }
+
+  // Convert to arrays for weighted random selection
+  const wallets = Array.from(walletTickets.keys())
+  const weights = Array.from(walletTickets.values())
+
+  // Calculate total tickets
+  const totalTickets = weights.reduce((sum, weight) => sum + weight, 0)
+
+  if (totalTickets === 0) {
+    console.warn(`Total ticket count is 0 for raffle ${raffleId}`)
+    return null
+  }
+
+  // Weighted random selection
+  // Generate a random number between 0 and totalTickets
+  let random = Math.random() * totalTickets
+
+  // Find which wallet wins by iterating through weighted ranges
+  for (let i = 0; i < wallets.length; i++) {
+    random -= weights[i]
+    if (random <= 0) {
+      const winnerWallet = wallets[i]
+      
+      // Update the raffle with the winner
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('raffles')
+        .update({
+          winner_wallet: winnerWallet,
+          winner_selected_at: now,
+        })
+        .eq('id', raffleId)
+
+      if (error) {
+        console.error('Error updating raffle with winner:', error)
+        throw new Error(`Failed to update raffle with winner: ${error.message}`)
+      }
+
+      console.log(`Winner selected for raffle ${raffleId}: ${winnerWallet} (${weights[i]} tickets)`)
+      return winnerWallet
+    }
+  }
+
+  // Fallback to last wallet (should not happen due to random <= 0 check)
+  const winnerWallet = wallets[wallets.length - 1]
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('raffles')
+    .update({
+      winner_wallet: winnerWallet,
+      winner_selected_at: now,
+    })
+    .eq('id', raffleId)
+
+  if (error) {
+    console.error('Error updating raffle with winner:', error)
+    throw new Error(`Failed to update raffle with winner: ${error.message}`)
+  }
+
+  return winnerWallet
+}
+
+/**
+ * Get all raffles that have ended but don't have a winner selected yet
+ */
+export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
+  const now = new Date().toISOString()
+  
+  const { data, error } = await supabase
+    .from('raffles')
+    .select('*')
+    .is('winner_wallet', null)
+    .is('winner_selected_at', null)
+    .lte('end_time', now)
+    .eq('is_active', true)
+
+  if (error) {
+    console.error('Error fetching ended raffles without winner:', error)
+    return []
+  }
+
+  return (data || []) as Raffle[]
+}

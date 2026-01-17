@@ -94,28 +94,51 @@ export function RafflesList({
   // Poll for entry updates when there are active raffles
   // This ensures all users see updated ticket totals in real-time
   useEffect(() => {
-    const now = new Date()
+    let pollInterval: NodeJS.Timeout | null = null
     
-    // Check if there are any active raffles
+    const checkAndPoll = () => {
+      const now = new Date()
+      
+      // Check if there are any active raffles (reactive to time passing)
+      const hasActiveRaffles = filteredRaffles.some(({ raffle }) => {
+        const endTime = new Date(raffle.end_time)
+        return endTime > now && raffle.is_active
+      })
+
+      // Stop polling if no active raffles
+      if (!hasActiveRaffles) {
+        if (pollInterval) {
+          clearInterval(pollInterval)
+          pollInterval = null
+        }
+        return
+      }
+
+      // Poll for active raffles
+      fetchEntriesForActiveRaffles()
+    }
+
+    // Initial check
+    checkAndPoll()
+
+    // Only start interval if there are active raffles
+    const now = new Date()
     const hasActiveRaffles = filteredRaffles.some(({ raffle }) => {
       const endTime = new Date(raffle.end_time)
       return endTime > now && raffle.is_active
     })
 
-    // Only poll if there are active raffles
-    if (!hasActiveRaffles) {
-      return
+    if (hasActiveRaffles) {
+      // Poll every 3 seconds to get fresh entry data (consistent with detail page)
+      // Note: Real-time subscriptions would be more efficient but complex for multiple raffles
+      pollInterval = setInterval(checkAndPoll, 3000)
     }
-
-    // Poll every 3 seconds to get fresh entry data (consistent with detail page)
-    // Note: Real-time subscriptions would be more efficient but complex for multiple raffles
-    const pollInterval = setInterval(() => {
-      fetchEntriesForActiveRaffles()
-    }, 3000)
 
     // Cleanup interval on unmount or when no active raffles
     return () => {
-      clearInterval(pollInterval)
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
     }
   }, [filteredRaffles, fetchEntriesForActiveRaffles])
 

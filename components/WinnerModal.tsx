@@ -20,7 +20,6 @@ interface WinnerModalProps {
   prizeAmount: number | null
   prizeCurrency: string | null
   themeAccent: ThemeAccent
-  discordUrl?: string
 }
 
 export function WinnerModal({
@@ -30,7 +29,6 @@ export function WinnerModal({
   prizeAmount,
   prizeCurrency,
   themeAccent,
-  discordUrl = 'https://discord.gg/example',
 }: WinnerModalProps) {
   const borderStyle = getThemeAccentBorderStyle(themeAccent)
 
@@ -68,12 +66,12 @@ export function WinnerModal({
         <DialogFooter>
           <Button
             className="w-full"
-            onClick={() => window.open(discordUrl, '_blank')}
+            onClick={() => onOpenChange(false)}
             style={{
               backgroundColor: getThemeAccentBorderStyle(themeAccent).borderColor,
             }}
           >
-            Join Discord to Claim
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>

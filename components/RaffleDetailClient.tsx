@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
+import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -58,12 +59,49 @@ export function RaffleDetailClient({
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [showParticipants, setShowParticipants] = useState(false)
+  const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
-  const isActive = new Date(raffle.end_time) > new Date() && raffle.is_active
+  // Make isActive reactive to time passing - critical for mobile connections
+  const [isActive, setIsActive] = useState(() => {
+    const endTime = new Date(raffle.end_time)
+    const now = new Date()
+    return endTime > now && raffle.is_active
+  })
+
+  // Update isActive when time passes (e.g., raffle ends while page is open)
+  useEffect(() => {
+    const endTime = new Date(raffle.end_time).getTime()
+    const now = Date.now()
+    const shouldBeActive = endTime > now && raffle.is_active
+    
+    setIsActive(shouldBeActive)
+
+    // If raffle is still active, set up interval to check when it ends
+    if (shouldBeActive) {
+      const timeUntilEnd = endTime - now
+      // Check every second if raffle will end soon (< 5 minutes), otherwise check every 30 seconds
+      const checkInterval = timeUntilEnd < 5 * 60 * 1000 ? 1000 : 30000
+      
+      const intervalId = setInterval(() => {
+        const now = Date.now()
+        const shouldBeActive = endTime > now && raffle.is_active
+        setIsActive(prev => {
+          return shouldBeActive
+        })
+        
+        // Clear interval if raffle has ended
+        if (!shouldBeActive) {
+          clearInterval(intervalId)
+        }
+      }, checkInterval)
+      
+      return () => clearInterval(intervalId)
+    }
+  }, [raffle.end_time, raffle.is_active])
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const themeColor = getThemeAccentColor(raffle.theme_accent)
 
@@ -668,7 +706,11 @@ export function RaffleDetailClient({
                 View Participants ({currentOwlVisionScore.uniqueWallets})
               </Button>
               {raffle.winner_wallet && (
-                <Button variant="outline" className="flex-1">
+                <Button 
+                  variant="outline" 
+                  className="flex-1"
+                  onClick={() => setShowWinner(true)}
+                >
                   <Trophy className="mr-2 h-4 w-4" />
                   View Winner
                 </Button>
@@ -694,6 +736,17 @@ export function RaffleDetailClient({
         entries={entries}
         themeAccent={raffle.theme_accent}
       />
+
+      {raffle.winner_wallet && (
+        <WinnerModal
+          open={showWinner}
+          onOpenChange={setShowWinner}
+          winnerWallet={raffle.winner_wallet}
+          prizeAmount={raffle.prize_amount}
+          prizeCurrency={raffle.prize_currency}
+          themeAccent={raffle.theme_accent}
+        />
+      )}
 
       <Dialog open={showEnterRaffleDialog} onOpenChange={setShowEnterRaffleDialog}>
         <DialogContent className="sm:max-w-[500px]">

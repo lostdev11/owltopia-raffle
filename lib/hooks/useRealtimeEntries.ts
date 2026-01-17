@@ -55,6 +55,16 @@ export function useRealtimeEntries({
   // Set up realtime subscription
   useEffect(() => {
     if (!enabled || !raffleId) {
+      // Cleanup when disabled
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+      isRealtimeActiveRef.current = false
       return
     }
 
@@ -96,8 +106,8 @@ export function useRealtimeEntries({
               console.warn('Realtime subscription closed, falling back to polling')
               isRealtimeActiveRef.current = false
               setIsUsingRealtime(false)
-              // Fall back to polling
-              if (!pollIntervalRef.current) {
+              // Only fall back to polling if still enabled
+              if (enabled && !pollIntervalRef.current) {
                 pollIntervalRef.current = setInterval(fetchEntries, pollingInterval)
               }
               fetchEntries().then(() => setIsLoading(false))
@@ -108,7 +118,8 @@ export function useRealtimeEntries({
 
         // If subscription doesn't become active within 2 seconds, fall back to polling
         const fallbackTimeout = setTimeout(() => {
-          if (!isRealtimeActiveRef.current && channelRef.current) {
+          // Only start polling if still enabled (raffle hasn't ended)
+          if (!isRealtimeActiveRef.current && channelRef.current && enabled) {
             console.warn('Realtime subscription timeout, using polling fallback')
             supabase.removeChannel(channelRef.current)
             channelRef.current = null
@@ -137,7 +148,8 @@ export function useRealtimeEntries({
 
     // If Supabase is not configured or realtime failed, use polling
     // Check ref instead of state to avoid dependency issues
-    if (!isSupabaseConfigured() || !isRealtimeActiveRef.current) {
+    // Only set up polling if still enabled (raffle hasn't ended)
+    if ((!isSupabaseConfigured() || !isRealtimeActiveRef.current) && enabled) {
       // Only set up polling if we haven't already (realtime might have set it up)
       if (!pollIntervalRef.current && !isRealtimeActiveRef.current) {
         setIsLoading(true)
