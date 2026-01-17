@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { WalletMultiButton, useWalletModal } from '@solana/wallet-adapter-react-ui'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,11 +17,13 @@ import {
 export function WalletConnectButton() {
   const router = useRouter()
   const { publicKey, connected, disconnect, signMessage, wallet } = useWallet()
+  const { setVisible } = useWalletModal()
   const [mounted, setMounted] = useState(false)
   const [showSignDialog, setShowSignDialog] = useState(false)
   const [isSigning, setIsSigning] = useState(false)
   const [signError, setSignError] = useState<string | null>(null)
   const prevConnectedRef = useRef(false)
+  const buttonRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -283,13 +285,79 @@ export function WalletConnectButton() {
     await disconnect()
   }, [publicKey, disconnect])
 
+  // Ensure button is properly initialized and clickable on first interaction
+  // This fixes the issue where WalletMultiButton requires two clicks on Windows Chrome with Solflare
+  // IMPORTANT: This hook must be before any conditional returns to follow Rules of Hooks
+  useEffect(() => {
+    if (!mounted || !buttonRef.current || connected) {
+      return
+    }
+
+    let handleClickFallback: ((e: MouseEvent) => void) | null = null
+    let cleanupButton: (() => void) | null = null
+    
+    const timeoutId = setTimeout(() => {
+      // Ensure the button is fully rendered and interactive
+      const button = buttonRef.current?.querySelector('button')
+      if (!button) return
+
+      // Remove any CSS that might block interactions
+      button.style.pointerEvents = 'auto'
+      button.style.cursor = 'pointer'
+      
+      // Ensure the button is not disabled
+      button.disabled = false
+      
+      // Add click handler as fallback to ensure modal opens on first click
+      // This is a workaround for the double-click issue on Windows Chrome with Solflare
+      handleClickFallback = (e: MouseEvent) => {
+        // Only intervene if this is the first click and wallet is not connected
+        // Check if the modal is already open by checking for the modal element
+        const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+        if (!modal && !connected) {
+          // Small delay to let the button's own handler run first, then ensure modal opens
+          setTimeout(() => {
+            const modalAfterClick = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+            if (!modalAfterClick && !connected) {
+              // Button's handler didn't open modal, open it ourselves
+              setVisible(true)
+            }
+          }, 50)
+        }
+      }
+      
+      // Add event listener with capture to ensure we see the click
+      button.addEventListener('click', handleClickFallback, { capture: false })
+      
+      cleanupButton = () => {
+        if (handleClickFallback) {
+          button.removeEventListener('click', handleClickFallback)
+        }
+      }
+    }, 100) // Small delay to ensure everything is initialized
+    
+    return () => {
+      clearTimeout(timeoutId)
+      if (cleanupButton) {
+        cleanupButton()
+      }
+    }
+  }, [mounted, connected, setVisible])
+
   if (!mounted) {
     return null
   }
 
   return (
     <>
-      <div className="wallet-connect-wrapper">
+      <div 
+        ref={buttonRef}
+        className="wallet-connect-wrapper"
+        style={{ 
+          pointerEvents: 'auto',
+          display: 'inline-block'
+        }}
+      >
         <WalletMultiButton />
       </div>
       

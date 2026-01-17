@@ -3,6 +3,10 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
 
+// Force dynamic rendering to prevent caching stale data
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default async function RaffleDetailPage({
   params,
 }: {

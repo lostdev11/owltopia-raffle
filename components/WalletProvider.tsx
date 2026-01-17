@@ -5,7 +5,6 @@ import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
-  PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
@@ -36,10 +35,10 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
 
   // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking --
   // Only the wallets you configure here will be compiled into your application
-  // Note: Jupiter Wallet Extension should be automatically detected as a Standard Wallet
+  // Note: Phantom and Jupiter Wallet Extension are automatically detected as Standard Wallets
+  // They don't need to be explicitly added here - removing PhantomWalletAdapter to avoid the warning
   const wallets = useMemo(
     () => [
-      new PhantomWalletAdapter(),
       new SolflareWalletAdapter({ network }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
