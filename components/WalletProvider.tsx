@@ -1,11 +1,10 @@
 'use client'
 
-import { useMemo, ReactNode } from 'react'
+import { useMemo, ReactNode, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
-  PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
@@ -34,16 +33,48 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
     return 'https://solana.drpc.org'
   }, [network])
 
-  // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking --
-  // Only the wallets you configure here will be compiled into your application
-  // Note: PhantomWalletAdapter automatically handles both extension (desktop) and deep links (mobile)
-  // Phantom and Jupiter Wallet Extension are also automatically detected as Standard Wallets,
-  // but explicitly adding PhantomWalletAdapter ensures mobile deep link support
+  // Configure wallet adapters
+  // Note: The wallet adapter library automatically detects Standard Wallets (like Phantom)
+  // when they're installed as browser extensions. We explicitly add adapters for better mobile support.
   const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network }),
-    ],
+    () => {
+      // Create wallet adapters
+      // Phantom is now a Standard Wallet and is automatically detected - no need to add it explicitly
+      // SolflareWalletAdapter provides additional wallet option
+      const walletAdapters = [
+        new SolflareWalletAdapter({ network }),
+      ]
+      
+      // Log available wallets for debugging (only in development)
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        // Wait a bit for wallet detection to complete
+        setTimeout(() => {
+          const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
+            navigator.userAgent || navigator.vendor || (window as any).opera || ''
+          )
+          const isPhantomBrowser = navigator.userAgent?.toLowerCase().includes('phantom') || false
+          const phantomAvailable = !!(window as any).solana?.isPhantom || !!(window as any).phantom?.solana
+          
+          const adapterStates = walletAdapters.map(w => ({
+            name: w.name,
+            readyState: w.readyState,
+            icon: w.icon
+          }))
+          
+          console.log('Wallet adapters initialized:', walletAdapters.map(w => w.name))
+          console.log('Adapter states:', adapterStates)
+          console.log('Environment:', {
+            isMobile,
+            isPhantomBrowser,
+            phantomExtensionAvailable: phantomAvailable,
+            solanaObject: !!(window as any).solana,
+            phantomObject: !!(window as any).phantom
+          })
+        }, 500)
+      }
+      
+      return walletAdapters
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [network]
   )
@@ -54,6 +85,14 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
         wallets={wallets} 
         autoConnect={false}
         onError={(error) => {
+          // Log all errors in development for debugging
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Wallet adapter error:', {
+              name: error?.name,
+              message: error?.message,
+              stack: error?.stack
+            })
+          }
           // Suppress known harmless extension errors
           const errorMessage = (error?.message || '').toLowerCase()
           const errorString = JSON.stringify(error || '').toLowerCase()
@@ -70,8 +109,17 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             errorMessage.includes('unexpected error') ||
             errorString.includes('unexpected error')
           
+          // Check for WalletNotReadyError (common on mobile when wallet isn't installed/ready)
+          const isWalletNotReady = 
+            errorName.includes('walletnotready') ||
+            errorMessage.includes('wallet not ready') ||
+            errorString.includes('walletnotready') ||
+            errorStack.includes('walletnotready')
+          
           // These are common extension errors that don't affect functionality
           if (
+            // WalletNotReadyError - expected on mobile when wallet isn't installed
+            isWalletNotReady ||
             errorMessage.includes('solanaactionscontentscript') ||
             errorStack.includes('solanaactionscontentscript') ||
             errorMessage.includes('runtime.lasterror') ||
@@ -101,11 +149,30 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             ))
           ) {
             // Silently ignore - these are from browser extensions or user-initiated cancellations
+            // WalletNotReadyError is expected on mobile when wallet isn't installed
             return
           }
           
-          // Log other wallet errors for debugging
-          console.error('Wallet adapter error:', error)
+          // Log other wallet errors for debugging (but don't show to user if it's a connection attempt)
+          // Only log if it's not a user cancellation
+          if (!errorMessage.includes('user rejected') && 
+              !errorMessage.includes('user cancelled') &&
+              !errorMessage.includes('user declined')) {
+            // On mobile, log connection errors more verbosely for debugging
+            const isMobile = typeof window !== 'undefined' && /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
+              navigator.userAgent || navigator.vendor || (window as any).opera || ''
+            )
+            if (isMobile && isConnectionError) {
+              console.warn('Mobile wallet connection error:', {
+                error,
+                message: error?.message,
+                name: error?.name,
+                stack: error?.stack
+              })
+            } else {
+              console.error('Wallet adapter error:', error)
+            }
+          }
         }}
       >
         <WalletModalProvider>{children}</WalletModalProvider>

@@ -1,12 +1,16 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 import { WalletContextProvider } from '@/components/WalletProvider'
 import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
 import { ErrorHandler } from '@/components/ErrorHandler'
 
-const inter = Inter({ subsets: ['latin'] })
+const plusJakartaSans = Plus_Jakarta_Sans({ 
+  subsets: ['latin'],
+  variable: '--font-plus-jakarta-sans',
+  weight: ['300', '400', '500', '600', '700', '800'],
+})
 
 export const metadata: Metadata = {
   title: 'Owl Raffle',
@@ -25,7 +29,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${inter.className} min-h-full flex flex-col`}>
+      <body className={`${plusJakartaSans.variable} font-sans min-h-full flex flex-col`}>
         <script
           dangerouslySetInnerHTML={{
             __html: `

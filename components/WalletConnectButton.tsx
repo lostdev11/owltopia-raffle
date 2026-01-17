@@ -17,7 +17,7 @@ import { isMobileDevice, isPhantomBrowser, isPhantomExtensionAvailable, redirect
 
 export function WalletConnectButton() {
   const router = useRouter()
-  const { publicKey, connected, disconnect, signMessage, wallet } = useWallet()
+  const { publicKey, connected, disconnect, signMessage, wallet, connecting, connect } = useWallet()
   const { setVisible } = useWalletModal()
   const [mounted, setMounted] = useState(false)
   const [showSignDialog, setShowSignDialog] = useState(false)
@@ -31,39 +31,60 @@ export function WalletConnectButton() {
     setMounted(true)
   }, [])
 
-  // Check if user should be redirected to Phantom browser
-  const shouldRedirectToPhantom = useCallback(() => {
-    if (!mounted) return false
-    
+  // Handle mobile deep link return - clean up URL parameters
+  useEffect(() => {
+    if (!mounted) return
+
     const isMobile = isMobileDevice()
-    const isPhantom = isPhantomBrowser()
-    const hasPhantomExtension = isPhantomExtensionAvailable()
-    
-    // On mobile: redirect if not in Phantom browser
-    // On desktop: only redirect if no Phantom extension is available
-    if (isMobile && !isPhantom) {
-      return true
+    if (!isMobile) return
+
+    // Check URL for deep link callback parameters and clean them up
+    const checkUrlParams = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const hashParams = new URLSearchParams(window.location.hash.substring(1))
+      
+      // Check for common deep link callback parameters
+      const hasCallback = urlParams.has('phantom_encryption_public_key') || 
+                         urlParams.has('dapp_encryption_public_key') ||
+                         hashParams.has('phantom_encryption_public_key') ||
+                         hashParams.has('dapp_encryption_public_key')
+      
+      if (hasCallback) {
+        // Clean up URL parameters after processing
+        const cleanUrl = window.location.pathname
+        window.history.replaceState({}, '', cleanUrl)
+      }
     }
-    
-    // On desktop, we don't redirect - let them use other wallets
-    // But we could optionally redirect if they specifically want Phantom
-    return false
+
+    // When page becomes visible again (returning from wallet app), clean up URL
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkUrlParams()
+      }
+    }
+
+    // Check URL on mount and when page becomes visible
+    checkUrlParams()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [mounted])
 
-  // Handle wallet connect click - check if redirect is needed
-  const handleConnectWalletClick = useCallback((e: MouseEvent | TouchEvent) => {
-    if (connected) return
-    
-    // Check if we should redirect to Phantom browser
-    if (shouldRedirectToPhantom()) {
-      e.preventDefault()
-      e.stopPropagation()
-      setShowPhantomRedirectDialog(true)
-      return false
+  // Monitor connection state changes (debug only in development)
+  useEffect(() => {
+    if (mounted && process.env.NODE_ENV === 'development') {
+      console.log('Wallet state:', { 
+        connected, 
+        connecting, 
+        wallet: wallet?.adapter?.name,
+        publicKey: publicKey?.toBase58(),
+        walletReadyState: wallet?.adapter?.readyState
+      })
     }
-    
-    return true
-  }, [connected, shouldRedirectToPhantom])
+  }, [mounted, connected, connecting, wallet, publicKey])
+
 
   // Show sign dialog when wallet connects but hasn't signed yet
   useEffect(() => {
@@ -378,140 +399,66 @@ export function WalletConnectButton() {
     await disconnect()
   }, [publicKey, disconnect])
 
-  // Ensure button is properly initialized and clickable on first interaction
-  // This fixes the issue where WalletMultiButton requires two clicks/taps on desktop and mobile
-  // IMPORTANT: This hook must be before any conditional returns to follow Rules of Hooks
+  // Ensure button is properly initialized and clickable
   useEffect(() => {
     if (!mounted || !buttonRef.current || connected) {
       return
     }
 
-    let handleInteractionFallback: ((e: MouseEvent | TouchEvent) => void) | null = null
-    let wrapperClickHandler: ((e: MouseEvent) => void) | null = null
-    let cleanupButton: (() => void) | null = null
-    
     const timeoutId = setTimeout(() => {
       // Ensure the button is fully rendered and interactive
       const button = buttonRef.current?.querySelector('button')
-      if (!button) return
+      if (!button) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('WalletMultiButton not found in wrapper')
+        }
+        return
+      }
 
-      // Remove any CSS that might block interactions (works for both desktop and mobile)
+      // Ensure the button can receive clicks/touches
       button.style.pointerEvents = 'auto'
       button.style.cursor = 'pointer'
-      button.style.touchAction = 'manipulation' // Optimize touch handling on mobile
+      button.style.touchAction = 'manipulation'
       button.style.position = 'relative'
       button.style.zIndex = '10'
       
-      // Ensure the button is not disabled
-      button.disabled = false
+      // Remove any disabled state
+      if (button.hasAttribute('disabled')) {
+        button.removeAttribute('disabled')
+      }
       
-      // Also ensure the wrapper and any parent elements allow pointer events
+      // Ensure the wrapper allows pointer events
       if (buttonRef.current) {
         buttonRef.current.style.pointerEvents = 'auto'
         buttonRef.current.style.zIndex = '10'
       }
-      
-      // Add interaction handler as fallback to ensure modal opens on first click/tap
-      // This is a workaround for the double-click/tap issue on desktop and mobile
-      handleInteractionFallback = (e: MouseEvent | TouchEvent) => {
-        // Only intervene if the modal is not already open and wallet is not connected
-        if (connected) return
-        
-        // Check if the modal is already open
-        const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-        if (modal) return
-        
-        // Immediately open the modal - don't wait for the button's handler
-        setVisible(true)
-        
-        // Double-check after a delay to ensure modal actually opened
+
+      // Add a fallback click handler that ensures modal opens
+      const handleClick = (e: Event) => {
+        // Small delay to check if modal opened
         setTimeout(() => {
-          const modalAfterClick = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-          if (!modalAfterClick && !connected) {
-            // Modal didn't open, try again
-            console.log('Modal did not open, attempting to open again...')
+          const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+          if (!modal && !connected) {
+            if (process.env.NODE_ENV === 'development') {
+              console.log('Fallback: Opening wallet modal programmatically')
+            }
             setVisible(true)
           }
         }, 100)
       }
-      
-      // Add event listeners for both click (desktop) and touchstart (mobile)
-      // Using touchstart for better mobile responsiveness
-      // Using capture: false so we don't interfere with the button's own handler
-      // Prevent default on touchstart to avoid double-firing (touch + click)
-      let touchHandled = false
-      const touchHandler = (e: TouchEvent) => {
-        // Check if redirect is needed before handling
-        if (handleConnectWalletClick(e) === false) {
-          return
-        }
-        touchHandled = true
-        if (handleInteractionFallback) {
-          handleInteractionFallback(e)
-        }
-        // Clear touch flag after a short delay
-        setTimeout(() => {
-          touchHandled = false
-        }, 300)
+
+      // Add click listener as fallback
+      button.addEventListener('click', handleClick, { capture: false })
+
+      return () => {
+        button.removeEventListener('click', handleClick)
       }
-      const clickHandler = (e: MouseEvent) => {
-        // Check if redirect is needed before handling
-        if (handleConnectWalletClick(e) === false) {
-          return
-        }
-        // On mobile, click events fire after touch - skip if we already handled touch
-        if (touchHandled && 'ontouchstart' in window) {
-          return
-        }
-        if (handleInteractionFallback) {
-          handleInteractionFallback(e)
-        }
-      }
-      button.addEventListener('touchstart', touchHandler, { capture: false, passive: true })
-      button.addEventListener('click', clickHandler, { capture: false, passive: true })
-      
-      // Also add a direct click handler on the wrapper as a last resort
-      wrapperClickHandler = (e: MouseEvent) => {
-        if (connected) return
-        const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-        if (!modal && buttonRef.current && e.target && buttonRef.current.contains(e.target as Node)) {
-          console.log('Wrapper click handler triggered, opening modal...')
-          setVisible(true)
-        }
-      }
-      
-      if (buttonRef.current && wrapperClickHandler) {
-        buttonRef.current.addEventListener('click', wrapperClickHandler, { capture: false, passive: false })
-      }
-      
-      // Also ensure the button can receive clicks directly
-      // Remove any CSS that might prevent interaction
-      const buttonStyles = window.getComputedStyle(button)
-      if (buttonStyles.pointerEvents === 'none') {
-        button.style.pointerEvents = 'auto'
-      }
-      if (buttonStyles.cursor === 'not-allowed' || buttonStyles.cursor === 'default') {
-        button.style.cursor = 'pointer'
-      }
-      
-      cleanupButton = () => {
-        // Cleanup will be handled by storing handlers in scope
-        button.removeEventListener('touchstart', touchHandler)
-        button.removeEventListener('click', clickHandler)
-        // Cleanup wrapper click handler
-        if (buttonRef.current && wrapperClickHandler) {
-          buttonRef.current.removeEventListener('click', wrapperClickHandler)
-        }
-      }
-    }, 100) // Small delay to ensure everything is initialized (works for both desktop and mobile)
+    }, 200)
     
     return () => {
       clearTimeout(timeoutId)
-      if (cleanupButton) {
-        cleanupButton()
-      }
     }
-  }, [mounted, connected, setVisible, handleConnectWalletClick])
+  }, [mounted, connected, setVisible])
 
   if (!mounted) {
     return null
@@ -526,52 +473,8 @@ export function WalletConnectButton() {
           pointerEvents: 'auto',
           display: 'inline-block',
           touchAction: 'manipulation',
-          WebkitTouchCallout: 'none',
-          WebkitUserSelect: 'none',
-          userSelect: 'none',
           position: 'relative',
           zIndex: 10,
-          width: '100%',
-          maxWidth: 'fit-content'
-        }}
-        onTouchStart={(e) => {
-          // Mobile touch handler - check for Phantom redirect first
-          if (!connected) {
-            if (shouldRedirectToPhantom()) {
-              e.preventDefault()
-              e.stopPropagation()
-              setShowPhantomRedirectDialog(true)
-              return
-            }
-            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-            if (!modal) {
-              e.preventDefault()
-              setVisible(true)
-            }
-          }
-        }}
-        onClick={(e) => {
-          // Direct click handler - check for Phantom redirect first
-          if (!connected) {
-            if (shouldRedirectToPhantom()) {
-              e.preventDefault()
-              e.stopPropagation()
-              setShowPhantomRedirectDialog(true)
-              return
-            }
-            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-            if (!modal) {
-              // Small delay to let the button's own handler run first
-              setTimeout(() => {
-                const modalAfterDelay = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-                if (!modalAfterDelay && !connected) {
-                  // Button's handler didn't open modal, open it ourselves
-                  console.log('Opening wallet modal via wrapper onClick fallback...')
-                  setVisible(true)
-                }
-              }, 50)
-            }
-          }
         }}
       >
         <WalletMultiButton />
