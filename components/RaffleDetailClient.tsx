@@ -208,7 +208,7 @@ export function RaffleDetailClient({
               const recentResult = await connection.getRecentBlockhash('confirmed')
               latestBlockhash = {
                 blockhash: recentResult.blockhash,
-                lastValidBlockHeight: recentResult.lastValidBlockHeight || 0,
+                lastValidBlockHeight: 0, // getRecentBlockhash doesn't provide lastValidBlockHeight
               }
               break
             } else {
