@@ -446,7 +446,9 @@ export function WalletConnectButton() {
           return
         }
         touchHandled = true
-        handleInteractionFallback(e)
+        if (handleInteractionFallback) {
+          handleInteractionFallback(e)
+        }
         // Clear touch flag after a short delay
         setTimeout(() => {
           touchHandled = false
@@ -461,7 +463,9 @@ export function WalletConnectButton() {
         if (touchHandled && 'ontouchstart' in window) {
           return
         }
-        handleInteractionFallback(e)
+        if (handleInteractionFallback) {
+          handleInteractionFallback(e)
+        }
       }
       button.addEventListener('touchstart', touchHandler, { capture: false, passive: true })
       button.addEventListener('click', clickHandler, { capture: false, passive: true })
