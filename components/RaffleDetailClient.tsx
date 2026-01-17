@@ -608,7 +608,7 @@ export function RaffleDetailClient({
 
           <CardContent className="pt-6 space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {raffle.prize_amount != null && Number(raffle.prize_amount) > 0 && raffle.prize_currency && raffle.prize_amount !== 0 && raffle.prize_amount !== "0" && (
+              {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
                   <p className="text-sm text-muted-foreground">Prize</p>
                   <p className="text-xl font-bold">
