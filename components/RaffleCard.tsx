@@ -2,21 +2,37 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
+import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import type { Raffle, Entry } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit, LayoutGrid, Square } from 'lucide-react'
+import { Trash2, Edit } from 'lucide-react'
 import Image from 'next/image'
+import {
+  Transaction,
+  SystemProgram,
+  PublicKey,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js'
+import {
+  getAssociatedTokenAddress,
+  createTransferInstruction,
+  getMint,
+  getAccount,
+  createAssociatedTokenAccountInstruction,
+} from '@solana/spl-token'
 
 type CardSize = 'small' | 'medium' | 'large'
 
@@ -31,17 +47,33 @@ interface RaffleCardProps {
 export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priority = false }: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { publicKey, connected } = useWallet()
+  const { publicKey, sendTransaction, connected } = useWallet()
+  const { connection } = useConnection()
   const [isAdmin, setIsAdmin] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [imageModalOpen, setImageModalOpen] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [expandedSize, setExpandedSize] = useState<CardSize>('large')
+  const [showQuickBuy, setShowQuickBuy] = useState(false)
+  const [ticketQuantity, setTicketQuantity] = useState(1)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
   
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const isActive = new Date(raffle.end_time) > new Date() && raffle.is_active
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
+  const themeColor = getThemeAccentColor(raffle.theme_accent)
+  
+  // Calculate available tickets
+  const totalTicketsSold = entries
+    .filter(e => e.status === 'confirmed')
+    .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+  const availableTickets = raffle.max_tickets 
+    ? raffle.max_tickets - totalTicketsSold 
+    : null
+  const maxPurchaseQuantity = availableTickets !== null 
+    ? Math.max(0, availableTickets) 
+    : 100
 
   // Check admin status
   useEffect(() => {
@@ -138,9 +170,227 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
     }
   }
 
+  const handlePurchase = async () => {
+    if (!connected || !publicKey) {
+      setError('Please connect your wallet first')
+      return
+    }
+
+    setIsProcessing(true)
+    setError(null)
+    setSuccess(false)
+
+    try {
+      // Step 1: Create entry and get payment details
+      const createResponse = await fetch('/api/entries/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          raffleId: raffle.id,
+          walletAddress: publicKey.toBase58(),
+          ticketQuantity,
+        }),
+      })
+
+      if (!createResponse.ok) {
+        const errorData = await createResponse.json()
+        throw new Error(errorData.error || 'Failed to create entry')
+      }
+
+      const { entry, paymentDetails } = await createResponse.json()
+
+      // Step 2: Build transaction
+      let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
+      let retries = 3
+      while (retries > 0) {
+        try {
+          try {
+            const result = await connection.getLatestBlockhash('confirmed')
+            latestBlockhash = result
+            break
+          } catch (latestError: any) {
+            const errorMsg = latestError?.message || ''
+            if (errorMsg.includes('does not exist') || errorMsg.includes('not available') || latestError?.code === -32601) {
+              const recentResult = await connection.getRecentBlockhash('confirmed')
+              latestBlockhash = {
+                blockhash: recentResult.blockhash,
+                lastValidBlockHeight: 0,
+              }
+              break
+            } else {
+              throw latestError
+            }
+          }
+        } catch (rpcError: any) {
+          retries--
+          if (retries === 0) {
+            throw new Error('Failed to get blockhash. Please try again.')
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)))
+        }
+      }
+      
+      if (!latestBlockhash) {
+        throw new Error('Failed to get recent blockhash')
+      }
+
+      const transaction = new Transaction()
+      transaction.recentBlockhash = latestBlockhash.blockhash
+      transaction.feePayer = publicKey
+      
+      const recipientPubkey = new PublicKey(paymentDetails.recipient)
+
+      if (raffle.currency === 'SOL') {
+        const lamports = Math.round(paymentDetails.amount * LAMPORTS_PER_SOL)
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: recipientPubkey,
+            lamports,
+          })
+        )
+      } else if (raffle.currency === 'USDC') {
+        const usdcMint = new PublicKey(paymentDetails.usdcMint)
+        const mintInfo = await getMint(connection, usdcMint)
+        const decimals = mintInfo.decimals
+        const amount = BigInt(Math.round(paymentDetails.amount * Math.pow(10, decimals)))
+
+        const senderTokenAddress = await getAssociatedTokenAddress(usdcMint, publicKey)
+        const recipientTokenAddress = await getAssociatedTokenAddress(usdcMint, recipientPubkey)
+
+        let accountExists = false
+        try {
+          await getAccount(connection, recipientTokenAddress)
+          accountExists = true
+        } catch (error: any) {
+          if (!error?.message?.includes('TokenAccountNotFoundError') && !error?.message?.includes('could not find account')) {
+            throw error
+          }
+        }
+        
+        if (!accountExists) {
+          transaction.add(
+            createAssociatedTokenAccountInstruction(
+              publicKey,
+              recipientTokenAddress,
+              recipientPubkey,
+              usdcMint
+            )
+          )
+        }
+
+        transaction.add(
+          createTransferInstruction(
+            senderTokenAddress,
+            recipientTokenAddress,
+            publicKey,
+            amount,
+            []
+          )
+        )
+      } else {
+        throw new Error(`Unsupported currency: ${raffle.currency}`)
+      }
+
+      // Step 3: Send transaction
+      let signature: string
+      try {
+        signature = await sendTransaction(transaction, connection, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+          maxRetries: 3,
+        })
+      } catch (walletError: any) {
+        const errorMessage = walletError?.message || walletError?.toString() || 'Unknown error'
+        if (walletError?.code === 4001 || errorMessage.includes('User rejected') || errorMessage.includes('rejected')) {
+          throw new Error('Transaction was cancelled')
+        }
+        if (errorMessage.includes('insufficient funds')) {
+          throw new Error('Insufficient funds')
+        }
+        throw new Error(`Transaction failed: ${errorMessage}`)
+      }
+
+      // Step 4: Wait for confirmation
+      const maxAttempts = 30
+      let attempts = 0
+      let confirmed = false
+      
+      while (attempts < maxAttempts && !confirmed) {
+        try {
+          const status = await connection.getSignatureStatus(signature)
+          if (status?.value?.confirmationStatus === 'confirmed' || status?.value?.confirmationStatus === 'finalized') {
+            confirmed = true
+            break
+          }
+          if (status?.value?.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`)
+          }
+        } catch (error) {
+          // Ignore errors during polling
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        attempts++
+      }
+      
+      if (!confirmed) {
+        throw new Error('Transaction confirmation timeout')
+      }
+
+      // Step 5: Verify entry
+      const verifyResponse = await fetch('/api/entries/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          entryId: entry.id,
+          transactionSignature: signature,
+        }),
+      })
+
+      if (!verifyResponse.ok) {
+        const errorData = await verifyResponse.json()
+        throw new Error(errorData.error || 'Failed to verify transaction')
+      }
+
+      setSuccess(true)
+      router.refresh()
+      
+      setTimeout(() => {
+        setShowQuickBuy(false)
+        setSuccess(false)
+        setTicketQuantity(1)
+      }, 2000)
+    } catch (err) {
+      console.error('Purchase error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to purchase tickets')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handleQuantityChange = (value: string) => {
+    const numValue = parseInt(value) || 1
+    const clampedValue = Math.max(1, Math.min(numValue, maxPurchaseQuantity))
+    setTicketQuantity(clampedValue)
+  }
+
+  const handleToggleQuickBuy = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!showQuickBuy) {
+      setTicketQuantity(1)
+      setError(null)
+      setSuccess(false)
+    }
+    setShowQuickBuy(!showQuickBuy)
+  }
+
   // Small size - List format (horizontal)
-  // When expanded, render as medium/large card format
-  if (size === 'small' && !isExpanded) {
+  if (size === 'small') {
     return (
       <div className="relative">
         <Link 
@@ -158,7 +408,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           >
             {raffle.image_url && (
               <div 
-                className="relative w-24 h-24 flex-shrink-0 overflow-hidden cursor-pointer"
+                className="!relative w-24 h-24 flex-shrink-0 overflow-hidden cursor-pointer"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -218,24 +468,69 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <Badge variant={isActive ? 'default' : 'secondary'} className="text-xs">
                   {isActive ? 'Active' : 'Ended'}
                 </Badge>
-                <Button 
-                  type="button"
-                  size="sm" 
-                  className="h-7 text-xs"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setIsExpanded(!isExpanded)
-                    if (!isExpanded) {
-                      // When expanding, default to large size
-                      setExpandedSize('large')
-                    }
-                  }}
-                >
-                  {isExpanded ? 'Collapse' : isActive ? 'Enter' : 'View'}
-                </Button>
+                {isActive && (
+                  <Button 
+                    type="button"
+                    size="sm" 
+                    className="h-7 text-xs"
+                    onClick={handleToggleQuickBuy}
+                  >
+                    {showQuickBuy ? 'Cancel' : 'Buy'}
+                  </Button>
+                )}
               </div>
             </div>
+            {showQuickBuy && isActive && (
+              <div className="mt-3 pt-3 border-t space-y-3">
+                {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
+                  </p>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="small-quantity" className="text-xs">Quantity</Label>
+                  <Input
+                    id="small-quantity"
+                    type="number"
+                    min="1"
+                    max={maxPurchaseQuantity}
+                    value={ticketQuantity}
+                    onChange={(e) => handleQuantityChange(e.target.value)}
+                    disabled={availableTickets !== null && availableTickets <= 0}
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t">
+                  <span className="text-xs text-muted-foreground">Total</span>
+                  <div className="text-sm font-bold flex items-center gap-1">
+                    {(raffle.ticket_price * ticketQuantity).toFixed(6)} {raffle.currency}
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={12} className="inline-block" />
+                  </div>
+                </div>
+                {error && (
+                  <div className="p-2 rounded bg-destructive/10 border border-destructive text-destructive text-xs">
+                    {error}
+                  </div>
+                )}
+                {success && (
+                  <div className="p-2 rounded bg-green-500/10 border border-green-500 text-green-500 text-xs">
+                    Tickets purchased successfully!
+                  </div>
+                )}
+                <Button
+                  onClick={handlePurchase}
+                  disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
+                  size="sm"
+                  className="w-full h-7 text-xs"
+                  style={{
+                    backgroundColor: themeColor,
+                    color: '#000',
+                  }}
+                >
+                  {!connected ? 'Connect Wallet' : isProcessing ? 'Processing...' : 'Buy Tickets'}
+                </Button>
+              </div>
+            )}
           </div>
         </Card>
       </Link>
@@ -306,7 +601,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
             <DialogContent className="max-w-5xl w-full p-0">
               {raffle.image_url && (
-                <div className="relative w-full h-[80vh] min-h-[500px]">
+                <div className="!relative w-full h-[80vh] min-h-[500px]">
                   <Image
                     src={raffle.image_url}
                     alt={raffle.title}
@@ -349,84 +644,38 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
     },
   }
 
-  // When expanded, use the expanded size setting; otherwise use the global size
-  // If size is 'small' but not expanded, handle separately above
-  // When expanded with small size, default to 'large' for the card view
-  let displaySize: 'medium' | 'large'
-  if (isExpanded) {
-    displaySize = expandedSize === 'medium' ? 'medium' : 'large'
-  } else {
-    displaySize = size === 'medium' ? 'medium' : 'large'
-  }
+  const displaySize = size === 'medium' ? 'medium' : 'large'
   const classes = sizeClasses[displaySize]
 
   return (
-    <div className={`relative ${isExpanded ? 'col-span-full z-50' : ''}`}>
+    <div className="relative">
       <Link 
-        href={isExpanded ? '#' : `/raffles/${raffle.slug}`} 
+        href={`/raffles/${raffle.slug}`} 
         onClick={(e) => {
-          if (isExpanded) {
-            e.preventDefault()
-          }
-          // Stop propagation for any clicks inside to prevent Link navigation when buttons are clicked
           const target = e.target as HTMLElement
-          if (target.closest('button')) {
+          if (target.closest('button') || showQuickBuy) {
             e.preventDefault()
           }
         }}
       >
         <Card
-          className={getThemeAccentClasses(raffle.theme_accent, `h-full flex flex-col ${isExpanded ? '' : 'hover:scale-105 cursor-pointer'}`)}
+          className={getThemeAccentClasses(raffle.theme_accent, 'h-full flex flex-col hover:scale-105 cursor-pointer')}
           style={borderStyle}
         >
           <CardHeader className={classes.header}>
             <div className="flex items-start justify-between gap-2">
-              <CardTitle className={`${classes.title} ${isExpanded ? '' : 'line-clamp-2'}`}>{raffle.title}</CardTitle>
+              <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
               <div className="flex items-center gap-2">
-                {isExpanded && (
-                  <div className="flex items-center gap-1 border rounded-md p-1 bg-background/50">
-                    <Button
-                      type="button"
-                      variant={expandedSize === 'medium' ? 'default' : 'ghost'}
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        console.log('Setting expandedSize to medium')
-                        setExpandedSize('medium')
-                      }}
-                      className="h-7 px-2"
-                      title="Medium"
-                    >
-                      <LayoutGrid className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={expandedSize === 'large' ? 'default' : 'ghost'}
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        console.log('Setting expandedSize to large')
-                        setExpandedSize('large')
-                      }}
-                      className="h-7 px-2"
-                      title="Large"
-                    >
-                      <Square className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
                 <OwlVisionBadge score={owlVisionScore} />
               </div>
             </div>
-          <CardDescription className={`${classes.description} ${isExpanded ? 'line-clamp-none' : ''}`}>
+          <CardDescription className={classes.description}>
             {raffle.description}
           </CardDescription>
         </CardHeader>
         {raffle.image_url && (
           <div 
-            className={`relative w-full ${classes.image} overflow-hidden cursor-pointer`}
+            className={`!relative w-full ${classes.image} overflow-hidden cursor-pointer`}
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -483,22 +732,89 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               {isActive ? 'Active' : 'Ended'}
             </Badge>
           </div>
-          <Button 
-            type="button"
-            className="w-full" 
-            size={displaySize === 'large' ? 'lg' : 'default'}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setIsExpanded(!isExpanded)
-              if (!isExpanded) {
-                // When expanding, default to large size
-                setExpandedSize('large')
-              }
-            }}
-          >
-            {isExpanded ? 'Collapse' : isActive ? 'Enter Raffle' : 'View Details'}
-          </Button>
+          {!showQuickBuy && (
+            <Button 
+              type="button"
+              className="w-full" 
+              size={displaySize === 'large' ? 'lg' : 'default'}
+              onClick={handleToggleQuickBuy}
+              disabled={!isActive || (availableTickets !== null && availableTickets <= 0)}
+            >
+              {isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details'}
+            </Button>
+          )}
+          {showQuickBuy && isActive && (
+            <div className="w-full space-y-3 pt-2">
+              {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
+                <div className="p-2 rounded-lg bg-muted border">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Tickets Available</span>
+                    <span className="font-semibold">
+                      {availableTickets} / {raffle.max_tickets}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="card-quantity" className={displaySize === 'large' ? 'text-sm' : 'text-xs'}>Number of Tickets</Label>
+                <Input
+                  id="card-quantity"
+                  type="number"
+                  min="1"
+                  max={maxPurchaseQuantity}
+                  value={ticketQuantity}
+                  onChange={(e) => handleQuantityChange(e.target.value)}
+                  disabled={availableTickets !== null && availableTickets <= 0}
+                />
+                {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
+                  </p>
+                )}
+              </div>
+              {displaySize === 'large' && (
+                <HootBoostMeter quantity={ticketQuantity} />
+              )}
+              <div className="flex items-center justify-between pt-2 border-t">
+                <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
+                <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
+                  {(raffle.ticket_price * ticketQuantity).toFixed(6)} {raffle.currency}
+                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
+                </div>
+              </div>
+              {error && (
+                <div className="p-2 rounded-lg bg-destructive/10 border border-destructive text-destructive text-xs">
+                  {error}
+                </div>
+              )}
+              {success && (
+                <div className="p-2 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-xs">
+                  Tickets purchased successfully!
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleToggleQuickBuy}
+                  disabled={isProcessing}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handlePurchase}
+                  disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
+                  className="flex-1"
+                  style={{
+                    backgroundColor: themeColor,
+                    color: '#000',
+                  }}
+                >
+                  {!connected ? 'Connect Wallet' : isProcessing ? 'Processing...' : 'Buy Tickets'}
+                </Button>
+              </div>
+            </div>
+          )}
         </CardFooter>
       </Card>
     </Link>

@@ -107,7 +107,7 @@ export function ImageUpload({ value, onChange, label = 'Image', disabled = false
       
       {preview ? (
         <div className="relative group">
-          <div className="relative w-full h-48 rounded-md overflow-hidden border border-input">
+          <div className="!relative w-full h-48 rounded-md overflow-hidden border border-input">
             <Image
               src={preview}
               alt="Preview"

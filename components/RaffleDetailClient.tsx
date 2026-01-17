@@ -562,7 +562,7 @@ export function RaffleDetailClient({
           </CardHeader>
 
           {raffle.image_url && (
-            <div className="relative w-full h-96 overflow-hidden">
+            <div className="!relative w-full h-96 overflow-hidden">
               <Image
                 src={raffle.image_url}
                 alt={raffle.title}
@@ -584,13 +584,15 @@ export function RaffleDetailClient({
                   </p>
                 </div>
               )}
-              <div>
-                <p className="text-sm text-muted-foreground">Ticket Price</p>
-                <div className="text-xl font-bold flex items-center gap-2">
-                  {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={20} className="inline-block" />
+              {raffle.ticket_price > 0 && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Ticket Price</p>
+                  <div className="text-xl font-bold flex items-center gap-2">
+                    {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '') || '0'} {raffle.currency}
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={20} className="inline-block" />
+                  </div>
                 </div>
-              </div>
+              )}
               <div>
                 <p className="text-sm text-muted-foreground">Confirmed Entries</p>
                 <p className="text-xl font-bold">{currentOwlVisionScore.confirmedEntries}</p>
