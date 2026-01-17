@@ -42,6 +42,11 @@ export default async function RaffleDetailPage({
     }
   }
 
+  // Ensure raffle is not null before proceeding
+  if (!raffle) {
+    notFound()
+  }
+
   const entries = await getEntriesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
 

@@ -436,7 +436,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               {raffle.description}
             </CardDescription>
             <div className="flex items-center gap-4 text-xs mb-2">
-              {raffle.prize_amount && raffle.prize_currency && (
+              {raffle.prize_amount != null && Number(raffle.prize_amount) > 0 && raffle.prize_currency && raffle.prize_amount !== 0 && raffle.prize_amount !== "0" && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>
                   <span className="font-semibold">{raffle.prize_amount} {raffle.prize_currency}</span>
@@ -696,7 +696,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         )}
         <CardContent className={`flex-1 ${classes.contentPadding}`}>
           <div className={classes.content}>
-            {raffle.prize_amount && raffle.prize_currency && (
+            {raffle.prize_amount != null && Number(raffle.prize_amount) > 0 && raffle.prize_currency && raffle.prize_amount !== 0 && raffle.prize_amount !== "0" && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Prize</span>
                 <span className="font-semibold">
