@@ -399,7 +399,39 @@ export function WalletConnectButton() {
     await disconnect()
   }, [publicKey, disconnect])
 
-  // Ensure button is properly initialized and clickable
+  // Intercept clicks when wallet is connected to disconnect instead of opening modal
+  useEffect(() => {
+    if (!mounted || !buttonRef.current || !connected) {
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      const button = buttonRef.current?.querySelector('button')
+      if (!button) {
+        return
+      }
+
+      // Intercept click to disconnect instead of opening wallet modal
+      const handleClick = (e: Event) => {
+        e.preventDefault()
+        e.stopPropagation()
+        handleDisconnect()
+      }
+
+      // Use capture phase to intercept before WalletMultiButton's handler
+      button.addEventListener('click', handleClick, { capture: true })
+
+      return () => {
+        button.removeEventListener('click', handleClick, { capture: true })
+      }
+    }, 200)
+    
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [mounted, connected, handleDisconnect])
+
+  // Ensure button is properly initialized and clickable when not connected
   useEffect(() => {
     if (!mounted || !buttonRef.current || connected) {
       return
