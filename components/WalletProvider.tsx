@@ -5,6 +5,7 @@ import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
+  PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
@@ -35,10 +36,11 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
 
   // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking --
   // Only the wallets you configure here will be compiled into your application
-  // Note: Phantom is now a Standard Wallet and doesn't need an explicit adapter
+  // Note: Jupiter Wallet Extension should be automatically detected as a Standard Wallet
   const wallets = useMemo(
     () => [
-      new SolflareWalletAdapter(),
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter({ network }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [network]
@@ -54,6 +56,17 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
           const errorMessage = (error?.message || '').toLowerCase()
           const errorString = JSON.stringify(error || '').toLowerCase()
           const errorStack = (error?.stack || '').toLowerCase()
+          const errorName = (error?.name || '').toLowerCase()
+          
+          // Check for WalletConnectionError with "Unexpected error" (common with StandardWallet adapters like Phantom)
+          const isConnectionError = 
+            errorName.includes('walletconnectionerror') ||
+            errorName.includes('connectionerror') ||
+            (errorMessage.includes('connection') && errorMessage.includes('error'))
+          
+          const isUnexpectedError = 
+            errorMessage.includes('unexpected error') ||
+            errorString.includes('unexpected error')
           
           // These are common extension errors that don't affect functionality
           if (
@@ -72,6 +85,11 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             errorString.includes('failed to send message to service worker') ||
             errorStack.includes('disconnected port') ||
             errorStack.includes('port object') ||
+            // StandardWallet adapter connection errors (Phantom, etc.)
+            // These often occur when user cancels connection or extension is temporarily unavailable
+            (isConnectionError && isUnexpectedError) ||
+            (isConnectionError && errorStack.includes('standardwalletadapter')) ||
+            (isConnectionError && errorStack.includes('_standardwalletadapter_connect')) ||
             // Catch "Something went wrong" from Solana extensions
             (errorMessage.includes('something went wrong') && (
               errorStack.includes('solana') ||
@@ -80,7 +98,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
               errorMessage.includes('extension')
             ))
           ) {
-            // Silently ignore - these are from browser extensions
+            // Silently ignore - these are from browser extensions or user-initiated cancellations
             return
           }
           

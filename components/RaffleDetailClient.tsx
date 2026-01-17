@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -73,7 +73,7 @@ export function RaffleDetailClient({
   }, [initialEntries])
 
   // Function to fetch updated entries from the API
-  const fetchEntries = async () => {
+  const fetchEntries = useCallback(async () => {
     try {
       const response = await fetch(`/api/entries?raffleId=${raffle.id}`)
       if (response.ok) {
@@ -84,7 +84,7 @@ export function RaffleDetailClient({
       console.error('Error fetching entries:', error)
       // Don't throw - just log the error, we'll refresh the page as fallback
     }
-  }
+  }, [raffle.id])
 
   // Calculate owlVisionScore based on current entries
   const currentOwlVisionScore = calculateOwlVisionScore(raffle, entries)
@@ -113,6 +113,25 @@ export function RaffleDetailClient({
 
     checkAdminStatus()
   }, [connected, publicKey])
+
+  // Poll for entry updates when raffle is active
+  // This ensures all users see updated ticket totals in real-time
+  useEffect(() => {
+    // Only poll if the raffle is active
+    if (!isActive) {
+      return
+    }
+
+    // Poll every 5 seconds to get fresh entry data
+    const pollInterval = setInterval(() => {
+      fetchEntries()
+    }, 5000)
+
+    // Cleanup interval on unmount or when raffle becomes inactive
+    return () => {
+      clearInterval(pollInterval)
+    }
+  }, [isActive, fetchEntries]) // Depend on isActive and fetchEntries
 
   // Calculate total tickets sold (from confirmed entries only)
   const totalTicketsSold = entries
@@ -172,14 +191,14 @@ export function RaffleDetailClient({
 
       // Step 2: Build transaction
       // Get recent blockhash first (needed for transaction)
-      let blockhash
+      let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
       let retries = 3
       while (retries > 0) {
         try {
           // Try getLatestBlockhash first (newer API)
           try {
             const result = await connection.getLatestBlockhash('confirmed')
-            blockhash = result.blockhash
+            latestBlockhash = result
             break
           } catch (latestError: any) {
             // If getLatestBlockhash doesn't exist or isn't supported, try getRecentBlockhash (older API)
@@ -187,7 +206,10 @@ export function RaffleDetailClient({
             if (errorMsg.includes('does not exist') || errorMsg.includes('not available') || latestError?.code === -32601) {
               // Fallback to getRecentBlockhash for older RPC endpoints
               const recentResult = await connection.getRecentBlockhash('confirmed')
-              blockhash = recentResult.blockhash
+              latestBlockhash = {
+                blockhash: recentResult.blockhash,
+                lastValidBlockHeight: recentResult.lastValidBlockHeight || 0,
+              }
               break
             } else {
               // Re-throw if it's a different error
@@ -233,12 +255,13 @@ export function RaffleDetailClient({
         }
       }
       
-      if (!blockhash) {
+      if (!latestBlockhash) {
         throw new Error('Failed to get recent blockhash after retries')
       }
 
+      // Construct transaction with proper blockhash for Phantom compatibility
       const transaction = new Transaction()
-      transaction.recentBlockhash = blockhash
+      transaction.recentBlockhash = latestBlockhash.blockhash
       transaction.feePayer = publicKey
       
       const recipientPubkey = new PublicKey(paymentDetails.recipient)

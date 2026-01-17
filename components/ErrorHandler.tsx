@@ -39,6 +39,16 @@ export function ErrorHandler() {
       const hasPromiseCatch = errorString.includes('promise.catch') || 
                               errorString.includes('promise') && errorString.includes('catch')
       
+      // Check for WalletConnectionError patterns
+      const isConnectionError = 
+        errorString.includes('walletconnectionerror') ||
+        errorString.includes('connectionerror') ||
+        (errorMessage.includes('connection') && errorMessage.includes('error'))
+      
+      const isUnexpectedError = 
+        errorMessage.includes('unexpected error') ||
+        errorString.includes('unexpected error')
+      
       // Suppress known harmless extension errors
       if (
         // Solana wallet extension errors (check both message and stack trace)
@@ -49,6 +59,11 @@ export function ErrorHandler() {
         // Chrome extension port errors (harmless)
         errorString.includes('extension context invalidated') ||
         errorString.includes('message port closed') ||
+        // StandardWallet adapter connection errors (Phantom, etc.)
+        // These often occur when user cancels connection or extension is temporarily unavailable
+        (isConnectionError && isUnexpectedError) ||
+        (isConnectionError && errorStack.includes('standardwalletadapter')) ||
+        (isConnectionError && errorStack.includes('_standardwalletadapter_connect')) ||
         // Generic "Something went wrong" from Solana extensions - be very aggressive
         (hasSomethingWentWrong && (hasSolanaScript || hasExtension || errorString.includes('solana') || errorString.includes('wallet'))) ||
         // Promise rejections from extensions
@@ -95,12 +110,26 @@ export function ErrorHandler() {
                           errorSource.includes('extension') ||
                           errorStack.includes('extension')
       
+      // Check for WalletConnectionError patterns
+      const isConnectionError = 
+        errorMessage.includes('connection') && errorMessage.includes('error') ||
+        errorStack.includes('walletconnectionerror') ||
+        errorStack.includes('connectionerror')
+      
+      const isUnexpectedError = 
+        errorMessage.includes('unexpected error') ||
+        errorStack.includes('unexpected error')
+      
       // Suppress extension script errors
       if (
         hasSolanaScript ||
         errorSource.includes('extension://') ||
         errorMessage.includes('runtime.lasterror') ||
         errorMessage.includes('receiving end does not exist') ||
+        // StandardWallet adapter connection errors
+        (isConnectionError && isUnexpectedError) ||
+        (isConnectionError && errorStack.includes('standardwalletadapter')) ||
+        (isConnectionError && errorStack.includes('_standardwalletadapter_connect')) ||
         // Catch "Something went wrong" from extensions - be very aggressive
         (hasSomethingWentWrong && (hasSolanaScript || hasExtension || errorStack.includes('solana'))) ||
         // Any error from solanaActionsContentScript.js
@@ -125,12 +154,27 @@ export function ErrorHandler() {
       const hasExtension = reason.includes('extension') || 
                           errorStack.includes('extension')
       
+      // Check for WalletConnectionError patterns
+      const isConnectionError = 
+        reason.includes('connection') && reason.includes('error') ||
+        errorStack.includes('walletconnectionerror') ||
+        errorStack.includes('connectionerror')
+      
+      const isUnexpectedError = 
+        reason.includes('unexpected error') ||
+        errorMessage.includes('unexpected error') ||
+        errorStack.includes('unexpected error')
+      
       // Suppress extension-related promise rejections
       if (
         hasSolanaScript ||
         reason.includes('runtime.lasterror') ||
         reason.includes('receiving end does not exist') ||
         reason.includes('extension context') ||
+        // StandardWallet adapter connection errors
+        (isConnectionError && isUnexpectedError) ||
+        (isConnectionError && errorStack.includes('standardwalletadapter')) ||
+        (isConnectionError && errorStack.includes('_standardwalletadapter_connect')) ||
         // Catch "Something went wrong" errors from Solana extensions - be very aggressive
         (hasSomethingWentWrong && (hasSolanaScript || hasExtension || reason.includes('solana') || reason.includes('wallet'))) ||
         // Promise.catch errors from extensions

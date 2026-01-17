@@ -15,7 +15,7 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit } from 'lucide-react'
+import { Trash2, Edit, LayoutGrid, Square } from 'lucide-react'
 import Image from 'next/image'
 
 type CardSize = 'small' | 'medium' | 'large'
@@ -35,6 +35,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const [isAdmin, setIsAdmin] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [imageModalOpen, setImageModalOpen] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [expandedSize, setExpandedSize] = useState<CardSize>('large')
   
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const isActive = new Date(raffle.end_time) > new Date() && raffle.is_active
@@ -136,16 +139,32 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   }
 
   // Small size - List format (horizontal)
-  if (size === 'small') {
+  // When expanded, render as medium/large card format
+  if (size === 'small' && !isExpanded) {
     return (
       <div className="relative">
-        <Link href={`/raffles/${raffle.slug}`}>
+        <Link 
+          href={`/raffles/${raffle.slug}`}
+          onClick={(e) => {
+            const target = e.target as HTMLElement
+            if (target.closest('button')) {
+              e.preventDefault()
+            }
+          }}
+        >
           <Card
             className={getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row')}
             style={borderStyle}
           >
             {raffle.image_url && (
-              <div className="relative w-24 h-24 flex-shrink-0 overflow-hidden">
+              <div 
+                className="relative w-24 h-24 flex-shrink-0 overflow-hidden cursor-pointer"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setImageModalOpen(true)
+                }}
+              >
                 <Image
                   src={raffle.image_url}
                   alt={raffle.title}
@@ -199,8 +218,21 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <Badge variant={isActive ? 'default' : 'secondary'} className="text-xs">
                   {isActive ? 'Active' : 'Ended'}
                 </Badge>
-                <Button size="sm" disabled={!isActive} className="h-7 text-xs">
-                  {isActive ? 'Enter' : 'View'}
+                <Button 
+                  type="button"
+                  size="sm" 
+                  className="h-7 text-xs"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setIsExpanded(!isExpanded)
+                    if (!isExpanded) {
+                      // When expanding, default to large size
+                      setExpandedSize('large')
+                    }
+                  }}
+                >
+                  {isExpanded ? 'Collapse' : isActive ? 'Enter' : 'View'}
                 </Button>
               </div>
             </div>
@@ -271,6 +303,22 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
+            <DialogContent className="max-w-5xl w-full p-0">
+              {raffle.image_url && (
+                <div className="relative w-full h-[80vh] min-h-[500px]">
+                  <Image
+                    src={raffle.image_url}
+                    alt={raffle.title}
+                    fill
+                    sizes="100vw"
+                    className="object-contain"
+                    priority={priority}
+                  />
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>
@@ -301,28 +349,90 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
     },
   }
 
-  const classes = sizeClasses[size]
+  // When expanded, use the expanded size setting; otherwise use the global size
+  // If size is 'small' but not expanded, handle separately above
+  // When expanded with small size, default to 'large' for the card view
+  let displaySize: 'medium' | 'large'
+  if (isExpanded) {
+    displaySize = expandedSize === 'medium' ? 'medium' : 'large'
+  } else {
+    displaySize = size === 'medium' ? 'medium' : 'large'
+  }
+  const classes = sizeClasses[displaySize]
 
   return (
-    <div className="relative">
-      <Link href={`/raffles/${raffle.slug}`}>
+    <div className={`relative ${isExpanded ? 'col-span-full z-50' : ''}`}>
+      <Link 
+        href={isExpanded ? '#' : `/raffles/${raffle.slug}`} 
+        onClick={(e) => {
+          if (isExpanded) {
+            e.preventDefault()
+          }
+          // Stop propagation for any clicks inside to prevent Link navigation when buttons are clicked
+          const target = e.target as HTMLElement
+          if (target.closest('button')) {
+            e.preventDefault()
+          }
+        }}
+      >
         <Card
-          className={getThemeAccentClasses(raffle.theme_accent, 'hover:scale-105 cursor-pointer h-full flex flex-col')}
+          className={getThemeAccentClasses(raffle.theme_accent, `h-full flex flex-col ${isExpanded ? '' : 'hover:scale-105 cursor-pointer'}`)}
           style={borderStyle}
         >
           <CardHeader className={classes.header}>
             <div className="flex items-start justify-between gap-2">
-              <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
+              <CardTitle className={`${classes.title} ${isExpanded ? '' : 'line-clamp-2'}`}>{raffle.title}</CardTitle>
               <div className="flex items-center gap-2">
+                {isExpanded && (
+                  <div className="flex items-center gap-1 border rounded-md p-1 bg-background/50">
+                    <Button
+                      type="button"
+                      variant={expandedSize === 'medium' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        console.log('Setting expandedSize to medium')
+                        setExpandedSize('medium')
+                      }}
+                      className="h-7 px-2"
+                      title="Medium"
+                    >
+                      <LayoutGrid className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={expandedSize === 'large' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        console.log('Setting expandedSize to large')
+                        setExpandedSize('large')
+                      }}
+                      className="h-7 px-2"
+                      title="Large"
+                    >
+                      <Square className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
                 <OwlVisionBadge score={owlVisionScore} />
               </div>
             </div>
-          <CardDescription className={classes.description}>
+          <CardDescription className={`${classes.description} ${isExpanded ? 'line-clamp-none' : ''}`}>
             {raffle.description}
           </CardDescription>
         </CardHeader>
         {raffle.image_url && (
-          <div className={`relative w-full ${classes.image} overflow-hidden`}>
+          <div 
+            className={`relative w-full ${classes.image} overflow-hidden cursor-pointer`}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setImageModalOpen(true)
+            }}
+          >
             <Image
               src={raffle.image_url}
               alt={raffle.title}
@@ -359,7 +469,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           </div>
         </CardContent>
         <CardFooter className={`flex flex-col ${classes.footer} ${classes.footerPadding}`}>
-          <div className={`w-full flex items-center justify-between ${size === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
+          <div className={`w-full flex items-center justify-between ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
             <span>
               {isActive ? (
                 <span title={formatDateTimeWithTimezone(raffle.end_time)}>
@@ -373,8 +483,21 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               {isActive ? 'Active' : 'Ended'}
             </Badge>
           </div>
-          <Button className="w-full" disabled={!isActive} size={size === 'large' ? 'lg' : 'default'}>
-            {isActive ? 'Enter Raffle' : 'View Details'}
+          <Button 
+            type="button"
+            className="w-full" 
+            size={displaySize === 'large' ? 'lg' : 'default'}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setIsExpanded(!isExpanded)
+              if (!isExpanded) {
+                // When expanding, default to large size
+                setExpandedSize('large')
+              }
+            }}
+          >
+            {isExpanded ? 'Collapse' : isActive ? 'Enter Raffle' : 'View Details'}
           </Button>
         </CardFooter>
       </Card>
@@ -441,6 +564,22 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 {deleting ? 'Deleting...' : 'Delete Raffle'}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
+          <DialogContent className="max-w-5xl w-full p-0">
+            {raffle.image_url && (
+              <div className="relative w-full h-[80vh] min-h-[500px]">
+                <Image
+                  src={raffle.image_url}
+                  alt={raffle.title}
+                  fill
+                  sizes="100vw"
+                  className="object-contain"
+                  priority={priority}
+                />
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </>

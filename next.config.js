@@ -20,6 +20,19 @@ const nextConfig = {
         'pino-pretty': false,
       }
     }
+    
+    // Externalize Solana packages for server-side builds to avoid bundling issues
+    // This prevents Next.js from trying to bundle these packages incorrectly
+    if (isServer) {
+      config.externals = config.externals || []
+      if (Array.isArray(config.externals)) {
+        config.externals.push('@solana/web3.js', '@solana/spl-token')
+      } else if (typeof config.externals === 'object') {
+        config.externals['@solana/web3.js'] = '@solana/web3.js'
+        config.externals['@solana/spl-token'] = '@solana/spl-token'
+      }
+    }
+    
     return config
   },
 }

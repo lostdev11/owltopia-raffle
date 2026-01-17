@@ -49,12 +49,22 @@ export default function RootLayout({
                   const hasExtension = errorString.includes('extension://') || 
                                       errorString.includes('extension') ||
                                       errorStack.includes('extension');
+                  const isConnectionError = 
+                    errorString.includes('connection') && errorString.includes('error') ||
+                    errorStack.includes('walletconnectionerror') ||
+                    errorStack.includes('connectionerror');
+                  const isUnexpectedError = 
+                    errorString.includes('unexpected error') ||
+                    errorStack.includes('unexpected error');
                   
                   if (hasSolanaScript || 
                       (hasSomethingWentWrong && (hasSolanaScript || hasExtension || errorString.includes('solana') || errorString.includes('wallet'))) ||
                       errorStack.includes('solanaactionscontentscript.js') ||
                       errorString.includes('runtime.lasterror') ||
-                      errorString.includes('receiving end does not exist')) {
+                      errorString.includes('receiving end does not exist') ||
+                      // StandardWallet adapter connection errors
+                      (isConnectionError && isUnexpectedError) ||
+                      (isConnectionError && errorStack.includes('standardwalletadapter'))) {
                     return; // Suppress
                   }
                   
@@ -71,10 +81,21 @@ export default function RootLayout({
                                           errorStack.includes('solanaactionscontentscript');
                   const hasSomethingWentWrong = reason.includes('something went wrong') || 
                                                 errorMessage.includes('something went wrong');
+                  const isConnectionError = 
+                    reason.includes('connection') && reason.includes('error') ||
+                    errorStack.includes('walletconnectionerror') ||
+                    errorStack.includes('connectionerror');
+                  const isUnexpectedError = 
+                    reason.includes('unexpected error') ||
+                    errorMessage.includes('unexpected error') ||
+                    errorStack.includes('unexpected error');
                   
                   if (hasSolanaScript || 
                       (hasSomethingWentWrong && (hasSolanaScript || reason.includes('extension') || reason.includes('solana') || reason.includes('wallet'))) ||
-                      errorStack.includes('solanaactionscontentscript.js')) {
+                      errorStack.includes('solanaactionscontentscript.js') ||
+                      // StandardWallet adapter connection errors
+                      (isConnectionError && isUnexpectedError) ||
+                      (isConnectionError && errorStack.includes('standardwalletadapter'))) {
                     event.preventDefault();
                   }
                 });
@@ -88,9 +109,19 @@ export default function RootLayout({
                   const hasSolanaScript = errorSource.includes('solanaactionscontentscript') || 
                                           errorStack.includes('solanaactionscontentscript');
                   const hasSomethingWentWrong = errorMessage.includes('something went wrong');
+                  const isConnectionError = 
+                    errorMessage.includes('connection') && errorMessage.includes('error') ||
+                    errorStack.includes('walletconnectionerror') ||
+                    errorStack.includes('connectionerror');
+                  const isUnexpectedError = 
+                    errorMessage.includes('unexpected error') ||
+                    errorStack.includes('unexpected error');
                   
                   if (hasSolanaScript || 
-                      (hasSomethingWentWrong && (hasSolanaScript || errorSource.includes('extension') || errorStack.includes('solana')))) {
+                      (hasSomethingWentWrong && (hasSolanaScript || errorSource.includes('extension') || errorStack.includes('solana'))) ||
+                      // StandardWallet adapter connection errors
+                      (isConnectionError && isUnexpectedError) ||
+                      (isConnectionError && errorStack.includes('standardwalletadapter'))) {
                     event.preventDefault();
                   }
                 });
