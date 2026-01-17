@@ -294,6 +294,7 @@ export function WalletConnectButton() {
     }
 
     let handleInteractionFallback: ((e: MouseEvent | TouchEvent) => void) | null = null
+    let wrapperClickHandler: ((e: MouseEvent) => void) | null = null
     let cleanupButton: (() => void) | null = null
     
     const timeoutId = setTimeout(() => {
@@ -321,25 +322,45 @@ export function WalletConnectButton() {
       // This is a workaround for the double-click/tap issue on desktop and mobile
       handleInteractionFallback = (e: MouseEvent | TouchEvent) => {
         // Only intervene if the modal is not already open and wallet is not connected
-        // Check if the modal is already open by checking for the modal element
+        if (connected) return
+        
+        // Check if the modal is already open
         const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-        if (!modal && !connected) {
-          // Small delay to let the button's own handler run first, then ensure modal opens
-          setTimeout(() => {
-            const modalAfterClick = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-            if (!modalAfterClick && !connected) {
-              // Button's handler didn't open modal, open it ourselves
-              setVisible(true)
-            }
-          }, 50)
-        }
+        if (modal) return
+        
+        // Immediately open the modal - don't wait for the button's handler
+        setVisible(true)
+        
+        // Double-check after a delay to ensure modal actually opened
+        setTimeout(() => {
+          const modalAfterClick = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+          if (!modalAfterClick && !connected) {
+            // Modal didn't open, try again
+            console.log('Modal did not open, attempting to open again...')
+            setVisible(true)
+          }
+        }, 100)
       }
       
       // Add event listeners for both click (desktop) and touchstart (mobile)
       // Using touchstart for better mobile responsiveness
-      // Using capture: false so normal handlers run first, then our fallback
+      // Using capture: false so we don't interfere with the button's own handler
       button.addEventListener('click', handleInteractionFallback, { capture: false, passive: true })
       button.addEventListener('touchstart', handleInteractionFallback, { capture: false, passive: true })
+      
+      // Also add a direct click handler on the wrapper as a last resort
+      wrapperClickHandler = (e: MouseEvent) => {
+        if (connected) return
+        const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+        if (!modal && buttonRef.current && e.target && buttonRef.current.contains(e.target as Node)) {
+          console.log('Wrapper click handler triggered, opening modal...')
+          setVisible(true)
+        }
+      }
+      
+      if (buttonRef.current && wrapperClickHandler) {
+        buttonRef.current.addEventListener('click', wrapperClickHandler, { capture: false, passive: false })
+      }
       
       // Also ensure the button can receive clicks directly
       // Remove any CSS that might prevent interaction
@@ -355,6 +376,10 @@ export function WalletConnectButton() {
         if (handleInteractionFallback) {
           button.removeEventListener('click', handleInteractionFallback)
           button.removeEventListener('touchstart', handleInteractionFallback)
+        }
+        // Cleanup wrapper click handler
+        if (buttonRef.current && wrapperClickHandler) {
+          buttonRef.current.removeEventListener('click', wrapperClickHandler)
         }
       }
     }, 100) // Small delay to ensure everything is initialized (works for both desktop and mobile)
@@ -382,6 +407,24 @@ export function WalletConnectButton() {
           touchAction: 'manipulation',
           position: 'relative',
           zIndex: 10
+        }}
+        onClick={(e) => {
+          // Direct click handler as fallback to ensure modal opens
+          // Only trigger if wallet is not connected and modal is not already open
+          if (!connected) {
+            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+            if (!modal) {
+              // Small delay to let the button's own handler run first
+              setTimeout(() => {
+                const modalAfterDelay = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+                if (!modalAfterDelay && !connected) {
+                  // Button's handler didn't open modal, open it ourselves
+                  console.log('Opening wallet modal via wrapper onClick fallback...')
+                  setVisible(true)
+                }
+              }, 50)
+            }
+          }
         }}
       >
         <WalletMultiButton />
