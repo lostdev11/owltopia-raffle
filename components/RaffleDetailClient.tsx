@@ -75,7 +75,14 @@ export function RaffleDetailClient({
   // Function to fetch updated entries from the API
   const fetchEntries = useCallback(async () => {
     try {
-      const response = await fetch(`/api/entries?raffleId=${raffle.id}`)
+      // Add cache-busting timestamp to ensure fresh data
+      const cacheBuster = new Date().getTime()
+      const response = await fetch(`/api/entries?raffleId=${raffle.id}&_t=${cacheBuster}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+        }
+      })
       if (response.ok) {
         const updatedEntries = await response.json()
         setEntries(updatedEntries)
@@ -114,24 +121,32 @@ export function RaffleDetailClient({
     checkAdminStatus()
   }, [connected, publicKey])
 
+  // Refresh entries when wallet connection status changes
+  // This ensures user tickets are recalculated when user connects/disconnects
+  useEffect(() => {
+    if (mounted) {
+      fetchEntries()
+    }
+  }, [connected, publicKey, mounted, fetchEntries])
+
   // Poll for entry updates when raffle is active
   // This ensures all users see updated ticket totals in real-time
   useEffect(() => {
     // Only poll if the raffle is active
-    if (!isActive) {
+    if (!isActive || !mounted) {
       return
     }
 
-    // Poll every 5 seconds to get fresh entry data
+    // Poll every 3 seconds to get fresh entry data (reduced from 5s for more real-time updates)
     const pollInterval = setInterval(() => {
       fetchEntries()
-    }, 5000)
+    }, 3000)
 
     // Cleanup interval on unmount or when raffle becomes inactive
     return () => {
       clearInterval(pollInterval)
     }
-  }, [isActive, fetchEntries]) // Depend on isActive and fetchEntries
+  }, [isActive, mounted, fetchEntries]) // Depend on isActive, mounted, and fetchEntries
 
   // Calculate total tickets sold (from confirmed entries only)
   const totalTicketsSold = entries
@@ -487,17 +502,21 @@ export function RaffleDetailClient({
       // Immediately refresh server-side data to ensure consistency
       router.refresh()
       
+      // Immediately fetch entries once (entry should be confirmed now)
+      fetchEntries()
+      
       // Fetch updated entries with retries to ensure we get the confirmed entry
       // The database update might take a moment to be visible, so retry a few times
       // Wait a brief moment first for the database commit to complete
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 800))
       
       // Fetch entries multiple times with delays to catch the update
-      for (let i = 0; i < 4; i++) {
+      // This ensures the UI reflects the new entry even if there's a slight delay
+      for (let i = 0; i < 3; i++) {
         await fetchEntries()
-        if (i < 3) {
+        if (i < 2) {
           // Wait before next fetch (longer delays for later retries)
-          await new Promise(resolve => setTimeout(resolve, 500 + (i * 300)))
+          await new Promise(resolve => setTimeout(resolve, 600 + (i * 400)))
         }
       }
       
