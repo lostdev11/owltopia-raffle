@@ -40,6 +40,7 @@ import {
   getAccount,
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token'
+import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 
 interface RaffleDetailClientProps {
   raffle: Raffle
@@ -55,7 +56,6 @@ export function RaffleDetailClient({
   const router = useRouter()
   const { publicKey, sendTransaction, connected } = useWallet()
   const { connection } = useConnection()
-  const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [showParticipants, setShowParticipants] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
@@ -67,31 +67,19 @@ export function RaffleDetailClient({
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const themeColor = getThemeAccentColor(raffle.theme_accent)
 
-  // Update entries when initialEntries prop changes (e.g., from server refresh)
-  useEffect(() => {
-    setEntries(initialEntries)
-  }, [initialEntries])
+  // Use real-time entries hook (with polling fallback)
+  const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
+    raffleId: raffle.id,
+    enabled: isActive, // Only enable real-time updates for active raffles
+    pollingInterval: 3000, // 3 second polling fallback
+    initialEntries, // Initialize with server-side entries
+  })
 
-  // Function to fetch updated entries from the API
-  const fetchEntries = useCallback(async () => {
-    try {
-      // Add cache-busting timestamp to ensure fresh data
-      const cacheBuster = new Date().getTime()
-      const response = await fetch(`/api/entries?raffleId=${raffle.id}&_t=${cacheBuster}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-        }
-      })
-      if (response.ok) {
-        const updatedEntries = await response.json()
-        setEntries(updatedEntries)
-      }
-    } catch (error) {
-      console.error('Error fetching entries:', error)
-      // Don't throw - just log the error, we'll refresh the page as fallback
-    }
-  }, [raffle.id])
+  // Refresh entries when wallet connection status changes
+  // This ensures user tickets are recalculated when user connects/disconnects
+  useEffect(() => {
+    fetchEntries()
+  }, [connected, publicKey, fetchEntries])
 
   // Calculate owlVisionScore based on current entries
   const currentOwlVisionScore = calculateOwlVisionScore(raffle, entries)
@@ -127,24 +115,8 @@ export function RaffleDetailClient({
     fetchEntries()
   }, [connected, publicKey, fetchEntries])
 
-  // Poll for entry updates when raffle is active
-  // This ensures all users see updated ticket totals in real-time
-  useEffect(() => {
-    // Only poll if the raffle is active
-    if (!isActive) {
-      return
-    }
-
-    // Poll every 3 seconds to get fresh entry data (reduced from 5s for more real-time updates)
-    const pollInterval = setInterval(() => {
-      fetchEntries()
-    }, 3000)
-
-    // Cleanup interval on unmount or when raffle becomes inactive
-    return () => {
-      clearInterval(pollInterval)
-    }
-  }, [isActive, fetchEntries]) // Depend on isActive and fetchEntries
+  // Real-time updates are now handled by useRealtimeEntries hook
+  // No need for separate polling logic - it's built into the hook
 
   // Calculate total tickets sold (from confirmed entries only)
   const totalTicketsSold = entries
@@ -500,22 +472,15 @@ export function RaffleDetailClient({
       // Immediately refresh server-side data to ensure consistency
       router.refresh()
       
-      // Immediately fetch entries once (entry should be confirmed now)
+      // If using realtime, it will automatically update. Otherwise, trigger a fetch.
+      // Wait a moment for the database commit, then fetch once
+      await new Promise(resolve => setTimeout(resolve, 1000))
       fetchEntries()
       
-      // Fetch updated entries with retries to ensure we get the confirmed entry
-      // The database update might take a moment to be visible, so retry a few times
-      // Wait a brief moment first for the database commit to complete
-      await new Promise(resolve => setTimeout(resolve, 800))
-      
-      // Fetch entries multiple times with delays to catch the update
-      // This ensures the UI reflects the new entry even if there's a slight delay
-      for (let i = 0; i < 3; i++) {
-        await fetchEntries()
-        if (i < 2) {
-          // Wait before next fetch (longer delays for later retries)
-          await new Promise(resolve => setTimeout(resolve, 600 + (i * 400)))
-        }
+      // If not using realtime, do one more fetch after a short delay to catch the update
+      if (!isUsingRealtime) {
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        fetchEntries()
       }
       
       // Close the dialog after successful purchase
@@ -668,6 +633,9 @@ export function RaffleDetailClient({
                     </Badge>
                   )}
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  💡 Don't see your entry? Try refreshing the page.
+                </p>
               </div>
             )}
 
@@ -790,8 +758,11 @@ export function RaffleDetailClient({
             )}
             
             {success && (
-              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm">
-                Tickets purchased successfully! Transaction confirmed.
+              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
+                <p>Tickets purchased successfully! Transaction confirmed.</p>
+                <p className="text-xs opacity-90">
+                  Your entry should appear shortly. If you don't see it, please refresh the page.
+                </p>
               </div>
             )}
           </div>

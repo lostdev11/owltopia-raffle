@@ -101,6 +101,11 @@ export function ParticipantsModal({
             ))
           )}
         </div>
+        <div className="pt-4 border-t">
+          <p className="text-xs text-muted-foreground text-center">
+            💡 Don't see your entry? Try refreshing the page to see the latest updates.
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   )

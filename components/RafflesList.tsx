@@ -107,10 +107,11 @@ export function RafflesList({
       return
     }
 
-    // Poll every 5 seconds to get fresh entry data (same interval as detail page)
+    // Poll every 3 seconds to get fresh entry data (consistent with detail page)
+    // Note: Real-time subscriptions would be more efficient but complex for multiple raffles
     const pollInterval = setInterval(() => {
       fetchEntriesForActiveRaffles()
-    }, 5000)
+    }, 3000)
 
     // Cleanup interval on unmount or when no active raffles
     return () => {
