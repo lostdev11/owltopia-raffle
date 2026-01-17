@@ -1,9 +1,6 @@
 import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { RafflesList } from '@/components/RafflesList'
-import { Button } from '@/components/ui/button'
 import { getSupabaseConfigError } from '@/lib/supabase'
-import Link from 'next/link'
-import { Plus } from 'lucide-react'
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -98,19 +95,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key`}
 
   return (
     <div className="container mx-auto py-8 px-4">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-bold mb-2">Owl Raffles</h1>
-          <p className="text-muted-foreground">
-            Transparent raffles with Owl Vision trust scoring
-          </p>
-        </div>
-        <Link href="/admin/raffles/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Raffle
-          </Button>
-        </Link>
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold mb-2">Owl Raffles</h1>
+        <p className="text-muted-foreground">
+          Transparent raffles with Owl Vision trust scoring
+        </p>
       </div>
 
       <div className="mb-12">

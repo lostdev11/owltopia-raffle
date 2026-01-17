@@ -449,10 +449,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={14} className="inline-block" />
                 </span>
               </span>
-              <span>
-                <span className="text-muted-foreground">Entries: </span>
-                <span className="font-semibold">{owlVisionScore.confirmedEntries}</span>
-              </span>
+              {owlVisionScore.confirmedEntries > 0 && (
+                <span>
+                  <span className="text-muted-foreground">Entries: </span>
+                  <span className="font-semibold">{owlVisionScore.confirmedEntries}</span>
+                </span>
+              )}
             </div>
             <div className="flex items-center justify-between mt-auto">
               <span className="text-xs text-muted-foreground">
@@ -709,12 +711,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Entries</span>
-              <span className="font-semibold">
-                {owlVisionScore.confirmedEntries} confirmed
-              </span>
-            </div>
+            {owlVisionScore.confirmedEntries > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Entries</span>
+                <span className="font-semibold">
+                  {owlVisionScore.confirmedEntries} confirmed
+                </span>
+              </div>
+            )}
           </div>
         </CardContent>
         <CardFooter className={`flex flex-col ${classes.footer} ${classes.footerPadding}`}>
