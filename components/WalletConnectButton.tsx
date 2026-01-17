@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { isMobileDevice, isPhantomBrowser, isPhantomExtensionAvailable, redirectToPhantomBrowser } from '@/lib/utils'
 
 export function WalletConnectButton() {
   const router = useRouter()
@@ -22,12 +23,47 @@ export function WalletConnectButton() {
   const [showSignDialog, setShowSignDialog] = useState(false)
   const [isSigning, setIsSigning] = useState(false)
   const [signError, setSignError] = useState<string | null>(null)
+  const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
   const prevConnectedRef = useRef(false)
   const buttonRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Check if user should be redirected to Phantom browser
+  const shouldRedirectToPhantom = useCallback(() => {
+    if (!mounted) return false
+    
+    const isMobile = isMobileDevice()
+    const isPhantom = isPhantomBrowser()
+    const hasPhantomExtension = isPhantomExtensionAvailable()
+    
+    // On mobile: redirect if not in Phantom browser
+    // On desktop: only redirect if no Phantom extension is available
+    if (isMobile && !isPhantom) {
+      return true
+    }
+    
+    // On desktop, we don't redirect - let them use other wallets
+    // But we could optionally redirect if they specifically want Phantom
+    return false
+  }, [mounted])
+
+  // Handle wallet connect click - check if redirect is needed
+  const handleConnectWalletClick = useCallback((e: MouseEvent | TouchEvent) => {
+    if (connected) return
+    
+    // Check if we should redirect to Phantom browser
+    if (shouldRedirectToPhantom()) {
+      e.preventDefault()
+      e.stopPropagation()
+      setShowPhantomRedirectDialog(true)
+      return false
+    }
+    
+    return true
+  }, [connected, shouldRedirectToPhantom])
 
   // Show sign dialog when wallet connects but hasn't signed yet
   useEffect(() => {
@@ -402,8 +438,33 @@ export function WalletConnectButton() {
       // Add event listeners for both click (desktop) and touchstart (mobile)
       // Using touchstart for better mobile responsiveness
       // Using capture: false so we don't interfere with the button's own handler
-      button.addEventListener('click', handleInteractionFallback, { capture: false, passive: true })
-      button.addEventListener('touchstart', handleInteractionFallback, { capture: false, passive: true })
+      // Prevent default on touchstart to avoid double-firing (touch + click)
+      let touchHandled = false
+      const touchHandler = (e: TouchEvent) => {
+        // Check if redirect is needed before handling
+        if (handleConnectWalletClick(e) === false) {
+          return
+        }
+        touchHandled = true
+        handleInteractionFallback(e)
+        // Clear touch flag after a short delay
+        setTimeout(() => {
+          touchHandled = false
+        }, 300)
+      }
+      const clickHandler = (e: MouseEvent) => {
+        // Check if redirect is needed before handling
+        if (handleConnectWalletClick(e) === false) {
+          return
+        }
+        // On mobile, click events fire after touch - skip if we already handled touch
+        if (touchHandled && 'ontouchstart' in window) {
+          return
+        }
+        handleInteractionFallback(e)
+      }
+      button.addEventListener('touchstart', touchHandler, { capture: false, passive: true })
+      button.addEventListener('click', clickHandler, { capture: false, passive: true })
       
       // Also add a direct click handler on the wrapper as a last resort
       wrapperClickHandler = (e: MouseEvent) => {
@@ -430,10 +491,9 @@ export function WalletConnectButton() {
       }
       
       cleanupButton = () => {
-        if (handleInteractionFallback) {
-          button.removeEventListener('click', handleInteractionFallback)
-          button.removeEventListener('touchstart', handleInteractionFallback)
-        }
+        // Cleanup will be handled by storing handlers in scope
+        button.removeEventListener('touchstart', touchHandler)
+        button.removeEventListener('click', clickHandler)
         // Cleanup wrapper click handler
         if (buttonRef.current && wrapperClickHandler) {
           buttonRef.current.removeEventListener('click', wrapperClickHandler)
@@ -447,7 +507,7 @@ export function WalletConnectButton() {
         cleanupButton()
       }
     }
-  }, [mounted, connected, setVisible])
+  }, [mounted, connected, setVisible, handleConnectWalletClick])
 
   if (!mounted) {
     return null
@@ -462,13 +522,39 @@ export function WalletConnectButton() {
           pointerEvents: 'auto',
           display: 'inline-block',
           touchAction: 'manipulation',
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
           position: 'relative',
-          zIndex: 10
+          zIndex: 10,
+          width: '100%',
+          maxWidth: 'fit-content'
+        }}
+        onTouchStart={(e) => {
+          // Mobile touch handler - check for Phantom redirect first
+          if (!connected) {
+            if (shouldRedirectToPhantom()) {
+              e.preventDefault()
+              e.stopPropagation()
+              setShowPhantomRedirectDialog(true)
+              return
+            }
+            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+            if (!modal) {
+              e.preventDefault()
+              setVisible(true)
+            }
+          }
         }}
         onClick={(e) => {
-          // Direct click handler as fallback to ensure modal opens
-          // Only trigger if wallet is not connected and modal is not already open
+          // Direct click handler - check for Phantom redirect first
           if (!connected) {
+            if (shouldRedirectToPhantom()) {
+              e.preventDefault()
+              e.stopPropagation()
+              setShowPhantomRedirectDialog(true)
+              return
+            }
             const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
             if (!modal) {
               // Small delay to let the button's own handler run first
@@ -554,6 +640,67 @@ export function WalletConnectButton() {
               className="bg-green-600 hover:bg-green-700"
             >
               {isSigning ? 'Signing...' : 'Sign Message'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phantom Browser Redirect Dialog */}
+      <Dialog open={showPhantomRedirectDialog} onOpenChange={setShowPhantomRedirectDialog}>
+        <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
+          <DialogHeader>
+            <DialogTitle>Open in Phantom Browser</DialogTitle>
+            <DialogDescription className="pt-2">
+              For the best experience, we recommend opening this site in the Phantom browser app. You can also continue with other wallet options.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4 space-y-4">
+            <div className="bg-muted/50 p-4 rounded-lg border">
+              <h4 className="font-semibold mb-2 text-sm">Why Phantom Browser?</h4>
+              <ul className="space-y-2 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <span className="text-green-500 mt-1">✓</span>
+                  <span>Seamless wallet connection</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-500 mt-1">✓</span>
+                  <span>Better security and performance</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-500 mt-1">✓</span>
+                  <span>Native Solana wallet integration</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg">
+              <p className="text-sm text-blue-600 dark:text-blue-400">
+                <strong>Don't have Phantom?</strong> Download it from the App Store or Google Play Store.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPhantomRedirectDialog(false)
+                // Open wallet selection modal so they can choose other wallets
+                setVisible(true)
+              }}
+              className="w-full sm:w-auto"
+            >
+              Continue with Other Wallets
+            </Button>
+            <Button
+              onClick={() => {
+                redirectToPhantomBrowser()
+                setShowPhantomRedirectDialog(false)
+              }}
+              className="bg-purple-600 hover:bg-purple-700 w-full sm:w-auto"
+            >
+              Open in Phantom
             </Button>
           </DialogFooter>
         </DialogContent>

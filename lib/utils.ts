@@ -55,3 +55,66 @@ export function formatDateTimeWithTimezone(utcIsoString: string): string {
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/**
+ * Detects if the user is on a mobile device
+ */
+export function isMobileDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  
+  // Check user agent for mobile devices
+  const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera
+  const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i
+  return mobileRegex.test(userAgent)
+}
+
+/**
+ * Detects if Phantom wallet extension is available (desktop)
+ */
+export function isPhantomExtensionAvailable(): boolean {
+  if (typeof window === 'undefined') return false
+  
+  // Check for Phantom extension
+  return !!(window as any).solana?.isPhantom || !!(window as any).phantom?.solana
+}
+
+/**
+ * Detects if user is in Phantom browser (mobile)
+ */
+export function isPhantomBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+  
+  // Check user agent for Phantom browser
+  const userAgent = navigator.userAgent || ''
+  return userAgent.toLowerCase().includes('phantom')
+}
+
+/**
+ * Gets the Phantom deep link URL for the current page
+ */
+export function getPhantomDeepLink(): string {
+  if (typeof window === 'undefined') return ''
+  
+  const currentUrl = window.location.href
+  // Use Phantom's universal link format
+  return `https://phantom.app/ul/v1/${encodeURIComponent(currentUrl)}`
+}
+
+/**
+ * Redirects user to open the current page in Phantom browser (mobile)
+ */
+export function redirectToPhantomBrowser(): void {
+  if (typeof window === 'undefined') return
+  
+  const deepLink = getPhantomDeepLink()
+  
+  // Try to open in Phantom browser
+  window.location.href = deepLink
+  
+  // Fallback: If Phantom is not installed, this will open the App Store/Play Store
+  // After a short delay, show a message if still on the page
+  setTimeout(() => {
+    // If we're still here after 2 seconds, Phantom might not be installed
+    // The user will see Phantom's page which handles this case
+  }, 2000)
+}
