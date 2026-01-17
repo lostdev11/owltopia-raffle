@@ -305,9 +305,17 @@ export function WalletConnectButton() {
       button.style.pointerEvents = 'auto'
       button.style.cursor = 'pointer'
       button.style.touchAction = 'manipulation' // Optimize touch handling on mobile
+      button.style.position = 'relative'
+      button.style.zIndex = '10'
       
       // Ensure the button is not disabled
       button.disabled = false
+      
+      // Also ensure the wrapper and any parent elements allow pointer events
+      if (buttonRef.current) {
+        buttonRef.current.style.pointerEvents = 'auto'
+        buttonRef.current.style.zIndex = '10'
+      }
       
       // Add interaction handler as fallback to ensure modal opens on first click/tap
       // This is a workaround for the double-click/tap issue on desktop and mobile
@@ -329,8 +337,19 @@ export function WalletConnectButton() {
       
       // Add event listeners for both click (desktop) and touchstart (mobile)
       // Using touchstart for better mobile responsiveness
+      // Using capture: false so normal handlers run first, then our fallback
       button.addEventListener('click', handleInteractionFallback, { capture: false, passive: true })
       button.addEventListener('touchstart', handleInteractionFallback, { capture: false, passive: true })
+      
+      // Also ensure the button can receive clicks directly
+      // Remove any CSS that might prevent interaction
+      const buttonStyles = window.getComputedStyle(button)
+      if (buttonStyles.pointerEvents === 'none') {
+        button.style.pointerEvents = 'auto'
+      }
+      if (buttonStyles.cursor === 'not-allowed' || buttonStyles.cursor === 'default') {
+        button.style.cursor = 'pointer'
+      }
       
       cleanupButton = () => {
         if (handleInteractionFallback) {
@@ -360,7 +379,9 @@ export function WalletConnectButton() {
         style={{ 
           pointerEvents: 'auto',
           display: 'inline-block',
-          touchAction: 'manipulation' // Optimize touch handling on mobile
+          touchAction: 'manipulation',
+          position: 'relative',
+          zIndex: 10
         }}
       >
         <WalletMultiButton />
