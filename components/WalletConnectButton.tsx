@@ -286,14 +286,14 @@ export function WalletConnectButton() {
   }, [publicKey, disconnect])
 
   // Ensure button is properly initialized and clickable on first interaction
-  // This fixes the issue where WalletMultiButton requires two clicks on Windows Chrome with Solflare
+  // This fixes the issue where WalletMultiButton requires two clicks/taps on desktop and mobile
   // IMPORTANT: This hook must be before any conditional returns to follow Rules of Hooks
   useEffect(() => {
     if (!mounted || !buttonRef.current || connected) {
       return
     }
 
-    let handleClickFallback: ((e: MouseEvent) => void) | null = null
+    let handleInteractionFallback: ((e: MouseEvent | TouchEvent) => void) | null = null
     let cleanupButton: (() => void) | null = null
     
     const timeoutId = setTimeout(() => {
@@ -301,17 +301,18 @@ export function WalletConnectButton() {
       const button = buttonRef.current?.querySelector('button')
       if (!button) return
 
-      // Remove any CSS that might block interactions
+      // Remove any CSS that might block interactions (works for both desktop and mobile)
       button.style.pointerEvents = 'auto'
       button.style.cursor = 'pointer'
+      button.style.touchAction = 'manipulation' // Optimize touch handling on mobile
       
       // Ensure the button is not disabled
       button.disabled = false
       
-      // Add click handler as fallback to ensure modal opens on first click
-      // This is a workaround for the double-click issue on Windows Chrome with Solflare
-      handleClickFallback = (e: MouseEvent) => {
-        // Only intervene if this is the first click and wallet is not connected
+      // Add interaction handler as fallback to ensure modal opens on first click/tap
+      // This is a workaround for the double-click/tap issue on desktop and mobile
+      handleInteractionFallback = (e: MouseEvent | TouchEvent) => {
+        // Only intervene if the modal is not already open and wallet is not connected
         // Check if the modal is already open by checking for the modal element
         const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
         if (!modal && !connected) {
@@ -326,15 +327,18 @@ export function WalletConnectButton() {
         }
       }
       
-      // Add event listener with capture to ensure we see the click
-      button.addEventListener('click', handleClickFallback, { capture: false })
+      // Add event listeners for both click (desktop) and touchstart (mobile)
+      // Using touchstart for better mobile responsiveness
+      button.addEventListener('click', handleInteractionFallback, { capture: false, passive: true })
+      button.addEventListener('touchstart', handleInteractionFallback, { capture: false, passive: true })
       
       cleanupButton = () => {
-        if (handleClickFallback) {
-          button.removeEventListener('click', handleClickFallback)
+        if (handleInteractionFallback) {
+          button.removeEventListener('click', handleInteractionFallback)
+          button.removeEventListener('touchstart', handleInteractionFallback)
         }
       }
-    }, 100) // Small delay to ensure everything is initialized
+    }, 100) // Small delay to ensure everything is initialized (works for both desktop and mobile)
     
     return () => {
       clearTimeout(timeoutId)
@@ -355,7 +359,8 @@ export function WalletConnectButton() {
         className="wallet-connect-wrapper"
         style={{ 
           pointerEvents: 'auto',
-          display: 'inline-block'
+          display: 'inline-block',
+          touchAction: 'manipulation' // Optimize touch handling on mobile
         }}
       >
         <WalletMultiButton />
