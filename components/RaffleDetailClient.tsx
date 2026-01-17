@@ -484,14 +484,26 @@ export function RaffleDetailClient({
 
       setSuccess(true)
       
-      // Immediately fetch updated entries to show real-time updates
-      await fetchEntries()
+      // Immediately refresh server-side data to ensure consistency
+      router.refresh()
+      
+      // Fetch updated entries with retries to ensure we get the confirmed entry
+      // The database update might take a moment to be visible, so retry a few times
+      // Wait a brief moment first for the database commit to complete
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Fetch entries multiple times with delays to catch the update
+      for (let i = 0; i < 4; i++) {
+        await fetchEntries()
+        if (i < 3) {
+          // Wait before next fetch (longer delays for later retries)
+          await new Promise(resolve => setTimeout(resolve, 500 + (i * 300)))
+        }
+      }
       
       // Close the dialog after successful purchase
       setTimeout(() => {
         setShowEnterRaffleDialog(false)
-        // Also refresh server-side data to ensure consistency
-        router.refresh()
       }, 1500)
     } catch (err) {
       console.error('Purchase error:', err)
