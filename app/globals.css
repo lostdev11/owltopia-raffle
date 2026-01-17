@@ -77,3 +77,12 @@
 .wallet-connect-wrapper * {
   pointer-events: auto !important;
 }
+
+/* Ensure sign dialog appears above wallet adapter modal */
+[data-radix-dialog-overlay][class*="wallet-connect"] {
+  z-index: 10000 !important;
+}
+
+[data-radix-dialog-content] {
+  z-index: 10001 !important;
+}

@@ -35,35 +35,92 @@ export function WalletConnectButton() {
       // Reset error state when connecting
       setSignError(null)
       
-      // Small delay to ensure wallet is fully connected and adapter is ready
-      // Increased delay slightly to allow Standard Wallets (like Phantom) to initialize
-      const timeoutId = setTimeout(() => {
+      // Function to check if wallet adapter modal is still open and wait for it to close
+      // Returns cleanup function to cancel timeouts
+      const waitForWalletModalToClose = (callback: () => void, maxWaitTime = 2000): (() => void) => {
+        const startTime = Date.now()
+        let checkTimeoutId: NodeJS.Timeout | null = null
+        let callbackTimeoutId: NodeJS.Timeout | null = null
+        let cancelled = false
+        
+        const checkModal = () => {
+          if (cancelled) return
+          
+          const walletModal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+          const isWalletModalOpen = walletModal && window.getComputedStyle(walletModal).display !== 'none'
+          
+          // If modal is closed or we've waited too long, proceed
+          if (!isWalletModalOpen || (Date.now() - startTime) > maxWaitTime) {
+            // Add a small additional delay to ensure modal animation has completed
+            if (!cancelled) {
+              callbackTimeoutId = setTimeout(() => {
+                if (!cancelled) {
+                  callback()
+                }
+              }, 300)
+            }
+            return
+          }
+          
+          // Check again in 100ms
+          if (!cancelled) {
+            checkTimeoutId = setTimeout(checkModal, 100)
+          }
+        }
+        
+        checkModal()
+        
+        // Return cleanup function
+        return () => {
+          cancelled = true
+          if (checkTimeoutId) clearTimeout(checkTimeoutId)
+          if (callbackTimeoutId) clearTimeout(callbackTimeoutId)
+        }
+      }
+      
+      // First, ensure wallet is fully connected and adapter is ready
+      // Then wait for wallet adapter modal to close before showing sign dialog
+      let cleanupWaitFunction: (() => void) | null = null
+      const initialTimeout = setTimeout(() => {
         // Verify wallet is still connected after delay
         if (!connected || !publicKey) {
           return
         }
         
-        // Check if wallet adapter supports signing
-        if (!signMessage) {
-          // Wallet doesn't support signing - show error
-          setSignError('Your wallet does not support message signing. Please disconnect and use a wallet that supports message signing (e.g., Phantom, Solflare).')
-          setShowSignDialog(true)
-          prevConnectedRef.current = connected
-          return
-        }
-        
-        // Check if user has signed for this wallet address
-        const hasSigned = localStorage.getItem(`wallet_signed_${publicKey.toBase58()}`)
-        
-        // Always show sign dialog if:
-        // 1. User hasn't signed yet, OR
-        // 2. User just connected (transition from disconnected to connected)
-        if (!hasSigned || (prevConnectedRef.current === false && connected)) {
-          setShowSignDialog(true)
-        }
-      }, 750) // 750ms delay to allow wallet to fully initialize (Standard Wallets may need more time)
+        // Wait for wallet adapter modal to close before showing sign dialog
+        cleanupWaitFunction = waitForWalletModalToClose(() => {
+          // Verify wallet is still connected after waiting
+          if (!connected || !publicKey) {
+            return
+          }
+          
+          // Check if wallet adapter supports signing
+          if (!signMessage) {
+            // Wallet doesn't support signing - show error
+            setSignError('Your wallet does not support message signing. Please disconnect and use a wallet that supports message signing (e.g., Phantom, Solflare).')
+            setShowSignDialog(true)
+            prevConnectedRef.current = connected
+            return
+          }
+          
+          // Check if user has signed for this wallet address
+          const hasSigned = localStorage.getItem(`wallet_signed_${publicKey.toBase58()}`)
+          
+          // Always show sign dialog if:
+          // 1. User hasn't signed yet, OR
+          // 2. User just connected (transition from disconnected to connected)
+          if (!hasSigned || (prevConnectedRef.current === false && connected)) {
+            setShowSignDialog(true)
+          }
+        })
+      }, 500) // Initial delay to allow wallet to initialize
       
-      return () => clearTimeout(timeoutId)
+      return () => {
+        clearTimeout(initialTimeout)
+        if (cleanupWaitFunction) {
+          cleanupWaitFunction()
+        }
+      }
     } else if (!connected && prevConnectedRef.current) {
       // Wallet just disconnected - reset state
       setShowSignDialog(false)
@@ -436,7 +493,7 @@ export function WalletConnectButton() {
           handleDisconnect()
         }
       }}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
           <DialogHeader>
             <DialogTitle>Sign Message to Connect</DialogTitle>
             <DialogDescription className="pt-2">
