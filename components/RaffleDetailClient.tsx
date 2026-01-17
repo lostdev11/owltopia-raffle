@@ -124,16 +124,14 @@ export function RaffleDetailClient({
   // Refresh entries when wallet connection status changes
   // This ensures user tickets are recalculated when user connects/disconnects
   useEffect(() => {
-    if (mounted) {
-      fetchEntries()
-    }
-  }, [connected, publicKey, mounted, fetchEntries])
+    fetchEntries()
+  }, [connected, publicKey, fetchEntries])
 
   // Poll for entry updates when raffle is active
   // This ensures all users see updated ticket totals in real-time
   useEffect(() => {
     // Only poll if the raffle is active
-    if (!isActive || !mounted) {
+    if (!isActive) {
       return
     }
 
@@ -146,7 +144,7 @@ export function RaffleDetailClient({
     return () => {
       clearInterval(pollInterval)
     }
-  }, [isActive, mounted, fetchEntries]) // Depend on isActive, mounted, and fetchEntries
+  }, [isActive, fetchEntries]) // Depend on isActive and fetchEntries
 
   // Calculate total tickets sold (from confirmed entries only)
   const totalTicketsSold = entries
