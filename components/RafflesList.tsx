@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
@@ -33,6 +33,90 @@ export function RafflesList({
   useEffect(() => {
     setFilteredRaffles(rafflesWithEntries)
   }, [rafflesWithEntries])
+
+  // Function to fetch updated entries for all active raffles
+  const fetchEntriesForActiveRaffles = useCallback(async () => {
+    const now = new Date()
+    
+    // Get current raffles and identify active ones
+    setFilteredRaffles(prev => {
+      // Get all active raffles (those that are still active)
+      const activeRaffles = prev.filter(({ raffle }) => {
+        const endTime = new Date(raffle.end_time)
+        return endTime > now && raffle.is_active
+      })
+
+      if (activeRaffles.length === 0) {
+        return prev // No active raffles to poll
+      }
+
+      // Fetch entries for all active raffles in parallel
+      Promise.all(
+        activeRaffles.map(async ({ raffle }) => {
+          try {
+            const response = await fetch(`/api/entries?raffleId=${raffle.id}&t=${Date.now()}`)
+            if (response.ok) {
+              const entries = await response.json()
+              return { raffleId: raffle.id, entries, raffle }
+            }
+            return null
+          } catch (error) {
+            console.error(`Error fetching entries for raffle ${raffle.id}:`, error)
+            return null
+          }
+        })
+      ).then(results => {
+        // Filter out null results (failed fetches)
+        const updates = results.filter((r): r is { raffleId: string; entries: Entry[]; raffle: Raffle } => r !== null)
+        
+        if (updates.length > 0) {
+          // Update state with all fetched entries at once
+          setFilteredRaffles(current => {
+            // Create a map for efficient lookup
+            const updatedMap = new Map(current.map(r => [r.raffle.id, r]))
+            
+            // Apply all updates
+            updates.forEach(({ raffleId, entries, raffle }) => {
+              updatedMap.set(raffleId, { raffle, entries })
+            })
+            
+            return Array.from(updatedMap.values())
+          })
+        }
+      }).catch(error => {
+        console.error('Error fetching entries for active raffles:', error)
+      })
+
+      return prev // Return unchanged, will update via Promise callback
+    })
+  }, [])
+
+  // Poll for entry updates when there are active raffles
+  // This ensures all users see updated ticket totals in real-time
+  useEffect(() => {
+    const now = new Date()
+    
+    // Check if there are any active raffles
+    const hasActiveRaffles = filteredRaffles.some(({ raffle }) => {
+      const endTime = new Date(raffle.end_time)
+      return endTime > now && raffle.is_active
+    })
+
+    // Only poll if there are active raffles
+    if (!hasActiveRaffles) {
+      return
+    }
+
+    // Poll every 5 seconds to get fresh entry data (same interval as detail page)
+    const pollInterval = setInterval(() => {
+      fetchEntriesForActiveRaffles()
+    }, 5000)
+
+    // Cleanup interval on unmount or when no active raffles
+    return () => {
+      clearInterval(pollInterval)
+    }
+  }, [filteredRaffles, fetchEntriesForActiveRaffles])
 
   // Callback to remove a raffle from the list (client-side immediate update)
   const handleRaffleDeleted = (raffleId: string) => {

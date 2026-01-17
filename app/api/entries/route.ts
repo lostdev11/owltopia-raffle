@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getEntriesByRaffleId } from '@/lib/db/raffles'
 
+// Force dynamic rendering to prevent caching stale entry data
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 /**
  * GET entries for a specific raffle
  * Query params: raffleId - the ID of the raffle
@@ -19,7 +23,15 @@ export async function GET(request: NextRequest) {
 
     const entries = await getEntriesByRaffleId(raffleId)
 
-    return NextResponse.json(entries, { status: 200 })
+    // Return response with no-cache headers to ensure fresh data
+    return NextResponse.json(entries, { 
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
+    })
   } catch (error) {
     console.error('Error fetching entries:', error)
     const errorMessage = error instanceof Error ? error.message : 'Internal server error'
