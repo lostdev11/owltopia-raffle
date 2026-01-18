@@ -18,7 +18,7 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit } from 'lucide-react'
+import { Trash2, Edit, Trophy } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -58,9 +58,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [imageError, setImageError] = useState(false)
   
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const isActive = new Date(raffle.end_time) > new Date() && raffle.is_active
+  const isWinner = !isActive && raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const themeColor = getThemeAccentColor(raffle.theme_accent)
   
@@ -404,12 +406,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           }}
         >
           <Card
-            className={getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch')}
-            style={borderStyle}
+            className={`${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''}`}
+            style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
           >
-            {raffle.image_url && (
+            {isWinner && (
+              <div className="winner-golden-overlay absolute inset-0 rounded-lg pointer-events-none z-0" />
+            )}
+            {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer"
+                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer z-10"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -423,10 +428,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   sizes="(max-width: 768px) 160px, 192px"
                   className="object-cover"
                   priority={priority}
+                  onError={() => setImageError(true)}
+                  unoptimized={raffle.image_url.startsWith('http://')}
                 />
               </div>
             )}
-            <div className="flex-1 flex flex-col p-3 min-w-0">
+            {imageError && (
+              <div className="w-40 md:w-48 h-40 md:h-40 flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
+                <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
+              </div>
+            )}
+            <div className="flex-1 flex flex-col p-3 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <CardTitle className="text-sm font-semibold line-clamp-1 flex-1">{raffle.title}</CardTitle>
                 <div className="flex items-center gap-2">
@@ -483,6 +495,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 )}
               </div>
             </div>
+            {!isActive && raffle.winner_wallet && (
+              <div className="mt-2 pt-2 border-t flex items-center gap-2">
+                <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
+                <span className="text-xs text-muted-foreground">
+                  Winner: <span className="font-mono font-semibold text-foreground">
+                    {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                  </span>
+                </span>
+              </div>
+            )}
             {showQuickBuy && isActive && (
               <div className="mt-3 pt-3 border-t space-y-3">
                 {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
@@ -603,7 +625,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           </Dialog>
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
             <DialogContent className="max-w-5xl w-full p-0">
-              {raffle.image_url && (
+              {raffle.image_url && !imageError && (
                 <div className="!relative w-full h-[80vh] min-h-[500px]">
                   <Image
                     src={raffle.image_url}
@@ -612,7 +634,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     sizes="100vw"
                     className="object-contain"
                     priority={priority}
+                    onError={() => setImageError(true)}
+                    unoptimized={raffle.image_url.startsWith('http://')}
                   />
+                </div>
+              )}
+              {imageError && (
+                <div className="w-full h-[80vh] min-h-[500px] flex items-center justify-center bg-muted border rounded">
+                  <span className="text-muted-foreground">Image unavailable</span>
                 </div>
               )}
             </DialogContent>
@@ -657,12 +686,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         }}
       >
         <Card
-          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl`}
-          style={borderStyle}
+          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''}`}
+          style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
         >
-          {raffle.image_url && (
+          {isWinner && (
+            <div className="winner-golden-overlay absolute inset-0 rounded-xl pointer-events-none z-0" />
+          )}
+          {raffle.image_url && !imageError && (
             <div 
-              className="!relative w-full aspect-square overflow-hidden cursor-pointer"
+              className="!relative w-full aspect-square overflow-hidden cursor-pointer z-10"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -676,9 +708,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
                 className="object-cover"
                 priority={priority}
+                onError={() => setImageError(true)}
+                unoptimized={raffle.image_url.startsWith('http://')}
               />
               {/* Metadata overlay on image */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity">
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity z-10">
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
@@ -690,8 +724,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </div>
               </div>
               {/* Always visible overlay at bottom for key info */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3">
-                <div className="flex items-center justify-between">
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3 z-10">
+                <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
                       {raffle.ticket_price} {raffle.currency}
@@ -705,13 +739,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     {isActive ? 'Active' : 'Ended'}
                   </Badge>
                 </div>
+                {!isActive && raffle.winner_wallet && (
+                  <div className={`${classes.footer} text-white/90 flex items-center gap-1.5 mt-1 pt-1 border-t border-white/20`}>
+                    <Trophy className={`${displaySize === 'large' ? 'h-3.5 w-3.5' : 'h-3 w-3'} text-yellow-400 flex-shrink-0`} />
+                    <span className="truncate">
+                      Winner: <span className="font-mono font-semibold">
+                        {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                      </span>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
-          {/* Fallback if no image */}
-          {!raffle.image_url && (
+          {/* Fallback if image error or no image */}
+          {(imageError || !raffle.image_url) && (
             <>
-              <CardHeader className="p-4">
+              <CardHeader className="p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
                   <OwlVisionBadge score={owlVisionScore} />
@@ -762,6 +806,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     {isActive ? 'Active' : 'Ended'}
                   </Badge>
                 </div>
+                {!isActive && raffle.winner_wallet && (
+                  <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
+                    <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />
+                    <span className="text-muted-foreground">
+                      Winner: <span className="font-mono font-semibold text-foreground">
+                        {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                      </span>
+                    </span>
+                  </div>
+                )}
                 {!showQuickBuy && (
                   <Button 
                     type="button"
@@ -916,7 +970,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         </Dialog>
         <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
           <DialogContent className="max-w-5xl w-full p-0">
-            {raffle.image_url && (
+            {raffle.image_url && !imageError && (
               <div className="relative w-full h-[80vh] min-h-[500px]">
                 <Image
                   src={raffle.image_url}
@@ -925,7 +979,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   sizes="100vw"
                   className="object-contain"
                   priority={priority}
+                  onError={() => setImageError(true)}
+                  unoptimized={raffle.image_url.startsWith('http://')}
                 />
+              </div>
+            )}
+            {imageError && (
+              <div className="w-full h-[80vh] min-h-[500px] flex items-center justify-center bg-muted border rounded">
+                <span className="text-muted-foreground">Image unavailable</span>
               </div>
             )}
           </DialogContent>

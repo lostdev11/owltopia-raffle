@@ -108,3 +108,51 @@
 [data-radix-dialog-content] {
   z-index: 10001 !important;
 }
+
+/* Winner golden tint animation */
+@keyframes golden-pulse {
+  0%, 100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes golden-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes golden-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.4), 0 0 40px rgba(234, 179, 8, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(234, 179, 8, 0.6), 0 0 60px rgba(234, 179, 8, 0.4);
+  }
+}
+
+.winner-golden-overlay {
+  background: linear-gradient(
+    135deg,
+    rgba(234, 179, 8, 0.15) 0%,
+    rgba(250, 204, 21, 0.20) 25%,
+    rgba(234, 179, 8, 0.25) 50%,
+    rgba(250, 204, 21, 0.20) 75%,
+    rgba(234, 179, 8, 0.15) 100%
+  );
+  background-size: 200% 200%;
+  animation: golden-pulse 4s ease-in-out infinite, golden-shimmer 6s ease-in-out infinite;
+}
+
+.winner-golden-card {
+  animation: golden-glow 3s ease-in-out infinite;
+}
