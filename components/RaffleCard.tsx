@@ -56,8 +56,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const [imageModalOpen, setImageModalOpen] = useState(false)
   const [showQuickBuy, setShowQuickBuy] = useState(false)
   const [ticketQuantity, setTicketQuantity] = useState(1)
-  const [purchaseAmount, setPurchaseAmount] = useState(0)
+  const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const [isProcessing, setIsProcessing] = useState(false)
+  
+  // Calculate purchase amount automatically based on ticket price and quantity
+  const purchaseAmount = raffle.ticket_price * ticketQuantity
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [imageError, setImageError] = useState(false)
@@ -456,7 +459,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         setShowQuickBuy(false)
         setSuccess(false)
         setTicketQuantity(1)
-        setPurchaseAmount(0)
+        setTicketQuantityDisplay('1')
       }, 2000)
     } catch (err) {
       console.error('Purchase error:', err)
@@ -467,9 +470,34 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   }
 
   const handleQuantityChange = (value: string) => {
-    const numValue = parseInt(value) || 1
+    // Allow empty string for erasing
+    setTicketQuantityDisplay(value)
+    if (value === '') {
+      return // Allow empty display temporarily
+    }
+    const numValue = parseInt(value)
+    if (isNaN(numValue)) {
+      return // Don't update if not a valid number
+    }
     const clampedValue = Math.max(1, Math.min(numValue, maxPurchaseQuantity))
     setTicketQuantity(clampedValue)
+    // Sync display value with clamped value if it was changed
+    if (clampedValue !== numValue) {
+      setTicketQuantityDisplay(clampedValue.toString())
+    }
+  }
+
+  const handleQuantityBlur = () => {
+    // When input loses focus, ensure it has a valid value
+    if (ticketQuantityDisplay === '' || isNaN(parseInt(ticketQuantityDisplay))) {
+      setTicketQuantityDisplay('1')
+      setTicketQuantity(1)
+    } else {
+      const numValue = parseInt(ticketQuantityDisplay)
+      const clampedValue = Math.max(1, Math.min(numValue, maxPurchaseQuantity))
+      setTicketQuantity(clampedValue)
+      setTicketQuantityDisplay(clampedValue.toString())
+    }
   }
 
   const handleToggleQuickBuy = (e: React.MouseEvent) => {
@@ -477,7 +505,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
     e.stopPropagation()
     if (!showQuickBuy) {
       setTicketQuantity(1)
-      setPurchaseAmount(0)
+      setTicketQuantityDisplay('1')
       setError(null)
       setSuccess(false)
     }
@@ -626,8 +654,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     type="number"
                     min="1"
                     max={maxPurchaseQuantity}
-                    value={ticketQuantity}
+                    value={ticketQuantityDisplay}
                     onChange={(e) => handleQuantityChange(e.target.value)}
+                    onBlur={handleQuantityBlur}
                     disabled={availableTickets !== null && availableTickets <= 0}
                     className="h-10 sm:h-7 text-base sm:text-xs"
                   />
@@ -635,7 +664,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <div className="flex items-center justify-between pt-1 border-t">
                   <span className="text-xs text-muted-foreground">Total</span>
                   <div className="text-sm font-bold flex items-center gap-1">
-                    {(raffle.ticket_price * ticketQuantity).toFixed(6)} {raffle.currency}
+                    {purchaseAmount.toFixed(6)} {raffle.currency}
                     <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={12} className="inline-block" />
                   </div>
                 </div>
@@ -986,8 +1015,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   type="number"
                   min="1"
                   max={maxPurchaseQuantity}
-                  value={ticketQuantity}
+                  value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
+                  onBlur={handleQuantityBlur}
                   disabled={availableTickets !== null && availableTickets <= 0}
                   className="text-base sm:text-sm h-11 sm:h-10"
                 />
@@ -996,23 +1026,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
                   </p>
                 )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="card-amount" className={displaySize === 'large' ? 'text-sm' : 'text-xs'}>Purchase Amount ({raffle.currency}) *</Label>
-                <Input
-                  id="card-amount"
-                  type="number"
-                  step="0.000001"
-                  min="0"
-                  value={purchaseAmount}
-                  onChange={(e) => setPurchaseAmount(parseFloat(e.target.value) || 0)}
-                  disabled={availableTickets !== null && availableTickets <= 0}
-                  className="text-base sm:text-sm h-11 sm:h-10"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Enter the amount you want to pay
-                </p>
               </div>
               {displaySize === 'large' && (
                 <HootBoostMeter quantity={ticketQuantity} />

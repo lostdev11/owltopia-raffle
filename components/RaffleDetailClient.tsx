@@ -59,8 +59,11 @@ export function RaffleDetailClient({
   const { publicKey, sendTransaction, connected } = useWallet()
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
-  const [purchaseAmount, setPurchaseAmount] = useState(0)
+  const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const [showParticipants, setShowParticipants] = useState(false)
+  
+  // Calculate purchase amount automatically based on ticket price and quantity
+  const purchaseAmount = raffle.ticket_price * ticketQuantity
   const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -663,15 +666,40 @@ export function RaffleDetailClient({
   }
 
   const handleQuantityChange = (value: string) => {
-    const numValue = parseInt(value) || 1
+    // Allow empty string for erasing
+    setTicketQuantityDisplay(value)
+    if (value === '') {
+      return // Allow empty display temporarily
+    }
+    const numValue = parseInt(value)
+    if (isNaN(numValue)) {
+      return // Don't update if not a valid number
+    }
     const clampedValue = Math.max(1, Math.min(numValue, maxPurchaseQuantity))
     setTicketQuantity(clampedValue)
+    // Sync display value with clamped value if it was changed
+    if (clampedValue !== numValue) {
+      setTicketQuantityDisplay(clampedValue.toString())
+    }
+  }
+
+  const handleQuantityBlur = () => {
+    // When input loses focus, ensure it has a valid value
+    if (ticketQuantityDisplay === '' || isNaN(parseInt(ticketQuantityDisplay))) {
+      setTicketQuantityDisplay('1')
+      setTicketQuantity(1)
+    } else {
+      const numValue = parseInt(ticketQuantityDisplay)
+      const clampedValue = Math.max(1, Math.min(numValue, maxPurchaseQuantity))
+      setTicketQuantity(clampedValue)
+      setTicketQuantityDisplay(clampedValue.toString())
+    }
   }
 
   const handleOpenEnterRaffleDialog = () => {
     // Reset state when opening dialog
     setTicketQuantity(1)
-    setPurchaseAmount(0)
+    setTicketQuantityDisplay('1')
     setError(null)
     setSuccess(false)
     setShowEnterRaffleDialog(true)
@@ -998,8 +1026,9 @@ export function RaffleDetailClient({
                   type="number"
                   min="1"
                   max={maxPurchaseQuantity}
-                  value={ticketQuantity}
+                  value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
+                  onBlur={handleQuantityBlur}
                   disabled={availableTickets !== null && availableTickets <= 0}
                   className="text-base sm:text-sm h-11 sm:h-10"
                 />
@@ -1008,24 +1037,6 @@ export function RaffleDetailClient({
                   Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
                 </p>
               )}
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="dialog-amount">Purchase Amount ({raffle.currency}) *</Label>
-              <Input
-                id="dialog-amount"
-                type="number"
-                step="0.000001"
-                min="0"
-                value={purchaseAmount}
-                onChange={(e) => setPurchaseAmount(parseFloat(e.target.value) || 0)}
-                disabled={availableTickets !== null && availableTickets <= 0}
-                className="text-base sm:text-sm h-11 sm:h-10"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Enter the amount you want to pay for this purchase
-              </p>
             </div>
             
             <HootBoostMeter quantity={ticketQuantity} />
