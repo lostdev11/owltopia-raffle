@@ -102,163 +102,77 @@
   }
 }
 
-/* Android-specific wallet modal improvements */
+/* Mobile wallet modal improvements - ensure overlay shows page behind */
 @media (hover: none) and (pointer: coarse) {
-  /* Ensure wallet adapter modal is visible and accessible on Android */
-  .wallet-adapter-modal-wrapper,
-  .wallet-adapter-modal,
-  [class*="wallet-adapter-modal"] {
-    z-index: 10000 !important;
+  /* Wallet adapter modal root - ensure it has backdrop overlay */
+  .wallet-adapter-modal {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
+    z-index: 10000 !important;
+    background: rgba(0, 0, 0, 0.7) !important;
+    backdrop-filter: blur(4px) !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     touch-action: manipulation !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  /* Wallet adapter modal overlay - ensure backdrop is visible */
+  .wallet-adapter-modal-overlay {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.7) !important;
+    backdrop-filter: blur(4px) !important;
+    z-index: 10000 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Wallet adapter modal container - centers content */
+  .wallet-adapter-modal-container {
+    position: relative !important;
+    z-index: 10001 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: 100% !important;
     padding: 1rem !important;
   }
+
+  /* Wallet adapter modal wrapper - the actual modal content */
+  .wallet-adapter-modal-wrapper {
+    position: relative !important;
+    z-index: 10002 !important;
+    background: hsl(var(--background)) !important;
+    border-radius: 0.5rem !important;
+    max-width: 90vw !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.2) !important;
+  }
+
+  /* Ensure wallet adapter modal is visible and accessible on mobile */
+  [class*="wallet-adapter-modal"]:not(.wallet-adapter-modal-wrapper):not(.wallet-adapter-modal-container) {
+    z-index: 10000 !important;
+  }
   
-  /* Ensure wallet buttons in modal are tappable on Android */
+  /* Ensure wallet buttons in modal are tappable on mobile */
   .wallet-adapter-modal button,
   [class*="wallet-adapter"] button {
-    min-height: 48px !important; /* Android recommended tap target */
+    min-height: 48px !important; /* Mobile recommended tap target */
     min-width: 48px !important;
     padding: 14px 20px !important;
     touch-action: manipulation !important;
     -webkit-tap-highlight-color: rgba(34, 197, 94, 0.3) !important;
     tap-highlight-color: rgba(34, 197, 94, 0.3) !important;
-  }
-  
-  /* Improve wallet adapter modal content container for mobile */
-  .wallet-adapter-modal-container,
-  [class*="wallet-adapter-modal"][class*="container"] {
-    max-width: 90vw !important;
-    max-height: 90vh !important;
-    overflow-y: auto !important;
-    border-radius: 1rem !important;
-  }
-  
-  /* Style the "Detected" badge/banner for better mobile visibility */
-  .wallet-adapter-modal-list .wallet-adapter-button span,
-  [class*="wallet-adapter"] [class*="detected"],
-  [class*="wallet-adapter"] span[class*="badge"] {
-    font-size: 0.75rem !important;
-    padding: 4px 8px !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    white-space: nowrap !important;
-  }
-  
-  /* Improve text readability in wallet modal on mobile */
-  .wallet-adapter-modal h2,
-  .wallet-adapter-modal h3,
-  .wallet-adapter-modal p,
-  .wallet-adapter-modal span,
-  [class*="wallet-adapter-modal"] h2,
-  [class*="wallet-adapter-modal"] h3,
-  [class*="wallet-adapter-modal"] p {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-  }
-  
-  /* Improve wallet list items spacing on mobile */
-  .wallet-adapter-modal-list,
-  [class*="wallet-adapter-modal-list"] {
-    gap: 0.75rem !important;
-    padding: 1rem !important;
-  }
-  
-  /* Improve wallet button text layout on mobile */
-  .wallet-adapter-modal-list .wallet-adapter-button {
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    padding: 12px 16px !important;
-    font-size: 16px !important;
-    gap: 0.75rem !important;
-  }
-}
-
-/* Mobile wallet modal improvements - general mobile screens */
-@media (max-width: 640px) {
-  /* Ensure wallet adapter modal is properly sized on mobile */
-  .wallet-adapter-modal-wrapper,
-  .wallet-adapter-modal,
-  [class*="wallet-adapter-modal"],
-  [role="dialog"][class*="wallet-adapter"] {
-    padding: 1rem !important;
-  }
-  
-  /* Improve modal content container */
-  .wallet-adapter-modal-container,
-  [class*="wallet-adapter-modal"][class*="container"],
-  [role="dialog"][class*="wallet-adapter"] > div {
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    border-radius: 1rem !important;
-    max-height: calc(100vh - 2rem) !important;
-    overflow-y: auto !important;
-  }
-  
-  /* Improve "Phantom Detected" banner styling */
-  .wallet-adapter-modal-list .wallet-adapter-button,
-  [class*="wallet-adapter-modal-list"] [class*="wallet-adapter-button"] {
-    position: relative !important;
-    overflow: visible !important;
-  }
-  
-  /* Style detected badge/banner text */
-  .wallet-adapter-modal-list .wallet-adapter-button span:last-child,
-  [class*="wallet-adapter-button"] span[class*="detected"],
-  [class*="wallet-adapter-button"] span:not(:first-child) {
-    background-color: rgb(34, 197, 94) !important;
-    color: white !important;
-    padding: 4px 10px !important;
-    border-radius: 6px !important;
-    font-size: 0.75rem !important;
-    font-weight: 600 !important;
-    margin-left: auto !important;
-  }
-  
-  /* Improve text readability in modal */
-  .wallet-adapter-modal h1,
-  .wallet-adapter-modal h2,
-  .wallet-adapter-modal h3,
-  [role="dialog"][class*="wallet-adapter"] h1,
-  [role="dialog"][class*="wallet-adapter"] h2,
-  [role="dialog"][class*="wallet-adapter"] h3 {
-    font-size: 18px !important;
-    line-height: 1.4 !important;
-    margin-bottom: 0.5rem !important;
-  }
-  
-  .wallet-adapter-modal p,
-  [role="dialog"][class*="wallet-adapter"] p {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-  }
-  
-  /* Improve wallet list spacing */
-  .wallet-adapter-modal-list,
-  [class*="wallet-adapter-modal-list"],
-  [role="dialog"][class*="wallet-adapter"] ul,
-  [role="dialog"][class*="wallet-adapter"] div[class*="list"] {
-    gap: 0.75rem !important;
-    padding: 1rem !important;
-  }
-  
-  /* Better button layout for mobile */
-  .wallet-adapter-modal-list .wallet-adapter-button,
-  [class*="wallet-adapter-modal-list"] button {
-    width: 100% !important;
-    justify-content: space-between !important;
-    padding: 14px 16px !important;
-    font-size: 16px !important;
-    min-height: 56px !important;
   }
 }
 
@@ -395,112 +309,11 @@ label[role="button"],
   -webkit-tap-highlight-color: rgba(34, 197, 94, 0.2);
 }
 
-  /* Prevent text selection on buttons for better mobile UX */
+/* Prevent text selection on buttons for better mobile UX */
 button,
 a[role="button"],
 input[type="button"],
 input[type="submit"] {
   user-select: none;
   -webkit-user-select: none;
-}
-
-/* Additional mobile wallet modal improvements - handle "Phantom Detected" banner */
-@media (max-width: 640px) {
-  /* Style the main modal title/header area */
-  [role="dialog"][class*="wallet-adapter"] > div > div:first-child,
-  .wallet-adapter-modal > div:first-child {
-    padding: 1.5rem 1rem 1rem 1rem !important;
-    text-align: center !important;
-  }
-  
-  /* Improve "Phantom Detected" or similar detection banners */
-  [role="dialog"][class*="wallet-adapter"] [class*="detected"],
-  [role="dialog"][class*="wallet-adapter"] [style*="green"],
-  .wallet-adapter-modal [class*="detected"],
-  .wallet-adapter-modal [style*="background"][style*="green"],
-  .wallet-adapter-modal div[style*="background-color: rgb(34, 197, 94)"] {
-    border-radius: 8px !important;
-    padding: 12px 16px !important;
-    margin: 1rem 0 !important;
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    text-align: center !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-  }
-  
-  /* Improve text that says "Connect Wallet on Solana to continue" or similar */
-  [role="dialog"][class*="wallet-adapter"] p,
-  [role="dialog"][class*="wallet-adapter"] span:not([class*="button"]),
-  .wallet-adapter-modal p:not([class*="button"]),
-  .wallet-adapter-modal span:not([class*="button"]):not([class*="icon"]) {
-    font-size: 14px !important;
-    line-height: 1.6 !important;
-    color: rgba(255, 255, 255, 0.9) !important;
-    text-align: center !important;
-    margin: 0.5rem 0 !important;
-    padding: 0 0.5rem !important;
-  }
-  
-  /* Style "More options" or expandable sections */
-  [role="dialog"][class*="wallet-adapter"] [class*="more"],
-  [role="dialog"][class*="wallet-adapter"] [class*="options"],
-  [role="dialog"][class*="wallet-adapter"] button[class*="expand"],
-  .wallet-adapter-modal [class*="more"],
-  .wallet-adapter-modal [class*="options"] {
-    font-size: 14px !important;
-    padding: 12px 16px !important;
-    min-height: 48px !important;
-    width: 100% !important;
-    justify-content: center !important;
-    gap: 8px !important;
-  }
-  
-  /* Improve overall modal content layout */
-  [role="dialog"][class*="wallet-adapter"] > div,
-  .wallet-adapter-modal > div {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 1rem !important;
-    padding: 1rem !important;
-  }
-  
-  /* Ensure wallet list is properly styled */
-  [role="dialog"][class*="wallet-adapter"] ul,
-  [role="dialog"][class*="wallet-adapter"] [class*="list"],
-  .wallet-adapter-modal ul,
-  .wallet-adapter-modal [class*="list"] {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0.75rem !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-  }
-  
-  /* Improve wallet item buttons */
-  [role="dialog"][class*="wallet-adapter"] li button,
-  [role="dialog"][class*="wallet-adapter"] [class*="list"] button,
-  .wallet-adapter-modal li button,
-  .wallet-adapter-modal [class*="list"] button {
-    width: 100% !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    padding: 14px 16px !important;
-    font-size: 16px !important;
-    min-height: 56px !important;
-    border-radius: 8px !important;
-    gap: 12px !important;
-  }
-  
-  /* Style wallet icons/images */
-  [role="dialog"][class*="wallet-adapter"] img,
-  [role="dialog"][class*="wallet-adapter"] svg,
-  .wallet-adapter-modal img,
-  .wallet-adapter-modal svg {
-    width: 32px !important;
-    height: 32px !important;
-    flex-shrink: 0 !important;
-  }
 }
