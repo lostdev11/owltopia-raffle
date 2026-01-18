@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { 
   getEndedRafflesWithoutWinner, 
   selectWinner,
-  getRaffleById 
+  getRaffleById,
+  getEntriesByRaffleId,
+  isRaffleEligibleToDraw
 } from '@/lib/db/raffles'
 
 // Force dynamic rendering
@@ -50,7 +52,24 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const winnerWallet = await selectWinner(raffleId)
+      // Check if raffle meets minimum requirements (unless force override)
+      const entries = await getEntriesByRaffleId(raffleId)
+      const forceOverride = body.forceOverride === true
+      
+      if (!forceOverride && !isRaffleEligibleToDraw(raffle, entries)) {
+        return NextResponse.json(
+          { 
+            error: 'Raffle does not meet minimum requirements to draw',
+            raffleId: raffle.id,
+            minTickets: raffle.min_tickets,
+            ticketsSold: entries.filter(e => e.status === 'confirmed')
+              .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+          },
+          { status: 400 }
+        )
+      }
+
+      const winnerWallet = await selectWinner(raffleId, forceOverride)
       
       if (!winnerWallet) {
         return NextResponse.json(
@@ -82,6 +101,21 @@ export async function POST(request: NextRequest) {
     
     for (const raffle of endedRaffles) {
       try {
+        // Check if raffle meets minimum requirements
+        const entries = await getEntriesByRaffleId(raffle.id)
+        const isEligible = isRaffleEligibleToDraw(raffle, entries)
+        
+        if (!isEligible) {
+          results.push({
+            raffleId: raffle.id,
+            raffleTitle: raffle.title,
+            success: false,
+            winnerWallet: null,
+            error: `Minimum requirements not met (min: ${raffle.min_tickets || 'N/A'}, sold: ${entries.filter(e => e.status === 'confirmed').reduce((sum, entry) => sum + entry.ticket_quantity, 0)})`
+          })
+          continue
+        }
+        
         const winnerWallet = await selectWinner(raffle.id)
         results.push({
           raffleId: raffle.id,

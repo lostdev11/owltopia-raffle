@@ -15,10 +15,47 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: 'Owl Raffle',
   description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+  viewport: {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 5,
+    userScalable: true,
+  },
   icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+    icon: [
+      { url: '/icon.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icon.png', sizes: '16x16', type: 'image/png' },
+      { url: '/icon.png', sizes: '96x96', type: 'image/png' },
+    ],
+    shortcut: '/icon.png',
+    apple: [
+      { url: '/icon.png', sizes: '180x180', type: 'image/png' },
+      { url: '/icon.png', sizes: '152x152', type: 'image/png' },
+      { url: '/icon.png', sizes: '144x144', type: 'image/png' },
+      { url: '/icon.png', sizes: '120x120', type: 'image/png' },
+      { url: '/icon.png', sizes: '114x114', type: 'image/png' },
+      { url: '/icon.png', sizes: '76x76', type: 'image/png' },
+      { url: '/icon.png', sizes: '72x72', type: 'image/png' },
+      { url: '/icon.png', sizes: '60x60', type: 'image/png' },
+      { url: '/icon.png', sizes: '57x57', type: 'image/png' },
+    ],
+  },
+  openGraph: {
+    type: 'website',
+    siteName: 'Owl Raffle',
+    title: 'Owl Raffle',
+    description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
   },
 }
 

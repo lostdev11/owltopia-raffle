@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { isMobileDevice, isPhantomBrowser, isPhantomExtensionAvailable, redirectToPhantomBrowser } from '@/lib/utils'
+import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, redirectToPhantomBrowser } from '@/lib/utils'
 
 export function WalletConnectButton() {
   const router = useRouter()
@@ -43,11 +43,15 @@ export function WalletConnectButton() {
       const urlParams = new URLSearchParams(window.location.search)
       const hashParams = new URLSearchParams(window.location.hash.substring(1))
       
-      // Check for common deep link callback parameters
+      // Check for common deep link callback parameters (Phantom, Solflare, etc.)
       const hasCallback = urlParams.has('phantom_encryption_public_key') || 
                          urlParams.has('dapp_encryption_public_key') ||
+                         urlParams.has('data') || // Solflare callback
+                         urlParams.has('nonce') || // Solflare callback
                          hashParams.has('phantom_encryption_public_key') ||
-                         hashParams.has('dapp_encryption_public_key')
+                         hashParams.has('dapp_encryption_public_key') ||
+                         hashParams.has('data') || // Solflare callback
+                         hashParams.has('nonce') // Solflare callback
       
       if (hasCallback) {
         // Clean up URL parameters after processing
@@ -84,6 +88,28 @@ export function WalletConnectButton() {
       })
     }
   }, [mounted, connected, connecting, wallet, publicKey])
+
+  // Handle Solflare connection on mobile - ensure proper deep linking
+  useEffect(() => {
+    if (!mounted || !isMobileDevice()) return
+
+    // When Solflare is selected and connecting, ensure we're using the current page URL
+    // The Solflare adapter should use this as the redirect_link for deep link callbacks
+    if (connecting && wallet?.adapter?.name === 'Solflare') {
+      // Ensure the current URL is clean and ready for deep link callbacks
+      const currentUrl = window.location.href.split('?')[0].split('#')[0]
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Solflare connection on mobile - current URL:', currentUrl)
+        console.log('Note: Solflare adapter should use this URL as redirect_link for deep link callbacks')
+      }
+
+      // The adapter should automatically detect mobile and use deep links
+      // If it's redirecting to website instead, it might be a browser/app detection issue
+      // We can't directly modify the adapter's redirect_link, but we can ensure
+      // the page is ready to receive the callback
+    }
+  }, [mounted, connecting, wallet])
 
 
   // Show sign dialog when wallet connects but hasn't signed yet
@@ -437,6 +463,8 @@ export function WalletConnectButton() {
       return
     }
 
+    let cleanupFn: (() => void) | null = null
+    
     const timeoutId = setTimeout(() => {
       // Ensure the button is fully rendered and interactive
       const button = buttonRef.current?.querySelector('button')
@@ -465,30 +493,52 @@ export function WalletConnectButton() {
         buttonRef.current.style.zIndex = '10'
       }
 
-      // Add a fallback click handler that ensures modal opens
-      const handleClick = (e: Event) => {
-        // Small delay to check if modal opened
-        setTimeout(() => {
-          const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-          if (!modal && !connected) {
-            if (process.env.NODE_ENV === 'development') {
-              console.log('Fallback: Opening wallet modal programmatically')
+      // Only add fallback handlers for mobile devices (especially Android)
+      // Desktop should use the native WalletMultiButton click handler
+      const isMobile = isMobileDevice()
+      const isAndroid = isAndroidDevice()
+      
+      if (isMobile) {
+        // Add a fallback click handler for mobile devices to ensure modal opens
+        // Android devices may need both touchstart and click events
+        const handleInteraction = (e: Event) => {
+          // For mobile, check if modal opened after a delay
+          // Don't prevent default - let the native handler try first
+          setTimeout(() => {
+            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
+            if (!modal && !connected) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log('Fallback: Opening wallet modal programmatically on mobile')
+              }
+              // Use a small delay to ensure native handler has had a chance
+              setTimeout(() => setVisible(true), 50)
             }
-            setVisible(true)
+          }, 150)
+        }
+
+        // Add both touchstart (for Android) and click listeners as fallback on mobile only
+        if (isAndroid) {
+          // Android devices often respond better to touchstart
+          button.addEventListener('touchstart', handleInteraction, { passive: true, capture: false })
+        }
+        // Add click listener as fallback for mobile (but don't prevent default)
+        button.addEventListener('click', handleInteraction, { passive: true, capture: false })
+
+        // Store cleanup function
+        cleanupFn = () => {
+          if (isAndroid) {
+            button.removeEventListener('touchstart', handleInteraction)
           }
-        }, 100)
-      }
-
-      // Add click listener as fallback
-      button.addEventListener('click', handleClick, { capture: false })
-
-      return () => {
-        button.removeEventListener('click', handleClick)
+          button.removeEventListener('click', handleInteraction)
+        }
       }
     }, 200)
     
     return () => {
       clearTimeout(timeoutId)
+      if (cleanupFn) {
+        cleanupFn()
+      }
     }
   }, [mounted, connected, setVisible])
 

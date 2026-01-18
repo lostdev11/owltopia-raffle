@@ -12,6 +12,56 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        // Apply security headers to all routes
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains; preload'
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN'
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff'
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin'
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'geolocation=(), microphone=(), camera=(), fullscreen=(self)'
+          },
+          {
+            // Content-Security-Policy that allows wallet extensions and necessary resources
+            // 'unsafe-inline' and 'unsafe-eval' are needed for Next.js and wallet adapters
+            // Wallet extensions (Phantom, etc.) inject scripts via chrome-extension:// URLs which are allowed by default
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://solana.drpc.org",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              "img-src 'self' data: https: blob:",
+              "font-src 'self' data: https://fonts.gstatic.com",
+              "connect-src 'self' https://*.supabase.co https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org",
+              "frame-src 'self'",
+              "frame-ancestors 'self'",
+              "object-src 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+              "upgrade-insecure-requests"
+            ].join('; ')
+          }
+        ],
+      },
+    ]
+  },
   webpack: (config, { isServer }) => {
     // Suppress warnings about optional dependencies
     if (!isServer) {

@@ -4,6 +4,8 @@ export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 
 export type PrizeType = 'crypto' | 'nft'
 
+export type RaffleStatus = 'pending_min_not_met' | 'completed' | null
+
 export interface Raffle {
   id: string
   slug: string
@@ -20,6 +22,7 @@ export interface Raffle {
   ticket_price: number
   currency: string
   max_tickets: number | null
+  min_tickets: number | null
   start_time: string
   end_time: string
   theme_accent: ThemeAccent
@@ -30,6 +33,7 @@ export interface Raffle {
   is_active: boolean
   winner_wallet: string | null
   winner_selected_at: string | null
+  status: RaffleStatus
 }
 
 export interface Entry {

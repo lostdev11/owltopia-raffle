@@ -113,6 +113,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
+    let minTickets: number | null = null
+    if (body.min_tickets != null && body.min_tickets !== '') {
+      const parsed = typeof body.min_tickets === 'number' 
+        ? body.min_tickets 
+        : parseInt(String(body.min_tickets), 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        minTickets = parsed
+      }
+    } else if (body.minParticipants != null && body.minParticipants !== '') {
+      // Fallback to minParticipants if min_tickets not provided
+      const parsed = typeof body.minParticipants === 'number' 
+        ? body.minParticipants 
+        : parseInt(String(body.minParticipants), 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        minTickets = parsed
+      }
+    }
+
     // Build raffle data - only include NFT fields if this is an NFT prize
     const raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'> = {
       slug: slug, // Use the generated unique slug
@@ -130,6 +149,7 @@ export async function POST(request: NextRequest) {
       ticket_price: body.ticket_price,
       currency: body.currency || 'SOL',
       max_tickets: body.max_tickets ? parseInt(body.max_tickets) : null,
+      min_tickets: minTickets,
       start_time: startTime,
       end_time: body.end_time,
       theme_accent: body.theme_accent || 'prime',
@@ -138,6 +158,7 @@ export async function POST(request: NextRequest) {
       is_active: true,
       winner_wallet: null,
       winner_selected_at: null,
+      status: null,
     }
 
     const raffle = await createRaffle(raffleData)

@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
+import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
@@ -66,6 +67,7 @@ export function RaffleDetailClient({
   const [success, setSuccess] = useState(false)
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
+  const [imageError, setImageError] = useState(false)
   // Make isActive reactive to time passing - critical for mobile connections
   const [isActive, setIsActive] = useState(() => {
     const endTime = new Date(raffle.end_time)
@@ -158,9 +160,11 @@ export function RaffleDetailClient({
   // No need for separate polling logic - it's built into the hook
 
   // Calculate total tickets sold (from confirmed entries only)
-  const totalTicketsSold = entries
-    .filter(e => e.status === 'confirmed')
-    .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+  const totalTicketsSold = calculateTicketsSold(entries)
+  
+  // Calculate minimum eligibility
+  const minTickets = getRaffleMinimum(raffle)
+  const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
 
   // Calculate available tickets
   const availableTickets = raffle.max_tickets 
@@ -641,48 +645,58 @@ export function RaffleDetailClient({
 
           {raffle.image_url && (
             <>
-              <div className={`flex items-center justify-end gap-2 ${classes.headerPadding} pt-0 pb-2`}>
-                <span className="text-sm text-muted-foreground mr-2">Image size:</span>
-                <div className="flex gap-1 border rounded-md p-1">
-                  <Button
-                    variant={imageSize === 'small' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setImageSize('small')}
-                    className="h-8 px-3"
-                    title="Small"
-                  >
-                    <Grid3x3 className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={imageSize === 'medium' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setImageSize('medium')}
-                    className="h-8 px-3"
-                    title="Medium"
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={imageSize === 'large' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setImageSize('large')}
-                    className="h-8 px-3"
-                    title="Large"
-                  >
-                    <Square className="h-4 w-4" />
-                  </Button>
+              {!imageError && (
+                <div className={`flex items-center justify-end gap-2 ${classes.headerPadding} pt-0 pb-2`}>
+                  <span className="text-sm text-muted-foreground mr-2">Image size:</span>
+                  <div className="flex gap-1 border rounded-md p-1">
+                    <Button
+                      variant={imageSize === 'small' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => setImageSize('small')}
+                      className="h-8 px-3"
+                      title="Small"
+                    >
+                      <Grid3x3 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={imageSize === 'medium' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => setImageSize('medium')}
+                      className="h-8 px-3"
+                      title="Medium"
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={imageSize === 'large' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => setImageSize('large')}
+                      className="h-8 px-3"
+                      title="Large"
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
-                <Image
-                  src={raffle.image_url}
-                  alt={raffle.title}
-                  fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
-                  priority
-                  className="object-contain"
-                />
-              </div>
+              )}
+              {!imageError ? (
+                <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
+                  <Image
+                    src={raffle.image_url}
+                    alt={raffle.title}
+                    fill
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
+                    priority
+                    className="object-contain"
+                    onError={() => setImageError(true)}
+                    unoptimized={raffle.image_url.startsWith('http://')}
+                  />
+                </div>
+              ) : (
+                <div className={`w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} flex items-center justify-center bg-muted border rounded`}>
+                  <span className="text-muted-foreground">Image unavailable</span>
+                </div>
+              )}
             </>
           )}
 
@@ -715,6 +729,22 @@ export function RaffleDetailClient({
                   <p className={classes.contentText + ' font-bold'}>
                     {availableTickets !== null ? availableTickets : raffle.max_tickets}
                   </p>
+                </div>
+              )}
+              {minTickets && (
+                <div>
+                  <p className={classes.labelText + ' text-muted-foreground'}>Tickets Sold (Min to Draw)</p>
+                  <p className={classes.contentText + ' font-bold'}>
+                    {totalTicketsSold} / {minTickets}
+                  </p>
+                  {isActive && (
+                    <Badge 
+                      variant={isEligibleToDraw ? 'default' : 'secondary'} 
+                      className={`text-xs mt-1 ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                    >
+                      {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                    </Badge>
+                  )}
                 </div>
               )}
               <div>

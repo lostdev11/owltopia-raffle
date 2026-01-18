@@ -109,6 +109,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     ticket_price: raffle.ticket_price,
     currency: raffle.currency,
     max_tickets: raffle.max_tickets,
+    min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,
     end_time: raffle.end_time,
     theme_accent: raffle.theme_accent,
@@ -117,6 +118,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     is_active: raffle.is_active,
     winner_wallet: raffle.winner_wallet,
     winner_selected_at: raffle.winner_selected_at,
+    status: raffle.status ?? null,
   }
 
   // Only include NFT fields if prize_type is 'nft' or if NFT fields are provided
@@ -223,17 +225,40 @@ export async function deleteRaffle(id: string) {
  * Select a winner for a raffle based on weighted random selection.
  * Each wallet's chance is proportional to their total ticket quantity.
  * Only considers confirmed entries.
+ * Checks if raffle meets minimum requirements before drawing.
  * 
  * @param raffleId - The ID of the raffle
- * @returns The winner's wallet address, or null if no valid entries
+ * @param forceOverride - If true, bypass minimum check (for admin override)
+ * @returns The winner's wallet address, or null if no valid entries or minimum not met
  */
-export async function selectWinner(raffleId: string): Promise<string | null> {
+export async function selectWinner(raffleId: string, forceOverride: boolean = false): Promise<string | null> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    console.warn(`Raffle not found: ${raffleId}`)
+    return null
+  }
+
   // Get all confirmed entries for this raffle
   const entries = await getEntriesByRaffleId(raffleId)
   const confirmedEntries = entries.filter(e => e.status === 'confirmed')
 
   if (confirmedEntries.length === 0) {
     console.warn(`No confirmed entries found for raffle ${raffleId}`)
+    return null
+  }
+
+  // Check minimum requirements unless override is forced
+  if (!forceOverride && !isRaffleEligibleToDraw(raffle, entries)) {
+    console.warn(`Raffle ${raffleId} does not meet minimum requirements`)
+    // Update status to pending_min_not_met if raffle has ended
+    const now = new Date()
+    const endTime = new Date(raffle.end_time)
+    if (endTime <= now && raffle.status !== 'pending_min_not_met') {
+      await supabase
+        .from('raffles')
+        .update({ status: 'pending_min_not_met' })
+        .eq('id', raffleId)
+    }
     return null
   }
 
@@ -273,6 +298,7 @@ export async function selectWinner(raffleId: string): Promise<string | null> {
         .update({
           winner_wallet: winnerWallet,
           winner_selected_at: now,
+          status: 'completed',
         })
         .eq('id', raffleId)
 
@@ -294,6 +320,7 @@ export async function selectWinner(raffleId: string): Promise<string | null> {
     .update({
       winner_wallet: winnerWallet,
       winner_selected_at: now,
+      status: 'completed',
     })
     .eq('id', raffleId)
 
@@ -325,4 +352,49 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   }
 
   return (data || []) as Raffle[]
+}
+
+/**
+ * Calculate total tickets sold for a raffle from confirmed entries
+ */
+export function calculateTicketsSold(entries: Entry[]): number {
+  return entries
+    .filter(e => e.status === 'confirmed')
+    .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+}
+
+/**
+ * Calculate unique participants (wallets) for a raffle from confirmed entries
+ */
+export function calculateUniqueParticipants(entries: Entry[]): number {
+  const uniqueWallets = new Set(
+    entries
+      .filter(e => e.status === 'confirmed')
+      .map(e => e.wallet_address)
+  )
+  return uniqueWallets.size
+}
+
+/**
+ * Check if a raffle is eligible to be drawn (meets minimum requirements)
+ * Returns true if no minimum is set OR if minimum is met
+ */
+export function isRaffleEligibleToDraw(raffle: Raffle, entries: Entry[]): boolean {
+  // If no minimum is set, raffle is always eligible
+  if (!raffle.min_tickets) {
+    return true
+  }
+
+  // Check if minimum tickets requirement is met
+  const ticketsSold = calculateTicketsSold(entries)
+  return ticketsSold >= raffle.min_tickets
+}
+
+/**
+ * Get the minimum threshold for a raffle (prefers min_tickets over min_participants if both exist)
+ * This is for display purposes
+ */
+export function getRaffleMinimum(raffle: Raffle): number | null {
+  // Default to min_tickets if both exist (as per requirements)
+  return raffle.min_tickets ?? null
 }

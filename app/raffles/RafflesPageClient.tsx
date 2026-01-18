@@ -1,10 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { RafflesList } from '@/components/RafflesList'
 import type { Raffle, Entry } from '@/lib/types'
-
-type CardSize = 'small' | 'medium' | 'large'
 
 interface RafflesPageClientProps {
   activeRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
@@ -17,8 +15,7 @@ export function RafflesPageClient({
   futureRafflesWithEntries,
   pastRafflesWithEntries,
 }: RafflesPageClientProps) {
-  // Shared size state for Active and Past raffles
-  const [sharedSize, setSharedSize] = useState<CardSize>('medium')
+  const { connected } = useWallet()
 
   return (
     <div className="container mx-auto py-8 px-4">
@@ -37,9 +34,6 @@ export function RafflesPageClient({
           <RafflesList 
             rafflesWithEntries={activeRafflesWithEntries} 
             title={undefined}
-            showViewSizeControls={true}
-            size={sharedSize}
-            onSizeChange={setSharedSize}
           />
         ) : (
           <div className="text-center py-8">
@@ -54,7 +48,6 @@ export function RafflesPageClient({
           <RafflesList 
             rafflesWithEntries={futureRafflesWithEntries} 
             title={undefined}
-            showViewSizeControls={false}
           />
         ) : (
           <div className="text-center py-8">
@@ -63,14 +56,11 @@ export function RafflesPageClient({
         )}
       </div>
 
-      {pastRafflesWithEntries.length > 0 && (
+      {connected && pastRafflesWithEntries.length > 0 && (
         <div className="mb-12">
           <RafflesList 
             rafflesWithEntries={pastRafflesWithEntries} 
             title="Past Raffles"
-            showViewSizeControls={true}
-            size={sharedSize}
-            onSizeChange={setSharedSize}
           />
         </div>
       )}

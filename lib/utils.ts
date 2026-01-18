@@ -69,6 +69,17 @@ export function isMobileDevice(): boolean {
 }
 
 /**
+ * Detects if the user is on an Android device
+ */
+export function isAndroidDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  
+  // Check user agent for Android devices
+  const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera
+  return /android/i.test(userAgent)
+}
+
+/**
  * Detects if Phantom wallet extension is available (desktop)
  */
 export function isPhantomExtensionAvailable(): boolean {
@@ -117,4 +128,29 @@ export function redirectToPhantomBrowser(): void {
     // If we're still here after 2 seconds, Phantom might not be installed
     // The user will see Phantom's page which handles this case
   }, 2000)
+}
+
+/**
+ * Gets the Solflare deep link URL for connecting
+ * Note: This is used by the SolflareWalletAdapter internally
+ * We ensure the current page URL is properly formatted for callbacks
+ */
+export function getSolflareDeepLinkUrl(): string {
+  if (typeof window === 'undefined') return ''
+  
+  // Get the current page URL without query params or hash (clean base URL)
+  // This will be used as redirect_link by the Solflare adapter
+  const currentUrl = window.location.origin + window.location.pathname
+  return currentUrl
+}
+
+/**
+ * Detects if user is in Solflare browser (mobile)
+ */
+export function isSolflareBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+  
+  // Check user agent for Solflare browser
+  const userAgent = navigator.userAgent || ''
+  return userAgent.toLowerCase().includes('solflare')
 }

@@ -70,6 +70,35 @@ export async function PATCH(
       }
     }
 
+    // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
+    let minTickets: number | null = null
+    if (body.min_tickets != null && body.min_tickets !== '') {
+      const parsed = typeof body.min_tickets === 'number' 
+        ? body.min_tickets 
+        : parseInt(String(body.min_tickets), 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        minTickets = parsed
+      } else if (body.min_tickets !== null && body.min_tickets !== '') {
+        return NextResponse.json(
+          { error: 'min_tickets must be a positive number' },
+          { status: 400 }
+        )
+      }
+    } else if (body.minParticipants != null && body.minParticipants !== '') {
+      // Fallback to minParticipants if min_tickets not provided
+      const parsed = typeof body.minParticipants === 'number' 
+        ? body.minParticipants 
+        : parseInt(String(body.minParticipants), 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        minTickets = parsed
+      } else if (body.minParticipants !== null && body.minParticipants !== '') {
+        return NextResponse.json(
+          { error: 'minParticipants must be a positive number' },
+          { status: 400 }
+        )
+      }
+    }
+
     const updates: any = {
       title: body.title,
       description: body.description || null,
@@ -77,6 +106,7 @@ export async function PATCH(
       ticket_price: body.ticket_price,
       currency: body.currency,
       max_tickets: maxTickets,
+      min_tickets: minTickets,
       start_time: body.start_time,
       end_time: body.end_time,
       theme_accent: body.theme_accent,

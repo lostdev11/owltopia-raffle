@@ -1,4 +1,4 @@
-import { getRaffleBySlug, getEntriesByRaffleId, selectWinner } from '@/lib/db/raffles'
+import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw } from '@/lib/db/raffles'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
@@ -26,14 +26,32 @@ export default async function RaffleDetailPage({
 
   if (hasEnded && hasNoWinner && raffle.is_active) {
     try {
-      // Automatically select a winner based on ticket quantities
-      const winnerWallet = await selectWinner(raffle.id)
+      // Get entries to check eligibility
+      const entries = await getEntriesByRaffleId(raffle.id)
       
-      if (winnerWallet) {
-        // Refresh raffle data to get updated winner information
-        raffle = await getRaffleBySlug(params.slug)
-        if (!raffle) {
-          notFound()
+      // Check if raffle meets minimum requirements
+      const isEligible = isRaffleEligibleToDraw(raffle, entries)
+      
+      if (isEligible) {
+        // Automatically select a winner based on ticket quantities
+        const winnerWallet = await selectWinner(raffle.id)
+        
+        if (winnerWallet) {
+          // Refresh raffle data to get updated winner information
+          raffle = await getRaffleBySlug(params.slug)
+          if (!raffle) {
+            notFound()
+          }
+        }
+      } else {
+        // Update status to pending_min_not_met if minimum not met
+        const { updateRaffle } = await import('@/lib/db/raffles')
+        if (raffle.status !== 'pending_min_not_met') {
+          await updateRaffle(raffle.id, { status: 'pending_min_not_met' })
+          raffle = await getRaffleBySlug(params.slug)
+          if (!raffle) {
+            notFound()
+          }
         }
       }
     } catch (error) {

@@ -82,6 +82,7 @@ export function CreateRaffleForm() {
 
     const formData = new FormData(e.currentTarget)
     const maxTicketsValue = formData.get('max_tickets') as string
+    const minTicketsValue = formData.get('min_tickets') as string
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
@@ -89,6 +90,7 @@ export function CreateRaffleForm() {
       ticket_price: parseFloat(formData.get('ticket_price') as string),
       currency: formData.get('currency') as string,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
+      min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
       start_time: localDateTimeToUtc(startTime),
       end_time: localDateTimeToUtc(endTime),
       theme_accent: themeAccent,
@@ -208,6 +210,20 @@ export function CreateRaffleForm() {
             />
             <p className="text-xs text-muted-foreground">
               Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="min_tickets">Minimum to Draw (optional)</Label>
+            <Input
+              id="min_tickets"
+              name="min_tickets"
+              type="number"
+              min="1"
+              placeholder="Leave empty for no minimum"
+            />
+            <p className="text-xs text-muted-foreground">
+              Raffle will only be eligible to draw once this minimum is reached.
             </p>
           </div>
 

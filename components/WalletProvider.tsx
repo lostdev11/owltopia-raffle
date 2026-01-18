@@ -5,7 +5,10 @@ import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
+  PhantomWalletAdapter,
   SolflareWalletAdapter,
+  CoinbaseWalletAdapter,
+  TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
 
@@ -34,15 +37,31 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
   }, [network])
 
   // Configure wallet adapters
-  // Note: The wallet adapter library automatically detects Standard Wallets (like Phantom)
-  // when they're installed as browser extensions. We explicitly add adapters for better mobile support.
+  // Note: On Android devices, Standard Wallet detection may not work reliably in regular browsers.
+  // We explicitly add adapters for better mobile support, especially for Android devices.
   const wallets = useMemo(
     () => {
       // Create wallet adapters
-      // Phantom is now a Standard Wallet and is automatically detected - no need to add it explicitly
-      // SolflareWalletAdapter provides additional wallet option
+      // For desktop: Explicitly include PhantomWalletAdapter for reliable desktop browser extension support
+      // For mobile: Include adapters that support Mobile Wallet Adapter (MWA) for Android
+      // Note: PhantomWalletAdapter works on both desktop (browser extension) and mobile (Phantom browser)
+      // SolflareWalletAdapter: Supports both desktop and MWA on Android
+      // CoinbaseWalletAdapter: Additional mobile wallet option
+      // TrustWalletAdapter: Popular Android wallet option
       const walletAdapters = [
-        new SolflareWalletAdapter({ network }),
+        // Phantom wallet - explicit for desktop browser extension support
+        // Also works in Phantom mobile browser
+        new PhantomWalletAdapter({ network }),
+        // Solflare - supports desktop and MWA on Android
+        new SolflareWalletAdapter({ 
+          network,
+          // Ensure proper mobile deep link handling
+          // The adapter will use the current page URL as redirect_link
+          // Make sure the page URL is accessible for deep link callbacks
+        }),
+        // Additional mobile wallet options for Android
+        new CoinbaseWalletAdapter({ network }),
+        new TrustWalletAdapter({ network }),
       ]
       
       // Log available wallets for debugging (only in development)
@@ -50,6 +69,9 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
         // Wait a bit for wallet detection to complete
         setTimeout(() => {
           const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
+            navigator.userAgent || navigator.vendor || (window as any).opera || ''
+          )
+          const isAndroid = /android/i.test(
             navigator.userAgent || navigator.vendor || (window as any).opera || ''
           )
           const isPhantomBrowser = navigator.userAgent?.toLowerCase().includes('phantom') || false
@@ -65,11 +87,22 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
           console.log('Adapter states:', adapterStates)
           console.log('Environment:', {
             isMobile,
+            isAndroid,
             isPhantomBrowser,
             phantomExtensionAvailable: phantomAvailable,
             solanaObject: !!(window as any).solana,
-            phantomObject: !!(window as any).phantom
+            phantomObject: !!(window as any).phantom,
+            userAgent: navigator.userAgent
           })
+          
+            // Android-specific logging
+            if (isAndroid) {
+              console.log('Android device detected - Mobile Wallet Adapter (MWA) should be available')
+              console.log('Available wallet adapters for Android:', adapterStates.filter(a => 
+                ['Solflare', 'Coinbase', 'Trust'].includes(a.name)
+              ).map(a => a.name))
+              console.log('Note: Phantom is automatically detected as a Standard Wallet and will be available if installed')
+            }
         }, 500)
       }
       

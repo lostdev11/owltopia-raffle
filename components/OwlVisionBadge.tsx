@@ -19,7 +19,7 @@ interface OwlVisionBadgeProps {
 export function OwlVisionBadge({ score, className }: OwlVisionBadgeProps) {
   const getScoreColor = (scoreValue: number) => {
     if (scoreValue >= 80) return 'text-green-400'
-    if (scoreValue >= 60) return 'text-yellow-400'
+    if (scoreValue >= 60) return 'text-blue-400'
     if (scoreValue >= 40) return 'text-orange-400'
     return 'text-red-400'
   }

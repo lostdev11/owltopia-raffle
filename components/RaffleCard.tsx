@@ -15,6 +15,7 @@ import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import type { Raffle, Entry } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
+import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
@@ -67,15 +68,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const themeColor = getThemeAccentColor(raffle.theme_accent)
   
   // Calculate available tickets
-  const totalTicketsSold = entries
-    .filter(e => e.status === 'confirmed')
-    .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+  const totalTicketsSold = calculateTicketsSold(entries)
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
   const maxPurchaseQuantity = availableTickets !== null 
     ? Math.max(0, availableTickets) 
     : 100
+  
+  // Calculate minimum eligibility
+  const minTickets = getRaffleMinimum(raffle)
+  const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
 
   // Check admin status
   useEffect(() => {
@@ -399,8 +402,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           href={`/raffles/${raffle.slug}`}
           onClick={(e) => {
             const target = e.target as HTMLElement
-            // Prevent navigation if clicking on buttons or when quick buy form is open
-            if (target.closest('button') || showQuickBuy) {
+            // Prevent navigation if clicking on buttons or interactive form elements
+            if (target.closest('button') || target.closest('input') || target.closest('label')) {
               e.preventDefault()
             }
           }}
@@ -469,6 +472,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </span>
               )}
             </div>
+            {minTickets && (
+              <div className="flex items-center gap-2 text-xs mb-2">
+                <span className="text-muted-foreground">Tickets Sold: </span>
+                <span className="font-semibold">{totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(min to draw)</span></span>
+              </div>
+            )}
             <div className="flex items-center justify-between mt-auto">
               <span className="text-xs text-muted-foreground">
                 {isActive ? (
@@ -480,6 +489,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 )}
               </span>
               <div className="flex items-center gap-2">
+                {minTickets && isActive && (
+                  <Badge 
+                    variant={isEligibleToDraw ? 'default' : 'secondary'} 
+                    className={`text-xs ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                  >
+                    {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                  </Badge>
+                )}
                 <Badge variant={isActive ? 'default' : 'secondary'} className="text-xs">
                   {isActive ? 'Active' : 'Ended'}
                 </Badge>
@@ -679,8 +696,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         href={`/raffles/${raffle.slug}`} 
         onClick={(e) => {
           const target = e.target as HTMLElement
-          // Prevent navigation if clicking on buttons or when quick buy form is open
-          if (target.closest('button') || showQuickBuy) {
+          // Prevent navigation if clicking on buttons or interactive form elements
+          if (target.closest('button') || target.closest('input') || target.closest('label')) {
             e.preventDefault()
           }
         }}
@@ -693,14 +710,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             <div className="winner-golden-overlay absolute inset-0 rounded-xl pointer-events-none z-0" />
           )}
           {raffle.image_url && !imageError && (
-            <div 
-              className="!relative w-full aspect-square overflow-hidden cursor-pointer z-10"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setImageModalOpen(true)
-              }}
-            >
+            <div className="!relative w-full aspect-square overflow-hidden z-10">
               <Image
                 src={raffle.image_url}
                 alt={raffle.title}
@@ -712,7 +722,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 unoptimized={raffle.image_url.startsWith('http://')}
               />
               {/* Metadata overlay on image */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity z-10">
+              <div 
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setImageModalOpen(true)
+                }}
+              >
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
@@ -724,7 +741,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </div>
               </div>
               {/* Always visible overlay at bottom for key info */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3 z-10">
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3 z-10 pointer-events-none">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
@@ -733,11 +750,24 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     </div>
                     <div className={`${classes.footer} text-white/80`}>
                       {owlVisionScore.confirmedEntries} entries
+                      {minTickets && (
+                        <span className="ml-2">• {totalTicketsSold} / {minTickets} min</span>
+                      )}
                     </div>
                   </div>
-                  <Badge variant={isActive ? 'default' : 'secondary'} className={classes.badge}>
-                    {isActive ? 'Active' : 'Ended'}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    {minTickets && isActive && (
+                      <Badge 
+                        variant={isEligibleToDraw ? 'default' : 'secondary'} 
+                        className={`${classes.badge} ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                      >
+                        {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
+                      </Badge>
+                    )}
+                    <Badge variant={isActive ? 'default' : 'secondary'} className={classes.badge}>
+                      {isActive ? 'Active' : 'Ended'}
+                    </Badge>
+                  </div>
                 </div>
                 {!isActive && raffle.winner_wallet && (
                   <div className={`${classes.footer} text-white/90 flex items-center gap-1.5 mt-1 pt-1 border-t border-white/20`}>
@@ -789,6 +819,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       </span>
                     </div>
                   )}
+                  {minTickets && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Tickets Sold</span>
+                      <span className="font-semibold">
+                        {totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(min to draw)</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
@@ -802,9 +840,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                     )}
                   </span>
-                  <Badge variant={isActive ? 'default' : 'secondary'}>
-                    {isActive ? 'Active' : 'Ended'}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    {minTickets && isActive && (
+                      <Badge 
+                        variant={isEligibleToDraw ? 'default' : 'secondary'} 
+                        className={isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}
+                      >
+                        {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                      </Badge>
+                    )}
+                    <Badge variant={isActive ? 'default' : 'secondary'}>
+                      {isActive ? 'Active' : 'Ended'}
+                    </Badge>
+                  </div>
                 </div>
                 {!isActive && raffle.winner_wallet && (
                   <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
