@@ -49,8 +49,9 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data: https://fonts.gstatic.com",
-              // Allow RPC connections to common Solana RPC providers (Helius, QuickNode, Alchemy, drpc, etc.)
-              "connect-src 'self' https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com https://mainnet-beta.helius-rpc.com",
+              // Allow RPC connections - includes common providers and HTTPS connections for custom endpoints
+              // This allows any HTTPS RPC endpoint to work (required for custom RPC providers)
+              "connect-src 'self' https: wss: https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
               "frame-src 'self'",
               "frame-ancestors 'self'",
               "object-src 'none'",

@@ -1,99 +1,111 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdmin } from '@/lib/db/admins'
 import { getEntriesByRaffleId, getRaffleById } from '@/lib/db/raffles'
-import { updateEntryStatus } from '@/lib/db/entries'
+import { updateEntryStatus, getEntryById } from '@/lib/db/entries'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import type { Entry, Raffle } from '@/lib/types'
 
-// Force dynamic rendering to prevent caching stale entry data
+// Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
 
 /**
- * GET entries for a specific raffle
- * Query params: raffleId - the ID of the raffle
- * 
- * Automatically verifies pending entries with transaction signatures in the background
+ * Admin endpoint to batch verify pending entries for a raffle
+ * Checks transaction signatures and verifies payments on-chain
  */
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const raffleId = searchParams.get('raffleId')
+    const body = await request.json()
+    const { raffleId, adminWallet } = body
 
-    if (!raffleId) {
+    if (!raffleId || !adminWallet) {
       return NextResponse.json(
-        { error: 'Missing required parameter: raffleId' },
+        { error: 'Missing required fields: raffleId and adminWallet' },
         { status: 400 }
       )
     }
 
-    const entries = await getEntriesByRaffleId(raffleId)
+    // Check admin status
+    const adminStatus = await isAdmin(adminWallet)
+    if (!adminStatus) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Admin access required' },
+        { status: 403 }
+      )
+    }
 
-    // Automatically verify pending entries with transaction signatures in the background
-    // This runs asynchronously so it doesn't block the response
-    const pendingWithSignatures = entries.filter(
+    // Get raffle
+    const raffle = await getRaffleById(raffleId)
+    if (!raffle) {
+      return NextResponse.json(
+        { error: 'Raffle not found' },
+        { status: 404 }
+      )
+    }
+
+    // Get all entries for the raffle
+    const allEntries = await getEntriesByRaffleId(raffleId)
+    
+    // Filter to pending entries that have transaction signatures
+    const pendingEntries = allEntries.filter(
       e => e.status === 'pending' && e.transaction_signature
     )
-    
-    if (pendingWithSignatures.length > 0) {
-      // Run verification in background (don't await)
-      verifyPendingEntries(raffleId, pendingWithSignatures).catch(error => {
-        console.error('Error in background verification:', error)
+
+    if (pendingEntries.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'No pending entries with transaction signatures found',
+        verified: 0,
+        rejected: 0,
+        skipped: 0
       })
     }
 
-    // Return response with no-cache headers to ensure fresh data
-    return NextResponse.json(entries, { 
-      status: 200,
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
+    // Verify each pending entry
+    const results = {
+      verified: 0,
+      rejected: 0,
+      errors: [] as string[]
+    }
+
+    for (const entry of pendingEntries) {
+      try {
+        const verificationResult = await verifyTransaction(
+          entry.transaction_signature!,
+          entry,
+          raffle
+        )
+
+        if (verificationResult.valid) {
+          await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature)
+          results.verified++
+        } else {
+          await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature)
+          results.rejected++
+          results.errors.push(
+            `Entry ${entry.id}: ${verificationResult.error || 'Verification failed'}`
+          )
+        }
+      } catch (error: any) {
+        results.rejected++
+        results.errors.push(`Entry ${entry.id}: ${error.message || 'Verification error'}`)
+        console.error(`Error verifying entry ${entry.id}:`, error)
       }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Verified ${results.verified} entries, rejected ${results.rejected}`,
+      verified: results.verified,
+      rejected: results.rejected,
+      errors: results.errors
     })
   } catch (error) {
-    console.error('Error fetching entries:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
+    console.error('Error in batch verify entries:', error)
     return NextResponse.json(
-      { error: errorMessage },
+      { error: 'Internal server error' },
       { status: 500 }
     )
-  }
-}
-
-/**
- * Verify pending entries in the background
- */
-async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
-  const raffle = await getRaffleById(raffleId)
-  if (!raffle) return
-
-  for (const entry of pendingEntries) {
-    if (!entry.transaction_signature) continue
-
-    try {
-      const verificationResult = await verifyTransaction(
-        entry.transaction_signature,
-        entry,
-        raffle
-      )
-
-      if (verificationResult.valid) {
-        await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature)
-        console.log(`Auto-verified entry ${entry.id} for raffle ${raffleId}`)
-      } else {
-        // Only reject if it's clearly invalid, otherwise leave as pending for retry
-        if (verificationResult.error?.includes('Transaction not found')) {
-          // Transaction might still be confirming, don't reject yet
-          continue
-        }
-        await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature)
-        console.log(`Auto-rejected entry ${entry.id}: ${verificationResult.error}`)
-      }
-    } catch (error: any) {
-      console.error(`Error auto-verifying entry ${entry.id}:`, error.message)
-      // Don't update status on error, let it retry next time
-    }
   }
 }
 
@@ -115,12 +127,15 @@ async function verifyTransaction(
       if (rpcUrl && !rpcUrl.includes('://')) {
         rpcUrl = `https://${rpcUrl}`
       } else {
+        console.warn(`Invalid RPC URL format: ${rpcUrl}. Using fallback.`)
         rpcUrl = 'https://api.mainnet-beta.solana.com'
       }
     }
     
     if (!rpcUrl || (!rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://'))) {
-      return { valid: false, error: 'Invalid RPC URL configuration' }
+      const error = `Invalid RPC URL configuration. Endpoint URL must start with 'http:' or 'https:'. Current value: ${rpcUrl || 'undefined'}`
+      console.error(error)
+      return { valid: false, error }
     }
     
     const connection = new Connection(rpcUrl, 'confirmed')
@@ -129,6 +144,7 @@ async function verifyTransaction(
                            process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
     
     if (!recipientWallet) {
+      console.error('Recipient wallet not configured for verification')
       return { valid: true } // Allow in development
     }
     
@@ -158,14 +174,14 @@ async function verifyTransaction(
     if (!transaction) {
       return { 
         valid: false, 
-        error: `Transaction not found: ${transactionSignature}` 
+        error: `Transaction not found: ${transactionSignature}. It may still be confirming.` 
       }
     }
     
     if (transaction.meta?.err) {
       return { 
         valid: false, 
-        error: `Transaction failed: ${JSON.stringify(transaction.meta.err)}` 
+        error: `Transaction failed on-chain: ${JSON.stringify(transaction.meta.err)}` 
       }
     }
     
@@ -182,12 +198,19 @@ async function verifyTransaction(
         ? (message as any).staticAccountKeys
         : (message as any).accountKeys
       
+      const senderPubkey = new PublicKey(entry.wallet_address)
+      const senderIndex = accountKeys.findIndex(
+        (key: PublicKey) => key.equals(senderPubkey)
+      )
       const recipientIndex = accountKeys.findIndex(
         (key: PublicKey) => key.equals(recipientPubkey)
       )
       
-      if (recipientIndex === -1) {
-        return { valid: false, error: 'Recipient wallet not found in transaction' }
+      if (senderIndex === -1 || recipientIndex === -1) {
+        return { 
+          valid: false, 
+          error: `Sender or recipient wallet not found in transaction` 
+        }
       }
       
       const preBalance = transaction.meta.preBalances[recipientIndex]
@@ -251,6 +274,7 @@ async function verifyTransaction(
     return { valid: true }
   } catch (error: any) {
     const errorMessage = error?.message || String(error)
+    console.error('Error verifying transaction:', error)
     return { 
       valid: false, 
       error: `Verification error: ${errorMessage}` 

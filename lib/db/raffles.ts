@@ -49,18 +49,40 @@ export async function getRaffleById(id: string) {
 }
 
 export async function getEntriesByRaffleId(raffleId: string) {
-  const { data, error } = await supabase
-    .from('entries')
-    .select('*')
-    .eq('raffle_id', raffleId)
-    .order('created_at', { ascending: false })
+  // Fetch all entries using pagination to handle any Supabase row limits
+  // Supabase defaults to 1000 rows per query, but projects can have custom limits
+  const allEntries: Entry[] = []
+  const pageSize = 1000
+  let offset = 0
+  let hasMore = true
 
-  if (error) {
-    console.error('Error fetching entries:', error)
-    return []
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('raffle_id', raffleId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      console.error('Error fetching entries:', error)
+      return []
+    }
+
+    if (!data || data.length === 0) {
+      hasMore = false
+    } else {
+      allEntries.push(...(data as Entry[]))
+      // If we got fewer than pageSize results, we've reached the end
+      if (data.length < pageSize) {
+        hasMore = false
+      } else {
+        offset += pageSize
+      }
+    }
   }
 
-  return (data || []) as Entry[]
+  return allEntries
 }
 
 /**

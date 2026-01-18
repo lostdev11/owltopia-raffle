@@ -233,10 +233,21 @@ export function RaffleDetailClient({
             const errorMsg = latestError?.message || ''
             if (errorMsg.includes('does not exist') || errorMsg.includes('not available') || latestError?.code === -32601) {
               // Fallback to getRecentBlockhash for older RPC endpoints
-              const recentResult = await connection.getRecentBlockhash('confirmed')
-              latestBlockhash = {
-                blockhash: recentResult.blockhash,
-                lastValidBlockHeight: 0, // getRecentBlockhash doesn't provide lastValidBlockHeight
+              // Try to get lastValidBlockHeight separately using getSlot for mobile wallet compatibility
+              try {
+                const recentResult = await connection.getRecentBlockhash('confirmed')
+                const slot = await connection.getSlot('confirmed')
+                latestBlockhash = {
+                  blockhash: recentResult.blockhash,
+                  lastValidBlockHeight: slot, // Use current slot as approximate lastValidBlockHeight
+                }
+              } catch (fallbackError) {
+                // If we can't get slot, still try with 0 (wallet will handle it)
+                const recentResult = await connection.getRecentBlockhash('confirmed')
+                latestBlockhash = {
+                  blockhash: recentResult.blockhash,
+                  lastValidBlockHeight: 0,
+                }
               }
               break
             } else {
@@ -308,9 +319,13 @@ export function RaffleDetailClient({
         throw new Error('Failed to get recent blockhash after retries')
       }
 
-      // Construct transaction with proper blockhash for Phantom compatibility
+      // Construct transaction with proper blockhash and lastValidBlockHeight for mobile wallet compatibility
+      // Setting lastValidBlockHeight is critical for Android mobile wallets (MWA)
       const transaction = new Transaction()
       transaction.recentBlockhash = latestBlockhash.blockhash
+      if (latestBlockhash.lastValidBlockHeight) {
+        transaction.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight
+      }
       transaction.feePayer = publicKey
       
       const recipientPubkey = new PublicKey(paymentDetails.recipient)
@@ -483,15 +498,22 @@ export function RaffleDetailClient({
         throw new Error(`Unsupported currency: ${raffle.currency}`)
       }
 
-      // Validate transaction before sending
-      if (transaction.instructions.length === 0) {
-        throw new Error('Transaction has no instructions. Please try again.')
-      }
 
       // Step 3: Send transaction for signing
       // Use sendOptions to ensure proper transaction handling
+      // For Android mobile wallets, ensure transaction is properly constructed
       let signature: string
       try {
+        // Validate transaction before sending (especially important for mobile wallets)
+        if (transaction.instructions.length === 0) {
+          throw new Error('Transaction has no instructions. Please try again.')
+        }
+        
+        // Ensure blockhash is still valid (especially important for slower mobile connections)
+        if (!transaction.recentBlockhash) {
+          throw new Error('Transaction blockhash is missing. Please try again.')
+        }
+        
         signature = await sendTransaction(transaction, connection, {
           skipPreflight: false,
           preflightCommitment: 'confirmed',
@@ -503,6 +525,15 @@ export function RaffleDetailClient({
         // Provide more helpful error messages for wallet errors
         const errorMessage = walletError?.message || walletError?.toString() || 'Unknown error'
         const errorCode = walletError?.code
+        const errorName = walletError?.name || ''
+        
+        // Check if this is an Android/mobile device
+        const isMobile = typeof window !== 'undefined' && /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
+          navigator.userAgent || navigator.vendor || (window as any).opera || ''
+        )
+        const isAndroid = typeof window !== 'undefined' && /android/i.test(
+          navigator.userAgent || navigator.vendor || (window as any).opera || ''
+        )
         
         if (errorCode === 4001 || errorMessage.includes('User rejected') || errorMessage.includes('rejected')) {
           throw new Error('Transaction was cancelled. Please try again if you want to continue.')
@@ -510,11 +541,21 @@ export function RaffleDetailClient({
         if (errorMessage.includes('insufficient funds') || errorMessage.includes('Insufficient')) {
           throw new Error('Insufficient funds in your wallet. Please ensure you have enough SOL/USDC to cover the transaction and fees.')
         }
+        // Android/Mobile-specific errors
+        if (isAndroid && (errorMessage.includes('blockhash') || errorMessage.includes('Blockhash') || errorMessage.includes('expired'))) {
+          throw new Error('Transaction blockhash expired. This can happen on slower connections. Please try again - the transaction will use a fresh blockhash.')
+        }
+        if (isMobile && (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))) {
+          throw new Error('Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.')
+        }
         if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
           throw new Error('Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.')
         }
         if (errorMessage.includes('Network') || errorMessage.includes('connection')) {
           throw new Error('Network error. Please check your internet connection and try again.')
+        }
+        if (isMobile && errorMessage.includes('timeout')) {
+          throw new Error('Transaction timeout. This can happen on slower mobile connections. Please try again.')
         }
         // Re-throw with original message for other errors
         throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
