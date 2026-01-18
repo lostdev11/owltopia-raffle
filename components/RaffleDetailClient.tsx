@@ -820,7 +820,7 @@ export function RaffleDetailClient({
               )}
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Confirmed Entries</p>
-                <p className={classes.contentText + ' font-bold'}>{currentOwlVisionScore.confirmedEntries}</p>
+                <p className={classes.contentText + ' font-bold'}>{totalTicketsSold}</p>
               </div>
               {raffle.max_tickets !== null && (
                 <div>

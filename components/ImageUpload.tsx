@@ -141,7 +141,6 @@ export function ImageUpload({ value, onChange, label = 'Image', disabled = false
             ref={fileInputRef}
             type="file"
             accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-            capture="environment"
             onChange={handleFileSelect}
             disabled={disabled || uploading}
             className="hidden"

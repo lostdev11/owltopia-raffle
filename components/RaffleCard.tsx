@@ -551,10 +551,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={14} className="inline-block" />
                 </span>
               </span>
-              {owlVisionScore.confirmedEntries > 0 && (
+              {totalTicketsSold > 0 && (
                 <span>
                   <span className="text-muted-foreground">Entries: </span>
-                  <span className="font-semibold">{owlVisionScore.confirmedEntries}</span>
+                  <span className="font-semibold">{totalTicketsSold}</span>
                 </span>
               )}
             </div>
@@ -837,7 +837,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block flex-shrink-0" />
                     </div>
                     <div className={`${classes.footer} text-white/80`}>
-                      {owlVisionScore.confirmedEntries} entries
+                      {totalTicketsSold} entries
                       {minTickets && (
                         <span className="ml-2">• {totalTicketsSold} / {minTickets} min</span>
                       )}
@@ -899,11 +899,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
                     </span>
                   </div>
-                  {owlVisionScore.confirmedEntries > 0 && (
+                  {totalTicketsSold > 0 && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Entries</span>
                       <span className="font-semibold">
-                        {owlVisionScore.confirmedEntries} confirmed
+                        {totalTicketsSold} confirmed
                       </span>
                     </div>
                   )}
