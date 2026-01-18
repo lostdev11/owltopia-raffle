@@ -2,7 +2,7 @@
 
 import { useMemo, ReactNode, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
+import { BaseWalletAdapter, WalletAdapterNetwork, WalletError, WalletErrorCode } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
   PhantomWalletAdapter,
@@ -10,6 +10,7 @@ import {
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import {
   SolanaMobileWalletAdapter,
   createDefaultAddressSelector,
@@ -20,6 +21,192 @@ import { clusterApiUrl } from '@solana/web3.js'
 
 // Import wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css'
+
+// Custom Jupiter Wallet Adapter
+// Jupiter Wallet injects itself into window.solana when installed
+class JupiterWalletAdapter extends BaseWalletAdapter {
+  name = 'Jupiter'
+  url = 'https://jup.ag'
+  icon = 'https://jup.ag/favicon.ico'
+  supportedTransactionVersions: Set<'legacy' | 0> = new Set(['legacy', 0])
+
+  private _publicKey: PublicKey | null = null
+  private _connecting = false
+  private _provider: any = null
+
+  constructor(network?: WalletAdapterNetwork) {
+    super()
+    
+    // Check if Jupiter Wallet is installed
+    // Jupiter Wallet injects itself into window.solana following the Solana Wallet Standard
+    if (typeof window !== 'undefined') {
+      const solana = (window as any).solana
+      // Check for Jupiter-specific identifier
+      // Jupiter Wallet may identify itself via isJupiter, isJupiterWallet, or other properties
+      // We check for Jupiter-specific properties first
+      if (solana && (solana.isJupiter || solana.isJupiterWallet)) {
+        this._provider = solana
+      } else if (solana && !solana.isPhantom && !solana.isSolflare) {
+        // Fallback: If window.solana exists and it's not Phantom or Solflare,
+        // it could be Jupiter or another wallet. We'll check on connect if it's available.
+        // Note: This is a best-effort detection and may conflict with other wallets
+        // In practice, Jupiter Wallet should set a specific identifier
+        this._provider = solana
+      }
+    }
+  }
+
+  get publicKey(): PublicKey | null {
+    return this._publicKey
+  }
+
+  get connecting(): boolean {
+    return this._connecting
+  }
+
+  get ready(): boolean {
+    return typeof window !== 'undefined' && !!this._provider
+  }
+
+  async connect(): Promise<void> {
+    try {
+      if (this._publicKey || this._connecting) return
+      if (!this._provider) {
+        throw new WalletError(
+          'Jupiter Wallet not found. Please install Jupiter Wallet extension.',
+          WalletErrorCode.WalletNotInstalled
+        )
+      }
+
+      this._connecting = true
+
+      try {
+        // Connect to the wallet
+        const response = await this._provider.connect()
+        this._publicKey = new PublicKey(response.publicKey)
+        this.emit('connect')
+      } catch (error: any) {
+        // Handle connection errors
+        throw error
+      } finally {
+        this._connecting = false
+      }
+    } catch (error: any) {
+      this.emit('error', error)
+      throw error
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    const provider = this._provider
+    if (provider) {
+      this._publicKey = null
+
+      try {
+        await provider.disconnect()
+      } catch (error: any) {
+        this.emit('error', error)
+      }
+
+      this.emit('disconnect')
+    }
+  }
+
+  async sendTransaction<T extends Transaction | VersionedTransaction>(
+    transaction: T,
+    connection: any,
+    options?: any
+  ): Promise<string> {
+    if (!this._provider) {
+      throw new WalletError(
+        'Wallet not connected',
+        WalletErrorCode.WalletNotConnected
+      )
+    }
+
+    try {
+      // Use sendTransaction if available, otherwise fall back to sign and send
+      if (this._provider.sendTransaction) {
+        return await this._provider.sendTransaction(transaction, connection, options)
+      } else {
+        // Fallback: sign and send manually
+        const signed = await this.signTransaction(transaction)
+        return await connection.sendRawTransaction(signed.serialize(), options)
+      }
+    } catch (error: any) {
+      this.emit('error', error)
+      throw error
+    }
+  }
+
+  async signTransaction<T extends Transaction | VersionedTransaction>(
+    transaction: T
+  ): Promise<T> {
+    if (!this._provider) {
+      throw new WalletError(
+        'Wallet not connected',
+        WalletErrorCode.WalletNotConnected
+      )
+    }
+
+    try {
+      const signed = await this._provider.signTransaction(transaction)
+      return signed
+    } catch (error: any) {
+      this.emit('error', error)
+      throw error
+    }
+  }
+
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(
+    transactions: T[]
+  ): Promise<T[]> {
+    if (!this._provider) {
+      throw new WalletError(
+        'Wallet not connected',
+        WalletErrorCode.WalletNotConnected
+      )
+    }
+
+    try {
+      if (this._provider.signAllTransactions) {
+        return await this._provider.signAllTransactions(transactions)
+      } else {
+        // Fallback: sign transactions individually
+        return await Promise.all(
+          transactions.map((tx) => this.signTransaction(tx))
+        )
+      }
+    } catch (error: any) {
+      this.emit('error', error)
+      throw error
+    }
+  }
+
+  async signMessage(message: Uint8Array): Promise<Uint8Array> {
+    if (!this._provider) {
+      throw new WalletError(
+        'Wallet not connected',
+        WalletErrorCode.WalletNotConnected
+      )
+    }
+
+    try {
+      if (this._provider.signMessage) {
+        const response = await this._provider.signMessage(message)
+        return response.signature
+      } else {
+        throw new WalletError(
+          'Message signing not supported',
+          WalletErrorCode.WalletSignMessageError
+        )
+      }
+    } catch (error: any) {
+      this.emit('error', error)
+      throw error
+    }
+  }
+}
 
 interface WalletContextProviderProps {
   children: ReactNode
@@ -85,6 +272,8 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
           // The adapter will use the current page URL as redirect_link
           // Make sure the page URL is accessible for deep link callbacks
         }),
+        // Jupiter Wallet - browser extension wallet
+        new JupiterWalletAdapter({ network }),
         // Additional mobile wallet options for Android
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network }),
