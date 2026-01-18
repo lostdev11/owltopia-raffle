@@ -7,7 +7,6 @@ const externalLinks = [
   { name: 'Staking', url: 'https://www.nftstake.app/owltopia' },
   { name: 'X', url: 'https://x.com/Owltopia_sol' },
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
-  { name: 'Mint', url: 'https://www.nftlaunch.app/mint/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
   { name: 'Atlas3', url: 'https://atlas3.io/project/owltopia' },

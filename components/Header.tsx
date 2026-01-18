@@ -40,7 +40,9 @@ export function Header() {
     <header className="w-full bg-black border-b border-green-500/20">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between gap-4">
-          <Logo className="flex-1" width={600} height={150} priority />
+          <Link href="/" className="flex-1">
+            <Logo className="flex-1" width={600} height={150} priority />
+          </Link>
           <div className="flex items-center gap-4">
             {isAdmin && (
               <Link href="/admin">
