@@ -2,7 +2,7 @@
 
 import { useMemo, ReactNode, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
-import { BaseWalletAdapter, WalletAdapterNetwork, WalletError, WalletErrorCode } from '@solana/wallet-adapter-base'
+import { BaseWalletAdapter, WalletAdapterNetwork, WalletError } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
   PhantomWalletAdapter,
@@ -73,8 +73,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
       if (this._publicKey || this._connecting) return
       if (!this._provider) {
         throw new WalletError(
-          'Jupiter Wallet not found. Please install Jupiter Wallet extension.',
-          WalletErrorCode.WalletNotInstalled
+          'Jupiter Wallet not found. Please install Jupiter Wallet extension.'
         )
       }
 
@@ -119,8 +118,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
   ): Promise<string> {
     if (!this._provider) {
       throw new WalletError(
-        'Wallet not connected',
-        WalletErrorCode.WalletNotConnected
+        'Wallet not connected'
       )
     }
 
@@ -144,8 +142,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
   ): Promise<T> {
     if (!this._provider) {
       throw new WalletError(
-        'Wallet not connected',
-        WalletErrorCode.WalletNotConnected
+        'Wallet not connected'
       )
     }
 
@@ -163,8 +160,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
   ): Promise<T[]> {
     if (!this._provider) {
       throw new WalletError(
-        'Wallet not connected',
-        WalletErrorCode.WalletNotConnected
+        'Wallet not connected'
       )
     }
 
@@ -186,8 +182,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
   async signMessage(message: Uint8Array): Promise<Uint8Array> {
     if (!this._provider) {
       throw new WalletError(
-        'Wallet not connected',
-        WalletErrorCode.WalletNotConnected
+        'Wallet not connected'
       )
     }
 
@@ -197,8 +192,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
         return response.signature
       } else {
         throw new WalletError(
-          'Message signing not supported',
-          WalletErrorCode.WalletSignMessageError
+          'Message signing not supported'
         )
       }
     } catch (error: any) {
