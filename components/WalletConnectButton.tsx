@@ -493,44 +493,27 @@ export function WalletConnectButton() {
         buttonRef.current.style.zIndex = '10'
       }
 
-      // Only add fallback handlers for mobile devices (especially Android)
-      // Desktop should use the native WalletMultiButton click handler
-      const isMobile = isMobileDevice()
-      const isAndroid = isAndroidDevice()
-      
-      if (isMobile) {
-        // Add a fallback click handler for mobile devices to ensure modal opens
-        // Android devices may need both touchstart and click events
-        const handleInteraction = (e: Event) => {
-          // For mobile, check if modal opened after a delay
-          // Don't prevent default - let the native handler try first
-          setTimeout(() => {
-            const modal = document.querySelector('[role="dialog"][class*="wallet-adapter"]')
-            if (!modal && !connected) {
-              if (process.env.NODE_ENV === 'development') {
-                console.log('Fallback: Opening wallet modal programmatically on mobile')
-              }
-              // Use a small delay to ensure native handler has had a chance
-              setTimeout(() => setVisible(true), 50)
+      // Ensure the button opens the modal on first click for both mobile and desktop
+      // Add a click handler that ensures modal opens immediately
+      const handleButtonClick = (e: Event) => {
+        if (!connected) {
+          // Always ensure modal opens - call setVisible in a microtask so native handler
+          // has a chance first, but still feels instant to the user
+          Promise.resolve().then(() => {
+            // Double-check connection state in case it changed
+            if (!connected) {
+              setVisible(true)
             }
-          }, 150)
+          })
         }
+      }
 
-        // Add both touchstart (for Android) and click listeners as fallback on mobile only
-        if (isAndroid) {
-          // Android devices often respond better to touchstart
-          button.addEventListener('touchstart', handleInteraction, { passive: true, capture: false })
-        }
-        // Add click listener as fallback for mobile (but don't prevent default)
-        button.addEventListener('click', handleInteraction, { passive: true, capture: false })
+      // Add click handler that ensures modal opens on first click
+      button.addEventListener('click', handleButtonClick, { passive: true, capture: false })
 
-        // Store cleanup function
-        cleanupFn = () => {
-          if (isAndroid) {
-            button.removeEventListener('touchstart', handleInteraction)
-          }
-          button.removeEventListener('click', handleInteraction)
-        }
+      // Store cleanup function
+      cleanupFn = () => {
+        button.removeEventListener('click', handleButtonClick)
       }
     }, 200)
     

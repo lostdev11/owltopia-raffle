@@ -10,6 +10,12 @@ import {
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
+import {
+  SolanaMobileWalletAdapter,
+  createDefaultAddressSelector,
+  createDefaultAuthorizationResultCache,
+  createDefaultWalletNotFoundHandler,
+} from '@solana-mobile/wallet-adapter-mobile'
 import { clusterApiUrl } from '@solana/web3.js'
 
 // Import wallet adapter CSS
@@ -43,16 +49,36 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
     () => {
       // Create wallet adapters
       // For desktop: Explicitly include PhantomWalletAdapter for reliable desktop browser extension support
-      // For mobile: Include adapters that support Mobile Wallet Adapter (MWA) for Android
+      // For mobile: Include Mobile Wallet Adapter (MWA) for proper Android support
       // Note: PhantomWalletAdapter works on both desktop (browser extension) and mobile (Phantom browser)
-      // SolflareWalletAdapter: Supports both desktop and MWA on Android
+      // SolanaMobileWalletAdapter: Proper MWA support for Android devices - must be included first for mobile
+      // SolflareWalletAdapter: Supports both desktop and deep links on mobile (fallback)
       // CoinbaseWalletAdapter: Additional mobile wallet option
       // TrustWalletAdapter: Popular Android wallet option
       const walletAdapters = [
+        // Mobile Wallet Adapter - provides proper MWA protocol support on Android
+        // This should be first to ensure it's available when needed on mobile devices
+        new SolanaMobileWalletAdapter({
+          addressSelector: createDefaultAddressSelector(),
+          appIdentity: {
+            name: 'Owl Raffle',
+            uri: typeof window !== 'undefined' ? window.location.origin : 'https://owlraffle.com',
+            icon: typeof window !== 'undefined' ? `${window.location.origin}/icon.png` : '/icon.png',
+          },
+          authorizationResultCache: createDefaultAuthorizationResultCache(),
+          cluster: network === WalletAdapterNetwork.Mainnet 
+            ? 'mainnet-beta' 
+            : network === WalletAdapterNetwork.Devnet 
+            ? 'devnet' 
+            : network === WalletAdapterNetwork.Testnet 
+            ? 'testnet' 
+            : 'mainnet-beta',
+          onWalletNotFound: createDefaultWalletNotFoundHandler(),
+        }),
         // Phantom wallet - explicit for desktop browser extension support
         // Also works in Phantom mobile browser
         new PhantomWalletAdapter({ network }),
-        // Solflare - supports desktop and MWA on Android
+        // Solflare - supports desktop and deep links on mobile (fallback if MWA not available)
         new SolflareWalletAdapter({ 
           network,
           // Ensure proper mobile deep link handling
@@ -97,11 +123,13 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
           
             // Android-specific logging
             if (isAndroid) {
-              console.log('Android device detected - Mobile Wallet Adapter (MWA) should be available')
+              console.log('Android device detected - Mobile Wallet Adapter (MWA) is available')
+              console.log('Mobile Wallet Adapter (SolanaMobileWalletAdapter) should handle MWA-compatible wallets')
               console.log('Available wallet adapters for Android:', adapterStates.filter(a => 
-                ['Solflare', 'Coinbase', 'Trust'].includes(a.name)
+                ['Solana Mobile', 'Solflare', 'Coinbase', 'Trust'].includes(a.name)
               ).map(a => a.name))
               console.log('Note: Phantom is automatically detected as a Standard Wallet and will be available if installed')
+              console.log('Note: SolanaMobileWalletAdapter uses the MWA protocol for better Android wallet compatibility')
             }
         }, 500)
       }

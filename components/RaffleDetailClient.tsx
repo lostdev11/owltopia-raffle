@@ -249,9 +249,22 @@ export function RaffleDetailClient({
           const errorMessage = rpcError?.message || ''
           const errorCode = rpcError?.code || rpcError?.error?.code
           const errorStr = JSON.stringify(rpcError)
+          const errorName = rpcError?.name || ''
+          
+          // Check for network/fetch errors (common on mobile)
+          const isFetchError = 
+            errorMessage.includes('failed to fetch') ||
+            errorMessage.includes('Failed to fetch') ||
+            errorMessage.includes('NetworkError') ||
+            errorMessage.includes('Network request failed') ||
+            errorName === 'TypeError' ||
+            (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+            errorMessage.includes('CORS') ||
+            errorMessage.includes('network')
           
           // Check for retryable errors: 403 (rate limit), 19 (temporary internal error), 500, network issues
-          if (errorMessage.includes('403') || 
+          if (isFetchError ||
+              errorMessage.includes('403') || 
               errorMessage.includes('Access forbidden') ||
               errorCode === 19 ||
               errorMessage.includes('Temporary internal error') ||
@@ -260,7 +273,14 @@ export function RaffleDetailClient({
               errorMessage.includes('Network') ||
               errorMessage.includes('timeout')) {
             if (retries === 0) {
-              if (errorMessage.includes('403') || errorMessage.includes('Access forbidden')) {
+              if (isFetchError) {
+                throw new Error(
+                  'Network connection failed. This may be a network issue or CORS restriction on mobile. ' +
+                  'Please check your internet connection and try again. ' +
+                  'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                  'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                )
+              } else if (errorMessage.includes('403') || errorMessage.includes('Access forbidden')) {
                 throw new Error(
                   'RPC endpoint is rate-limited or requires authentication. ' +
                   'Please set NEXT_PUBLIC_SOLANA_RPC_URL in your .env.local file to a private RPC endpoint ' +
@@ -274,8 +294,9 @@ export function RaffleDetailClient({
                 )
               }
             }
-            // Exponential backoff: wait longer for each retry
-            await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)))
+            // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
+            const backoffDelay = isFetchError ? 2000 * (3 - retries) : 1000 * (3 - retries)
+            await new Promise(resolve => setTimeout(resolve, backoffDelay))
           } else {
             // Non-retryable error, throw immediately
             throw rpcError
@@ -319,22 +340,45 @@ export function RaffleDetailClient({
             mintRetries--
             const errorMessage = rpcError?.message || ''
             const errorCode = rpcError?.code || rpcError?.error?.code
+            const errorName = rpcError?.name || ''
+            
+            // Check for network/fetch errors (common on mobile)
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
             
             // Check if it's a retryable error (code 19 = temporary internal error, or network issues)
-            if (errorCode === 19 || 
+            if (isFetchError ||
+                errorCode === 19 || 
                 errorMessage.includes('Temporary internal error') ||
                 errorMessage.includes('500') ||
                 errorMessage.includes('Network') ||
                 errorMessage.includes('timeout')) {
               if (mintRetries === 0) {
-                throw new Error(
-                  'Failed to fetch USDC mint information after retries. This may be a temporary RPC issue. ' +
-                  'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                  'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
-                )
+                if (isFetchError) {
+                  throw new Error(
+                    'Network connection failed while fetching USDC mint information. This may be a network issue or CORS restriction on mobile. ' +
+                    'Please check your internet connection and try again. ' +
+                    'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                  )
+                } else {
+                  throw new Error(
+                    'Failed to fetch USDC mint information after retries. This may be a temporary RPC issue. ' +
+                    'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                  )
+                }
               }
-              // Exponential backoff: wait longer for each retry
-              await new Promise(resolve => setTimeout(resolve, 1000 * (3 - mintRetries)))
+              // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
+              const backoffDelay = isFetchError ? 2000 * (3 - mintRetries) : 1000 * (3 - mintRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
             } else {
               // Non-retryable error, throw immediately
               throw rpcError
@@ -378,8 +422,20 @@ export function RaffleDetailClient({
               break
             }
             
+            // Check for network/fetch errors (common on mobile)
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
+            
             // Retryable RPC error
-            if (errorCode === 19 || 
+            if (isFetchError ||
+                errorCode === 19 || 
                 errorMessage.includes('Temporary internal error') ||
                 errorMessage.includes('500') ||
                 errorMessage.includes('Network') ||
@@ -390,7 +446,9 @@ export function RaffleDetailClient({
                 accountExists = false
                 break
               }
-              await new Promise(resolve => setTimeout(resolve, 1000 * (3 - accountRetries)))
+              // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
+              const backoffDelay = isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
             } else {
               // Other errors - assume account doesn't exist
               accountExists = false

@@ -230,10 +230,35 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           }
         } catch (rpcError: any) {
           retries--
+          const errorMessage = rpcError?.message || ''
+          const errorName = rpcError?.name || ''
+          
+          // Check for network/fetch errors (common on mobile)
+          const isFetchError = 
+            errorMessage.includes('failed to fetch') ||
+            errorMessage.includes('Failed to fetch') ||
+            errorMessage.includes('NetworkError') ||
+            errorMessage.includes('Network request failed') ||
+            errorName === 'TypeError' ||
+            (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+            errorMessage.includes('CORS') ||
+            errorMessage.includes('network')
+          
           if (retries === 0) {
-            throw new Error('Failed to get blockhash. Please try again.')
+            if (isFetchError) {
+              throw new Error(
+                'Network connection failed. This may be a network issue or CORS restriction on mobile. ' +
+                'Please check your internet connection and try again. ' +
+                'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+              )
+            } else {
+              throw new Error('Failed to get blockhash. Please try again.')
+            }
           }
-          await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)))
+          // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
+          const backoffDelay = isFetchError ? 2000 * (3 - retries) : 1000 * (3 - retries)
+          await new Promise(resolve => setTimeout(resolve, backoffDelay))
         }
       }
       
