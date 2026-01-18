@@ -59,6 +59,7 @@ export function RaffleDetailClient({
   const { publicKey, sendTransaction, connected } = useWallet()
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
+  const [purchaseAmount, setPurchaseAmount] = useState(0)
   const [showParticipants, setShowParticipants] = useState(false)
   const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
@@ -204,6 +205,7 @@ export function RaffleDetailClient({
           raffleId: raffle.id,
           walletAddress: publicKey.toBase58(),
           ticketQuantity,
+          amountPaid: purchaseAmount,
         }),
       })
 
@@ -668,6 +670,7 @@ export function RaffleDetailClient({
   const handleOpenEnterRaffleDialog = () => {
     // Reset state when opening dialog
     setTicketQuantity(1)
+    setPurchaseAmount(0)
     setError(null)
     setSuccess(false)
     setShowEnterRaffleDialog(true)
@@ -1006,12 +1009,30 @@ export function RaffleDetailClient({
               )}
             </div>
             
+            <div className="space-y-2">
+              <Label htmlFor="dialog-amount">Purchase Amount ({raffle.currency}) *</Label>
+              <Input
+                id="dialog-amount"
+                type="number"
+                step="0.000001"
+                min="0"
+                value={purchaseAmount}
+                onChange={(e) => setPurchaseAmount(parseFloat(e.target.value) || 0)}
+                disabled={availableTickets !== null && availableTickets <= 0}
+                className="text-base sm:text-sm h-11 sm:h-10"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter the amount you want to pay for this purchase
+              </p>
+            </div>
+            
             <HootBoostMeter quantity={ticketQuantity} />
             
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">
-                {(raffle.ticket_price * ticketQuantity).toFixed(6)} {raffle.currency}
+                {purchaseAmount.toFixed(6)} {raffle.currency}
                 <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={20} className="inline-block" />
               </div>
             </div>

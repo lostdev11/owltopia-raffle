@@ -79,7 +79,7 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
       )
 
       if (verificationResult.valid) {
-        await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature)
+        await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature ?? undefined)
         console.log(`Auto-verified entry ${entry.id} for raffle ${raffleId}`)
       } else {
         // Only reject if it's clearly invalid, otherwise leave as pending for retry
@@ -87,7 +87,7 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
           // Transaction might still be confirming, don't reject yet
           continue
         }
-        await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature)
+        await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature ?? undefined)
         console.log(`Auto-rejected entry ${entry.id}: ${verificationResult.error}`)
       }
     } catch (error: any) {

@@ -77,10 +77,10 @@ export async function POST(request: NextRequest) {
         )
 
         if (verificationResult.valid) {
-          await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature)
+          await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature ?? undefined)
           results.verified++
         } else {
-          await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature)
+          await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature ?? undefined)
           results.rejected++
           results.errors.push(
             `Entry ${entry.id}: ${verificationResult.error || 'Verification failed'}`

@@ -56,6 +56,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const [imageModalOpen, setImageModalOpen] = useState(false)
   const [showQuickBuy, setShowQuickBuy] = useState(false)
   const [ticketQuantity, setTicketQuantity] = useState(1)
+  const [purchaseAmount, setPurchaseAmount] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -196,6 +197,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           raffleId: raffle.id,
           walletAddress: publicKey.toBase58(),
           ticketQuantity,
+          amountPaid: purchaseAmount,
         }),
       })
 
@@ -454,6 +456,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         setShowQuickBuy(false)
         setSuccess(false)
         setTicketQuantity(1)
+        setPurchaseAmount(0)
       }, 2000)
     } catch (err) {
       console.error('Purchase error:', err)
@@ -474,6 +477,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
     e.stopPropagation()
     if (!showQuickBuy) {
       setTicketQuantity(1)
+      setPurchaseAmount(0)
       setError(null)
       setSuccess(false)
     }
@@ -993,13 +997,30 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   </p>
                 )}
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="card-amount" className={displaySize === 'large' ? 'text-sm' : 'text-xs'}>Purchase Amount ({raffle.currency}) *</Label>
+                <Input
+                  id="card-amount"
+                  type="number"
+                  step="0.000001"
+                  min="0"
+                  value={purchaseAmount}
+                  onChange={(e) => setPurchaseAmount(parseFloat(e.target.value) || 0)}
+                  disabled={availableTickets !== null && availableTickets <= 0}
+                  className="text-base sm:text-sm h-11 sm:h-10"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the amount you want to pay
+                </p>
+              </div>
               {displaySize === 'large' && (
                 <HootBoostMeter quantity={ticketQuantity} />
               )}
               <div className="flex items-center justify-between pt-2 border-t">
                 <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
                 <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
-                  {(raffle.ticket_price * ticketQuantity).toFixed(6)} {raffle.currency}
+                  {purchaseAmount.toFixed(6)} {raffle.currency}
                   <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
                 </div>
               </div>

@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { raffleId, walletAddress, ticketQuantity } = body
+    const { raffleId, walletAddress, ticketQuantity, amountPaid } = body
 
     if (!raffleId || !walletAddress || !ticketQuantity) {
       return NextResponse.json(
@@ -60,11 +60,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Calculate total amount
-    const amountPaid = raffle.ticket_price * ticketQuantity
+    // Use provided amountPaid if available, otherwise calculate from ticket_price * ticketQuantity
+    const finalAmountPaid = amountPaid !== undefined && amountPaid !== null ? amountPaid : raffle.ticket_price * ticketQuantity
     
     // Log calculation for debugging
-    console.log(`Payment calculation: ticket_price=${raffle.ticket_price}, ticketQuantity=${ticketQuantity}, amountPaid=${amountPaid}`)
+    console.log(`Payment calculation: ticket_price=${raffle.ticket_price}, ticketQuantity=${ticketQuantity}, providedAmountPaid=${amountPaid}, finalAmountPaid=${finalAmountPaid}`)
 
     // Create pending entry
     const entry = await createEntry({
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       ticket_quantity: ticketQuantity,
       transaction_signature: null,
       status: 'pending',
-      amount_paid: amountPaid,
+      amount_paid: finalAmountPaid,
       currency: raffle.currency,
     })
 
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
       entry,
       paymentDetails: {
         recipient: recipientWallet,
-        amount: amountPaid,
+        amount: finalAmountPaid,
         currency: raffle.currency,
         // USDC mint address on Solana mainnet
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
