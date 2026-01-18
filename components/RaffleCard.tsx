@@ -504,7 +504,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <Button 
                     type="button"
                     size="sm" 
-                    className="h-7 text-xs"
+                    className="h-8 sm:h-7 text-xs sm:text-xs touch-manipulation min-h-[32px] sm:min-h-[28px] px-3 sm:px-2"
                     onClick={handleToggleQuickBuy}
                   >
                     {showQuickBuy ? 'Cancel' : 'Buy'}
@@ -539,7 +539,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     value={ticketQuantity}
                     onChange={(e) => handleQuantityChange(e.target.value)}
                     disabled={availableTickets !== null && availableTickets <= 0}
-                    className="h-7 text-xs"
+                    className="h-10 sm:h-7 text-base sm:text-xs"
                   />
                 </div>
                 <div className="flex items-center justify-between pt-1 border-t">
@@ -563,7 +563,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   onClick={handlePurchase}
                   disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
                   size="sm"
-                  className="w-full h-7 text-xs"
+                  className="w-full h-11 sm:h-7 text-base sm:text-xs touch-manipulation min-h-[44px] sm:min-h-[28px]"
                   style={{
                     backgroundColor: themeColor,
                     color: '#000',
@@ -583,7 +583,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 w-7 p-0 bg-background"
+              className="h-9 w-9 sm:h-7 sm:w-7 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -597,7 +597,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 type="button"
                 variant="destructive"
                 size="sm"
-                className="h-7 w-7 p-0"
+                className="h-9 w-9 sm:h-7 sm:w-7 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -616,12 +616,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
                 </DialogDescription>
               </DialogHeader>
-              <DialogFooter>
+              <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setDeleteDialogOpen(false)}
                   disabled={deleting}
+                  className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
                 >
                   Cancel
                 </Button>
@@ -634,6 +635,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     handleDelete(e)
                   }}
                   disabled={deleting}
+                  className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
                 >
                   {deleting ? 'Deleting...' : 'Delete Raffle'}
                 </Button>
@@ -867,7 +869,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 {!showQuickBuy && (
                   <Button 
                     type="button"
-                    className="w-full" 
+                    className="w-full touch-manipulation min-h-[44px] text-base sm:text-sm" 
                     size={displaySize === 'large' ? 'lg' : 'default'}
                     onClick={handleToggleQuickBuy}
                     disabled={!isActive || (availableTickets !== null && availableTickets <= 0)}
@@ -897,6 +899,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   value={ticketQuantity}
                   onChange={(e) => handleQuantityChange(e.target.value)}
                   disabled={availableTickets !== null && availableTickets <= 0}
+                  className="text-base sm:text-sm h-11 sm:h-10"
                 />
                 {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                   <p className="text-xs text-muted-foreground">
@@ -924,19 +927,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   Tickets purchased successfully!
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-2">
                 <Button
                   variant="outline"
                   onClick={handleToggleQuickBuy}
                   disabled={isProcessing}
-                  className="flex-1"
+                  className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm"
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handlePurchase}
                   disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
-                  className="flex-1"
+                  className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm"
                   style={{
                     backgroundColor: themeColor,
                     color: '#000',
@@ -959,7 +962,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             type="button"
             variant="outline"
             size="sm"
-            className="h-8 w-8 p-0 bg-background"
+            className="h-9 w-9 sm:h-8 sm:w-8 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -973,7 +976,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               type="button"
               variant="destructive"
               size="sm"
-              className="h-8 w-8 p-0"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -992,12 +995,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter>
+            <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setDeleteDialogOpen(false)}
                 disabled={deleting}
+                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
               >
                 Cancel
               </Button>
@@ -1010,6 +1014,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   handleDelete(e)
                 }}
                 disabled={deleting}
+                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
               >
                 {deleting ? 'Deleting...' : 'Delete Raffle'}
               </Button>

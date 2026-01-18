@@ -18,18 +18,18 @@ export function RafflesPageClient({
   const { connected } = useWallet()
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="mb-8">
-        <h1 className="text-5xl md:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
+    <div className="container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
           Owl Raffles
         </h1>
-        <p className="text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
+        <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
       </div>
 
-      <div className="mb-12">
-        <h2 className="text-2xl font-bold mb-6">Active Raffles</h2>
+      <div className="mb-8 sm:mb-12">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
         {activeRafflesWithEntries.length > 0 ? (
           <RafflesList 
             rafflesWithEntries={activeRafflesWithEntries} 
@@ -42,8 +42,8 @@ export function RafflesPageClient({
         )}
       </div>
 
-      <div className="mb-12">
-        <h2 className="text-2xl font-bold mb-6">Future Raffles</h2>
+      <div className="mb-8 sm:mb-12">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
         {futureRafflesWithEntries.length > 0 ? (
           <RafflesList 
             rafflesWithEntries={futureRafflesWithEntries} 
@@ -57,7 +57,7 @@ export function RafflesPageClient({
       </div>
 
       {connected && pastRafflesWithEntries.length > 0 && (
-        <div className="mb-12">
+        <div className="mb-8 sm:mb-12">
           <RafflesList 
             rafflesWithEntries={pastRafflesWithEntries} 
             title="Past Raffles"

@@ -12,15 +12,16 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   weight: ['300', '400', '500', '600', '700', '800'],
 })
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+}
+
 export const metadata: Metadata = {
   title: 'Owl Raffle',
   description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 5,
-    userScalable: true,
-  },
   icons: {
     icon: [
       { url: '/icon.png', sizes: '32x32', type: 'image/png' },

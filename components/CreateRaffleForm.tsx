@@ -179,10 +179,10 @@ export function CreateRaffleForm() {
             disabled={loading}
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="ticket_price">Ticket Price *</Label>
-              <Input id="ticket_price" name="ticket_price" type="number" step="0.000001" required />
+              <Input id="ticket_price" name="ticket_price" type="number" step="0.000001" required className="text-base sm:text-sm" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="currency">Currency *</Label>
@@ -190,7 +190,7 @@ export function CreateRaffleForm() {
                 id="currency"
                 name="currency"
                 defaultValue="SOL"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 required
               >
                 <option value="SOL">SOL</option>
@@ -229,23 +229,23 @@ export function CreateRaffleForm() {
 
           <div className="space-y-4">
             <Label>Night Mode Presets (optional)</Label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {NIGHT_MODE_PRESETS.map(preset => (
                 <Button
                   key={preset.name}
                   type="button"
                   variant={selectedPreset === preset.name ? 'default' : 'outline'}
                   onClick={() => handlePresetSelect(preset.name)}
-                  className="flex flex-col h-auto py-3"
+                  className="flex flex-col h-auto py-3 min-h-[60px] touch-manipulation"
                 >
-                  <span className="font-semibold">{preset.label}</span>
+                  <span className="font-semibold text-sm sm:text-base">{preset.label}</span>
                   <span className="text-xs opacity-80">{preset.description}</span>
                 </Button>
               ))}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="start_time">Start Time *</Label>
               <div className="flex gap-2">
@@ -256,6 +256,7 @@ export function CreateRaffleForm() {
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
                   required
+                  className="text-base sm:text-sm flex-1"
                 />
                 <Button
                   type="button"
@@ -270,6 +271,7 @@ export function CreateRaffleForm() {
                     setStartTime(`${year}-${month}-${day}T${hours}:${minutes}`)
                   }}
                   title="Set to current time"
+                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
                 >
                   Now
                 </Button>
@@ -283,18 +285,20 @@ export function CreateRaffleForm() {
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
                 required
+                className="text-base sm:text-sm"
               />
             </div>
           </div>
 
-          <div className="flex gap-4">
-            <Button type="submit" disabled={loading} className="flex-1">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+            <Button type="submit" disabled={loading} className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm">
               {loading ? 'Creating...' : 'Create Raffle'}
             </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => router.back()}
+              className="touch-manipulation min-h-[44px] text-base sm:text-sm"
             >
               Cancel
             </Button>

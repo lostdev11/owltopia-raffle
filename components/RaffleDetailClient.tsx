@@ -620,12 +620,12 @@ export function RaffleDetailClient({
   const classes = sizeClasses[imageSize]
 
   return (
-    <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-2' : imageSize === 'medium' ? 'py-6 px-3' : 'py-8 px-4'}`}>
+    <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-3' : imageSize === 'medium' ? 'py-6 px-3 sm:px-4' : 'py-8 px-3 sm:px-4'}`}>
       <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
         <Button
           variant="outline"
           onClick={() => router.push('/raffles')}
-          className="mb-4"
+          className="mb-4 touch-manipulation min-h-[44px] text-sm sm:text-base"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Listings
@@ -701,7 +701,7 @@ export function RaffleDetailClient({
           )}
 
           <CardContent className={classes.contentPadding}>
-            <div className={`grid grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
+            <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
                   <p className={classes.labelText + ' text-muted-foreground'}>Prize</p>
@@ -797,7 +797,7 @@ export function RaffleDetailClient({
                     backgroundColor: themeColor,
                     color: '#000',
                   }}
-                  className={`w-full md:w-auto ${imageSize === 'small' ? 'px-4' : 'px-8'}`}
+                  className={`w-full md:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm ${imageSize === 'small' ? 'px-4' : 'px-6 sm:px-8'}`}
                 >
                   {availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
@@ -806,19 +806,20 @@ export function RaffleDetailClient({
               </div>
             )}
 
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <Button
                 variant="outline"
                 onClick={() => setShowParticipants(true)}
-                className="flex-1"
+                className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
               >
                 <Users className="mr-2 h-4 w-4" />
-                View Participants ({currentOwlVisionScore.uniqueWallets})
+                <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
+                <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
               </Button>
               {raffle.winner_wallet && (
                 <Button 
                   variant="outline" 
-                  className="flex-1"
+                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                   onClick={() => setShowWinner(true)}
                 >
                   <Trophy className="mr-2 h-4 w-4" />
@@ -829,10 +830,11 @@ export function RaffleDetailClient({
                 <Button
                   variant="outline"
                   onClick={() => router.push(`/admin/raffles/${raffle.id}`)}
-                  className="flex-1"
+                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
                   <Edit className="mr-2 h-4 w-4" />
-                  Edit Raffle
+                  <span className="hidden sm:inline">Edit Raffle</span>
+                  <span className="sm:hidden">Edit</span>
                 </Button>
               )}
             </div>
@@ -886,17 +888,18 @@ export function RaffleDetailClient({
               </div>
             )}
             
-            <div className="space-y-2">
-              <Label htmlFor="dialog-quantity">Number of Tickets</Label>
-              <Input
-                id="dialog-quantity"
-                type="number"
-                min="1"
-                max={maxPurchaseQuantity}
-                value={ticketQuantity}
-                onChange={(e) => handleQuantityChange(e.target.value)}
-                disabled={availableTickets !== null && availableTickets <= 0}
-              />
+              <div className="space-y-2">
+                <Label htmlFor="dialog-quantity">Number of Tickets</Label>
+                <Input
+                  id="dialog-quantity"
+                  type="number"
+                  min="1"
+                  max={maxPurchaseQuantity}
+                  value={ticketQuantity}
+                  onChange={(e) => handleQuantityChange(e.target.value)}
+                  disabled={availableTickets !== null && availableTickets <= 0}
+                  className="text-base sm:text-sm h-11 sm:h-10"
+                />
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
@@ -930,11 +933,12 @@ export function RaffleDetailClient({
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
             <Button
               variant="outline"
               onClick={() => setShowEnterRaffleDialog(false)}
               disabled={isProcessing}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
             >
               Cancel
             </Button>
@@ -949,6 +953,7 @@ export function RaffleDetailClient({
                 backgroundColor: themeColor,
                 color: '#000',
               }}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
             >
               {!connected
                 ? 'Connect Wallet'
