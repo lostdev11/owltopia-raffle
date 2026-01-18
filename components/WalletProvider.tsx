@@ -2,7 +2,7 @@
 
 import { useMemo, ReactNode, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
-import { BaseWalletAdapter, WalletAdapterNetwork, WalletError } from '@solana/wallet-adapter-base'
+import { BaseWalletAdapter, WalletAdapterNetwork, WalletError, WalletReadyState, WalletName } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
   PhantomWalletAdapter,
@@ -24,8 +24,10 @@ import '@solana/wallet-adapter-react-ui/styles.css'
 
 // Custom Jupiter Wallet Adapter
 // Jupiter Wallet injects itself into window.solana when installed
+const JupiterWalletName = 'Jupiter' as WalletName<'Jupiter'>
+
 class JupiterWalletAdapter extends BaseWalletAdapter {
-  name = 'Jupiter'
+  readonly name = JupiterWalletName
   url = 'https://jup.ag'
   icon = 'https://jup.ag/favicon.ico'
   supportedTransactionVersions: Set<'legacy' | 0> = new Set(['legacy', 0])
@@ -34,7 +36,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
   private _connecting = false
   private _provider: any = null
 
-  constructor(network?: WalletAdapterNetwork) {
+  constructor(config?: { network?: WalletAdapterNetwork }) {
     super()
     
     // Check if Jupiter Wallet is installed
@@ -68,6 +70,13 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
     return typeof window !== 'undefined' && !!this._provider
   }
 
+  get readyState(): WalletReadyState {
+    if (typeof window === 'undefined') {
+      return WalletReadyState.Unsupported
+    }
+    return this._provider ? WalletReadyState.Installed : WalletReadyState.NotDetected
+  }
+
   async connect(): Promise<void> {
     try {
       if (this._publicKey || this._connecting) return
@@ -83,7 +92,7 @@ class JupiterWalletAdapter extends BaseWalletAdapter {
         // Connect to the wallet
         const response = await this._provider.connect()
         this._publicKey = new PublicKey(response.publicKey)
-        this.emit('connect')
+        this.emit('connect', this._publicKey)
       } catch (error: any) {
         // Handle connection errors
         throw error

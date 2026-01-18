@@ -69,3 +69,28 @@ export async function updateEntryStatus(
 
   return data as Entry
 }
+
+export async function deleteEntry(id: string) {
+  const { error, data } = await supabase
+    .from('entries')
+    .delete()
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error deleting entry:', error)
+    console.error('Entry ID:', id)
+    console.error('Supabase error details:', JSON.stringify(error, null, 2))
+    return false
+  }
+
+  // Check if any rows were actually deleted
+  if (!data) {
+    console.warn('No entry found with id:', id)
+    return false
+  }
+
+  console.log('Successfully deleted entry:', id)
+  return true
+}
