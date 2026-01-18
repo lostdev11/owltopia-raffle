@@ -431,6 +431,7 @@ export function RaffleDetailClient({
           } catch (error: any) {
             const errorMessage = error?.message || ''
             const errorCode = error?.code || error?.error?.code
+            const errorName = error?.name || ''
             
             // Token account doesn't exist (expected case)
             if (errorMessage.includes('TokenAccountNotFoundError') || 
