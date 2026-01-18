@@ -594,7 +594,7 @@ export function RaffleDetailClient({
           </CardHeader>
 
           {raffle.image_url && (
-            <div className="!relative w-full h-96 overflow-hidden">
+            <div className="!relative w-full aspect-square overflow-hidden">
               <Image
                 src={raffle.image_url}
                 alt={raffle.title}
