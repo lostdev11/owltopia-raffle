@@ -21,10 +21,33 @@ export function utcToLocalDateTime(utcIsoString: string): string {
 /**
  * Converts a datetime-local input value (in user's local timezone) to UTC ISO string
  * datetime-local inputs provide values in local timezone without timezone info
+ * 
+ * IMPORTANT: We explicitly parse the string to ensure it's interpreted as local time,
+ * not UTC. Some browsers interpret "YYYY-MM-DDTHH:mm" as UTC when passed directly to Date().
  */
 export function localDateTimeToUtc(localDateTimeString: string): string {
-  // Create a date in the user's local timezone
-  const localDate = new Date(localDateTimeString)
+  if (!localDateTimeString) {
+    throw new Error('localDateTimeString is required')
+  }
+
+  // Parse the datetime-local string (format: YYYY-MM-DDTHH:mm)
+  const [datePart, timePart] = localDateTimeString.split('T')
+  if (!datePart || !timePart) {
+    throw new Error('Invalid datetime-local format. Expected: YYYY-MM-DDTHH:mm')
+  }
+
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hours, minutes = 0] = timePart.split(':').map(Number)
+
+  // Create a Date object explicitly in local timezone
+  // Using the Date constructor with individual components interprets them as local time
+  const localDate = new Date(year, month - 1, day, hours, minutes, 0, 0)
+  
+  // Verify the date is valid
+  if (isNaN(localDate.getTime())) {
+    throw new Error('Invalid date values')
+  }
+
   // Convert to ISO string (which is in UTC)
   return localDate.toISOString()
 }

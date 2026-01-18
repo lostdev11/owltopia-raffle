@@ -99,6 +99,37 @@ export async function PATCH(
       }
     }
 
+    // Validate dates if provided
+    if (body.start_time || body.end_time) {
+      const startTime = body.start_time || existingRaffle.start_time
+      const endTime = body.end_time || existingRaffle.end_time
+
+      const startDate = new Date(startTime)
+      const endDate = new Date(endTime)
+      
+      if (isNaN(startDate.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid start_time format. Expected ISO 8601 format.' },
+          { status: 400 }
+        )
+      }
+      
+      if (isNaN(endDate.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid end_time format. Expected ISO 8601 format.' },
+          { status: 400 }
+        )
+      }
+      
+      // Validate that end_time is after start_time
+      if (endDate <= startDate) {
+        return NextResponse.json(
+          { error: 'end_time must be after start_time' },
+          { status: 400 }
+        )
+      }
+    }
+
     const updates: any = {
       title: body.title,
       description: body.description || null,

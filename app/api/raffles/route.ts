@@ -74,6 +74,32 @@ export async function POST(request: NextRequest) {
     // Default start_time to current time if not provided
     const startTime = body.start_time || new Date().toISOString()
 
+    // Validate date strings are valid ISO format
+    const startDate = new Date(startTime)
+    const endDate = new Date(body.end_time)
+    
+    if (isNaN(startDate.getTime())) {
+      return NextResponse.json(
+        { error: 'Invalid start_time format. Expected ISO 8601 format.' },
+        { status: 400 }
+      )
+    }
+    
+    if (isNaN(endDate.getTime())) {
+      return NextResponse.json(
+        { error: 'Invalid end_time format. Expected ISO 8601 format.' },
+        { status: 400 }
+      )
+    }
+    
+    // Validate that end_time is after start_time
+    if (endDate <= startDate) {
+      return NextResponse.json(
+        { error: 'end_time must be after start_time' },
+        { status: 400 }
+      )
+    }
+
     // Validate currency is USDC or SOL only
     const validCurrencies = ['USDC', 'SOL']
     if (body.currency && !validCurrencies.includes(body.currency)) {
