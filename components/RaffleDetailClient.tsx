@@ -27,7 +27,7 @@ import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor }
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -65,6 +65,7 @@ export function RaffleDetailClient({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   // Make isActive reactive to time passing - critical for mobile connections
   const [isActive, setIsActive] = useState(() => {
     const endTime = new Date(raffle.end_time)
@@ -569,9 +570,54 @@ export function RaffleDetailClient({
     setShowEnterRaffleDialog(true)
   }
 
+  // Size-based styling classes
+  const sizeClasses = {
+    small: {
+      containerPadding: 'py-2 px-2',
+      title: 'text-lg mb-0.5',
+      description: 'text-xs',
+      headerPadding: 'p-2',
+      imageSpace: 'space-y-1',
+      contentPadding: 'pt-2 space-y-2',
+      contentText: 'text-sm',
+      labelText: 'text-xs',
+      buttonSize: 'sm',
+      statsGrid: 'gap-1.5',
+      badgeSize: 'sm',
+    },
+    medium: {
+      containerPadding: 'py-4 px-3',
+      title: 'text-xl mb-1',
+      description: 'text-sm',
+      headerPadding: 'p-3',
+      imageSpace: 'space-y-2',
+      contentPadding: 'pt-3 space-y-3',
+      contentText: 'text-base',
+      labelText: 'text-xs',
+      buttonSize: 'default',
+      statsGrid: 'gap-2',
+      badgeSize: 'sm',
+    },
+    large: {
+      containerPadding: 'py-6 px-4',
+      title: 'text-2xl mb-2',
+      description: 'text-base',
+      headerPadding: 'p-4',
+      imageSpace: 'space-y-3',
+      contentPadding: 'pt-4 space-y-4',
+      contentText: 'text-lg',
+      labelText: 'text-sm',
+      buttonSize: 'lg',
+      statsGrid: 'gap-3',
+      badgeSize: 'default',
+    },
+  }
+
+  const classes = sizeClasses[imageSize]
+
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-2' : imageSize === 'medium' ? 'py-6 px-3' : 'py-8 px-4'}`}>
+      <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
         <Button
           variant="outline"
           onClick={() => router.push('/raffles')}
@@ -581,11 +627,11 @@ export function RaffleDetailClient({
           Back to Listings
         </Button>
         <Card className={getThemeAccentClasses(raffle.theme_accent)} style={borderStyle}>
-          <CardHeader>
+          <CardHeader className={classes.headerPadding}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <CardTitle className="text-3xl mb-2">{raffle.title}</CardTitle>
-                <CardDescription className="text-base">
+                <CardTitle className={classes.title}>{raffle.title}</CardTitle>
+                <CardDescription className={classes.description}>
                   {raffle.description}
                 </CardDescription>
               </div>
@@ -594,53 +640,87 @@ export function RaffleDetailClient({
           </CardHeader>
 
           {raffle.image_url && (
-            <div className="!relative w-full aspect-square overflow-hidden">
-              <Image
-                src={raffle.image_url}
-                alt={raffle.title}
-                fill
-                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
-                priority
-                className="object-cover"
-              />
-            </div>
+            <>
+              <div className={`flex items-center justify-end gap-2 ${classes.headerPadding} pt-0 pb-2`}>
+                <span className="text-sm text-muted-foreground mr-2">Image size:</span>
+                <div className="flex gap-1 border rounded-md p-1">
+                  <Button
+                    variant={imageSize === 'small' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setImageSize('small')}
+                    className="h-8 px-3"
+                    title="Small"
+                  >
+                    <Grid3x3 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={imageSize === 'medium' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setImageSize('medium')}
+                    className="h-8 px-3"
+                    title="Medium"
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={imageSize === 'large' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setImageSize('large')}
+                    className="h-8 px-3"
+                    title="Large"
+                  >
+                    <Square className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
+                <Image
+                  src={raffle.image_url}
+                  alt={raffle.title}
+                  fill
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
+                  priority
+                  className="object-contain"
+                />
+              </div>
+            </>
           )}
 
-          <CardContent className="pt-6 space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <CardContent className={classes.contentPadding}>
+            <div className={`grid grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
-                  <p className="text-sm text-muted-foreground">Prize</p>
-                  <p className="text-xl font-bold">
+                  <p className={classes.labelText + ' text-muted-foreground'}>Prize</p>
+                  <p className={classes.contentText + ' font-bold'}>
                     {raffle.prize_amount} {raffle.prize_currency}
                   </p>
                 </div>
               )}
               {raffle.ticket_price > 0 && (
                 <div>
-                  <p className="text-sm text-muted-foreground">Ticket Price</p>
-                  <div className="text-xl font-bold flex items-center gap-2">
+                  <p className={classes.labelText + ' text-muted-foreground'}>Ticket Price</p>
+                  <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
                     {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={20} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
                   </div>
                 </div>
               )}
               <div>
-                <p className="text-sm text-muted-foreground">Confirmed Entries</p>
-                <p className="text-xl font-bold">{currentOwlVisionScore.confirmedEntries}</p>
+                <p className={classes.labelText + ' text-muted-foreground'}>Confirmed Entries</p>
+                <p className={classes.contentText + ' font-bold'}>{currentOwlVisionScore.confirmedEntries}</p>
               </div>
               {raffle.max_tickets !== null && (
                 <div>
-                  <p className="text-sm text-muted-foreground">Available Tickets</p>
-                  <p className="text-xl font-bold">
+                  <p className={classes.labelText + ' text-muted-foreground'}>Available Tickets</p>
+                  <p className={classes.contentText + ' font-bold'}>
                     {availableTickets !== null ? availableTickets : raffle.max_tickets}
                   </p>
                 </div>
               )}
               <div>
-                <p className="text-sm text-muted-foreground">Status</p>
+                <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="space-y-1">
-                  <Badge variant={isActive ? 'default' : 'secondary'}>
+                  <Badge variant={isActive ? 'default' : 'secondary'} className={imageSize === 'small' ? 'text-xs' : ''}>
                     {isActive
                       ? `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`
                       : 'Ended'}
@@ -657,16 +737,16 @@ export function RaffleDetailClient({
             </div>
 
             {connected && (
-              <div className="p-4 rounded-lg bg-muted/50 border border-primary/20">
+              <div className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Your Tickets</p>
-                    <p className="text-2xl font-bold" style={{ color: themeColor }}>
+                    <p className={classes.labelText + ' text-muted-foreground'}>Your Tickets</p>
+                    <p className={`${imageSize === 'small' ? 'text-lg' : imageSize === 'medium' ? 'text-xl' : 'text-2xl'} font-bold`} style={{ color: themeColor }}>
                       {userTickets} {userTickets === 1 ? 'ticket' : 'tickets'}
                     </p>
                   </div>
                   {userTickets > 0 && (
-                    <Badge variant="default" className="text-lg px-4 py-2">
+                    <Badge variant="default" className={`${imageSize === 'small' ? 'text-xs px-2 py-1' : imageSize === 'medium' ? 'text-sm px-3 py-1.5' : 'text-lg px-4 py-2'}`}>
                       {userTickets}
                     </Badge>
                   )}
@@ -682,12 +762,12 @@ export function RaffleDetailClient({
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
                   disabled={availableTickets !== null && availableTickets <= 0}
-                  size="lg"
+                  size={classes.buttonSize as any}
                   style={{
                     backgroundColor: themeColor,
                     color: '#000',
                   }}
-                  className="w-full md:w-auto px-8"
+                  className={`w-full md:w-auto ${imageSize === 'small' ? 'px-4' : 'px-8'}`}
                 >
                   {availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'

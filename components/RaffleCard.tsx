@@ -397,18 +397,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           href={`/raffles/${raffle.slug}`}
           onClick={(e) => {
             const target = e.target as HTMLElement
-            if (target.closest('button')) {
+            // Prevent navigation if clicking on buttons or when quick buy form is open
+            if (target.closest('button') || showQuickBuy) {
               e.preventDefault()
             }
           }}
         >
           <Card
-            className={getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row')}
+            className={getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch')}
             style={borderStyle}
           >
             {raffle.image_url && (
               <div 
-                className="!relative w-24 h-24 flex-shrink-0 overflow-hidden cursor-pointer"
+                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -419,7 +420,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   src={raffle.image_url}
                   alt={raffle.title}
                   fill
-                  sizes="96px"
+                  sizes="(max-width: 768px) 160px, 192px"
                   className="object-cover"
                   priority={priority}
                 />
@@ -625,24 +626,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   // Medium and Large sizes - Card format (vertical)
   const sizeClasses = {
     medium: {
-      image: 'aspect-[4/3]',
       title: 'text-lg',
       description: 'text-sm line-clamp-2',
-      content: 'text-sm space-y-2',
-      footer: 'text-xs gap-2',
-      header: '',
-      contentPadding: 'pt-4',
-      footerPadding: '',
+      content: 'text-sm',
+      footer: 'text-xs',
+      badge: 'text-xs',
     },
     large: {
-      image: 'aspect-[4/3]',
       title: 'text-xl',
-      description: 'text-base line-clamp-3',
-      content: 'text-base space-y-3',
-      footer: 'text-sm gap-3',
-      header: 'p-6',
-      contentPadding: 'pt-6 px-6',
-      footerPadding: 'p-6',
+      description: 'text-base line-clamp-2',
+      content: 'text-base',
+      footer: 'text-sm',
+      badge: 'text-sm',
     },
   }
 
@@ -655,99 +650,130 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
         href={`/raffles/${raffle.slug}`} 
         onClick={(e) => {
           const target = e.target as HTMLElement
+          // Prevent navigation if clicking on buttons or when quick buy form is open
           if (target.closest('button') || showQuickBuy) {
             e.preventDefault()
           }
         }}
       >
         <Card
-          className={getThemeAccentClasses(raffle.theme_accent, 'h-full flex flex-col hover:scale-105 cursor-pointer')}
+          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl`}
           style={borderStyle}
         >
-          <CardHeader className={classes.header}>
-            <div className="flex items-start justify-between gap-2">
-              <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
-              <div className="flex items-center gap-2">
-                <OwlVisionBadge score={owlVisionScore} />
-              </div>
-            </div>
-          <CardDescription className={classes.description}>
-            {raffle.description}
-          </CardDescription>
-        </CardHeader>
-        {raffle.image_url && (
-          <div 
-            className={`!relative w-full ${classes.image} overflow-hidden cursor-pointer`}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setImageModalOpen(true)
-            }}
-          >
-            <Image
-              src={raffle.image_url}
-              alt={raffle.title}
-              fill
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
-              className="object-contain"
-              priority={priority}
-            />
-          </div>
-        )}
-        <CardContent className={`flex-1 ${classes.contentPadding}`}>
-          <div className={classes.content}>
-            {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Prize</span>
-                <span className="font-semibold">
-                  {raffle.prize_amount} {raffle.prize_currency}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Ticket Price</span>
-              <span className="font-semibold flex items-center gap-1.5">
-                {raffle.ticket_price} {raffle.currency}
-                <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
-              </span>
-            </div>
-            {owlVisionScore.confirmedEntries > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Entries</span>
-                <span className="font-semibold">
-                  {owlVisionScore.confirmedEntries} confirmed
-                </span>
-              </div>
-            )}
-          </div>
-        </CardContent>
-        <CardFooter className={`flex flex-col ${classes.footer} ${classes.footerPadding}`}>
-          <div className={`w-full flex items-center justify-between ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
-            <span>
-              {isActive ? (
-                <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                  Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
-                </span>
-              ) : (
-                <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
-              )}
-            </span>
-            <Badge variant={isActive ? 'default' : 'secondary'}>
-              {isActive ? 'Active' : 'Ended'}
-            </Badge>
-          </div>
-          {!showQuickBuy && (
-            <Button 
-              type="button"
-              className="w-full" 
-              size={displaySize === 'large' ? 'lg' : 'default'}
-              onClick={handleToggleQuickBuy}
-              disabled={!isActive || (availableTickets !== null && availableTickets <= 0)}
+          {raffle.image_url && (
+            <div 
+              className="!relative w-full aspect-square overflow-hidden cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setImageModalOpen(true)
+              }}
             >
-              {isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details'}
-            </Button>
+              <Image
+                src={raffle.image_url}
+                alt={raffle.title}
+                fill
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
+                className="object-cover"
+                priority={priority}
+              />
+              {/* Metadata overlay on image */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity">
+                <div className="absolute bottom-0 left-0 right-0 p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
+                    <OwlVisionBadge score={owlVisionScore} />
+                  </div>
+                  <CardDescription className={`${classes.description} text-white/90`}>
+                    {raffle.description}
+                  </CardDescription>
+                </div>
+              </div>
+              {/* Always visible overlay at bottom for key info */}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
+                      {raffle.ticket_price} {raffle.currency}
+                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block flex-shrink-0" />
+                    </div>
+                    <div className={`${classes.footer} text-white/80`}>
+                      {owlVisionScore.confirmedEntries} entries
+                    </div>
+                  </div>
+                  <Badge variant={isActive ? 'default' : 'secondary'} className={classes.badge}>
+                    {isActive ? 'Active' : 'Ended'}
+                  </Badge>
+                </div>
+              </div>
+            </div>
           )}
-          {showQuickBuy && isActive && (
+          {/* Fallback if no image */}
+          {!raffle.image_url && (
+            <>
+              <CardHeader className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
+                  <OwlVisionBadge score={owlVisionScore} />
+                </div>
+                <CardDescription className={classes.description}>
+                  {raffle.description}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-0">
+                <div className={classes.content}>
+                  {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Prize</span>
+                      <span className="font-semibold">
+                        {raffle.prize_amount} {raffle.prize_currency}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Ticket Price</span>
+                    <span className="font-semibold flex items-center gap-1.5">
+                      {raffle.ticket_price} {raffle.currency}
+                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
+                    </span>
+                  </div>
+                  {owlVisionScore.confirmedEntries > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Entries</span>
+                      <span className="font-semibold">
+                        {owlVisionScore.confirmedEntries} confirmed
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+              <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
+                <div className={`w-full flex items-center justify-between ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
+                  <span>
+                    {isActive ? (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>
+                        Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
+                      </span>
+                    ) : (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
+                    )}
+                  </span>
+                  <Badge variant={isActive ? 'default' : 'secondary'}>
+                    {isActive ? 'Active' : 'Ended'}
+                  </Badge>
+                </div>
+                {!showQuickBuy && (
+                  <Button 
+                    type="button"
+                    className="w-full" 
+                    size={displaySize === 'large' ? 'lg' : 'default'}
+                    onClick={handleToggleQuickBuy}
+                    disabled={!isActive || (availableTickets !== null && availableTickets <= 0)}
+                  >
+                    {isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details'}
+                  </Button>
+                )}
+                {showQuickBuy && isActive && (
             <div className="w-full space-y-3 pt-2">
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <div className="p-2 rounded-lg bg-muted border">
@@ -819,9 +845,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               </div>
             </div>
           )}
-        </CardFooter>
-      </Card>
-    </Link>
+              </CardFooter>
+            </>
+          )}
+        </Card>
+      </Link>
     {isAdmin && (
       <>
         <div className="absolute top-2 right-2 z-10 flex gap-2">

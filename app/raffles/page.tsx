@@ -1,6 +1,6 @@
 import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
-import { RafflesList } from '@/components/RafflesList'
 import { getSupabaseConfigError } from '@/lib/supabase'
+import { RafflesPageClient } from './RafflesPageClient'
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -94,61 +94,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key`}
   ])
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">Owl Raffles</h1>
-        <p className="text-muted-foreground">
-          Transparent raffles with Owl Vision trust scoring
-        </p>
-      </div>
-
-      <div className="mb-12">
-        <h2 className="text-2xl font-bold mb-6">Active Raffles</h2>
-        {activeRafflesWithEntries.length > 0 ? (
-          <RafflesList 
-            rafflesWithEntries={activeRafflesWithEntries} 
-            title={undefined}
-            showViewSizeControls={true}
-          />
-        ) : (
-          <div className="text-center py-8">
-            <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
-          </div>
-        )}
-      </div>
-
-      <div className="mb-12">
-        <h2 className="text-2xl font-bold mb-6">Future Raffles</h2>
-        {futureRafflesWithEntries.length > 0 ? (
-          <RafflesList 
-            rafflesWithEntries={futureRafflesWithEntries} 
-            title={undefined}
-            showViewSizeControls={false}
-          />
-        ) : (
-          <div className="text-center py-8">
-            <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
-          </div>
-        )}
-      </div>
-
-      {pastRafflesWithEntries.length > 0 && (
-        <div className="mb-12">
-          <RafflesList 
-            rafflesWithEntries={pastRafflesWithEntries} 
-            title="Past Raffles"
-            showViewSizeControls={false}
-          />
-        </div>
-      )}
-
-      {activeRafflesWithEntries.length === 0 && 
-       futureRafflesWithEntries.length === 0 && 
-       pastRafflesWithEntries.length === 0 && (
-        <div className="text-center py-16">
-          <p className="text-xl text-muted-foreground mb-4">No raffles available</p>
-        </div>
-      )}
-    </div>
+    <RafflesPageClient
+      activeRafflesWithEntries={activeRafflesWithEntries}
+      futureRafflesWithEntries={futureRafflesWithEntries}
+      pastRafflesWithEntries={pastRafflesWithEntries}
+    />
   )
 }

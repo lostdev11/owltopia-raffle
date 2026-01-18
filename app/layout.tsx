@@ -14,7 +14,7 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: 'Owl Raffle',
-  description: 'Transparent raffles with Owl Vision trust scoring',
+  description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
   icons: {
     icon: '/icon.svg',
     shortcut: '/icon.svg',
