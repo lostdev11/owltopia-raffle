@@ -15,7 +15,7 @@ const externalLinks = [
 
 export function Footer() {
   return (
-    <footer className="w-full bg-black border-t border-green-500/20 mt-auto">
+    <footer className="w-full bg-black border-t border-green-500/40 mt-auto">
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6">
         <div className="flex flex-col gap-4 sm:gap-6">
           {/* Owltopia neon branding */}
@@ -44,7 +44,7 @@ export function Footer() {
           </div>
           
           {/* Copyright and Terms Section */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/10 pt-3 sm:pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/40 pt-3 sm:pt-4">
             <div className="flex items-center gap-3 sm:gap-4">
               <span>© {new Date().getFullYear()} Owl Raffle</span>
             </div>
