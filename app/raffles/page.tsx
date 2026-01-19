@@ -59,17 +59,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key`}
       continue
     }
     
-    // Active raffle: endTime > now AND is_active (matching RaffleCard logic exactly)
-    // This includes raffles that haven't started yet (startTime > now) if they're active
-    if (endTimeMs > nowTime && raffle.is_active) {
-      activeRaffles.push(raffle)
+    // Future raffle: hasn't started yet (start time is strictly in the future)
+    // Check this BEFORE active check to ensure future raffles are categorized correctly
+    if (startTimeMs > nowTime) {
+      futureRaffles.push(raffle)
       continue
     }
     
-    // Future raffle: hasn't started yet (start time is strictly in the future)
-    // This catches raffles that don't match Active criteria but haven't started
-    if (startTimeMs > nowTime) {
-      futureRaffles.push(raffle)
+    // Active raffle: has started (startTime <= now), hasn't ended (endTime > now), and is_active
+    // Only raffles that have actually started should be considered active
+    if (startTimeMs <= nowTime && endTimeMs > nowTime && raffle.is_active) {
+      activeRaffles.push(raffle)
       continue
     }
     

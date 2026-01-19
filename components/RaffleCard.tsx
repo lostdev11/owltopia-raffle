@@ -66,10 +66,20 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const [imageError, setImageError] = useState(false)
   
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
-  const isActive = new Date(raffle.end_time) > new Date() && raffle.is_active
+  const now = new Date()
+  const startTime = new Date(raffle.start_time)
+  const endTime = new Date(raffle.end_time)
+  const isFuture = startTime > now
+  const isActive = endTime > now && raffle.is_active && !isFuture
   const isWinner = !isActive && raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
-  const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const themeColor = getThemeAccentColor(raffle.theme_accent)
+  
+  // Use red color for future raffles, otherwise use theme accent
+  const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
+  const borderStyle = isFuture ? {
+    borderColor: '#ef4444', // red-500
+    boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)', // red glow
+  } : baseBorderStyle
+  const themeColor = isFuture ? '#ef4444' : getThemeAccentColor(raffle.theme_accent)
   
   // Calculate available tickets
   const totalTicketsSold = calculateTicketsSold(entries)
@@ -675,7 +685,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             <div className="flex items-center justify-between mt-auto">
               <span className="text-xs text-muted-foreground">
-                {isActive ? (
+                {isFuture ? (
+                  <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                    Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                  </span>
+                ) : isActive ? (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>
                     Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
                   </span>
@@ -692,8 +706,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
                   </Badge>
                 )}
-                <Badge variant={isActive ? 'default' : 'secondary'} className="text-xs">
-                  {isActive ? 'Active' : 'Ended'}
+                <Badge 
+                  variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
+                  className={`text-xs ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}
+                >
+                  {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                 </Badge>
                 {isActive && (
                   <Button 
@@ -707,7 +724,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 )}
               </div>
             </div>
-            {!isActive && raffle.winner_wallet && (
+            {!isActive && !isFuture && raffle.winner_wallet && (
               <div className="mt-2 pt-2 border-t flex items-center gap-2">
                 <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
                 <span className="text-xs text-muted-foreground">
@@ -717,7 +734,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </span>
               </div>
             )}
-            {showQuickBuy && isActive && (
+            {showQuickBuy && isActive && !isFuture && (
               <div className="mt-3 pt-3 border-t space-y-3">
                 {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                   <p className="text-xs text-muted-foreground">
@@ -962,8 +979,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                         {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                       </Badge>
                     )}
-                    <Badge variant={isActive ? 'default' : 'secondary'} className={classes.badge}>
-                      {isActive ? 'Active' : 'Ended'}
+                    <Badge 
+                      variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
+                      className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}
+                    >
+                      {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                     </Badge>
                   </div>
                 </div>
@@ -1030,7 +1050,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
                 <div className={`w-full flex items-center justify-between ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
                   <span>
-                    {isActive ? (
+                    {isFuture ? (
+                      <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                        Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                      </span>
+                    ) : isActive ? (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>
                         Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
                       </span>
@@ -1047,12 +1071,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                         {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
                       </Badge>
                     )}
-                    <Badge variant={isActive ? 'default' : 'secondary'}>
-                      {isActive ? 'Active' : 'Ended'}
+                    <Badge 
+                      variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')}
+                      className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}
+                    >
+                      {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                     </Badge>
                   </div>
                 </div>
-                {!isActive && raffle.winner_wallet && (
+                {!isActive && !isFuture && raffle.winner_wallet && (
                   <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
                     <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />
                     <span className="text-muted-foreground">
@@ -1068,12 +1095,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     className="w-full touch-manipulation min-h-[44px] text-base sm:text-sm" 
                     size={displaySize === 'large' ? 'lg' : 'default'}
                     onClick={handleToggleQuickBuy}
-                    disabled={!isActive || (availableTickets !== null && availableTickets <= 0)}
+                    disabled={!isActive || isFuture || (availableTickets !== null && availableTickets <= 0)}
                   >
-                    {isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details'}
+                    {isFuture ? 'Starts Soon' : (isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
                   </Button>
                 )}
-                {showQuickBuy && isActive && (
+                {showQuickBuy && isActive && !isFuture && (
             <div className="w-full space-y-3 pt-2">
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <div className="p-2 rounded-lg bg-muted border">
