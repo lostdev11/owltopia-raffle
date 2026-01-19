@@ -701,9 +701,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 {minTickets && isActive && (
                   <Badge 
                     variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                    className={`text-xs ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                    className={`text-[9px] px-1 py-0 leading-tight ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                   >
-                    {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                    {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                   </Badge>
                 )}
                 <Badge 
@@ -915,6 +915,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           if (target.closest('button') || target.closest('input') || target.closest('label')) {
             e.preventDefault()
           }
+          // Prevent navigation for future raffles
+          if (isFuture) {
+            e.preventDefault()
+          }
         }}
       >
         <Card
@@ -974,7 +978,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     {minTickets && isActive && (
                       <Badge 
                         variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                        className={`${classes.badge} ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                        className={`text-[9px] px-1 py-0 leading-tight ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                       >
                         {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                       </Badge>
@@ -1066,9 +1070,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     {minTickets && isActive && (
                       <Badge 
                         variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                        className={isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}
+                        className={`text-[9px] px-1 py-0 leading-tight ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                       >
-                        {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                        {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                       </Badge>
                     )}
                     <Badge 

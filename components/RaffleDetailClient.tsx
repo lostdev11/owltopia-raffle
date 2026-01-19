@@ -73,18 +73,28 @@ export function RaffleDetailClient({
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
   // Make isActive reactive to time passing - critical for mobile connections
+  // Also check if raffle has started (not future)
   const [isActive, setIsActive] = useState(() => {
+    const startTime = new Date(raffle.start_time)
     const endTime = new Date(raffle.end_time)
     const now = new Date()
-    return endTime > now && raffle.is_active
+    return startTime <= now && endTime > now && raffle.is_active
+  })
+  const [isFuture, setIsFuture] = useState(() => {
+    const startTime = new Date(raffle.start_time)
+    const now = new Date()
+    return startTime > now
   })
 
-  // Update isActive when time passes (e.g., raffle ends while page is open)
+  // Update isActive and isFuture when time passes (e.g., raffle ends or starts while page is open)
   useEffect(() => {
+    const startTime = new Date(raffle.start_time).getTime()
     const endTime = new Date(raffle.end_time).getTime()
     const now = Date.now()
-    const shouldBeActive = endTime > now && raffle.is_active
+    const isFutureRaffle = startTime > now
+    const shouldBeActive = startTime <= now && endTime > now && raffle.is_active
     
+    setIsFuture(isFutureRaffle)
     setIsActive(shouldBeActive)
 
     // If raffle is still active, set up interval to check when it ends
@@ -108,7 +118,7 @@ export function RaffleDetailClient({
       
       return () => clearInterval(intervalId)
     }
-  }, [raffle.end_time, raffle.is_active])
+  }, [raffle.start_time, raffle.end_time, raffle.is_active])
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const themeColor = getThemeAccentColor(raffle.theme_accent)
 
@@ -925,9 +935,9 @@ export function RaffleDetailClient({
                   {isActive && (
                     <Badge 
                       variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                      className={`text-xs mt-1 ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                      className={`text-[9px] px-1 py-0 leading-tight mt-1 ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                     >
-                      {isEligibleToDraw ? 'Eligible to Draw' : 'Not Eligible Yet'}
+                      {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                     </Badge>
                   )}
                 </div>
@@ -935,13 +945,17 @@ export function RaffleDetailClient({
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="space-y-1">
-                  <Badge variant={isActive ? 'default' : 'secondary'} className={imageSize === 'small' ? 'text-xs' : ''}>
-                    {isActive
+                  <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}>
+                    {isFuture
+                      ? `Starts ${formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                      : isActive
                       ? `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`
                       : 'Ended'}
                   </Badge>
                   <p className="text-xs text-muted-foreground">
-                    {isActive ? (
+                    {isFuture ? (
+                      <>Starts: {formatDateTimeWithTimezone(raffle.start_time)}</>
+                    ) : isActive ? (
                       <>Ends: {formatDateTimeWithTimezone(raffle.end_time)}</>
                     ) : (
                       <>Ended: {formatDateTimeWithTimezone(raffle.end_time)}</>
@@ -972,7 +986,7 @@ export function RaffleDetailClient({
               </div>
             )}
 
-            {isActive && (
+            {isActive && !isFuture && (
               <div className="flex justify-center">
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
@@ -988,6 +1002,13 @@ export function RaffleDetailClient({
                     ? 'Sold Out'
                     : 'Enter Raffle'}
                 </Button>
+              </div>
+            )}
+            {isFuture && (
+              <div className="flex justify-center">
+                <Badge variant="default" className="bg-red-500 hover:bg-red-600 text-white px-4 py-2">
+                  Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                </Badge>
               </div>
             )}
 
