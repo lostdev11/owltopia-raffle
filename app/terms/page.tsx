@@ -176,7 +176,17 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">13. Intellectual Property</h2>
+          <h2 className="text-2xl font-semibold mb-4">13. Raffle Policy</h2>
+          <p className="mb-4">
+            In the event that the minimum number of tickets is not sold by the scheduled end date, the raffle will be extended for an additional seven (7) days.
+          </p>
+          <p className="mb-4">
+            If the minimum requirement is still not met after the extension period, all participants will receive a full refund.
+          </p>
+        </section>
+
+        <section className="mb-8">
+          <h2 className="text-2xl font-semibold mb-4">14. Intellectual Property</h2>
           <p className="mb-4">
             All content on the Platform, including but not limited to text, graphics, logos, and software, 
             is the property of Owl Raffle or its licensors and is protected by copyright and other intellectual property laws.
@@ -184,7 +194,7 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">14. Privacy</h2>
+          <h2 className="text-2xl font-semibold mb-4">15. Privacy</h2>
           <p className="mb-4">
             While transactions on the blockchain are public, we respect your privacy. 
             Please review our privacy practices and understand that wallet addresses may be publicly visible 
@@ -193,7 +203,7 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">15. Governing Law</h2>
+          <h2 className="text-2xl font-semibold mb-4">16. Governing Law</h2>
           <p className="mb-4">
             These Terms shall be governed by and construed in accordance with applicable laws, 
             without regard to conflict of law provisions. Any disputes arising from these Terms 
@@ -202,7 +212,7 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">16. Changes to Terms</h2>
+          <h2 className="text-2xl font-semibold mb-4">17. Changes to Terms</h2>
           <p className="mb-4">
             We reserve the right to modify these Terms of Service at any time. 
             Your continued use of the Platform after any changes constitutes acceptance of the new terms. 
@@ -211,7 +221,7 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">17. Contact</h2>
+          <h2 className="text-2xl font-semibold mb-4">18. Contact</h2>
           <p className="mb-4">
             If you have any questions about these Terms of Service, please contact us through the Platform.
           </p>

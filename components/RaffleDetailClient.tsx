@@ -28,7 +28,7 @@ import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor }
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -66,6 +66,11 @@ export function RaffleDetailClient({
   const purchaseAmount = raffle.ticket_price * ticketQuantity
   const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
+  const [showNftTransferDialog, setShowNftTransferDialog] = useState(false)
+  const [nftTransferSignature, setNftTransferSignature] = useState('')
+  const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
+  const [transferSuccess, setTransferSuccess] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -769,6 +774,70 @@ export function RaffleDetailClient({
     setShowEnterRaffleDialog(true)
   }
 
+  const handleOpenNftTransferDialog = () => {
+    setNftTransferSignature('')
+    setTransferError(null)
+    setTransferSuccess(false)
+    setShowNftTransferDialog(true)
+  }
+
+  const handleSubmitNftTransfer = async () => {
+    if (!connected || !publicKey) {
+      setTransferError('Please connect your wallet first')
+      return
+    }
+
+    if (!nftTransferSignature.trim()) {
+      setTransferError('Please enter a transaction signature')
+      return
+    }
+
+    setIsSubmittingTransfer(true)
+    setTransferError(null)
+    setTransferSuccess(false)
+
+    try {
+      const response = await fetch(`/api/raffles/${raffle.id}/nft-transfer`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transaction_signature: nftTransferSignature.trim(),
+          wallet_address: publicKey.toBase58(),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to record NFT transfer transaction')
+      }
+
+      setTransferSuccess(true)
+      
+      // Refresh the page to show the updated transaction signature
+      setTimeout(() => {
+        router.refresh()
+        setShowNftTransferDialog(false)
+      }, 1500)
+    } catch (err) {
+      console.error('Error submitting NFT transfer:', err)
+      setTransferError(err instanceof Error ? err.message : 'Failed to record NFT transfer transaction')
+    } finally {
+      setIsSubmittingTransfer(false)
+    }
+  }
+
+  // Check if raffle has ended
+  const hasEnded = !isActive && !isFuture
+  // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
+  const showNftTransferButton = 
+    hasEnded && 
+    raffle.winner_wallet && 
+    raffle.prize_type === 'nft' && 
+    isAdmin && 
+    !raffle.nft_transfer_transaction
+
   // Size-based styling classes
   const sizeClasses = {
     small: {
@@ -1032,6 +1101,17 @@ export function RaffleDetailClient({
                   View Winner
                 </Button>
               )}
+              {showNftTransferButton && (
+                <Button
+                  variant="outline"
+                  onClick={handleOpenNftTransferDialog}
+                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                >
+                  <Send className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Record NFT Transfer</span>
+                  <span className="sm:hidden">Record Transfer</span>
+                </Button>
+              )}
               {isAdmin && (
                 <Button
                   variant="outline"
@@ -1063,8 +1143,79 @@ export function RaffleDetailClient({
           prizeAmount={raffle.prize_amount}
           prizeCurrency={raffle.prize_currency}
           themeAccent={raffle.theme_accent}
+          nftTransferTransaction={raffle.nft_transfer_transaction}
+          prizeType={raffle.prize_type}
+          nftMintAddress={raffle.nft_mint_address}
+          nftCollectionName={raffle.nft_collection_name}
         />
       )}
+
+      <Dialog open={showNftTransferDialog} onOpenChange={setShowNftTransferDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Record NFT Transfer Transaction</DialogTitle>
+            <DialogDescription>
+              Enter the transaction signature for the NFT transfer to the winner. This will be visible to all participants for transparency.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="nft-transfer-signature">Transaction Signature</Label>
+              <Input
+                id="nft-transfer-signature"
+                type="text"
+                placeholder="Enter transaction signature..."
+                value={nftTransferSignature}
+                onChange={(e) => setNftTransferSignature(e.target.value)}
+                disabled={isSubmittingTransfer}
+                className="text-base sm:text-sm h-11 sm:h-10 font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                The Solana transaction signature that transferred the NFT to the winner's wallet.
+              </p>
+            </div>
+            
+            {transferError && (
+              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive text-destructive text-sm">
+                {transferError}
+              </div>
+            )}
+            
+            {transferSuccess && (
+              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm">
+                NFT transfer transaction recorded successfully!
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowNftTransferDialog(false)}
+              disabled={isSubmittingTransfer}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitNftTransfer}
+              disabled={!connected || isSubmittingTransfer || !nftTransferSignature.trim()}
+              style={{
+                backgroundColor: themeColor,
+                color: '#000',
+              }}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
+            >
+              {!connected
+                ? 'Connect Wallet'
+                : isSubmittingTransfer
+                ? 'Recording...'
+                : 'Record Transaction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showEnterRaffleDialog} onOpenChange={setShowEnterRaffleDialog}>
         <DialogContent className="sm:max-w-[500px]">

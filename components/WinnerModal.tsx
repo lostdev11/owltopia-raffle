@@ -11,7 +11,8 @@ import {
 import { Button } from '@/components/ui/button'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
-import { Trophy } from 'lucide-react'
+import { Trophy, ExternalLink } from 'lucide-react'
+import type { PrizeType } from '@/lib/types'
 
 interface WinnerModalProps {
   open: boolean
@@ -20,6 +21,10 @@ interface WinnerModalProps {
   prizeAmount: number | null
   prizeCurrency: string | null
   themeAccent: ThemeAccent
+  nftTransferTransaction?: string | null
+  prizeType?: PrizeType
+  nftMintAddress?: string | null
+  nftCollectionName?: string | null
 }
 
 export function WinnerModal({
@@ -29,6 +34,10 @@ export function WinnerModal({
   prizeAmount,
   prizeCurrency,
   themeAccent,
+  nftTransferTransaction,
+  prizeType,
+  nftMintAddress,
+  nftCollectionName,
 }: WinnerModalProps) {
   const borderStyle = getThemeAccentBorderStyle(themeAccent)
 
@@ -54,11 +63,50 @@ export function WinnerModal({
               {winnerWallet}
             </code>
           </div>
-          {prizeAmount && prizeCurrency && (
+          {prizeType === 'nft' ? (
+            <div className="text-center space-y-2">
+              <p className="text-sm text-muted-foreground">Prize</p>
+              <p className="text-xl font-bold">
+                NFT
+              </p>
+              {nftCollectionName && (
+                <p className="text-sm text-muted-foreground">
+                  {nftCollectionName}
+                </p>
+              )}
+              {nftMintAddress && (
+                <code className="block p-2 rounded-lg bg-muted font-mono text-xs break-all mt-2">
+                  {nftMintAddress}
+                </code>
+              )}
+            </div>
+          ) : prizeAmount && prizeCurrency ? (
             <div className="text-center space-y-2">
               <p className="text-sm text-muted-foreground">Prize</p>
               <p className="text-2xl font-bold">
                 {prizeAmount} {prizeCurrency}
+              </p>
+            </div>
+          ) : null}
+          {nftTransferTransaction && (
+            <div className="text-center space-y-2 pt-2 border-t">
+              <p className="text-sm text-muted-foreground">NFT Transfer Transaction</p>
+              <div className="flex items-center justify-center gap-2">
+                <code className="block p-2 rounded-lg bg-muted font-mono text-xs break-all flex-1">
+                  {nftTransferTransaction}
+                </code>
+                <a
+                  href={`https://solscan.io/tx/${nftTransferTransaction}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors"
+                  title="View on Solscan"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Verified transfer transaction
               </p>
             </div>
           )}

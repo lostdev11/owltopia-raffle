@@ -34,6 +34,7 @@ export interface Raffle {
   winner_wallet: string | null
   winner_selected_at: string | null
   status: RaffleStatus
+  nft_transfer_transaction: string | null
 }
 
 export interface Entry {
