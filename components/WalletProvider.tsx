@@ -252,7 +252,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
           addressSelector: createDefaultAddressSelector(),
           appIdentity: {
             name: 'Owl Raffle',
-            uri: typeof window !== 'undefined' ? window.location.origin : 'https://owlraffle.com',
+            uri: typeof window !== 'undefined' ? window.location.origin : 'https://owltopia.xyz',
             icon: typeof window !== 'undefined' ? `${window.location.origin}/icon.png` : '/icon.png',
           },
           authorizationResultCache: createDefaultAuthorizationResultCache(),

@@ -29,6 +29,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(raffle.image_url)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [entriesList, setEntriesList] = useState<Entry[]>(entries)
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
 
   // Check admin status when wallet connects
   useEffect(() => {
@@ -147,6 +149,50 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const handleDeleteEntry = async (entryId: string) => {
+    if (!connected || !publicKey) {
+      alert('Please connect your wallet to delete an entry')
+      return
+    }
+
+    if (!isAdmin) {
+      alert('Only admins can delete entries')
+      return
+    }
+
+    if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
+      return
+    }
+
+    setDeletingEntryId(entryId)
+
+    try {
+      const response = await fetch(`/api/entries/${entryId}`, {
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-wallet-address': publicKey.toBase58()
+        },
+        body: JSON.stringify({ wallet_address: publicKey.toBase58() }),
+      })
+
+      if (response.ok) {
+        // Remove entry from local state
+        setEntriesList(prev => prev.filter(e => e.id !== entryId))
+        // Refresh the page to update owl vision score
+        router.refresh()
+      } else {
+        const errorData = await response.json()
+        alert(errorData.error || 'Error deleting entry')
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      alert('Error deleting entry')
+    } finally {
+      setDeletingEntryId(null)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -245,6 +291,70 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
             )}
           </CardContent>
         </Card>
+
+        {entriesList.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Entries ({entriesList.length})</CardTitle>
+              <CardDescription>Manage raffle entries</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {entriesList.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <code className="text-xs font-mono truncate">{entry.wallet_address}</code>
+                        <span className="text-xs text-muted-foreground">
+                          • {entry.ticket_quantity} ticket(s)
+                        </span>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          entry.status === 'confirmed' 
+                            ? 'bg-green-500/10 text-green-500'
+                            : entry.status === 'pending'
+                            ? 'bg-yellow-500/10 text-yellow-500'
+                            : 'bg-red-500/10 text-red-500'
+                        }`}>
+                          {entry.status}
+                        </span>
+                        {entry.transaction_signature && (
+                          <a
+                            href={`https://solscan.io/tx/${entry.transaction_signature}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline"
+                          >
+                            View TX
+                          </a>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {entry.amount_paid} {entry.currency} • {new Date(entry.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleDeleteEntry(entry.id)}
+                      disabled={deletingEntryId === entry.id}
+                      className="ml-4 flex-shrink-0"
+                    >
+                      {deletingEntryId === entry.id ? (
+                        'Deleting...'
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className={getThemeAccentClasses(raffle.theme_accent)} style={borderStyle}>
           <CardHeader>

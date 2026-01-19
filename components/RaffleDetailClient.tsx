@@ -199,18 +199,72 @@ export function RaffleDetailClient({
 
     try {
       // Step 1: Create entry and get payment details
-      const createResponse = await fetch('/api/entries/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          raffleId: raffle.id,
-          walletAddress: publicKey.toBase58(),
-          ticketQuantity,
-          amountPaid: purchaseAmount,
-        }),
-      })
+      // Add retry logic and timeout for mobile connections
+      let createResponse: Response | null = null
+      let fetchRetries = 3
+      let fetchError: Error | null = null
+      
+      while (fetchRetries > 0) {
+        try {
+          // Create AbortController for timeout (30 seconds for mobile)
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30000)
+          
+          createResponse = await fetch('/api/entries/create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              raffleId: raffle.id,
+              walletAddress: publicKey.toBase58(),
+              ticketQuantity,
+              amountPaid: purchaseAmount,
+            }),
+            signal: controller.signal,
+          })
+          
+          clearTimeout(timeoutId)
+          
+          // If we get a response (even if not ok), break retry loop
+          break
+        } catch (fetchErr: any) {
+          fetchRetries--
+          fetchError = fetchErr
+          
+          // Check if it's a network/fetch error
+          const errorMessage = fetchErr?.message || ''
+          const errorName = fetchErr?.name || ''
+          const isFetchError = 
+            errorMessage.includes('failed to fetch') ||
+            errorMessage.includes('Failed to fetch') ||
+            errorMessage.includes('NetworkError') ||
+            errorMessage.includes('Network request failed') ||
+            errorName === 'TypeError' ||
+            errorName === 'AbortError' ||
+            errorMessage.includes('timeout') ||
+            errorMessage.includes('CORS') ||
+            errorMessage.includes('network')
+          
+          if (fetchRetries === 0) {
+            if (isFetchError || errorName === 'AbortError') {
+              throw new Error(
+                'Network connection failed. This may be a connectivity issue on mobile. ' +
+                'Please check your internet connection and try again. ' +
+                'If the issue persists, try switching between WiFi and mobile data.'
+              )
+            }
+            throw fetchErr
+          }
+          
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 2000 * (3 - fetchRetries)))
+        }
+      }
+
+      if (!createResponse) {
+        throw fetchError || new Error('Failed to create entry: Network error')
+      }
 
       if (!createResponse.ok) {
         const errorData = await createResponse.json()

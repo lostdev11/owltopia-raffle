@@ -191,18 +191,72 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
 
     try {
       // Step 1: Create entry and get payment details
-      const createResponse = await fetch('/api/entries/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          raffleId: raffle.id,
-          walletAddress: publicKey.toBase58(),
-          ticketQuantity,
-          amountPaid: purchaseAmount,
-        }),
-      })
+      // Add retry logic and timeout for mobile connections
+      let createResponse: Response | null = null
+      let fetchRetries = 3
+      let fetchError: Error | null = null
+      
+      while (fetchRetries > 0) {
+        try {
+          // Create AbortController for timeout (30 seconds for mobile)
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30000)
+          
+          createResponse = await fetch('/api/entries/create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              raffleId: raffle.id,
+              walletAddress: publicKey.toBase58(),
+              ticketQuantity,
+              amountPaid: purchaseAmount,
+            }),
+            signal: controller.signal,
+          })
+          
+          clearTimeout(timeoutId)
+          
+          // If we get a response (even if not ok), break retry loop
+          break
+        } catch (fetchErr: any) {
+          fetchRetries--
+          fetchError = fetchErr
+          
+          // Check if it's a network/fetch error
+          const errorMessage = fetchErr?.message || ''
+          const errorName = fetchErr?.name || ''
+          const isFetchError = 
+            errorMessage.includes('failed to fetch') ||
+            errorMessage.includes('Failed to fetch') ||
+            errorMessage.includes('NetworkError') ||
+            errorMessage.includes('Network request failed') ||
+            errorName === 'TypeError' ||
+            errorName === 'AbortError' ||
+            errorMessage.includes('timeout') ||
+            errorMessage.includes('CORS') ||
+            errorMessage.includes('network')
+          
+          if (fetchRetries === 0) {
+            if (isFetchError || errorName === 'AbortError') {
+              throw new Error(
+                'Network connection failed. This may be a connectivity issue on mobile. ' +
+                'Please check your internet connection and try again. ' +
+                'If the issue persists, try switching between WiFi and mobile data.'
+              )
+            }
+            throw fetchErr
+          }
+          
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 2000 * (3 - fetchRetries)))
+        }
+      }
+
+      if (!createResponse) {
+        throw fetchError || new Error('Failed to create entry: Network error')
+      }
 
       if (!createResponse.ok) {
         const errorData = await createResponse.json()
@@ -463,7 +517,30 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
       }, 2000)
     } catch (err) {
       console.error('Purchase error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to purchase tickets')
+      
+      // Provide helpful error messages for common errors
+      let errorMessage = 'Failed to purchase tickets'
+      if (err instanceof Error) {
+        const errMsg = err.message || ''
+        const errorStr = err.toString()
+        
+        // Prioritize specific error messages from fetch retry logic
+        if (errMsg.includes('Network connection failed') || errMsg.includes('connectivity issue')) {
+          errorMessage = errMsg
+        } else if (errMsg.includes('Failed to fetch') || errMsg.includes('failed to fetch')) {
+          errorMessage = 'Network connection failed. Please check your internet connection and try again. If the issue persists, try switching between WiFi and mobile data.'
+        } else if (errMsg.includes('403') || errMsg.includes('Access forbidden')) {
+          errorMessage = errMsg
+        } else if (errMsg.includes('RPC endpoint') || errMsg.includes('RPC')) {
+          errorMessage = errMsg
+        } else if (errMsg.includes('Network') || errMsg.includes('timeout')) {
+          errorMessage = 'Network error. Please check your connection and try again.'
+        } else {
+          errorMessage = errMsg
+        }
+      }
+      
+      setError(errorMessage)
     } finally {
       setIsProcessing(false)
     }
