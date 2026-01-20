@@ -185,6 +185,7 @@ export async function POST(request: NextRequest) {
       winner_wallet: null,
       winner_selected_at: null,
       status: null,
+      nft_transfer_transaction: null,
     }
 
     const raffle = await createRaffle(raffleData)
