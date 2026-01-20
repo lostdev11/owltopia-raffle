@@ -622,7 +622,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer z-10"
+                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer z-10 bg-muted"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -634,7 +634,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 160px, 192px"
-                  className="object-cover"
+                  className="object-cover w-full h-full"
                   priority={priority}
                   onError={() => setImageError(true)}
                   unoptimized={raffle.image_url.startsWith('http://')}
@@ -929,13 +929,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             <div className="winner-golden-overlay absolute inset-0 rounded-xl pointer-events-none z-0" />
           )}
           {raffle.image_url && !imageError && (
-            <div className="!relative w-full aspect-square overflow-hidden z-10">
+            <div className="!relative w-full aspect-square overflow-hidden z-10 bg-muted">
               <Image
                 src={raffle.image_url}
                 alt={raffle.title}
                 fill
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
-                className="object-cover"
+                className="object-cover w-full h-full"
                 priority={priority}
                 onError={() => setImageError(true)}
                 unoptimized={raffle.image_url.startsWith('http://')}
