@@ -622,7 +622,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-40 md:w-48 h-full flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
+                className="!relative w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
