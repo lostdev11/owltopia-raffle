@@ -646,7 +646,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
               </div>
             )}
-            <div className="flex-1 flex flex-col p-3 min-w-0 z-10 relative">
+            <div className="flex-1 flex flex-col p-2.5 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <CardTitle className="text-sm font-semibold line-clamp-1 flex-1">{raffle.title}</CardTitle>
                 <div className="flex items-center gap-2 group/owlvision">
@@ -701,7 +701,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 {minTickets && isActive && (
                   <Badge 
                     variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                    className={`text-[9px] px-1 py-0 leading-tight ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                    className={`text-[9px] px-1 py-0 leading-tight justify-center text-center ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                   >
                     {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                   </Badge>

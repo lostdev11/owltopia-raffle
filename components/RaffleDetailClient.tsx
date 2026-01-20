@@ -1004,7 +1004,7 @@ export function RaffleDetailClient({
                   {isActive && (
                     <Badge 
                       variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                      className={`text-[9px] px-1 py-0 leading-tight mt-1 ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                      className={`text-[9px] px-1 py-0 leading-tight mt-1 justify-center text-center ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
                     >
                       {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
                     </Badge>

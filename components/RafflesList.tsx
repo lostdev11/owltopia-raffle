@@ -217,7 +217,7 @@ export function RafflesList({
   }
 
   const gridClasses = {
-    small: 'flex flex-col gap-3',
+    small: 'flex flex-col gap-2',
     medium: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 lg:gap-8',
     large: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5 md:gap-6 lg:gap-10',
   }
