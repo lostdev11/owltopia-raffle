@@ -622,7 +622,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-40 md:w-48 h-40 md:h-40 flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
+                className="!relative w-40 md:w-48 h-full flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -642,7 +642,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               </div>
             )}
             {imageError && (
-              <div className="w-40 md:w-48 h-40 md:h-40 flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
+              <div className="w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
                 <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
               </div>
             )}
