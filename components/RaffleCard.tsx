@@ -602,7 +602,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   // Small size - List format (horizontal)
   if (size === 'small') {
     return (
-      <div className="relative">
+      <div className="relative z-10 md:hover:z-50">
         <Link 
           href={`/raffles/${raffle.slug}`}
           onClick={(e) => {
@@ -649,7 +649,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             <div className="flex-1 flex flex-col p-3 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <CardTitle className="text-sm font-semibold line-clamp-1 flex-1">{raffle.title}</CardTitle>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 group/owlvision">
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
@@ -697,7 +697,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                 )}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                 {minTickets && isActive && (
                   <Badge 
                     variant={isEligibleToDraw ? 'default' : 'secondary'} 
@@ -906,7 +906,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const classes = sizeClasses[displaySize]
 
   return (
-    <div className="relative">
+    <div className="relative z-10 md:hover:z-50">
       <Link 
         href={`/raffles/${raffle.slug}`} 
         onClick={(e) => {
@@ -952,7 +952,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
-                    <OwlVisionBadge score={owlVisionScore} />
+                    <div className="group/owlvision">
+                      <OwlVisionBadge score={owlVisionScore} />
+                    </div>
                   </div>
                   <CardDescription className={`${classes.description} text-white/90`}>
                     {raffle.description}
@@ -974,7 +976,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
+                  <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                     {minTickets && isActive && (
                       <Badge 
                         variant={isEligibleToDraw ? 'default' : 'secondary'} 
@@ -1010,7 +1012,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               <CardHeader className="p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
-                  <OwlVisionBadge score={owlVisionScore} />
+                  <div className="group/owlvision">
+                    <OwlVisionBadge score={owlVisionScore} />
+                  </div>
                 </div>
                 <CardDescription className={classes.description}>
                   {raffle.description}
@@ -1066,7 +1070,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                     )}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                     {minTickets && isActive && (
                       <Badge 
                         variant={isEligibleToDraw ? 'default' : 'secondary'} 

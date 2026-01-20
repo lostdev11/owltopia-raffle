@@ -56,16 +56,16 @@ export function ParticipantsModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={getThemeAccentClasses(themeAccent, 'max-w-2xl')}
+        className={getThemeAccentClasses(themeAccent, 'max-w-2xl sm:max-w-2xl')}
         style={borderStyle}
       >
-        <DialogHeader>
+        <DialogHeader className="pr-8 sm:pr-0">
           <DialogTitle>Participants ({participants.length})</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="break-words">
             Wallet addresses and ticket counts (confirmed entries only)
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-96 overflow-y-auto space-y-2">
+        <div className="max-h-96 overflow-y-auto space-y-2 -mx-1 px-1">
           {participants.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
               No confirmed participants yet
@@ -74,11 +74,11 @@ export function ParticipantsModal({
             participants.map((participant, index) => (
               <div
                 key={participant.wallet}
-                className="flex items-center justify-between p-3 rounded-lg border bg-card"
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border bg-card"
               >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <span className="text-muted-foreground">#{index + 1}</span>
-                  <code className="text-sm font-mono truncate">{participant.wallet}</code>
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0">#{index + 1}</span>
+                  <code className="text-xs sm:text-sm font-mono truncate flex-1 min-w-0">{participant.wallet}</code>
                   {participant.transactions.length > 0 && (
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {participant.transactions.map((tx, txIndex) => (
@@ -87,7 +87,7 @@ export function ParticipantsModal({
                           href={getSolanaExplorerUrl(tx)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-primary hover:text-primary/80 transition-colors"
+                          className="text-primary hover:text-primary/80 transition-colors touch-manipulation min-h-[44px] min-w-[44px] flex items-center justify-center"
                           title={`View transaction ${txIndex + 1} on Solscan`}
                         >
                           <ExternalLink className="h-4 w-4" />
@@ -96,13 +96,13 @@ export function ParticipantsModal({
                     </div>
                   )}
                 </div>
-                <div className="font-semibold ml-2">{participant.tickets} ticket(s)</div>
+                <div className="font-semibold text-sm sm:text-base sm:ml-2 flex-shrink-0">{participant.tickets} ticket(s)</div>
               </div>
             ))
           )}
         </div>
         <div className="pt-4 border-t">
-          <p className="text-xs text-muted-foreground text-center">
+          <p className="text-xs text-muted-foreground text-center break-words px-2">
             💡 Don't see your entry? Try refreshing the page to see the latest updates.
           </p>
         </div>
