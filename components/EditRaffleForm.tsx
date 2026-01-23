@@ -70,6 +70,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       return
     }
 
+    const formData = new FormData(e.currentTarget)
+
     // Validate 7-day maximum duration
     const startTimeValue = formData.get('start_time') as string
     const endTimeValue = formData.get('end_time') as string
@@ -81,14 +83,11 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       
       if (durationDays > 7) {
         alert('Raffle duration cannot exceed 7 days')
-        setLoading(false)
         return
       }
     }
 
     setLoading(true)
-
-    const formData = new FormData(e.currentTarget)
     const maxTicketsValue = formData.get('max_tickets') as string
     const minTicketsValue = formData.get('min_tickets') as string
     const data = {
