@@ -622,7 +622,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
+                className="!relative w-32 sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -642,29 +642,30 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               </div>
             )}
             {imageError && (
-              <div className="w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
+              <div className="w-32 sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
                 <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
               </div>
             )}
-            <div className="flex-1 flex flex-col p-2.5 min-w-0 z-10 relative">
+            <div className="flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
-                <CardTitle className="text-sm font-semibold line-clamp-1 flex-1 min-w-0 overflow-hidden">{raffle.title}</CardTitle>
-                <div className="flex items-center gap-2 group/owlvision flex-shrink-0">
+                <CardTitle className="!text-sm !font-semibold !leading-tight line-clamp-1 flex-1 min-w-0 overflow-hidden">{raffle.title}</CardTitle>
+                <div className="flex items-center gap-1 sm:gap-2 group/owlvision flex-shrink-0">
                   {minTickets && (
                     <Badge 
                       variant="outline" 
-                      className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-xs"
+                      className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1 sm:px-2"
+                      title={`Minimum ${minTickets} tickets required to draw winner`}
                     >
-                      Min Draw: {minTickets}
+                      <span className="sm:hidden">Min: </span><span className="hidden sm:inline">Min Draw: </span>{minTickets}
                     </Badge>
                   )}
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
-            <CardDescription className="text-xs text-muted-foreground line-clamp-1 mb-2">
+            <CardDescription className="text-xs text-muted-foreground line-clamp-1 mb-2 min-w-0">
               {raffle.description}
             </CardDescription>
-            <div className="flex items-center gap-4 text-xs mb-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>
@@ -685,8 +686,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </span>
               )}
             </div>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-xs text-muted-foreground">
+            <div className="flex items-center justify-between mt-auto gap-2">
+              <span className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                     Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
@@ -699,7 +700,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                 )}
               </span>
-              <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
+              <div className="flex items-center gap-1 sm:gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0" style={{ zIndex: 1 }}>
                 <Badge 
                   variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
                   className={`text-xs ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}
@@ -951,6 +952,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                         <Badge 
                           variant="outline" 
                           className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-xs"
+                          title={`Minimum ${minTickets} tickets required to draw winner`}
                         >
                           Min Draw: {minTickets}
                         </Badge>
@@ -964,9 +966,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </div>
               </div>
               {/* Always visible overlay at bottom for key info */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3 z-10 pointer-events-none">
-                <div className="mb-2">
-                  <CardTitle className={`${classes.title} text-white line-clamp-2 mb-1`}>{raffle.title}</CardTitle>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-2 sm:p-3 z-10 pointer-events-none">
+                <div className="mb-1 sm:mb-2">
+                  <CardTitle className={`${classes.title} text-white line-clamp-2 mb-1 !text-sm sm:!text-base md:!text-lg !font-semibold !leading-tight break-words`}>{raffle.title}</CardTitle>
                 </div>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
@@ -1003,16 +1005,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           {/* Fallback if image error or no image */}
           {(imageError || !raffle.image_url) && (
             <>
-              <CardHeader className="p-4 z-10 relative">
+              <CardHeader className="p-3 sm:p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
-                  <CardTitle className={`${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden`}>{raffle.title}</CardTitle>
-                  <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
+                  <CardTitle className={`${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>{raffle.title}</CardTitle>
+                  <div className="group/owlvision flex items-center gap-1 sm:gap-2 flex-shrink-0">
                     {minTickets && (
                       <Badge 
                         variant="outline" 
-                        className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-xs"
+                        className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1.5 sm:px-2"
+                        title={`Minimum ${minTickets} tickets required to draw winner`}
                       >
-                        Min Draw: {minTickets}
+                        <span className="sm:hidden">Min: </span><span className="hidden sm:inline">Min Draw: </span>{minTickets}
                       </Badge>
                     )}
                     <OwlVisionBadge score={owlVisionScore} />
