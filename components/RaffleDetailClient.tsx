@@ -1078,18 +1078,6 @@ export function RaffleDetailClient({
                     ? 'Sold Out'
                     : 'Enter Raffle'}
                 </Button>
-                {connected && (
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowParticipants(true)}
-                    size={classes.buttonSize as any}
-                    className={`w-full md:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm ${imageSize === 'small' ? 'px-4' : 'px-6 sm:px-8'}`}
-                  >
-                    <Users className="mr-2 h-4 w-4" />
-                    <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
-                    <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
-                  </Button>
-                )}
               </div>
             )}
             {isFuture && (
