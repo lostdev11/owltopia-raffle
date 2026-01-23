@@ -907,15 +907,6 @@ export function RaffleDetailClient({
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                {minTickets && (
-                  <Badge 
-                    variant="outline" 
-                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30"
-                    title={`Minimum ${minTickets} tickets required to draw winner`}
-                  >
-                    Min Draw: {minTickets}
-                  </Badge>
-                )}
                 <OwlVisionBadge score={currentOwlVisionScore} />
               </div>
             </div>
@@ -1021,13 +1012,24 @@ export function RaffleDetailClient({
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="space-y-1">
-                  <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}>
-                    {isFuture
-                      ? `Starts ${formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
-                      : isActive
-                      ? `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`
-                      : 'Ended'}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : '')}`}>
+                      {isFuture
+                        ? `Starts ${formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                        : isActive
+                        ? `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`
+                        : 'Ended'}
+                    </Badge>
+                    {minTickets && (
+                      <Badge 
+                        variant="outline" 
+                        className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30"
+                        title={`Minimum ${minTickets} tickets required to draw winner`}
+                      >
+                        Min Draw: {minTickets}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {isFuture ? (
                       <>Starts: {formatDateTimeWithTimezone(raffle.start_time)}</>

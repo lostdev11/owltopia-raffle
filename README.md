@@ -58,8 +58,30 @@ NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET=your_wallet_address  # Required: Wallet addr
 ```
 
 3. Run database migrations:
-   - Apply the SQL in `supabase/migrations/001_initial_schema.sql` to your Supabase project
-   - This creates the `raffles` and `entries` tables with all required columns
+   - **Quick Setup**: Apply all migrations at once using `supabase/migrations/apply_missing_migrations.sql`
+     - Go to your Supabase dashboard → SQL Editor
+     - Copy and paste the contents of `apply_missing_migrations.sql`
+     - Run the SQL script
+     - This applies migrations 006-015 (migrations 001-005 should already be applied)
+   
+   - **Manual Setup**: Apply migrations individually in order:
+     - `001_initial_schema.sql` - Creates `raffles` and `entries` tables
+     - `002_restrict_entry_currencies.sql` - Adds currency restrictions
+     - `003_add_admins_table.sql` - Creates admins table
+     - `004_add_initial_admin.sql` - Sets up initial admin policies
+     - `005_fix_admins_rls_policy.sql` - Fixes admin RLS policies
+     - `006_add_nft_support.sql` - **REQUIRED**: Adds NFT prize support
+     - `007_add_max_tickets.sql` - Adds max tickets limit
+     - `008_add_raffles_write_policies.sql` - Adds write policies
+     - `009_add_entries_update_policy.sql` - Adds entry update policy
+     - `010_add_raffles_delete_policy.sql` - Adds delete policy
+     - `011_ensure_entries_global_view.sql` - Ensures global entry view
+     - `012_add_min_tickets_and_status.sql` - Adds min tickets and status
+     - `013_add_entries_delete_policy.sql` - Adds entry delete policy
+     - `014_add_nft_transfer_transaction.sql` - Adds NFT transfer tracking
+     - `015_add_original_end_time.sql` - Adds original end time tracking
+   
+   **Note**: If you get an error about missing NFT columns when creating raffles, make sure migration `006_add_nft_support.sql` has been applied.
 
 4. Set up Supabase Storage:
    - Go to your Supabase dashboard → Storage
