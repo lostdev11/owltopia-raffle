@@ -134,6 +134,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,
     end_time: raffle.end_time,
+    original_end_time: raffle.original_end_time,
     theme_accent: raffle.theme_accent,
     edited_after_entries: raffle.edited_after_entries,
     created_by: raffle.created_by,
@@ -141,6 +142,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     winner_wallet: raffle.winner_wallet,
     winner_selected_at: raffle.winner_selected_at,
     status: raffle.status ?? null,
+    nft_transfer_transaction: raffle.nft_transfer_transaction,
   }
 
   // Only include NFT fields if prize_type is 'nft' or if NFT fields are provided
