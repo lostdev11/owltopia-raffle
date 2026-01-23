@@ -648,8 +648,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             )}
             <div className="flex-1 flex flex-col p-2.5 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
-                <CardTitle className="text-sm font-semibold line-clamp-1 flex-1">{raffle.title}</CardTitle>
-                <div className="flex items-center gap-2 group/owlvision">
+                <CardTitle className="text-sm font-semibold line-clamp-1 flex-1 min-w-0 overflow-hidden">{raffle.title}</CardTitle>
+                <div className="flex items-center gap-2 group/owlvision flex-shrink-0">
                   {minTickets && (
                     <Badge 
                       variant="outline" 
@@ -965,6 +965,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               </div>
               {/* Always visible overlay at bottom for key info */}
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-3 z-10 pointer-events-none">
+                <div className="mb-2">
+                  <CardTitle className={`${classes.title} text-white line-clamp-2 mb-1`}>{raffle.title}</CardTitle>
+                </div>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
@@ -1002,8 +1005,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             <>
               <CardHeader className="p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
-                  <CardTitle className={`${classes.title} line-clamp-2`}>{raffle.title}</CardTitle>
-                  <div className="group/owlvision flex items-center gap-2">
+                  <CardTitle className={`${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden`}>{raffle.title}</CardTitle>
+                  <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
                     {minTickets && (
                       <Badge 
                         variant="outline" 

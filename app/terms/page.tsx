@@ -84,6 +84,10 @@ export default function TermsPage() {
             <li>Entry prices are set by raffle creators and displayed before purchase</li>
             <li>You must ensure you have sufficient balance for gas/transaction fees</li>
             <li>Failed transactions do not result in entry purchases</li>
+            <li>Raffles may have a maximum ticket limit set by the creator - once this limit is reached, no additional entries can be purchased</li>
+            <li>All entries must be verified on-chain before they are considered valid for the raffle drawing</li>
+            <li>Entries may be in "pending", "confirmed", or "rejected" status - only confirmed entries are eligible for winner selection</li>
+            <li>If an entry is rejected due to verification failure or exceeding maximum ticket limits, the transaction amount will not be refunded</li>
           </ul>
         </section>
 
@@ -93,8 +97,16 @@ export default function TermsPage() {
             Winners will be selected according to the rules of each individual raffle:
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>Winners are selected randomly using verifiable methods</li>
-            <li>Prize distribution occurs after the raffle end time</li>
+            <li>Winners are selected randomly using verifiable weighted random selection - each wallet's chance is proportional to their total ticket quantity</li>
+            <li>Only confirmed entries are eligible for winner selection - pending or rejected entries are excluded</li>
+            <li>If a raffle has a minimum ticket requirement set, a winner can only be selected if BOTH conditions are met:
+              <ul className="list-disc pl-6 mt-2 space-y-1">
+                <li>The minimum number of tickets has been sold (based on confirmed entries)</li>
+                <li>At least seven (7) days have passed since the original raffle end time</li>
+              </ul>
+            </li>
+            <li>If no minimum ticket requirement is set, winners can be selected immediately after the raffle end time</li>
+            <li>Prize distribution occurs after winner selection</li>
             <li>Winners will be notified through the Platform</li>
             <li>Prizes are distributed directly to the winner's wallet address</li>
             <li>The Platform is not responsible for prizes after distribution</li>
@@ -176,13 +188,23 @@ export default function TermsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">13. Raffle Policy</h2>
+          <h2 className="text-2xl font-semibold mb-4">13. Raffle Policy and Minimum Requirements</h2>
           <p className="mb-4">
-            In the event that the minimum number of tickets is not sold by the scheduled end date, the raffle will be extended for an additional seven (7) days.
+            Raffles may have minimum ticket requirements set by the creator. The following rules apply:
           </p>
-          <p className="mb-4">
-            If the minimum requirement is still not met after the extension period, all participants will receive a full refund.
-          </p>
+          <ul className="list-disc pl-6 mb-4 space-y-2">
+            <li><strong>Minimum Ticket Requirements:</strong> If a raffle has a minimum ticket requirement set, the raffle must meet this minimum before a winner can be selected. Only confirmed entries count toward the minimum requirement.</li>
+            <li><strong>7-Day Waiting Period:</strong> For raffles with a minimum ticket requirement, a winner cannot be selected until BOTH of the following conditions are met:
+              <ul className="list-disc pl-6 mt-2 space-y-1">
+                <li>The minimum number of tickets has been sold (based on confirmed entries)</li>
+                <li>At least seven (7) days have passed since the original raffle end time</li>
+              </ul>
+            </li>
+            <li><strong>Raffle Extensions:</strong> In the event that the minimum number of tickets is not sold by the scheduled end date, the raffle will be extended for an additional seven (7) days.</li>
+            <li><strong>Refunds:</strong> If the minimum requirement is still not met after the extension period, all participants will receive a full refund based on their confirmed entries.</li>
+            <li><strong>No Minimum Requirement:</strong> If a raffle does not have a minimum ticket requirement set, winners can be selected immediately after the raffle end time, regardless of the number of tickets sold.</li>
+            <li><strong>Entry Verification:</strong> All entries must be verified on-chain before they are counted toward minimum requirements or winner selection. The Platform reserves the right to verify entries and reject entries that fail verification.</li>
+          </ul>
         </section>
 
         <section className="mb-8">
