@@ -70,6 +70,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       return
     }
 
+    // Validate 7-day maximum duration
+    const startTimeValue = formData.get('start_time') as string
+    const endTimeValue = formData.get('end_time') as string
+    if (startTimeValue && endTimeValue) {
+      const startDate = new Date(localDateTimeToUtc(startTimeValue))
+      const endDate = new Date(localDateTimeToUtc(endTimeValue))
+      const durationMs = endDate.getTime() - startDate.getTime()
+      const durationDays = durationMs / (1000 * 60 * 60 * 24)
+      
+      if (durationDays > 7) {
+        alert('Raffle duration cannot exceed 7 days')
+        setLoading(false)
+        return
+      }
+    }
+
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
@@ -83,8 +99,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       currency: formData.get('currency') as string,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
       min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
-      start_time: localDateTimeToUtc(formData.get('start_time') as string),
-      end_time: localDateTimeToUtc(formData.get('end_time') as string),
+      start_time: localDateTimeToUtc(startTimeValue),
+      end_time: localDateTimeToUtc(endTimeValue),
       theme_accent: formData.get('theme_accent') as string,
       wallet_address: publicKey.toBase58(),
     }
@@ -428,17 +444,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="min_tickets">Minimum to Draw (optional)</Label>
+                <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
                 <Input
                   id="min_tickets"
                   name="min_tickets"
                   type="number"
                   min="1"
-                  defaultValue={raffle.min_tickets || ''}
-                  placeholder="Leave empty for no minimum"
+                  defaultValue={raffle.min_tickets || '50'}
+                  placeholder="50 (recommended)"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Raffle will only be eligible to draw once this minimum is reached.
+                  Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
                 </p>
               </div>
 
@@ -469,14 +485,24 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="end_time">End Time *</Label>
+                  <Label htmlFor="end_time">End Time * (Max 7 days from start)</Label>
                   <Input
                     id="end_time"
                     name="end_time"
                     type="datetime-local"
                     defaultValue={utcToLocalDateTime(raffle.end_time)}
                     required
+                    className="text-base sm:text-sm"
+                    max={(() => {
+                      const startDate = new Date(raffle.start_time)
+                      const maxDate = new Date(startDate)
+                      maxDate.setDate(maxDate.getDate() + 7)
+                      return utcToLocalDateTime(maxDate.toISOString())
+                    })()}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Raffles have a maximum duration of 7 days.
+                  </p>
                 </div>
               </div>
 

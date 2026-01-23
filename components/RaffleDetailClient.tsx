@@ -983,33 +983,41 @@ export function RaffleDetailClient({
                   </div>
                 </div>
               )}
-              <div>
-                <p className={classes.labelText + ' text-muted-foreground'}>Confirmed Entries</p>
-                <p className={classes.contentText + ' font-bold'}>{totalTicketsSold}</p>
-              </div>
-              {raffle.max_tickets !== null && (
-                <div>
-                  <p className={classes.labelText + ' text-muted-foreground'}>Available Tickets</p>
-                  <p className={classes.contentText + ' font-bold'}>
-                    {availableTickets !== null ? availableTickets : raffle.max_tickets}
-                  </p>
-                </div>
-              )}
-              {minTickets && (
-                <div>
-                  <p className={classes.labelText + ' text-muted-foreground'}>Tickets Sold (Min to Draw)</p>
-                  <p className={classes.contentText + ' font-bold'}>
-                    {totalTicketsSold} / {minTickets}
-                  </p>
-                  {isActive && (
-                    <Badge 
-                      variant={isEligibleToDraw ? 'default' : 'secondary'} 
-                      className={`text-[9px] px-1 py-0 leading-tight mt-1 justify-center text-center ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
-                    >
-                      {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
-                    </Badge>
+              {connected && (
+                <>
+                  {minTickets ? (
+                    <div className="col-span-2 sm:col-span-2 md:col-span-2">
+                      <p className={classes.labelText + ' text-muted-foreground'}>Tickets Sold</p>
+                      <p className={classes.contentText + ' font-bold'}>
+                        {totalTicketsSold} / {minTickets}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Need {minTickets} tickets to draw winner
+                      </p>
+                      {isActive && (
+                        <Badge 
+                          variant={isEligibleToDraw ? 'default' : 'secondary'} 
+                          className={`text-[9px] px-1 py-0 leading-tight mt-2 justify-center text-center ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
+                        >
+                          {isEligibleToDraw ? 'Eligible' : 'Not Eligible'}
+                        </Badge>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Confirmed Entries</p>
+                      <p className={classes.contentText + ' font-bold'}>{totalTicketsSold}</p>
+                    </div>
                   )}
-                </div>
+                  {raffle.max_tickets !== null && (
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Available Tickets</p>
+                      <p className={classes.contentText + ' font-bold'}>
+                        {availableTickets !== null ? availableTickets : raffle.max_tickets}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
@@ -1056,7 +1064,7 @@ export function RaffleDetailClient({
             )}
 
             {isActive && !isFuture && (
-              <div className="flex justify-center">
+              <div className="flex flex-col gap-3 items-center">
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
                   disabled={availableTickets !== null && availableTickets <= 0}
@@ -1071,6 +1079,18 @@ export function RaffleDetailClient({
                     ? 'Sold Out'
                     : 'Enter Raffle'}
                 </Button>
+                {connected && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowParticipants(true)}
+                    size={classes.buttonSize as any}
+                    className={`w-full md:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm ${imageSize === 'small' ? 'px-4' : 'px-6 sm:px-8'}`}
+                  >
+                    <Users className="mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
+                    <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
+                  </Button>
+                )}
               </div>
             )}
             {isFuture && (
@@ -1081,27 +1101,29 @@ export function RaffleDetailClient({
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-              <Button
-                variant="outline"
-                onClick={() => setShowParticipants(true)}
-                className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
-              >
-                <Users className="mr-2 h-4 w-4" />
-                <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
-                <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
-              </Button>
-              {raffle.winner_wallet && (
-                <Button 
-                  variant="outline" 
+            {connected && (
+            {connected && (
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowParticipants(true)}
                   className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
-                  onClick={() => setShowWinner(true)}
                 >
-                  <Trophy className="mr-2 h-4 w-4" />
-                  View Winner
+                  <Users className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
+                  <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
                 </Button>
-              )}
-              {showNftTransferButton && (
+                {raffle.winner_wallet && (
+                  <Button 
+                    variant="outline" 
+                    className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                    onClick={() => setShowWinner(true)}
+                  >
+                    <Trophy className="mr-2 h-4 w-4" />
+                    View Winner
+                  </Button>
+                )}
+                {showNftTransferButton && (
                 <Button
                   variant="outline"
                   onClick={handleOpenNftTransferDialog}
@@ -1123,7 +1145,8 @@ export function RaffleDetailClient({
                   <span className="sm:hidden">Edit</span>
                 </Button>
               )}
-            </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

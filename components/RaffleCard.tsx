@@ -670,17 +670,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={14} className="inline-block" />
                 </span>
               </span>
-              {totalTicketsSold > 0 && (
+              {connected && totalTicketsSold > 0 && (
                 <span>
                   <span className="text-muted-foreground">Entries: </span>
                   <span className="font-semibold">{totalTicketsSold}</span>
                 </span>
               )}
             </div>
-            {minTickets && (
-              <div className="flex items-center gap-2 text-xs mb-2">
-                <span className="text-muted-foreground">Tickets Sold: </span>
-                <span className="font-semibold">{totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(min to draw)</span></span>
+            {connected && minTickets && (
+              <div className="text-xs mb-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Progress: </span>
+                  <span className="font-semibold">{totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(goal)</span></span>
+                </div>
               </div>
             )}
             <div className="flex items-center justify-between mt-auto">
@@ -698,7 +700,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 )}
               </span>
               <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                {minTickets && isActive && (
+                {connected && minTickets && isActive && (
                   <Badge 
                     variant={isEligibleToDraw ? 'default' : 'secondary'} 
                     className={`text-[9px] px-1 py-0 leading-tight justify-center text-center ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
@@ -969,15 +971,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       {raffle.ticket_price} {raffle.currency}
                       <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block flex-shrink-0" />
                     </div>
-                    <div className={`${classes.footer} text-white/80`}>
-                      {totalTicketsSold} entries
-                      {minTickets && (
-                        <span className="ml-2">• {totalTicketsSold} / {minTickets} min</span>
-                      )}
-                    </div>
+                    {connected && (
+                      <div className={`${classes.footer} text-white/80`}>
+                        {totalTicketsSold} entries
+                        {minTickets && (
+                          <span className="ml-2">• {totalTicketsSold} / {minTickets} min</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                    {minTickets && isActive && (
+                    {connected && minTickets && isActive && (
                       <Badge 
                         variant={isEligibleToDraw ? 'default' : 'secondary'} 
                         className={`text-[9px] px-1 py-0 leading-tight ${isEligibleToDraw ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500/80 hover:bg-orange-500'}`}
@@ -1037,7 +1041,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
                     </span>
                   </div>
-                  {totalTicketsSold > 0 && (
+                  {connected && totalTicketsSold > 0 && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Entries</span>
                       <span className="font-semibold">
@@ -1045,11 +1049,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                       </span>
                     </div>
                   )}
-                  {minTickets && (
+                  {connected && minTickets && (
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Tickets Sold</span>
+                      <span className="text-muted-foreground">Progress</span>
                       <span className="font-semibold">
-                        {totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(min to draw)</span>
+                        {totalTicketsSold} / {minTickets} <span className="text-muted-foreground font-normal">(goal)</span>
                       </span>
                     </div>
                   )}

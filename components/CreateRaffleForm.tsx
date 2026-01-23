@@ -78,6 +78,19 @@ export function CreateRaffleForm() {
       return
     }
 
+    // Validate 7-day maximum duration
+    if (startTime && endTime) {
+      const startDate = new Date(startTime)
+      const endDate = new Date(endTime)
+      const durationMs = endDate.getTime() - startDate.getTime()
+      const durationDays = durationMs / (1000 * 60 * 60 * 24)
+      
+      if (durationDays > 7) {
+        alert('Raffle duration cannot exceed 7 days')
+        return
+      }
+    }
+
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
@@ -214,16 +227,17 @@ export function CreateRaffleForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="min_tickets">Minimum to Draw (optional)</Label>
+            <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
             <Input
               id="min_tickets"
               name="min_tickets"
               type="number"
               min="1"
-              placeholder="Leave empty for no minimum"
+              defaultValue="50"
+              placeholder="50 (recommended)"
             />
             <p className="text-xs text-muted-foreground">
-              Raffle will only be eligible to draw once this minimum is reached.
+              Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
             </p>
           </div>
 
@@ -278,7 +292,7 @@ export function CreateRaffleForm() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="end_time">End Time *</Label>
+              <Label htmlFor="end_time">End Time * (Max 7 days from start)</Label>
               <Input
                 id="end_time"
                 type="datetime-local"
@@ -286,7 +300,15 @@ export function CreateRaffleForm() {
                 onChange={(e) => setEndTime(e.target.value)}
                 required
                 className="text-base sm:text-sm"
+                max={startTime ? (() => {
+                  const maxDate = new Date(startTime)
+                  maxDate.setDate(maxDate.getDate() + 7)
+                  return maxDate.toISOString().slice(0, 16)
+                })() : undefined}
               />
+              <p className="text-xs text-muted-foreground">
+                Raffles have a maximum duration of 7 days.
+              </p>
             </div>
           </div>
 

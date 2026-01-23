@@ -128,6 +128,16 @@ export async function PATCH(
           { status: 400 }
         )
       }
+      
+      // Validate that raffle duration does not exceed 7 days
+      const durationMs = endDate.getTime() - startDate.getTime()
+      const durationDays = durationMs / (1000 * 60 * 60 * 24)
+      if (durationDays > 7) {
+        return NextResponse.json(
+          { error: 'Raffle duration cannot exceed 7 days' },
+          { status: 400 }
+        )
+      }
     }
 
     const updates: any = {
