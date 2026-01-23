@@ -29,9 +29,81 @@ export function WalletConnectButton() {
 
   useEffect(() => {
     setMounted(true)
+    
+    // Check on mount if we're on a blank page from a previous mobile wallet connection attempt (Android fix)
+    // This handles all mobile wallets: Solflare, Phantom, Coinbase, Trust, etc.
+    if (isAndroidDevice()) {
+      const checkBlankPage = () => {
+        // Only check if document is ready
+        if (document.readyState === 'loading') return
+        
+        const currentHref = window.location.href
+        const isBlankPage = 
+          currentHref === 'about:blank' ||
+          currentHref === 'chrome-error://chromewebdata/' ||
+          (document.body && document.body.textContent?.trim() === '' && document.body.children.length === 0 && document.body.innerHTML.trim() === '')
+        
+        if (isBlankPage) {
+          // Check for stored redirect URL from any mobile wallet
+          // Try wallet-specific keys first, then generic key
+          const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+          let storedUrl: string | null = null
+          let walletName: string | null = null
+          
+          for (const wallet of walletNames) {
+            const key = `${wallet}_redirect_url`
+            const url = sessionStorage.getItem(key)
+            if (url) {
+              storedUrl = url
+              walletName = wallet
+              break
+            }
+          }
+          
+          // Fallback to generic key
+          if (!storedUrl) {
+            storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
+          }
+          
+          if (storedUrl) {
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`Detected blank page on mount (${walletName || 'unknown wallet'}), redirecting to stored URL:`, storedUrl)
+            }
+            window.location.href = storedUrl
+            return
+          }
+          
+          // If no stored URL but we're on blank page, try to go back or redirect to origin
+          try {
+            if (window.history.length > 1) {
+              window.history.back()
+            } else {
+              window.location.href = window.location.origin
+            }
+          } catch (e) {
+            window.location.href = window.location.origin
+          }
+        }
+      }
+      
+      // Check when document is ready
+      if (document.readyState === 'complete') {
+        checkBlankPage()
+      } else {
+        const handleReady = () => {
+          checkBlankPage()
+          document.removeEventListener('DOMContentLoaded', handleReady)
+        }
+        document.addEventListener('DOMContentLoaded', handleReady)
+      }
+      
+      // Also check after a delay as fallback
+      setTimeout(checkBlankPage, 1000)
+    }
   }, [])
 
   // Handle mobile deep link return - clean up URL parameters
+  // Enhanced for Android blank page fix - handles all mobile wallets
   useEffect(() => {
     if (!mounted) return
 
@@ -43,27 +115,91 @@ export function WalletConnectButton() {
       const urlParams = new URLSearchParams(window.location.search)
       const hashParams = new URLSearchParams(window.location.hash.substring(1))
       
-      // Check for common deep link callback parameters (Phantom, Solflare, etc.)
-      const hasCallback = urlParams.has('phantom_encryption_public_key') || 
-                         urlParams.has('dapp_encryption_public_key') ||
-                         urlParams.has('data') || // Solflare callback
-                         urlParams.has('nonce') || // Solflare callback
-                         hashParams.has('phantom_encryption_public_key') ||
-                         hashParams.has('dapp_encryption_public_key') ||
-                         hashParams.has('data') || // Solflare callback
-                         hashParams.has('nonce') // Solflare callback
+      // Check for deep link callback parameters from all supported wallets
+      // Phantom: phantom_encryption_public_key, dapp_encryption_public_key
+      // Solflare: data, nonce
+      // Coinbase: account, redirect_uri (may vary)
+      // Trust: account, redirect_uri (may vary)
+      // Generic: any wallet-specific params
+      const hasCallback = 
+        urlParams.has('phantom_encryption_public_key') || 
+        urlParams.has('dapp_encryption_public_key') ||
+        urlParams.has('data') || // Solflare callback
+        urlParams.has('nonce') || // Solflare callback
+        urlParams.has('account') || // Coinbase/Trust callback
+        urlParams.has('redirect_uri') || // Generic callback
+        hashParams.has('phantom_encryption_public_key') ||
+        hashParams.has('dapp_encryption_public_key') ||
+        hashParams.has('data') || // Solflare callback
+        hashParams.has('nonce') || // Solflare callback
+        hashParams.has('account') || // Coinbase/Trust callback
+        hashParams.has('redirect_uri') // Generic callback
       
       if (hasCallback) {
-        // Clean up URL parameters after processing
-        const cleanUrl = window.location.pathname
-        window.history.replaceState({}, '', cleanUrl)
+        // On Android, ensure we're not on a blank page before cleaning
+        if (isAndroidDevice()) {
+          const currentHref = window.location.href
+          const isBlankPage = 
+            currentHref === 'about:blank' ||
+            currentHref === 'chrome-error://chromewebdata/'
+          
+          if (isBlankPage) {
+            // If we're on blank page but have callback params, redirect to stored URL
+            // Check for stored URLs from any mobile wallet
+            const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+            let storedUrl: string | null = null
+            let walletName: string | null = null
+            
+            for (const wallet of walletNames) {
+              const key = `${wallet}_redirect_url`
+              const url = sessionStorage.getItem(key)
+              if (url) {
+                storedUrl = url
+                walletName = wallet
+                break
+              }
+            }
+            
+            // Fallback to generic key
+            if (!storedUrl) {
+              storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
+            }
+            
+            if (storedUrl) {
+              // Merge callback params with stored URL
+              const storedUrlObj = new URL(storedUrl)
+              urlParams.forEach((value, key) => {
+                storedUrlObj.searchParams.set(key, value)
+              })
+              hashParams.forEach((value, key) => {
+                storedUrlObj.searchParams.set(key, value)
+              })
+              
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`Redirecting from blank page with callback params (${walletName || 'unknown wallet'}) to:`, storedUrlObj.toString())
+              }
+              window.location.href = storedUrlObj.toString()
+              return
+            }
+          }
+        }
+        
+        // Clean up URL parameters after processing (but keep them for adapter to process)
+        // Only clean if we're not in the middle of a connection
+        if (!connecting) {
+          setTimeout(() => {
+            const cleanUrl = window.location.pathname
+            window.history.replaceState({}, '', cleanUrl)
+          }, 1000) // Delay to allow adapter to process callback
+        }
       }
     }
 
     // When page becomes visible again (returning from wallet app), clean up URL
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkUrlParams()
+        // Small delay to allow page to fully load
+        setTimeout(checkUrlParams, 300)
       }
     }
 
@@ -74,7 +210,7 @@ export function WalletConnectButton() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [mounted])
+  }, [mounted, connecting])
 
   // Monitor connection state changes (debug only in development)
   useEffect(() => {
@@ -89,25 +225,147 @@ export function WalletConnectButton() {
     }
   }, [mounted, connected, connecting, wallet, publicKey])
 
-  // Handle Solflare connection on mobile - ensure proper deep linking
+  // Handle all mobile wallet connections on Android - ensure proper deep linking
+  // Fix for Android blank page issue when connecting any mobile wallet
   useEffect(() => {
-    if (!mounted || !isMobileDevice()) return
+    if (!mounted || !isMobileDevice() || !isAndroidDevice()) return
 
-    // When Solflare is selected and connecting, ensure we're using the current page URL
-    // The Solflare adapter should use this as the redirect_link for deep link callbacks
-    if (connecting && wallet?.adapter?.name === 'Solflare') {
-      // Ensure the current URL is clean and ready for deep link callbacks
-      const currentUrl = window.location.href.split('?')[0].split('#')[0]
+    // List of mobile wallets that use deep links on Android
+    const mobileWalletNames = ['Solflare', 'Phantom', 'Coinbase', 'Trust', 'Solana Mobile']
+    
+    // Store the original URL before any mobile wallet connection on Android
+    if (connecting && wallet?.adapter?.name) {
+      const walletName = wallet.adapter.name
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Solflare connection on mobile - current URL:', currentUrl)
-        console.log('Note: Solflare adapter should use this URL as redirect_link for deep link callbacks')
-      }
+      // Check if this is a mobile wallet that might use deep links
+      const isMobileWallet = mobileWalletNames.some(name => 
+        walletName.toLowerCase().includes(name.toLowerCase())
+      )
+      
+      if (isMobileWallet) {
+        const currentUrl = window.location.href.split('?')[0].split('#')[0]
+        
+        // Normalize wallet name for storage key (lowercase, replace spaces with underscores)
+        const walletKey = walletName.toLowerCase().replace(/\s+/g, '_')
+        const storageKey = `${walletKey}_redirect_url`
+        
+        // Store the original URL in sessionStorage for recovery
+        sessionStorage.setItem(storageKey, currentUrl)
+        // Also store in generic key as fallback
+        sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`${walletName} connection on Android - stored redirect URL:`, currentUrl)
+        }
 
-      // The adapter should automatically detect mobile and use deep links
-      // If it's redirecting to website instead, it might be a browser/app detection issue
-      // We can't directly modify the adapter's redirect_link, but we can ensure
-      // the page is ready to receive the callback
+        // Set up a visibility change listener to detect when we return from wallet app
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+            // Check if we're on a blank page or error page
+            setTimeout(() => {
+              const currentHref = window.location.href
+              const isBlankPage = 
+                currentHref === 'about:blank' ||
+                currentHref === 'chrome-error://chromewebdata/' ||
+                document.body?.textContent?.trim() === '' ||
+                (document.body?.children?.length === 0 && !document.body?.textContent)
+              
+              // Get stored URL (try wallet-specific first, then generic)
+              let storedUrl = sessionStorage.getItem(storageKey)
+              if (!storedUrl) {
+                storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
+              }
+              
+              // If we're on a blank page, redirect back to the original URL
+              if (isBlankPage && storedUrl) {
+                if (process.env.NODE_ENV === 'development') {
+                  console.log(`Detected blank page after ${walletName} connection, redirecting to:`, storedUrl)
+                }
+                window.location.href = storedUrl
+                return
+              }
+              
+              // Check for wallet callback parameters in URL
+              const urlParams = new URLSearchParams(window.location.search)
+              const hashParams = new URLSearchParams(window.location.hash.substring(1))
+              
+              // Check for callback parameters based on wallet type
+              let hasCallback = false
+              if (walletName.toLowerCase().includes('solflare')) {
+                hasCallback = urlParams.has('data') || urlParams.has('nonce') ||
+                             hashParams.has('data') || hashParams.has('nonce')
+              } else if (walletName.toLowerCase().includes('phantom')) {
+                hasCallback = urlParams.has('phantom_encryption_public_key') ||
+                             urlParams.has('dapp_encryption_public_key') ||
+                             hashParams.has('phantom_encryption_public_key') ||
+                             hashParams.has('dapp_encryption_public_key')
+              } else {
+                // Generic callback detection for Coinbase, Trust, etc.
+                hasCallback = urlParams.has('account') || urlParams.has('redirect_uri') ||
+                             hashParams.has('account') || hashParams.has('redirect_uri') ||
+                             urlParams.toString().length > 0 || hashParams.toString().length > 0
+              }
+              
+              // If we have callback params but are on wrong page, redirect to stored URL
+              if (hasCallback && storedUrl && !currentHref.startsWith(storedUrl.split('?')[0])) {
+                // Merge callback params with stored URL
+                const storedUrlObj = new URL(storedUrl)
+                urlParams.forEach((value, key) => {
+                  storedUrlObj.searchParams.set(key, value)
+                })
+                hashParams.forEach((value, key) => {
+                  storedUrlObj.searchParams.set(key, value)
+                })
+                
+                if (process.env.NODE_ENV === 'development') {
+                  console.log(`Redirecting to stored URL with callback params (${walletName}):`, storedUrlObj.toString())
+                }
+                window.location.href = storedUrlObj.toString()
+              }
+            }, 500) // Small delay to allow page to load
+          }
+        }
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        
+        // Also check on page load/focus in case visibility change didn't fire
+        const handleFocus = () => {
+          setTimeout(() => {
+            const currentHref = window.location.href
+            let storedUrl = sessionStorage.getItem(storageKey)
+            if (!storedUrl) {
+              storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
+            }
+            
+            if (storedUrl && (currentHref === 'about:blank' || currentHref.includes('chrome-error'))) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`Detected blank/error page on focus (${walletName}), redirecting to:`, storedUrl)
+              }
+              window.location.href = storedUrl
+            }
+          }, 500)
+        }
+
+        window.addEventListener('focus', handleFocus)
+        
+        return () => {
+          document.removeEventListener('visibilitychange', handleVisibilityChange)
+          window.removeEventListener('focus', handleFocus)
+          // Clean up stored URLs after a delay (connection should complete by then)
+          setTimeout(() => {
+            sessionStorage.removeItem(storageKey)
+            // Only remove generic key if no other wallet is using it
+            const hasOtherWallet = mobileWalletNames.some(name => {
+              if (name.toLowerCase() === walletName.toLowerCase()) return false
+              const otherKey = name.toLowerCase().replace(/\s+/g, '_') + '_redirect_url'
+              return sessionStorage.getItem(otherKey) !== null
+            })
+            if (!hasOtherWallet) {
+              sessionStorage.removeItem('mobile_wallet_redirect_url')
+            }
+          }, 30000) // Remove after 30 seconds
+        }
+      }
     }
   }, [mounted, connecting, wallet])
 
