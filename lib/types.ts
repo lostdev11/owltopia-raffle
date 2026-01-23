@@ -25,6 +25,7 @@ export interface Raffle {
   min_tickets: number | null
   start_time: string
   end_time: string
+  original_end_time: string | null
   theme_accent: ThemeAccent
   edited_after_entries: boolean
   created_at: string

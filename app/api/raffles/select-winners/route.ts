@@ -4,7 +4,9 @@ import {
   selectWinner,
   getRaffleById,
   getEntriesByRaffleId,
-  isRaffleEligibleToDraw
+  isRaffleEligibleToDraw,
+  canSelectWinner,
+  updateRaffle
 } from '@/lib/db/raffles'
 
 // Force dynamic rendering
@@ -52,21 +54,56 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Check if raffle meets minimum requirements (unless force override)
+      // Check if raffle can have winner selected (min tickets met AND 7 days passed) unless force override
       const entries = await getEntriesByRaffleId(raffleId)
       const forceOverride = body.forceOverride === true
       
-      if (!forceOverride && !isRaffleEligibleToDraw(raffle, entries)) {
-        return NextResponse.json(
-          { 
-            error: 'Raffle does not meet minimum requirements to draw',
-            raffleId: raffle.id,
-            minTickets: raffle.min_tickets,
-            ticketsSold: entries.filter(e => e.status === 'confirmed')
-              .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
-          },
-          { status: 400 }
-        )
+      if (!forceOverride) {
+        const canDraw = canSelectWinner(raffle, entries)
+        const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
+        
+        if (!canDraw) {
+          // If min tickets not met, extend the raffle by 7 days
+          if (!meetsMinTickets) {
+            const now = new Date()
+            const endTime = new Date(raffle.end_time)
+            const originalEndTime = raffle.original_end_time || raffle.end_time
+            const newEndTime = new Date(endTime)
+            newEndTime.setDate(newEndTime.getDate() + 7)
+            
+            await updateRaffle(raffle.id, {
+              original_end_time: originalEndTime,
+              end_time: newEndTime.toISOString(),
+              status: 'pending_min_not_met'
+            })
+            
+            return NextResponse.json(
+              { 
+                error: 'Raffle does not meet minimum ticket requirements. Extended by 7 days.',
+                raffleId: raffle.id,
+                minTickets: raffle.min_tickets,
+                ticketsSold: entries.filter(e => e.status === 'confirmed')
+                  .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
+                extended: true,
+                newEndTime: newEndTime.toISOString()
+              },
+              { status: 400 }
+            )
+          } else {
+            // Min tickets met but 7 days haven't passed
+            return NextResponse.json(
+              { 
+                error: 'Raffle must wait 7 days after original end time before drawing winner',
+                raffleId: raffle.id,
+                minTickets: raffle.min_tickets,
+                ticketsSold: entries.filter(e => e.status === 'confirmed')
+                  .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
+                originalEndTime: raffle.original_end_time || raffle.end_time
+              },
+              { status: 400 }
+            )
+          }
+        }
       }
 
       const winnerWallet = await selectWinner(raffleId, forceOverride)
@@ -101,18 +138,44 @@ export async function POST(request: NextRequest) {
     
     for (const raffle of endedRaffles) {
       try {
-        // Check if raffle meets minimum requirements
+        // Check if raffle can have winner selected (min tickets met AND 7 days passed)
         const entries = await getEntriesByRaffleId(raffle.id)
-        const isEligible = isRaffleEligibleToDraw(raffle, entries)
+        const canDraw = canSelectWinner(raffle, entries)
+        const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
         
-        if (!isEligible) {
-          results.push({
-            raffleId: raffle.id,
-            raffleTitle: raffle.title,
-            success: false,
-            winnerWallet: null,
-            error: `Minimum requirements not met (min: ${raffle.min_tickets || 'N/A'}, sold: ${entries.filter(e => e.status === 'confirmed').reduce((sum, entry) => sum + entry.ticket_quantity, 0)})`
-          })
+        if (!canDraw) {
+          // If min tickets not met, extend the raffle by 7 days
+          if (!meetsMinTickets) {
+            const now = new Date()
+            const endTime = new Date(raffle.end_time)
+            const originalEndTime = raffle.original_end_time || raffle.end_time
+            const newEndTime = new Date(endTime)
+            newEndTime.setDate(newEndTime.getDate() + 7)
+            
+            await updateRaffle(raffle.id, {
+              original_end_time: originalEndTime,
+              end_time: newEndTime.toISOString(),
+              status: 'pending_min_not_met'
+            })
+            
+            results.push({
+              raffleId: raffle.id,
+              raffleTitle: raffle.title,
+              success: false,
+              winnerWallet: null,
+              error: `Minimum requirements not met (min: ${raffle.min_tickets || 'N/A'}, sold: ${entries.filter(e => e.status === 'confirmed').reduce((sum, entry) => sum + entry.ticket_quantity, 0)}). Extended by 7 days.`,
+              extended: true
+            })
+          } else {
+            // Min tickets met but 7 days haven't passed
+            results.push({
+              raffleId: raffle.id,
+              raffleTitle: raffle.title,
+              success: false,
+              winnerWallet: null,
+              error: `Raffle must wait 7 days after original end time before drawing winner`
+            })
+          }
           continue
         }
         

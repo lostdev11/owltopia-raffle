@@ -269,13 +269,22 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
-  // Check minimum requirements unless override is forced
-  if (!forceOverride && !isRaffleEligibleToDraw(raffle, entries)) {
-    console.warn(`Raffle ${raffleId} does not meet minimum requirements`)
-    // Update status to pending_min_not_met if raffle has ended
+  // Check if winner can be selected (min tickets met AND 7 days passed) unless override is forced
+  if (!forceOverride && !canSelectWinner(raffle, entries)) {
+    const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
+    const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
+    
+    if (!meetsMinTickets) {
+      console.warn(`Raffle ${raffleId} does not meet minimum ticket requirements`)
+    }
+    if (!sevenDaysPassed) {
+      console.warn(`Raffle ${raffleId} has not passed 7 days since original end time`)
+    }
+    
+    // Update status to pending_min_not_met if raffle has ended and min not met
     const now = new Date()
     const endTime = new Date(raffle.end_time)
-    if (endTime <= now && raffle.status !== 'pending_min_not_met') {
+    if (endTime <= now && !meetsMinTickets && raffle.status !== 'pending_min_not_met') {
       await supabase
         .from('raffles')
         .update({ status: 'pending_min_not_met' })
@@ -410,6 +419,39 @@ export function isRaffleEligibleToDraw(raffle: Raffle, entries: Entry[]): boolea
   // Check if minimum tickets requirement is met
   const ticketsSold = calculateTicketsSold(entries)
   return ticketsSold >= raffle.min_tickets
+}
+
+/**
+ * Check if 7 days have passed since the original end time
+ * If original_end_time is null, use end_time as the reference point
+ */
+export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
+  const now = new Date()
+  // Use original_end_time if set, otherwise use end_time (for raffles that haven't been extended)
+  const referenceTime = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+  const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000
+  const timeSinceReference = now.getTime() - referenceTime.getTime()
+  return timeSinceReference >= sevenDaysInMs
+}
+
+/**
+ * Check if a raffle can have a winner selected
+ * - If no min_tickets: winner can be selected immediately when raffle ends
+ * - If min_tickets set: requires both min tickets met AND 7 days passed since original end time
+ */
+export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
+  // If no minimum is set, raffle can be drawn immediately when it ends
+  if (!raffle.min_tickets) {
+    return true
+  }
+
+  // Check minimum tickets requirement
+  const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
+  
+  // Check if 7 days have passed since original end time
+  const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
+  
+  return meetsMinTickets && sevenDaysPassed
 }
 
 /**
