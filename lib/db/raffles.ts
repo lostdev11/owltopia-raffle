@@ -119,7 +119,7 @@ export async function getRaffles(activeOnly: boolean = false) {
     })) as Raffle[]
   }
 
-  return (data || []) as Raffle[]
+  return (data || []) as unknown as Raffle[]
 }
 
 export async function getRaffleBySlug(slug: string) {
@@ -569,7 +569,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     })) as Raffle[]
   }
 
-  return (data || []) as Raffle[]
+  return (data || []) as unknown as Raffle[]
 }
 
 /**
