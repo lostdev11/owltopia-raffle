@@ -1011,7 +1011,7 @@ export function RaffleDetailClient({
               )}
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
-                <div className="space-y-1">
+                <div className="mt-3 sm:mt-2 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : '')}`}>
                       {isFuture

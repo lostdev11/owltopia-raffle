@@ -31,9 +31,10 @@ export function RafflesPageClient({
       <div className="mb-8 sm:mb-12">
         <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
         {activeRafflesWithEntries.length > 0 ? (
-          <RafflesList 
-            rafflesWithEntries={activeRafflesWithEntries} 
+          <RafflesList
+            rafflesWithEntries={activeRafflesWithEntries}
             title={undefined}
+            section="active"
           />
         ) : (
           <div className="text-center py-8">
@@ -45,9 +46,10 @@ export function RafflesPageClient({
       <div className="mb-8 sm:mb-12">
         <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
         {futureRafflesWithEntries.length > 0 ? (
-          <RafflesList 
-            rafflesWithEntries={futureRafflesWithEntries} 
+          <RafflesList
+            rafflesWithEntries={futureRafflesWithEntries}
             title={undefined}
+            section="future"
           />
         ) : (
           <div className="text-center py-8">
@@ -58,9 +60,10 @@ export function RafflesPageClient({
 
       {connected && pastRafflesWithEntries.length > 0 && (
         <div className="mb-8 sm:mb-12">
-          <RafflesList 
-            rafflesWithEntries={pastRafflesWithEntries} 
+          <RafflesList
+            rafflesWithEntries={pastRafflesWithEntries}
             title="Past Raffles"
+            section="past"
           />
         </div>
       )}

@@ -7,6 +7,7 @@ import type { Raffle, Entry } from '@/lib/types'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
+type SectionType = 'active' | 'future' | 'past'
 
 interface RafflesListProps {
   rafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
@@ -14,68 +15,75 @@ interface RafflesListProps {
   showViewSizeControls?: boolean
   size?: CardSize
   onSizeChange?: (size: CardSize) => void
+  /** Section context: affects "days left" sort (past = most recent first) */
+  section?: SectionType
 }
 
-// Calculate days left for sorting
+const MS_PER_DAY = 1000 * 60 * 60 * 24
+
+// Calculate days left for sorting (same logic as display)
 function calculateDaysLeft(raffle: Raffle): number {
   const now = new Date()
   const startTime = new Date(raffle.start_time)
   const endTime = new Date(raffle.end_time)
-  
-  // For future raffles, use start_time
-  if (startTime > now) {
-    return Math.ceil((startTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  }
-  // For active raffles, use end_time
-  if (endTime > now) {
-    return Math.ceil((endTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  }
-  // For past raffles, return negative days
-  return Math.ceil((endTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+
+  if (startTime > now) return Math.ceil((startTime.getTime() - now.getTime()) / MS_PER_DAY)
+  if (endTime > now) return Math.ceil((endTime.getTime() - now.getTime()) / MS_PER_DAY)
+  return Math.ceil((endTime.getTime() - now.getTime()) / MS_PER_DAY)
 }
 
-export function RafflesList({ 
-  rafflesWithEntries, 
+export function RafflesList({
+  rafflesWithEntries,
   title,
   showViewSizeControls = true,
   size: controlledSize,
-  onSizeChange
+  onSizeChange,
+  section,
 }: RafflesListProps) {
   const [filteredRaffles, setFilteredRaffles] = useState(rafflesWithEntries)
   const [sortBy, setSortBy] = useState<SortOption>('days-left')
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
-  
+
   // Use ref to track current raffles without causing re-renders
   const rafflesRef = useRef(rafflesWithEntries)
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  // Sort raffles based on selected option
+  // Sort raffles based on selected option. Use slice() + sort to avoid mutating.
   const sortedRaffles = useMemo(() => {
-    const raffles = [...filteredRaffles]
-    
+    const raffles = filteredRaffles.slice()
+
     switch (sortBy) {
-      case 'days-left':
+      case 'days-left': {
+        const mult = section === 'past' ? -1 : 1 // past: most recent first (desc)
         return raffles.sort((a, b) => {
           const daysLeftA = calculateDaysLeft(a.raffle)
           const daysLeftB = calculateDaysLeft(b.raffle)
-          return daysLeftA - daysLeftB // Ascending: soonest first
+          const cmp = mult * (daysLeftA - daysLeftB)
+          if (cmp !== 0) return cmp
+          // Tie-breaker: end_time, then start_time, then id
+          const endA = new Date(a.raffle.end_time).getTime()
+          const endB = new Date(b.raffle.end_time).getTime()
+          if (endA !== endB) return endA - endB
+          const startA = new Date(a.raffle.start_time).getTime()
+          const startB = new Date(b.raffle.start_time).getTime()
+          if (startA !== startB) return startA - startB
+          return a.raffle.id.localeCompare(b.raffle.id)
         })
+      }
       case 'date':
         return raffles.sort((a, b) => {
           const dateA = new Date(a.raffle.start_time).getTime()
           const dateB = new Date(b.raffle.start_time).getTime()
-          return dateB - dateA // Descending: newest first
+          return dateB - dateA
         })
       case 'ticket-price':
-        return raffles.sort((a, b) => {
-          return a.raffle.ticket_price - b.raffle.ticket_price // Ascending: cheapest first
-        })
+        return raffles.sort((a, b) => a.raffle.ticket_price - b.raffle.ticket_price)
       default:
         return raffles
     }
-  }, [filteredRaffles, sortBy])
+  }, [filteredRaffles, sortBy, section])
 
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
