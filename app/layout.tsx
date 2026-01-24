@@ -17,6 +17,8 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 5,
   userScalable: true,
+  themeColor: '#0f172a',
+  interactiveWidget: 'resizes-content' as const,
 }
 
 export const metadata: Metadata = {
@@ -57,6 +59,11 @@ export const metadata: Metadata = {
       'max-image-preview': 'large',
       'max-snippet': -1,
     },
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'Owl Raffle',
+    statusBarStyle: 'default',
   },
 }
 
