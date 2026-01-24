@@ -1026,7 +1026,7 @@ export function RaffleDetailClient({
                         className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30"
                         title={`Minimum ${minTickets} tickets required to draw winner`}
                       >
-                        Min Draw: {minTickets}
+                        Draw Threshold: {minTickets}
                       </Badge>
                     )}
                   </div>

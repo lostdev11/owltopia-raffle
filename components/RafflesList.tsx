@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { RaffleCard } from '@/components/RaffleCard'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import type { Raffle, Entry } from '@/lib/types'
 
 type CardSize = 'small' | 'medium' | 'large'
+type SortOption = 'days-left' | 'date' | 'ticket-price'
 
 interface RafflesListProps {
   rafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
@@ -13,6 +14,24 @@ interface RafflesListProps {
   showViewSizeControls?: boolean
   size?: CardSize
   onSizeChange?: (size: CardSize) => void
+}
+
+// Calculate days left for sorting
+function calculateDaysLeft(raffle: Raffle): number {
+  const now = new Date()
+  const startTime = new Date(raffle.start_time)
+  const endTime = new Date(raffle.end_time)
+  
+  // For future raffles, use start_time
+  if (startTime > now) {
+    return Math.ceil((startTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  }
+  // For active raffles, use end_time
+  if (endTime > now) {
+    return Math.ceil((endTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  }
+  // For past raffles, return negative days
+  return Math.ceil((endTime.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 }
 
 export function RafflesList({ 
@@ -23,6 +42,7 @@ export function RafflesList({
   onSizeChange
 }: RafflesListProps) {
   const [filteredRaffles, setFilteredRaffles] = useState(rafflesWithEntries)
+  const [sortBy, setSortBy] = useState<SortOption>('days-left')
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
   
@@ -30,6 +50,32 @@ export function RafflesList({
   const rafflesRef = useRef(rafflesWithEntries)
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Sort raffles based on selected option
+  const sortedRaffles = useMemo(() => {
+    const raffles = [...filteredRaffles]
+    
+    switch (sortBy) {
+      case 'days-left':
+        return raffles.sort((a, b) => {
+          const daysLeftA = calculateDaysLeft(a.raffle)
+          const daysLeftB = calculateDaysLeft(b.raffle)
+          return daysLeftA - daysLeftB // Ascending: soonest first
+        })
+      case 'date':
+        return raffles.sort((a, b) => {
+          const dateA = new Date(a.raffle.start_time).getTime()
+          const dateB = new Date(b.raffle.start_time).getTime()
+          return dateB - dateA // Descending: newest first
+        })
+      case 'ticket-price':
+        return raffles.sort((a, b) => {
+          return a.raffle.ticket_price - b.raffle.ticket_price // Ascending: cheapest first
+        })
+      default:
+        return raffles
+    }
+  }, [filteredRaffles, sortBy])
 
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
@@ -228,11 +274,30 @@ export function RafflesList({
 
   return (
     <div>
-      {title && (
-        <h2 className="text-2xl font-bold mb-6">{title}</h2>
-      )}
+      <div className="flex items-center justify-between mb-4 sm:mb-6 gap-4">
+        {title && (
+          <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
+        )}
+        {filteredRaffles.length > 1 && (
+          <div className="flex items-center gap-2 ml-auto">
+            <label htmlFor="sort-select" className="text-sm text-muted-foreground whitespace-nowrap">
+              Sort by:
+            </label>
+            <select
+              id="sort-select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="px-3 py-1.5 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer"
+            >
+              <option value="days-left">Days Left</option>
+              <option value="date">Date</option>
+              <option value="ticket-price">Ticket Price</option>
+            </select>
+          </div>
+        )}
+      </div>
       <div className={gridClasses[size]}>
-        {filteredRaffles.map(({ raffle, entries }, index) => (
+        {sortedRaffles.map(({ raffle, entries }, index) => (
           <RaffleCard 
             key={raffle.id} 
             raffle={raffle} 
