@@ -105,6 +105,10 @@ export default function RootLayout({
                       errorStack.includes('solanaactionscontentscript.js') ||
                       errorString.includes('runtime.lasterror') ||
                       errorString.includes('receiving end does not exist') ||
+                      errorString.includes('could not establish connection') ||
+                      // Phantom-specific errors
+                      errorString.includes('[phantom]') ||
+                      (errorString.includes('phantom') && (errorString.includes('error updating cache') || errorString.includes('connection'))) ||
                       // StandardWallet adapter connection errors
                       (isConnectionError && isUnexpectedError) ||
                       (isConnectionError && errorStack.includes('standardwalletadapter'))) {
@@ -136,6 +140,11 @@ export default function RootLayout({
                   if (hasSolanaScript || 
                       (hasSomethingWentWrong && (hasSolanaScript || reason.includes('extension') || reason.includes('solana') || reason.includes('wallet'))) ||
                       errorStack.includes('solanaactionscontentscript.js') ||
+                      reason.includes('receiving end does not exist') ||
+                      reason.includes('could not establish connection') ||
+                      // Phantom-specific errors
+                      reason.includes('[phantom]') ||
+                      (reason.includes('phantom') && (reason.includes('error updating cache') || reason.includes('connection'))) ||
                       // StandardWallet adapter connection errors
                       (isConnectionError && isUnexpectedError) ||
                       (isConnectionError && errorStack.includes('standardwalletadapter'))) {
@@ -162,6 +171,11 @@ export default function RootLayout({
                   
                   if (hasSolanaScript || 
                       (hasSomethingWentWrong && (hasSolanaScript || errorSource.includes('extension') || errorStack.includes('solana'))) ||
+                      errorMessage.includes('receiving end does not exist') ||
+                      errorMessage.includes('could not establish connection') ||
+                      // Phantom-specific errors
+                      errorMessage.includes('[phantom]') ||
+                      (errorMessage.includes('phantom') && (errorMessage.includes('error updating cache') || errorMessage.includes('connection'))) ||
                       // StandardWallet adapter connection errors
                       (isConnectionError && isUnexpectedError) ||
                       (isConnectionError && errorStack.includes('standardwalletadapter'))) {

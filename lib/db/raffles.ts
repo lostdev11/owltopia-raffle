@@ -151,8 +151,9 @@ export async function getRaffleBySlug(slug: string) {
   // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
   const hasNftSupport = await checkNftMigrationApplied()
   if (!hasNftSupport && data) {
+    const row = data as unknown as Record<string, unknown>
     return {
-      ...data,
+      ...row,
       prize_type: 'crypto' as const,
       nft_mint_address: null,
       nft_collection_name: null,
@@ -161,7 +162,7 @@ export async function getRaffleBySlug(slug: string) {
     } as Raffle
   }
 
-  return data as Raffle
+  return data as unknown as Raffle
 }
 
 export async function getRaffleById(id: string) {
@@ -193,8 +194,9 @@ export async function getRaffleById(id: string) {
   // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
   const hasNftSupport = await checkNftMigrationApplied()
   if (!hasNftSupport && data) {
+    const row = data as unknown as Record<string, unknown>
     return {
-      ...data,
+      ...row,
       prize_type: 'crypto' as const,
       nft_mint_address: null,
       nft_collection_name: null,
@@ -203,7 +205,7 @@ export async function getRaffleById(id: string) {
     } as Raffle
   }
 
-  return data as Raffle
+  return data as unknown as Raffle
 }
 
 export async function getEntriesByRaffleId(raffleId: string) {
@@ -348,7 +350,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     throw new Error(`Database error: ${error.message}`)
   }
 
-  return data as Raffle
+  return data as unknown as Raffle
 }
 
 export async function updateRaffle(
@@ -377,7 +379,7 @@ export async function updateRaffle(
     throw new Error(`Database error updating raffle: ${error.message}`)
   }
 
-  return data as Raffle
+  return data as unknown as Raffle
 }
 
 export async function deleteRaffle(id: string) {

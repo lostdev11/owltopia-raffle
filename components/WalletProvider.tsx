@@ -377,6 +377,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             errorStack.includes('solanaactionscontentscript') ||
             errorMessage.includes('runtime.lasterror') ||
             errorMessage.includes('receiving end does not exist') ||
+            errorMessage.includes('could not establish connection') ||
             errorString.includes('solanaactionscontentscript') ||
             errorString.includes('runtime.lasterror') ||
             // Phantom wallet service worker connection errors
@@ -388,6 +389,11 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             errorString.includes('failed to send message to service worker') ||
             errorStack.includes('disconnected port') ||
             errorStack.includes('port object') ||
+            // Phantom-specific cache update errors
+            errorMessage.includes('[phantom]') ||
+            errorString.includes('[phantom]') ||
+            (errorMessage.includes('phantom') && (errorMessage.includes('error updating cache') || errorMessage.includes('connection'))) ||
+            (errorString.includes('phantom') && (errorString.includes('error updating cache') || errorString.includes('connection'))) ||
             // StandardWallet adapter connection errors (Phantom, etc.)
             // These often occur when user cancels connection or extension is temporarily unavailable
             (isConnectionError && isUnexpectedError) ||

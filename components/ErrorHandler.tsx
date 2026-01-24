@@ -56,6 +56,9 @@ export function ErrorHandler() {
         errorString.includes('runtime.lasterror') ||
         errorString.includes('receiving end does not exist') ||
         errorString.includes('could not establish connection') ||
+        // Phantom-specific errors
+        errorString.includes('[phantom]') ||
+        errorString.includes('phantom') && (errorString.includes('error updating cache') || errorString.includes('connection')) ||
         // Chrome extension port errors (harmless)
         errorString.includes('extension context invalidated') ||
         errorString.includes('message port closed') ||
@@ -126,6 +129,10 @@ export function ErrorHandler() {
         errorSource.includes('extension://') ||
         errorMessage.includes('runtime.lasterror') ||
         errorMessage.includes('receiving end does not exist') ||
+        errorMessage.includes('could not establish connection') ||
+        // Phantom-specific errors
+        errorMessage.includes('[phantom]') ||
+        (errorMessage.includes('phantom') && (errorMessage.includes('error updating cache') || errorMessage.includes('connection'))) ||
         // StandardWallet adapter connection errors
         (isConnectionError && isUnexpectedError) ||
         (isConnectionError && errorStack.includes('standardwalletadapter')) ||
@@ -170,6 +177,10 @@ export function ErrorHandler() {
         hasSolanaScript ||
         reason.includes('runtime.lasterror') ||
         reason.includes('receiving end does not exist') ||
+        reason.includes('could not establish connection') ||
+        // Phantom-specific errors
+        reason.includes('[phantom]') ||
+        (reason.includes('phantom') && (reason.includes('error updating cache') || reason.includes('connection'))) ||
         reason.includes('extension context') ||
         // StandardWallet adapter connection errors
         (isConnectionError && isUnexpectedError) ||
