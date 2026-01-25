@@ -73,13 +73,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const isActive = endTime > now && raffle.is_active && !isFuture
   const isWinner = !isActive && raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   
-  // Use red color for future raffles, otherwise use theme accent
+  // Use red for future, blue for past, theme accent for active
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const borderStyle = isFuture ? {
-    borderColor: '#ef4444', // red-500
-    boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)', // red glow
-  } : baseBorderStyle
-  const themeColor = isFuture ? '#ef4444' : getThemeAccentColor(raffle.theme_accent)
+  const borderStyle = isFuture
+    ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
+    : !isActive
+      ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' } // blue-500, blue glow
+      : baseBorderStyle
+  const themeColor = isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent))
   
   // Calculate available tickets
   const totalTicketsSold = calculateTicketsSold(entries)
@@ -724,7 +725,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 )}
                 <Badge 
                   variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                  className={`text-xs ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : '')}`}
+                  className={`text-xs ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
                 >
                   {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                 </Badge>
@@ -1002,7 +1003,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                     <Badge 
                       variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                      className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}
+                      className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
                     >
                       {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                     </Badge>
@@ -1089,7 +1090,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                     <Badge 
                       variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')}
-                      className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : ''}
+                      className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}
                     >
                       {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                     </Badge>

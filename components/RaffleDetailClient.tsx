@@ -124,8 +124,13 @@ export function RaffleDetailClient({
       return () => clearInterval(intervalId)
     }
   }, [raffle.start_time, raffle.end_time, raffle.is_active])
-  const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const themeColor = getThemeAccentColor(raffle.theme_accent)
+  const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
+  const borderStyle = isFuture
+    ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
+    : !isActive
+      ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' }
+      : baseBorderStyle
+  const themeColor = isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent))
 
   // Use real-time entries hook (with polling fallback)
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
@@ -1035,7 +1040,7 @@ export function RaffleDetailClient({
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="mt-3 sm:mt-2 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : '')}`}>
+                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}>
                       {isFuture
                         ? `Starts ${formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
                         : isActive
