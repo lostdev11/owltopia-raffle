@@ -17,6 +17,8 @@ interface RafflesListProps {
   onSizeChange?: (size: CardSize) => void
   /** Section context: affects "days left" sort (past = most recent first) */
   section?: SectionType
+  /** Optional callback when a raffle is deleted (for parent state management) */
+  onRaffleDeleted?: (raffleId: string) => void
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
@@ -39,6 +41,7 @@ export function RafflesList({
   size: controlledSize,
   onSizeChange,
   section,
+  onRaffleDeleted,
 }: RafflesListProps) {
   const [filteredRaffles, setFilteredRaffles] = useState(rafflesWithEntries)
   const [sortBy, setSortBy] = useState<SortOption>('days-left')
@@ -268,6 +271,10 @@ export function RafflesList({
       console.log('Filtered raffles count:', filtered.length, 'from', prev.length)
       return filtered
     })
+    // Also call parent callback if provided
+    if (onRaffleDeleted) {
+      onRaffleDeleted(raffleId)
+    }
   }
 
   const gridClasses = {

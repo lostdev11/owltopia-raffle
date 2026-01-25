@@ -287,14 +287,14 @@ export default function AdminDashboardPage() {
           </Card>
 
           <Card className="hover:border-primary transition-colors cursor-pointer">
-            <Link href="/raffles">
+            <Link href="/admin/raffles">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <BarChart3 className="h-5 w-5" />
-                  View All Raffles
+                  Manage All Raffles
                 </CardTitle>
                 <CardDescription>
-                  Browse and manage all existing raffles
+                  View and manage all raffles, including past raffles. Delete raffles from here.
                 </CardDescription>
               </CardHeader>
             </Link>

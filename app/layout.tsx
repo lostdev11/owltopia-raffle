@@ -49,6 +49,22 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+    images: [
+      {
+        // Currently using icon.png. For best results, create og-image.png (1200x630px) 
+        // and update this URL to '/og-image.png'. See public/OG_IMAGE_INSTRUCTIONS.md
+        url: '/icon.png',
+        width: 512,
+        height: 512,
+        alt: 'Owl Raffle Logo',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Owl Raffle',
+    description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+    images: ['/icon.png'], // Update to '/og-image.png' when you create the optimized image
   },
   robots: {
     index: true,

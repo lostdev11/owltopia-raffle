@@ -821,21 +821,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             >
               <Edit className="h-4 w-4" />
             </Button>
-            {isActive && (
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                className="h-9 w-9 sm:h-7 sm:w-7 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDeleteDialogOpen(true)
-                }}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="h-9 w-9 sm:h-7 sm:w-7 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setDeleteDialogOpen(true)
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
           <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
             <DialogContent>
@@ -1213,21 +1211,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
           >
             <Edit className="h-4 w-4" />
           </Button>
-          {isActive && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="h-9 w-9 sm:h-8 sm:w-8 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setDeleteDialogOpen(true)
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="h-9 w-9 sm:h-8 sm:w-8 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setDeleteDialogOpen(true)
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
         <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <DialogContent>
