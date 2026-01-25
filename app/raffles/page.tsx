@@ -1,6 +1,29 @@
+import type { Metadata } from 'next'
 import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { RafflesPageClient } from './RafflesPageClient'
+
+const BASE_URL = 'https://www.owltopia.xyz'
+const OG_IMAGE = `${BASE_URL}/logo.gif`
+
+export const metadata: Metadata = {
+  title: 'Raffles | Owltopia',
+  description: 'Browse and enter trusted Solana raffles. Every entry verified on-chain.',
+  openGraph: {
+    type: 'website',
+    url: `${BASE_URL}/raffles`,
+    siteName: 'Owltopia',
+    title: 'Raffles | Owltopia',
+    description: 'Browse and enter trusted Solana raffles. Every entry verified on-chain.',
+    images: [{ url: OG_IMAGE, alt: 'Owltopia' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Raffles | Owltopia',
+    description: 'Browse and enter trusted Solana raffles. Every entry verified on-chain.',
+    images: [OG_IMAGE],
+  },
+}
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
