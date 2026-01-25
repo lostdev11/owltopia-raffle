@@ -64,7 +64,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
  * Get the base columns that exist before NFT migration
  */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,rank,floor_price'
 }
 
 /**
@@ -315,6 +315,10 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.nft_metadata_uri = raffle.nft_metadata_uri
   }
 
+  // Include optional metadata fields
+  insertData.rank = raffle.rank
+  insertData.floor_price = raffle.floor_price
+
   const { data, error } = await supabase
     .from('raffles')
     .insert(insertData)
@@ -527,17 +531,22 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
 /**
  * Get all raffles that have ended but don't have a winner selected yet
+ * Includes raffles where:
+ * - end_time has passed, OR
+ * - original_end_time exists and 7 days have passed since it (for extended raffles that meet minimum)
  */
 export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
-  const now = new Date().toISOString()
+  const now = new Date()
   const columns = await getRaffleColumns()
   
+  // Fetch all active raffles without winners, then filter in JavaScript
+  // This ensures we catch all cases including extended raffles where 7 days have passed
+  // since original_end_time even if end_time is still in the future
   const { data, error } = await supabase
     .from('raffles')
     .select(columns)
     .is('winner_wallet', null)
     .is('winner_selected_at', null)
-    .lte('end_time', now)
     .eq('is_active', true)
 
   if (error) {
@@ -560,8 +569,10 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
 
   // Ensure all raffles have prize_type defaulted to 'crypto' if migration not applied
   const hasNftSupport = await checkNftMigrationApplied()
+  let raffles = (data || []) as unknown as Raffle[]
+  
   if (!hasNftSupport && data) {
-    return data.map((raffle: any) => ({
+    raffles = data.map((raffle: any) => ({
       ...raffle,
       prize_type: 'crypto' as const,
       nft_mint_address: null,
@@ -571,7 +582,29 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     })) as Raffle[]
   }
 
-  return (data || []) as unknown as Raffle[]
+  // Filter to only include raffles that have "ended" based on our criteria:
+  // 1. end_time has passed, OR
+  // 2. original_end_time exists and 7 days have passed since it
+  const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000
+  const filteredRaffles = raffles.filter(raffle => {
+    const endTime = new Date(raffle.end_time)
+    const hasEnded = endTime <= now
+    
+    // If original_end_time exists, check if 7 days have passed since it
+    if (raffle.original_end_time) {
+      const originalEndTime = new Date(raffle.original_end_time)
+      const timeSinceOriginalEnd = now.getTime() - originalEndTime.getTime()
+      const sevenDaysPassed = timeSinceOriginalEnd >= sevenDaysInMs
+      
+      // Include if either end_time has passed OR 7 days have passed since original_end_time
+      return hasEnded || sevenDaysPassed
+    }
+    
+    // No original_end_time, just check if end_time has passed
+    return hasEnded
+  })
+
+  return filteredRaffles
 }
 
 /**

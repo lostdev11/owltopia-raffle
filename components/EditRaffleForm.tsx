@@ -12,8 +12,9 @@ import { ImageUpload } from '@/components/ImageUpload'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
-import { AlertCircle, Trash2 } from 'lucide-react'
+import { AlertCircle, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
+import { canSelectWinner, isRaffleEligibleToDraw, hasSevenDaysPassedSinceOriginalEnd, calculateTicketsSold } from '@/lib/db/raffles'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -31,6 +32,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
+  const [selectingWinner, setSelectingWinner] = useState(false)
+  const [winnerMessage, setWinnerMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Check admin status when wallet connects
   useEffect(() => {
@@ -90,6 +93,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     setLoading(true)
     const maxTicketsValue = formData.get('max_tickets') as string
     const minTicketsValue = formData.get('min_tickets') as string
+    const rankValue = formData.get('rank') as string
+    const floorPriceValue = formData.get('floor_price') as string
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
@@ -98,6 +103,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       currency: formData.get('currency') as string,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
       min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
+      rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
+      floor_price: floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null,
       start_time: localDateTimeToUtc(startTimeValue),
       end_time: localDateTimeToUtc(endTimeValue),
       theme_accent: formData.get('theme_accent') as string,
@@ -208,6 +215,55 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const handleSelectWinner = async () => {
+    if (!connected || !publicKey) {
+      alert('Please connect your wallet to select a winner')
+      return
+    }
+
+    if (!isAdmin) {
+      alert('Only admins can select winners')
+      return
+    }
+
+    setSelectingWinner(true)
+    setWinnerMessage(null)
+
+    try {
+      const response = await fetch('/api/raffles/select-winners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raffleId: raffle.id }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setWinnerMessage({
+          type: 'success',
+          text: `Winner selected successfully! Winner: ${data.winnerWallet}`
+        })
+        // Refresh the page to show the winner
+        setTimeout(() => {
+          router.refresh()
+        }, 2000)
+      } else {
+        setWinnerMessage({
+          type: 'error',
+          text: data.error || 'Failed to select winner'
+        })
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      setWinnerMessage({
+        type: 'error',
+        text: 'Error selecting winner. Please try again.'
+      })
+    } finally {
+      setSelectingWinner(false)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -306,6 +362,98 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
             )}
           </CardContent>
         </Card>
+
+        {/* Winner Selection Section */}
+        {(() => {
+          const now = new Date()
+          const endTime = new Date(raffle.end_time)
+          const hasEnded = endTime <= now
+          const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
+          const canDraw = hasEnded && hasNoWinner ? canSelectWinner(raffle, entriesList) : false
+          const meetsMinTickets = raffle.min_tickets ? isRaffleEligibleToDraw(raffle, entriesList) : true
+          const sevenDaysPassed = raffle.min_tickets ? hasSevenDaysPassedSinceOriginalEnd(raffle) : true
+          const ticketsSold = calculateTicketsSold(entriesList)
+
+          if (!hasEnded || !hasNoWinner) {
+            return null
+          }
+
+          return (
+            <Card>
+              <CardHeader>
+                <CardTitle>Winner Selection</CardTitle>
+                <CardDescription>Manually trigger winner selection for this raffle</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Raffle Status:</span>
+                    <span className="text-sm font-semibold">Ended - No Winner Selected</span>
+                  </div>
+                  {raffle.min_tickets && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Minimum Tickets Required:</span>
+                        <span className={`text-sm font-semibold ${meetsMinTickets ? 'text-green-500' : 'text-red-500'}`}>
+                          {raffle.min_tickets} {meetsMinTickets ? '✓' : '✗'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Tickets Sold:</span>
+                        <span className="text-sm font-semibold">{ticketsSold}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">7 Days Passed Since Original End:</span>
+                        <span className={`text-sm font-semibold ${sevenDaysPassed ? 'text-green-500' : 'text-red-500'}`}>
+                          {sevenDaysPassed ? 'Yes ✓' : 'No ✗'}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  {!raffle.min_tickets && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Tickets Sold:</span>
+                      <span className="text-sm font-semibold">{ticketsSold}</span>
+                    </div>
+                  )}
+                </div>
+
+                {winnerMessage && (
+                  <div className={`p-3 rounded-lg border ${
+                    winnerMessage.type === 'success' 
+                      ? 'bg-green-500/10 border-green-500/20 text-green-500'
+                      : 'bg-red-500/10 border-red-500/20 text-red-500'
+                  }`}>
+                    <p className="text-sm">{winnerMessage.text}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-4">
+                  <Button
+                    type="button"
+                    onClick={handleSelectWinner}
+                    disabled={selectingWinner || !canDraw}
+                    className="flex items-center gap-2"
+                  >
+                    <Trophy className="h-4 w-4" />
+                    {selectingWinner ? 'Selecting Winner...' : 'Select Winner'}
+                  </Button>
+                  {!canDraw && (
+                    <div className="flex-1">
+                      <p className="text-sm text-muted-foreground">
+                        {!meetsMinTickets 
+                          ? `Minimum ticket requirement not met (need ${raffle.min_tickets}, have ${ticketsSold})`
+                          : !sevenDaysPassed
+                          ? 'Must wait 7 days after original end time before drawing winner'
+                          : 'Cannot select winner at this time'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })()}
 
         {entriesList.length > 0 && (
           <Card>
@@ -455,6 +603,35 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 <p className="text-xs text-muted-foreground">
                   Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
                 </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="rank">Rank (optional)</Label>
+                  <Input
+                    id="rank"
+                    name="rank"
+                    type="text"
+                    defaultValue={raffle.rank || ''}
+                    placeholder="e.g., #123 or 123"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Optional rank metadata (text or integer)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="floor_price">Floor Price (optional)</Label>
+                  <Input
+                    id="floor_price"
+                    name="floor_price"
+                    type="text"
+                    defaultValue={raffle.floor_price || ''}
+                    placeholder="e.g., 5.5 SOL or 1000"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Optional floor price metadata (text or numeric)
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2">

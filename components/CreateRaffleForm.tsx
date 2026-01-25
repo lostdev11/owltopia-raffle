@@ -96,6 +96,8 @@ export function CreateRaffleForm() {
     const formData = new FormData(e.currentTarget)
     const maxTicketsValue = formData.get('max_tickets') as string
     const minTicketsValue = formData.get('min_tickets') as string
+    const rankValue = formData.get('rank') as string
+    const floorPriceValue = formData.get('floor_price') as string
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
@@ -104,6 +106,8 @@ export function CreateRaffleForm() {
       currency: formData.get('currency') as string,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
       min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
+      rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
+      floor_price: floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null,
       start_time: localDateTimeToUtc(startTime),
       end_time: localDateTimeToUtc(endTime),
       theme_accent: themeAccent,
@@ -239,6 +243,33 @@ export function CreateRaffleForm() {
             <p className="text-xs text-muted-foreground">
               Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
             </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="rank">Rank (optional)</Label>
+              <Input
+                id="rank"
+                name="rank"
+                type="text"
+                placeholder="e.g., #123 or 123"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional rank metadata (text or integer)
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="floor_price">Floor Price (optional)</Label>
+              <Input
+                id="floor_price"
+                name="floor_price"
+                type="text"
+                placeholder="e.g., 5.5 SOL or 1000"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional floor price metadata (text or numeric)
+              </p>
+            </div>
           </div>
 
           <div className="space-y-4">

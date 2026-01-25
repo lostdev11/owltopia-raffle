@@ -1065,6 +1065,26 @@ export function RaffleDetailClient({
               </div>
             </div>
 
+            {(raffle.rank || raffle.floor_price) && (
+              <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
+                <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Details</h3>
+                <div className={`grid grid-cols-1 ${raffle.rank && raffle.floor_price ? 'sm:grid-cols-2' : ''} gap-4`}>
+                  {raffle.rank && (
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Rank</p>
+                      <p className={classes.contentText + ' font-semibold'}>{raffle.rank}</p>
+                    </div>
+                  )}
+                  {raffle.floor_price && (
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Floor Price</p>
+                      <p className={classes.contentText + ' font-semibold'}>{raffle.floor_price}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {connected && (
               <div className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20`}>
                 <div className="flex items-center justify-between">

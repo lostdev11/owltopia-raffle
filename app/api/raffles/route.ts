@@ -168,6 +168,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Parse optional metadata fields
+    const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
+    const floorPrice = body.floor_price && body.floor_price.trim() ? body.floor_price.trim() : null
+
     // Build raffle data - only include NFT fields if this is an NFT prize
     const raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'> = {
       slug: slug, // Use the generated unique slug
@@ -197,6 +201,8 @@ export async function POST(request: NextRequest) {
       winner_selected_at: null,
       status: null,
       nft_transfer_transaction: null,
+      rank: rank,
+      floor_price: floorPrice,
     }
 
     const raffle = await createRaffle(raffleData)

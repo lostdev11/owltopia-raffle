@@ -140,6 +140,10 @@ export async function PATCH(
       }
     }
 
+    // Parse optional metadata fields
+    const rank = body.rank !== undefined ? (body.rank && body.rank.trim() ? body.rank.trim() : null) : undefined
+    const floorPrice = body.floor_price !== undefined ? (body.floor_price && body.floor_price.trim() ? body.floor_price.trim() : null) : undefined
+
     const updates: any = {
       title: body.title,
       description: body.description || null,
@@ -151,6 +155,14 @@ export async function PATCH(
       start_time: body.start_time,
       end_time: body.end_time,
       theme_accent: body.theme_accent,
+    }
+
+    // Only update rank and floor_price if explicitly provided
+    if (rank !== undefined) {
+      updates.rank = rank
+    }
+    if (floorPrice !== undefined) {
+      updates.floor_price = floorPrice
     }
 
     // Only update prize_amount and prize_currency if explicitly provided
