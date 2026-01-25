@@ -1,6 +1,5 @@
 'use client'
 
-import { useWallet } from '@solana/wallet-adapter-react'
 import { RafflesList } from '@/components/RafflesList'
 import type { Raffle, Entry } from '@/lib/types'
 
@@ -15,7 +14,6 @@ export function RafflesPageClient({
   futureRafflesWithEntries,
   pastRafflesWithEntries,
 }: RafflesPageClientProps) {
-  const { connected } = useWallet()
 
   return (
     <div className="container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
@@ -58,11 +56,12 @@ export function RafflesPageClient({
         )}
       </div>
 
-      {connected && pastRafflesWithEntries.length > 0 && (
+      {pastRafflesWithEntries.length > 0 && (
         <div className="mb-8 sm:mb-12">
+          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
           <RafflesList
             rafflesWithEntries={pastRafflesWithEntries}
-            title="Past Raffles"
+            title={undefined}
             section="past"
           />
         </div>

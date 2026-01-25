@@ -16,6 +16,21 @@ export async function getEntryById(id: string) {
   return data as Entry
 }
 
+export async function getEntryByTransactionSignature(transactionSignature: string) {
+  const { data, error } = await supabase
+    .from('entries')
+    .select('*')
+    .eq('transaction_signature', transactionSignature)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error fetching entry by transaction signature:', error)
+    return null
+  }
+
+  return data as Entry | null
+}
+
 export async function createEntry(entry: Omit<Entry, 'id' | 'created_at' | 'verified_at'>) {
   // Validate currency is USDC or SOL only
   const validCurrencies = ['USDC', 'SOL']
@@ -32,6 +47,31 @@ export async function createEntry(entry: Omit<Entry, 'id' | 'created_at' | 'veri
 
   if (error) {
     console.error('Error creating entry:', error)
+    return null
+  }
+
+  return data as Entry
+}
+
+/**
+ * Save transaction signature to an entry without changing status
+ * This allows automatic verification to retry later
+ */
+export async function saveTransactionSignature(
+  id: string,
+  transactionSignature: string
+) {
+  const { data, error } = await supabase
+    .from('entries')
+    .update({ transaction_signature: transactionSignature })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error saving transaction signature:', error)
+    console.error('Entry ID:', id)
+    console.error('Supabase error details:', JSON.stringify(error, null, 2))
     return null
   }
 
@@ -70,7 +110,38 @@ export async function updateEntryStatus(
   return data as Entry
 }
 
-export async function deleteEntry(id: string) {
+export async function deleteEntry(id: string, deletedBy: string) {
+  // First, get the entry to be deleted
+  const entry = await getEntryById(id)
+  if (!entry) {
+    console.warn('No entry found with id:', id)
+    return false
+  }
+
+  // Store the entry in deleted_entries audit table before deleting
+  const { error: auditError } = await supabase
+    .from('deleted_entries')
+    .insert({
+      original_entry_id: entry.id,
+      raffle_id: entry.raffle_id,
+      wallet_address: entry.wallet_address,
+      ticket_quantity: entry.ticket_quantity,
+      transaction_signature: entry.transaction_signature,
+      status: entry.status,
+      amount_paid: entry.amount_paid,
+      currency: entry.currency,
+      created_at: entry.created_at,
+      verified_at: entry.verified_at,
+      deleted_by: deletedBy,
+      original_entry_data: entry as any,
+    })
+
+  if (auditError) {
+    console.error('Error storing deleted entry in audit table:', auditError)
+    // Continue with deletion even if audit fails
+  }
+
+  // Now delete the entry
   const { error, data } = await supabase
     .from('entries')
     .delete()
@@ -93,4 +164,132 @@ export async function deleteEntry(id: string) {
 
   console.log('Successfully deleted entry:', id)
   return true
+}
+
+export async function getDeletedEntries(raffleId?: string) {
+  let query = supabase
+    .from('deleted_entries')
+    .select('*')
+    .order('deleted_at', { ascending: false })
+
+  if (raffleId) {
+    query = query.eq('raffle_id', raffleId)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error fetching deleted entries:', error)
+    return []
+  }
+
+  return data || []
+}
+
+/**
+ * Mark an entry as restored (when it's restored via verify-by-tx endpoint)
+ */
+export async function markEntryAsRestored(
+  id: string,
+  restoredBy?: string
+) {
+  const { data, error } = await supabase
+    .from('entries')
+    .update({ 
+      restored_at: new Date().toISOString(),
+      restored_by: restoredBy || null,
+    })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error marking entry as restored:', error)
+    console.error('Entry ID:', id)
+    return null
+  }
+
+  return data as Entry
+}
+
+/**
+ * Get all restored entries (entries that have restored_at set, or were likely restored)
+ * This includes:
+ * 1. Entries explicitly marked as restored (have restored_at)
+ * 2. Entries that were likely restored before tracking was added:
+ *    - Have transaction_signature
+ *    - Have verified_at
+ *    - Created significantly before verified_at (more than 5 minutes, indicating restoration)
+ */
+export async function getRestoredEntries(walletAddress?: string) {
+  // First, get entries explicitly marked as restored
+  let query = supabase
+    .from('entries')
+    .select('*')
+    .not('restored_at', 'is', null)
+    .order('restored_at', { ascending: false })
+
+  if (walletAddress) {
+    query = query.eq('wallet_address', walletAddress)
+  }
+
+  const { data: explicitlyRestored, error: error1 } = await query
+
+  if (error1) {
+    console.error('Error fetching explicitly restored entries:', error1)
+  }
+
+  // Also get entries that were likely restored before tracking was added
+  // These are entries with transaction_signature and verified_at where
+  // created_at is significantly before verified_at (indicating restoration)
+  let likelyRestoredQuery = supabase
+    .from('entries')
+    .select('*')
+    .not('transaction_signature', 'is', null)
+    .not('verified_at', 'is', null)
+    .is('restored_at', null) // Don't include ones already marked
+    .order('verified_at', { ascending: false })
+
+  if (walletAddress) {
+    likelyRestoredQuery = likelyRestoredQuery.eq('wallet_address', walletAddress)
+  }
+
+  const { data: likelyRestored, error: error2 } = await likelyRestoredQuery
+
+  if (error2) {
+    console.error('Error fetching likely restored entries:', error2)
+  }
+
+  // Filter likely restored entries: created_at should be at least 5 minutes before verified_at
+  // This indicates the entry was pending/rejected and then restored later
+  const filteredLikelyRestored = (likelyRestored || []).filter((entry) => {
+    if (!entry.created_at || !entry.verified_at) return false
+    
+    const createdTime = new Date(entry.created_at).getTime()
+    const verifiedTime = new Date(entry.verified_at).getTime()
+    const timeDiffMinutes = (verifiedTime - createdTime) / (1000 * 60)
+    
+    // If verified more than 5 minutes after creation, it was likely restored
+    return timeDiffMinutes > 5
+  })
+
+  // Combine both sets and remove duplicates
+  const allRestored = [
+    ...(explicitlyRestored || []),
+    ...filteredLikelyRestored,
+  ]
+
+  // Remove duplicates by ID
+  const uniqueRestored = Array.from(
+    new Map(allRestored.map((entry) => [entry.id, entry])).values()
+  )
+
+  // Sort by restored_at (if available) or verified_at, descending
+  uniqueRestored.sort((a, b) => {
+    const aTime = a.restored_at ? new Date(a.restored_at).getTime() : (a.verified_at ? new Date(a.verified_at).getTime() : 0)
+    const bTime = b.restored_at ? new Date(b.restored_at).getTime() : (b.verified_at ? new Date(b.verified_at).getTime() : 0)
+    return bTime - aTime
+  })
+
+  return uniqueRestored as Entry[]
 }

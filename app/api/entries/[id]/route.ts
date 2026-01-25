@@ -49,8 +49,8 @@ export async function DELETE(
       )
     }
 
-    // Delete the entry
-    const success = await deleteEntry(entryId)
+    // Delete the entry (pass wallet address for audit trail)
+    const success = await deleteEntry(entryId, walletAddress)
 
     if (!success) {
       return NextResponse.json(

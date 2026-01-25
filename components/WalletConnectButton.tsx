@@ -783,10 +783,6 @@ export function WalletConnectButton() {
     }
   }, [mounted, connected, setVisible])
 
-  if (!mounted) {
-    return null
-  }
-
   return (
     <>
       <div 
@@ -800,7 +796,26 @@ export function WalletConnectButton() {
           zIndex: 10,
         }}
       >
-        <WalletMultiButton />
+        {mounted ? (
+          <WalletMultiButton />
+        ) : (
+          <button
+            className="wallet-adapter-button"
+            style={{
+              backgroundColor: 'rgb(34, 197, 94)',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+            disabled
+          >
+            Loading...
+          </button>
+        )}
       </div>
       
       <Dialog open={showSignDialog} onOpenChange={(open) => {

@@ -680,6 +680,28 @@ export function RaffleDetailClient({
 
       if (!verifyResponse.ok) {
         const errorData = await verifyResponse.json()
+        
+        // Handle temporary verification failures (202 Accepted)
+        if (verifyResponse.status === 202) {
+          // Transaction signature saved, verification will retry automatically
+          setSuccess(true)
+          setError(null)
+          // Show a message that verification is pending
+          console.log('Verification pending:', errorData.message || errorData.details)
+          
+          // Refresh to pick up the entry with saved signature
+          router.refresh()
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          fetchEntries()
+          
+          // Close dialog after showing success message
+          setTimeout(() => {
+            setShowEnterRaffleDialog(false)
+          }, 2000)
+          return // Exit early - verification will complete in background
+        }
+        
+        // Permanent failure
         const errorMessage = errorData.details 
           ? `${errorData.error}: ${errorData.details}` 
           : errorData.error || 'Failed to verify transaction'

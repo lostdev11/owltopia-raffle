@@ -513,6 +513,27 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
 
       if (!verifyResponse.ok) {
         const errorData = await verifyResponse.json()
+        
+        // Handle temporary verification failures (202 Accepted)
+        if (verifyResponse.status === 202) {
+          // Transaction signature saved, verification will retry automatically
+          setSuccess(true)
+          setError(null)
+          console.log('Verification pending:', errorData.message || errorData.details)
+          
+          // Refresh to pick up the entry with saved signature
+          router.refresh()
+          
+          setTimeout(() => {
+            setShowQuickBuy(false)
+            setSuccess(false)
+            setTicketQuantity(1)
+            setTicketQuantityDisplay('1')
+          }, 2000)
+          return // Exit early - verification will complete in background
+        }
+        
+        // Permanent failure
         throw new Error(errorData.error || 'Failed to verify transaction')
       }
 

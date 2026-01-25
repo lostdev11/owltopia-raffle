@@ -49,6 +49,8 @@ export interface Entry {
   currency: string
   created_at: string
   verified_at: string | null
+  restored_at: string | null
+  restored_by: string | null
 }
 
 export interface OwlVisionScore {
