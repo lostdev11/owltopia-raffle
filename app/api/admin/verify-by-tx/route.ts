@@ -390,7 +390,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verification successful - confirm the entry
-    const confirmedEntry = await updateEntryStatus(entry.id, 'confirmed', transactionSignature)
+    let confirmedEntry = await updateEntryStatus(entry.id, 'confirmed', transactionSignature)
 
     if (!confirmedEntry) {
       return NextResponse.json(
