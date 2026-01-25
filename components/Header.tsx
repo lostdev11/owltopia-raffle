@@ -44,6 +44,14 @@ export function Header() {
             <Logo className="flex-1 max-w-full h-auto" width={600} height={150} priority />
           </Link>
           <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+            {process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' && (
+              <Link href="/creator">
+                <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                  <span className="hidden sm:inline">Creator</span>
+                  <span className="sm:hidden">Create</span>
+                </Button>
+              </Link>
+            )}
             {isAdmin && (
               <Link href="/admin">
                 <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">

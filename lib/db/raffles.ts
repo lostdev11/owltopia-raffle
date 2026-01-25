@@ -64,7 +64,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
  * Get the base columns that exist before NFT migration
  */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,created_by_wallet,creator_payout_wallet,platform_fee_bps,creator_share_bps,creation_fee_usdc,gross_sales_usdc,platform_earnings_usdc,creator_earnings_usdc'
 }
 
 /**
@@ -303,6 +303,14 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     winner_selected_at: raffle.winner_selected_at,
     status: raffle.status ?? null,
     nft_transfer_transaction: raffle.nft_transfer_transaction,
+    created_by_wallet: raffle.created_by_wallet ?? null,
+    creator_payout_wallet: raffle.creator_payout_wallet ?? null,
+    platform_fee_bps: raffle.platform_fee_bps ?? 500,
+    creator_share_bps: raffle.creator_share_bps ?? 9500,
+    creation_fee_usdc: raffle.creation_fee_usdc ?? 1,
+    gross_sales_usdc: raffle.gross_sales_usdc ?? 0,
+    platform_earnings_usdc: raffle.platform_earnings_usdc ?? 0,
+    creator_earnings_usdc: raffle.creator_earnings_usdc ?? 0,
   }
 
   // Only include NFT fields if prize_type is 'nft' or if NFT fields are provided
@@ -380,6 +388,66 @@ export async function updateRaffle(
   }
 
   return data as unknown as Raffle
+}
+
+/**
+ * Update raffle fee tracking when an entry is confirmed
+ * Calculates and updates gross_sales_usdc, platform_earnings_usdc, and creator_earnings_usdc
+ * @param raffleId - The raffle ID
+ * @param entryAmountUsdc - The entry amount in USDC (converted from SOL if needed)
+ */
+export async function updateRaffleFees(raffleId: string, entryAmountUsdc: number): Promise<void> {
+  try {
+    const raffle = await getRaffleById(raffleId)
+    if (!raffle) {
+      console.error(`Raffle not found: ${raffleId}`)
+      return
+    }
+
+    // Calculate fees (only for USDC entries, or convert SOL to USDC)
+    // For now, we'll only track USDC directly
+    // TODO: Add SOL to USDC conversion if needed
+    
+    // Only update if currency is USDC (for now)
+    if (raffle.currency !== 'USDC') {
+      // Skip fee tracking for non-USDC entries for now
+      // In the future, we could convert SOL to USDC using a price oracle
+      return
+    }
+
+    // Calculate platform fee (5% = 500 bps)
+    const platformFeeBps = raffle.platform_fee_bps || 500
+    const creatorShareBps = raffle.creator_share_bps || 9500
+    
+    // Ensure they add up to 10000 (100%)
+    const totalBps = platformFeeBps + creatorShareBps
+    if (totalBps !== 10000) {
+      console.warn(`Fee BPS don't add up to 10000 for raffle ${raffleId}: platform=${platformFeeBps}, creator=${creatorShareBps}`)
+    }
+
+    const platformFee = (entryAmountUsdc * platformFeeBps) / 10000
+    const creatorFee = (entryAmountUsdc * creatorShareBps) / 10000
+
+    // Update raffle with new totals
+    const { error } = await supabase
+      .from('raffles')
+      .update({
+        gross_sales_usdc: (raffle.gross_sales_usdc || 0) + entryAmountUsdc,
+        platform_earnings_usdc: (raffle.platform_earnings_usdc || 0) + platformFee,
+        creator_earnings_usdc: (raffle.creator_earnings_usdc || 0) + creatorFee,
+      })
+      .eq('id', raffleId)
+
+    if (error) {
+      console.error(`Error updating raffle fees for ${raffleId}:`, error)
+      throw new Error(`Failed to update raffle fees: ${error.message}`)
+    }
+
+    console.log(`Updated fees for raffle ${raffleId}: +${entryAmountUsdc} USDC (platform: +${platformFee}, creator: +${creatorFee})`)
+  } catch (error) {
+    console.error(`Error in updateRaffleFees for raffle ${raffleId}:`, error)
+    // Don't throw - fee tracking failure shouldn't block entry confirmation
+  }
 }
 
 export async function deleteRaffle(id: string) {

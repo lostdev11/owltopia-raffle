@@ -1,4 +1,4 @@
--- Combined migration file to apply all missing migrations (006-015)
+-- Combined migration file to apply all missing migrations (006-016)
 -- This file can be safely run even if some migrations have already been applied
 -- All statements use IF NOT EXISTS or DROP IF EXISTS to prevent errors
 
@@ -201,3 +201,108 @@ ALTER TABLE raffles
 -- Create index for original_end_time lookups
 CREATE INDEX IF NOT EXISTS idx_raffles_original_end_time ON raffles(original_end_time) 
 WHERE original_end_time IS NOT NULL;
+
+-- ============================================================================
+-- Migration 016: Add creator + fee columns to raffles table
+-- ============================================================================
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS created_by_wallet TEXT;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS creator_payout_wallet TEXT;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS platform_fee_bps INTEGER NOT NULL DEFAULT 500;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS creator_share_bps INTEGER NOT NULL DEFAULT 9500;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS creation_fee_usdc NUMERIC NOT NULL DEFAULT 1;
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_platform_fee_bps_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_platform_fee_bps_check
+  CHECK (platform_fee_bps >= 0 AND platform_fee_bps <= 10000);
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_creator_share_bps_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_creator_share_bps_check
+  CHECK (creator_share_bps >= 0 AND creator_share_bps <= 10000);
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_creation_fee_usdc_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_creation_fee_usdc_check
+  CHECK (creation_fee_usdc >= 0);
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS gross_sales_usdc NUMERIC NOT NULL DEFAULT 0;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS platform_earnings_usdc NUMERIC NOT NULL DEFAULT 0;
+
+ALTER TABLE raffles
+  ADD COLUMN IF NOT EXISTS creator_earnings_usdc NUMERIC NOT NULL DEFAULT 0;
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_gross_sales_usdc_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_gross_sales_usdc_check
+  CHECK (gross_sales_usdc >= 0);
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_platform_earnings_usdc_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_platform_earnings_usdc_check
+  CHECK (platform_earnings_usdc >= 0);
+
+ALTER TABLE raffles
+  DROP CONSTRAINT IF EXISTS raffles_creator_earnings_usdc_check;
+
+ALTER TABLE raffles
+  ADD CONSTRAINT raffles_creator_earnings_usdc_check
+  CHECK (creator_earnings_usdc >= 0);
+
+CREATE INDEX IF NOT EXISTS idx_raffles_created_by_wallet ON raffles(created_by_wallet)
+  WHERE created_by_wallet IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raffles_creator_payout_wallet ON raffles(creator_payout_wallet)
+  WHERE creator_payout_wallet IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.set_creator_payout_wallet()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.created_by_wallet IS NULL AND NEW.created_by IS NOT NULL THEN
+    NEW.created_by_wallet := NEW.created_by;
+  END IF;
+  IF NEW.creator_payout_wallet IS NULL THEN
+    NEW.creator_payout_wallet := COALESCE(NEW.created_by_wallet, NEW.created_by);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_set_creator_payout_wallet ON raffles;
+
+CREATE TRIGGER trg_set_creator_payout_wallet
+  BEFORE INSERT ON raffles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.set_creator_payout_wallet();
+
+UPDATE raffles
+SET created_by_wallet = created_by
+WHERE created_by_wallet IS NULL AND created_by IS NOT NULL;
+
+UPDATE raffles
+SET creator_payout_wallet = COALESCE(creator_payout_wallet, created_by_wallet, created_by)
+WHERE creator_payout_wallet IS NULL AND (created_by_wallet IS NOT NULL OR created_by IS NOT NULL);

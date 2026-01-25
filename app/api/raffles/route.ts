@@ -197,6 +197,14 @@ export async function POST(request: NextRequest) {
       winner_selected_at: null,
       status: null,
       nft_transfer_transaction: null,
+      created_by_wallet: body.created_by_wallet ?? walletAddress,
+      creator_payout_wallet: body.creator_payout_wallet ?? null,
+      platform_fee_bps: body.platform_fee_bps ?? 500,
+      creator_share_bps: body.creator_share_bps ?? 9500,
+      creation_fee_usdc: body.creation_fee_usdc ?? 1,
+      gross_sales_usdc: 0,
+      platform_earnings_usdc: 0,
+      creator_earnings_usdc: 0,
     }
 
     const raffle = await createRaffle(raffleData)

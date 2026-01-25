@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateEntryStatus, getEntryById } from '@/lib/db/entries'
-import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId, updateRaffleFees } from '@/lib/db/raffles'
 import type { Entry, Raffle } from '@/lib/types'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
@@ -107,6 +107,12 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 }
       )
+    }
+
+    // Update fee tracking for marketplace raffles
+    // Only track fees if currency is USDC (for now)
+    if (raffle.currency === 'USDC') {
+      await updateRaffleFees(raffle.id, entry.amount_paid)
     }
 
     return NextResponse.json({ success: true, entry: confirmedEntry })

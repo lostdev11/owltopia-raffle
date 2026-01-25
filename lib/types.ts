@@ -36,6 +36,14 @@ export interface Raffle {
   winner_selected_at: string | null
   status: RaffleStatus
   nft_transfer_transaction: string | null
+  created_by_wallet: string | null
+  creator_payout_wallet: string | null
+  platform_fee_bps: number
+  creator_share_bps: number
+  creation_fee_usdc: number
+  gross_sales_usdc: number
+  platform_earnings_usdc: number
+  creator_earnings_usdc: number
 }
 
 export interface Entry {
