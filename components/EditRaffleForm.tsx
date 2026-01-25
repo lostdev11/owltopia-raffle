@@ -369,13 +369,51 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           const endTime = new Date(raffle.end_time)
           const hasEnded = endTime <= now
           const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
-          const canDraw = hasEnded && hasNoWinner ? canSelectWinner(raffle, entriesList) : false
-          const meetsMinTickets = raffle.min_tickets ? isRaffleEligibleToDraw(raffle, entriesList) : true
-          const sevenDaysPassed = raffle.min_tickets ? hasSevenDaysPassedSinceOriginalEnd(raffle) : true
-          const ticketsSold = calculateTicketsSold(entriesList)
-
-          if (!hasEnded || !hasNoWinner) {
+          
+          // Only show if raffle has ended
+          if (!hasEnded) {
             return null
+          }
+
+          // If winner already selected, show winner info
+          if (!hasNoWinner) {
+            return (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Winner Selected</CardTitle>
+                  <CardDescription>This raffle already has a winner</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Winner Wallet:</span>
+                      <code className="text-sm font-mono">{raffle.winner_wallet}</code>
+                    </div>
+                    {raffle.winner_selected_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Selected At:</span>
+                        <span className="text-sm">{new Date(raffle.winner_selected_at).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          }
+
+          // Calculate eligibility (with error handling)
+          let canDraw = false
+          let meetsMinTickets = true
+          let sevenDaysPassed = true
+          let ticketsSold = 0
+          
+          try {
+            canDraw = canSelectWinner(raffle, entriesList)
+            meetsMinTickets = raffle.min_tickets ? isRaffleEligibleToDraw(raffle, entriesList) : true
+            sevenDaysPassed = raffle.min_tickets ? hasSevenDaysPassedSinceOriginalEnd(raffle) : true
+            ticketsSold = calculateTicketsSold(entriesList)
+          } catch (error) {
+            console.error('Error calculating eligibility:', error)
           }
 
           return (
