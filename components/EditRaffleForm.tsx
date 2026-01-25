@@ -406,11 +406,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           let meetsMinTickets = true
           let sevenDaysPassed = true
           let ticketsSold = 0
+          const isExtended = !!raffle.original_end_time
           
           try {
             canDraw = canSelectWinner(raffle, entriesList)
             meetsMinTickets = raffle.min_tickets ? isRaffleEligibleToDraw(raffle, entriesList) : true
-            sevenDaysPassed = raffle.min_tickets ? hasSevenDaysPassedSinceOriginalEnd(raffle) : true
+            // Only check 7 days if raffle was extended
+            sevenDaysPassed = (raffle.min_tickets && isExtended) ? hasSevenDaysPassedSinceOriginalEnd(raffle) : true
             ticketsSold = calculateTicketsSold(entriesList)
           } catch (error) {
             console.error('Error calculating eligibility:', error)
@@ -440,12 +442,14 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         <span className="text-sm text-muted-foreground">Tickets Sold:</span>
                         <span className="text-sm font-semibold">{ticketsSold}</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">7 Days Passed Since Original End:</span>
-                        <span className={`text-sm font-semibold ${sevenDaysPassed ? 'text-green-500' : 'text-red-500'}`}>
-                          {sevenDaysPassed ? 'Yes ✓' : 'No ✗'}
-                        </span>
-                      </div>
+                      {isExtended && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">7 Days Passed Since Original End:</span>
+                          <span className={`text-sm font-semibold ${sevenDaysPassed ? 'text-green-500' : 'text-red-500'}`}>
+                            {sevenDaysPassed ? 'Yes ✓' : 'No ✗'}
+                          </span>
+                        </div>
+                      )}
                     </>
                   )}
                   {!raffle.min_tickets && (
@@ -481,7 +485,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <p className="text-sm text-muted-foreground">
                         {!meetsMinTickets 
                           ? `Minimum ticket requirement not met (need ${raffle.min_tickets}, have ${ticketsSold})`
-                          : !sevenDaysPassed
+                          : (isExtended && !sevenDaysPassed)
                           ? 'Must wait 7 days after original end time before drawing winner'
                           : 'Cannot select winner at this time'}
                       </p>

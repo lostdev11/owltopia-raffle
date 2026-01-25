@@ -659,7 +659,9 @@ export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
 /**
  * Check if a raffle can have a winner selected
  * - If no min_tickets: winner can be selected immediately when raffle ends
- * - If min_tickets set: requires both min tickets met AND 7 days passed since original end time
+ * - If min_tickets set:
+ *   - If raffle hasn't been extended (no original_end_time): can select immediately when min tickets met and raffle ended
+ *   - If raffle was extended (has original_end_time): requires both min tickets met AND 7 days passed since original end time
  */
 export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
   // If no minimum is set, raffle can be drawn immediately when it ends
@@ -670,10 +672,15 @@ export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
   // Check minimum tickets requirement
   const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
   
-  // Check if 7 days have passed since original end time
-  const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
+  // If raffle was extended (has original_end_time), require 7 days to pass
+  // This gives people time to buy more tickets after the extension
+  if (raffle.original_end_time) {
+    const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
+    return meetsMinTickets && sevenDaysPassed
+  }
   
-  return meetsMinTickets && sevenDaysPassed
+  // If raffle hasn't been extended and min tickets are met, can select immediately when raffle ends
+  return meetsMinTickets
 }
 
 /**
