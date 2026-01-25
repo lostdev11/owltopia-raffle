@@ -31,7 +31,9 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
   return data as Entry | null
 }
 
-export async function createEntry(entry: Omit<Entry, 'id' | 'created_at' | 'verified_at'>) {
+export async function createEntry(
+  entry: Omit<Entry, 'id' | 'created_at' | 'verified_at' | 'restored_at' | 'restored_by'>
+) {
   // Validate currency is USDC or SOL only
   const validCurrencies = ['USDC', 'SOL']
   if (!validCurrencies.includes(entry.currency)) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getEntryByTransactionSignature, updateEntryStatus, saveTransactionSignature, getEntryById, createEntry, markEntryAsRestored } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId, getRaffles, getRaffleBySlug } from '@/lib/db/raffles'
+import type { Entry, Raffle } from '@/lib/types'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import { isAdmin } from '@/lib/db/admins'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
@@ -179,7 +180,7 @@ export async function POST(request: NextRequest) {
         // No raffle slug provided - try to find matching entry across all raffles
         // BUT only match if transaction amount exactly matches a valid ticket purchase
         const activeRaffles = await getRaffles(false)
-        const candidateMatches: Array<{ entry: typeof entry, raffle: typeof raffle, confidence: number }> = []
+        const candidateMatches: Array<{ entry: Entry; raffle: Raffle; confidence: number }> = []
         
         for (const candidateRaffle of activeRaffles) {
           // Skip if currency doesn't match
