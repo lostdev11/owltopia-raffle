@@ -53,7 +53,7 @@ export default async function RaffleDetailPage({
           // Min tickets not met - extend raffle by 7 days
           // Store original_end_time if not already set
           const originalEndTime = raffle.original_end_time || raffle.end_time
-          const newEndTime = new Date(endTime)
+          const newEndTime = new Date(originalEndTime)
           newEndTime.setDate(newEndTime.getDate() + 7)
           
           await updateRaffle(raffle.id, {
