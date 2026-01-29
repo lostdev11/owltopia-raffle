@@ -34,6 +34,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
   const [selectingWinner, setSelectingWinner] = useState(false)
   const [winnerMessage, setWinnerMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [forceOverride, setForceOverride] = useState(false)
 
   // Check admin status when wallet connects
   useEffect(() => {
@@ -233,7 +234,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       const response = await fetch('/api/raffles/select-winners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raffleId: raffle.id }),
+        body: JSON.stringify({ raffleId: raffle.id, forceOverride }),
       })
 
       const data = await response.json()
@@ -366,8 +367,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         {/* Winner Selection Section */}
         {(() => {
           const now = new Date()
-          const endTime = new Date(raffle.end_time)
-          const hasEnded = endTime <= now
+          // For extended raffles, check original_end_time if it exists
+          // Otherwise check end_time
+          const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+          const hasEnded = endTimeToCheck <= now
           const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
           
           // Only show if raffle has ended
@@ -470,27 +473,49 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </div>
                 )}
 
-                <div className="flex gap-4">
-                  <Button
-                    type="button"
-                    onClick={handleSelectWinner}
-                    disabled={selectingWinner || !canDraw}
-                    className="flex items-center gap-2"
-                  >
-                    <Trophy className="h-4 w-4" />
-                    {selectingWinner ? 'Selecting Winner...' : 'Select Winner'}
-                  </Button>
+                <div className="space-y-3">
                   {!canDraw && (
-                    <div className="flex-1">
-                      <p className="text-sm text-muted-foreground">
-                        {!meetsMinTickets 
-                          ? `Minimum ticket requirement not met (need ${raffle.min_tickets}, have ${ticketsSold})`
-                          : (isExtended && !sevenDaysPassed)
-                          ? 'Must wait 7 days after original end time before drawing winner'
-                          : 'Cannot select winner at this time'}
-                      </p>
+                    <div className="flex items-start gap-2 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10">
+                      <input
+                        type="checkbox"
+                        id="force-override"
+                        checked={forceOverride}
+                        onChange={(e) => setForceOverride(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <label htmlFor="force-override" className="text-sm text-muted-foreground cursor-pointer flex-1">
+                        <span className="font-semibold text-yellow-600 dark:text-yellow-400">Force Override:</span> Bypass restrictions and select winner anyway
+                        {!meetsMinTickets && (
+                          <span className="block mt-1 text-xs">⚠️ Minimum ticket requirement not met (need {raffle.min_tickets}, have {ticketsSold})</span>
+                        )}
+                        {isExtended && !sevenDaysPassed && (
+                          <span className="block mt-1 text-xs">⚠️ 7 days have not passed since original end time</span>
+                        )}
+                      </label>
                     </div>
                   )}
+                  <div className="flex gap-4">
+                    <Button
+                      type="button"
+                      onClick={handleSelectWinner}
+                      disabled={selectingWinner || (!canDraw && !forceOverride)}
+                      className="flex items-center gap-2"
+                    >
+                      <Trophy className="h-4 w-4" />
+                      {selectingWinner ? 'Selecting Winner...' : 'Select Winner'}
+                    </Button>
+                    {!canDraw && !forceOverride && (
+                      <div className="flex-1">
+                        <p className="text-sm text-muted-foreground">
+                          {!meetsMinTickets 
+                            ? `Minimum ticket requirement not met (need ${raffle.min_tickets}, have ${ticketsSold})`
+                            : (isExtended && !sevenDaysPassed)
+                            ? 'Must wait 7 days after original end time before drawing winner'
+                            : 'Cannot select winner at this time'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>

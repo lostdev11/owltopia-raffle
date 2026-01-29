@@ -19,9 +19,10 @@ export default async function RaffleDetailPage({
   }
 
   // Check if raffle has ended and doesn't have a winner yet
+  // For extended raffles, check original_end_time if it exists
   const now = new Date()
-  const endTime = new Date(raffle.end_time)
-  const hasEnded = endTime <= now
+  const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+  const hasEnded = endTimeToCheck <= now
   const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
 
   if (hasEnded && hasNoWinner && raffle.is_active) {
