@@ -1,5 +1,17 @@
+const path = require('path')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Silence Turbopack/webpack config mismatch when using custom webpack config
+  turbopack: {
+    // Use this directory as workspace root so Next doesn't warn about parent lockfile
+    root: __dirname,
+  },
+  // Use project root for file tracing (webpack) so Next doesn't use parent lockfile
+  outputFileTracingRoot: path.join(__dirname),
+  // Disable dev indicators to avoid Next.js devtools (segment explorer) running during SSR,
+  // which can trigger "Cannot read properties of null (reading 'useContext')" with webpack
+  devIndicators: false,
   images: {
     remotePatterns: [
       {
@@ -65,6 +77,14 @@ const nextConfig = {
     ]
   },
   webpack: (config, { isServer }) => {
+    // Force a single React instance so wallet adapter's useContext works (avoids "Invalid hook call" / useContext null)
+    // Use package directory (not index.js) so subpaths like react/jsx-runtime resolve correctly
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      react: path.dirname(require.resolve('react/package.json')),
+      'react-dom': path.dirname(require.resolve('react-dom/package.json')),
+    }
+
     // Suppress warnings about optional dependencies
     if (!isServer) {
       config.resolve.fallback = {

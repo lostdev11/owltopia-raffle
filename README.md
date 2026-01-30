@@ -53,6 +53,7 @@ npm install
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key  # Required for server-side writes (API). Get from Supabase Dashboard → Settings → API. Never expose to the client.
 NEXT_PUBLIC_SOLANA_RPC_URL=your_solana_rpc_url  # REQUIRED: Use a private RPC endpoint (Helius, QuickNode, or Alchemy). Public endpoints are rate-limited and will cause 403 errors.
 NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET=your_wallet_address  # Required: Wallet address that receives ticket payments
 ```

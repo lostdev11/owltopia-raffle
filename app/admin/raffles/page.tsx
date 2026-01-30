@@ -22,15 +22,26 @@ export default async function AdminRafflesPage() {
     )
   }
 
-  const allRaffles = await getRaffles(false) // get all raffles including past ones
+  const { data: allRaffles, error: rafflesError } = await getRaffles(false)
+  if (rafflesError) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-6">
+            <h1 className="text-2xl font-bold text-destructive mb-4">Could not load raffles</h1>
+            <p className="text-destructive">{rafflesError.message}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
   const now = new Date()
   const nowTime = now.getTime()
-  
-  // Categorize raffles
+
   const pastRaffles: typeof allRaffles = []
   const activeRaffles: typeof allRaffles = []
   const futureRaffles: typeof allRaffles = []
-  
+
   for (const raffle of allRaffles) {
     const startTime = new Date(raffle.start_time)
     const endTime = new Date(raffle.end_time)

@@ -43,13 +43,15 @@ export function RafflesList({
   section,
   onRaffleDeleted,
 }: RafflesListProps) {
-  const [filteredRaffles, setFilteredRaffles] = useState(rafflesWithEntries)
+  // Defensive: coerce null/undefined to [] so we never read properties on null
+  const list = rafflesWithEntries ?? []
+  const [filteredRaffles, setFilteredRaffles] = useState(list)
   const [sortBy, setSortBy] = useState<SortOption>('days-left')
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
 
   // Use ref to track current raffles without causing re-renders
-  const rafflesRef = useRef(rafflesWithEntries)
+  const rafflesRef = useRef(list)
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -90,8 +92,9 @@ export function RafflesList({
 
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
-    setFilteredRaffles(rafflesWithEntries)
-    rafflesRef.current = rafflesWithEntries
+    const next = rafflesWithEntries ?? []
+    setFilteredRaffles(next)
+    rafflesRef.current = next
   }, [rafflesWithEntries])
 
   // Keep ref in sync with state changes (e.g., from handleRaffleDeleted or fetch updates)
@@ -265,12 +268,7 @@ export function RafflesList({
 
   // Callback to remove a raffle from the list (client-side immediate update)
   const handleRaffleDeleted = (raffleId: string) => {
-    console.log('handleRaffleDeleted called, removing raffle:', raffleId)
-    setFilteredRaffles(prev => {
-      const filtered = prev.filter(({ raffle }) => raffle.id !== raffleId)
-      console.log('Filtered raffles count:', filtered.length, 'from', prev.length)
-      return filtered
-    })
+    setFilteredRaffles(prev => prev.filter(({ raffle }) => raffle.id !== raffleId))
     // Also call parent callback if provided
     if (onRaffleDeleted) {
       onRaffleDeleted(raffleId)

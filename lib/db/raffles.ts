@@ -1,5 +1,11 @@
 import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Raffle, Entry } from '@/lib/types'
+import { withRetry } from '@/lib/db-retry'
+
+function getSupabaseForRead() {
+  return getSupabaseForServerRead(supabase)
+}
 
 // Cache for migration status to avoid repeated checks
 let nftMigrationCache: { applied: boolean; checked: boolean } = {
@@ -20,7 +26,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
   try {
     // Try to query prize_type column - if it exists, migration is applied
     // Use a simple query that won't fail even if table is empty
-    const { error } = await supabase
+    const { error } = await getSupabaseForRead()
       .from('raffles')
       .select('id, prize_type')
       .limit(1)
@@ -67,145 +73,200 @@ function getBaseRaffleColumns(): string {
   return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,rank,floor_price'
 }
 
+// Cache column list so we only run migration check once per process (faster subsequent loads)
+let raffleColumnsCache: string | null = null
+
+const FULL_RAFFLE_COLUMNS = getBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+
 /**
- * Get all columns including NFT columns if migration is applied
+ * Get all columns including NFT columns if migration is applied.
+ * Uses cache so we only hit the DB once per process after the first getRaffles.
  */
 async function getRaffleColumns(): Promise<string> {
-  const hasNftSupport = await checkNftMigrationApplied()
-  if (hasNftSupport) {
-    return getBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+  if (raffleColumnsCache !== null) {
+    return raffleColumnsCache
   }
-  return getBaseRaffleColumns()
+  const hasNftSupport = await checkNftMigrationApplied()
+  raffleColumnsCache =
+    hasNftSupport ? FULL_RAFFLE_COLUMNS : getBaseRaffleColumns()
+  return raffleColumnsCache
 }
 
-export async function getRaffles(activeOnly: boolean = false) {
-  const columns = await getRaffleColumns()
-  let query = supabase.from('raffles').select(columns).order('created_at', { ascending: false })
+/** Result type for getRaffles so callers can distinguish error from empty list (e.g. RLS/403). */
+export type GetRafflesResult = { data: Raffle[]; error: null } | { data: Raffle[]; error: { message: string; code?: string } }
 
-  if (activeOnly) {
-    query = query.eq('is_active', true)
-  }
+function isColumnError(errorMessage: string, errorCode?: string): boolean {
+  const msg = (errorMessage || '').toLowerCase()
+  const code = (errorCode || '').toLowerCase()
+  return (
+    msg.includes('column') ||
+    msg.includes('does not exist') ||
+    msg.includes('prize_type') ||
+    msg.includes('nft') ||
+    code === '42703' ||
+    code === '42p01'
+  )
+}
 
-  const { data, error } = await query
+/**
+ * Fetch raffles for public list. No wallet filter — public list shows all raffles.
+ * Does a single Supabase round-trip (no separate migration check) to avoid upstream timeouts.
+ */
+export async function getRaffles(activeOnly: boolean = false): Promise<GetRafflesResult> {
+  try {
+    return await withRetry(async () => {
+      const client = getSupabaseForRead()
+      const columns = raffleColumnsCache ?? FULL_RAFFLE_COLUMNS
+      let query = client.from('raffles').select(columns).order('created_at', { ascending: false })
+      if (activeOnly) {
+        query = query.eq('is_active', true)
+      }
+      const { data, error } = await query
 
-  if (error) {
-    console.error('Error fetching raffles:', error)
-    
-    // Check if error is related to missing NFT columns
-    const errorMsg = error.message?.toLowerCase() || ''
-    if (errorMsg.includes('column') && 
-        (errorMsg.includes('prize_type') || 
-         errorMsg.includes('nft') || 
-         errorMsg.includes('does not exist'))) {
-      console.error(
-        'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
-        'Please run the migration in your Supabase SQL Editor.'
-      )
+      if (error) {
+        if (isColumnError(error.message, error.code)) {
+          raffleColumnsCache = getBaseRaffleColumns()
+          nftMigrationCache = { applied: false, checked: true }
+          let retryQuery = client
+            .from('raffles')
+            .select(raffleColumnsCache)
+            .order('created_at', { ascending: false })
+          if (activeOnly) retryQuery = retryQuery.eq('is_active', true)
+          const retry = await retryQuery
+          if (retry.error) {
+            console.error('Error fetching raffles (retry with base columns):', retry.error)
+            return { data: [], error: { message: retry.error.message || 'Failed to fetch raffles', code: retry.error.code } }
+          }
+          const raffles = (retry.data || []).map((r: any) => ({
+            ...r,
+            prize_type: 'crypto' as const,
+            nft_mint_address: null,
+            nft_collection_name: null,
+            nft_token_id: null,
+            nft_metadata_uri: null,
+          })) as Raffle[]
+          return { data: raffles, error: null }
+        }
+        console.error('Error fetching raffles:', error)
+        return {
+          data: [],
+          error: { message: error.message || 'Failed to fetch raffles', code: error.code },
+        }
+      }
+
+      raffleColumnsCache = columns
+      nftMigrationCache = { applied: true, checked: true }
+      const hasNftSupport = columns.includes('prize_type')
+      let raffles = (data || []) as unknown as Raffle[]
+      if (!hasNftSupport && data?.length) {
+        raffles = data.map((raffle: any) => ({
+          ...raffle,
+          prize_type: 'crypto' as const,
+          nft_mint_address: null,
+          nft_collection_name: null,
+          nft_token_id: null,
+          nft_metadata_uri: null,
+        })) as Raffle[]
+      }
+      return { data: raffles, error: null }
+    }, { maxRetries: 2 })
+  } catch (error) {
+    console.error('Error fetching raffles after retries:', error)
+    return {
+      data: [],
+      error: { message: error instanceof Error ? error.message : 'Failed to fetch raffles' },
     }
-    
-    return []
   }
-
-  // Ensure all raffles have prize_type defaulted to 'crypto' if migration not applied
-  const hasNftSupport = await checkNftMigrationApplied()
-  if (!hasNftSupport && data) {
-    return data.map((raffle: any) => ({
-      ...raffle,
-      prize_type: 'crypto' as const,
-      nft_mint_address: null,
-      nft_collection_name: null,
-      nft_token_id: null,
-      nft_metadata_uri: null,
-    })) as Raffle[]
-  }
-
-  return (data || []) as unknown as Raffle[]
 }
 
 export async function getRaffleBySlug(slug: string) {
-  const columns = await getRaffleColumns()
-  const { data, error } = await supabase
-    .from('raffles')
-    .select(columns)
-    .eq('slug', slug)
-    .single()
+  return withRetry(async () => {
+    const columns = await getRaffleColumns()
+    const { data, error } = await getSupabaseForRead()
+      .from('raffles')
+      .select(columns)
+      .eq('slug', slug)
+      .single()
 
-  if (error) {
-    console.error('Error fetching raffle:', error)
-    
-    // Check if error is related to missing NFT columns
-    const errorMsg = error.message?.toLowerCase() || ''
-    if (errorMsg.includes('column') && 
-        (errorMsg.includes('prize_type') || 
-         errorMsg.includes('nft') || 
-         errorMsg.includes('does not exist'))) {
-      console.error(
-        'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
-        'Please run the migration in your Supabase SQL Editor.'
-      )
+    if (error) {
+      console.error('Error fetching raffle:', error)
+      
+      // Check if error is related to missing NFT columns
+      const errorMsg = error.message?.toLowerCase() || ''
+      if (errorMsg.includes('column') && 
+          (errorMsg.includes('prize_type') || 
+           errorMsg.includes('nft') || 
+           errorMsg.includes('does not exist'))) {
+        console.error(
+          'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
+          'Please run the migration in your Supabase SQL Editor.'
+        )
+      }
+      
+      return null
     }
-    
-    return null
-  }
 
-  // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
-  const hasNftSupport = await checkNftMigrationApplied()
-  if (!hasNftSupport && data) {
-    const row = data as unknown as Record<string, unknown>
-    return {
-      ...row,
-      prize_type: 'crypto' as const,
-      nft_mint_address: null,
-      nft_collection_name: null,
-      nft_token_id: null,
-      nft_metadata_uri: null,
-    } as Raffle
-  }
+    // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
+    const hasNftSupport = await checkNftMigrationApplied()
+    if (!hasNftSupport && data) {
+      const row = data as unknown as Record<string, unknown>
+      return {
+        ...row,
+        prize_type: 'crypto' as const,
+        nft_mint_address: null,
+        nft_collection_name: null,
+        nft_token_id: null,
+        nft_metadata_uri: null,
+      } as Raffle
+    }
 
-  return data as unknown as Raffle
+    return data as unknown as Raffle
+  }, { maxRetries: 2 })
 }
 
 export async function getRaffleById(id: string) {
-  const columns = await getRaffleColumns()
-  const { data, error } = await supabase
-    .from('raffles')
-    .select(columns)
-    .eq('id', id)
-    .single()
+  return withRetry(async () => {
+    const columns = await getRaffleColumns()
+    const { data, error } = await getSupabaseForRead()
+      .from('raffles')
+      .select(columns)
+      .eq('id', id)
+      .single()
 
-  if (error) {
-    console.error('Error fetching raffle:', error)
-    
-    // Check if error is related to missing NFT columns
-    const errorMsg = error.message?.toLowerCase() || ''
-    if (errorMsg.includes('column') && 
-        (errorMsg.includes('prize_type') || 
-         errorMsg.includes('nft') || 
-         errorMsg.includes('does not exist'))) {
-      console.error(
-        'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
-        'Please run the migration in your Supabase SQL Editor.'
-      )
+    if (error) {
+      console.error('Error fetching raffle:', error)
+      
+      // Check if error is related to missing NFT columns
+      const errorMsg = error.message?.toLowerCase() || ''
+      if (errorMsg.includes('column') && 
+          (errorMsg.includes('prize_type') || 
+           errorMsg.includes('nft') || 
+           errorMsg.includes('does not exist'))) {
+        console.error(
+          'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
+          'Please run the migration in your Supabase SQL Editor.'
+        )
+      }
+      
+      return null
     }
-    
-    return null
-  }
 
-  // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
-  const hasNftSupport = await checkNftMigrationApplied()
-  if (!hasNftSupport && data) {
-    const row = data as unknown as Record<string, unknown>
-    return {
-      ...row,
-      prize_type: 'crypto' as const,
-      nft_mint_address: null,
-      nft_collection_name: null,
-      nft_token_id: null,
-      nft_metadata_uri: null,
-    } as Raffle
-  }
+    // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
+    const hasNftSupport = await checkNftMigrationApplied()
+    if (!hasNftSupport && data) {
+      const row = data as unknown as Record<string, unknown>
+      return {
+        ...row,
+        prize_type: 'crypto' as const,
+        nft_mint_address: null,
+        nft_collection_name: null,
+        nft_token_id: null,
+        nft_metadata_uri: null,
+      } as Raffle
+    }
 
-  return data as unknown as Raffle
+    return data as unknown as Raffle
+  }, { maxRetries: 2 })
 }
 
 export async function getEntriesByRaffleId(raffleId: string) {
@@ -217,7 +278,7 @@ export async function getEntriesByRaffleId(raffleId: string) {
   let hasMore = true
 
   while (hasMore) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseForRead()
       .from('entries')
       .select('*')
       .eq('raffle_id', raffleId)
@@ -319,7 +380,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.rank = raffle.rank
   insertData.floor_price = raffle.floor_price
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from('raffles')
     .insert(insertData)
     .select()
@@ -369,7 +430,7 @@ export async function updateRaffle(
     updates.edited_after_entries = true
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from('raffles')
     .update(updates)
     .eq('id', id)
@@ -387,7 +448,7 @@ export async function updateRaffle(
 }
 
 export async function deleteRaffle(id: string) {
-  const { error, data } = await supabase
+  const { error, data } = await getSupabaseAdmin()
     .from('raffles')
     .delete()
     .eq('id', id)
@@ -451,7 +512,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     const now = new Date()
     const endTime = new Date(raffle.end_time)
     if (endTime <= now && !meetsMinTickets && raffle.status !== 'pending_min_not_met') {
-      await supabase
+      await getSupabaseAdmin()
         .from('raffles')
         .update({ status: 'pending_min_not_met' })
         .eq('id', raffleId)
@@ -490,7 +551,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       
       // Update the raffle with the winner
       const now = new Date().toISOString()
-      const { error } = await supabase
+      const { error } = await getSupabaseAdmin()
         .from('raffles')
         .update({
           winner_wallet: winnerWallet,
@@ -512,7 +573,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
   // Fallback to last wallet (should not happen due to random <= 0 check)
   const winnerWallet = wallets[wallets.length - 1]
   const now = new Date().toISOString()
-  const { error } = await supabase
+  const { error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
       winner_wallet: winnerWallet,
@@ -542,7 +603,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   // Fetch all active raffles without winners, then filter in JavaScript
   // This ensures we catch all cases including extended raffles where 7 days have passed
   // since original_end_time even if end_time is still in the future
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseForRead()
     .from('raffles')
     .select(columns)
     .is('winner_wallet', null)

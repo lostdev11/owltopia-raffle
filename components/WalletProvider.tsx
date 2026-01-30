@@ -70,51 +70,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network }),
       ]
-      
-      // Log available wallets for debugging (only in development)
-      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        // Wait a bit for wallet detection to complete
-        setTimeout(() => {
-          const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-            navigator.userAgent || navigator.vendor || (window as any).opera || ''
-          )
-          const isAndroid = /android/i.test(
-            navigator.userAgent || navigator.vendor || (window as any).opera || ''
-          )
-          const isPhantomBrowser = navigator.userAgent?.toLowerCase().includes('phantom') || false
-          const phantomAvailable = !!(window as any).solana?.isPhantom || !!(window as any).phantom?.solana
-          
-          const adapterStates = walletAdapters.map(w => ({
-            name: w.name,
-            readyState: w.readyState,
-            icon: w.icon
-          }))
-          
-          console.log('Wallet adapters initialized:', walletAdapters.map(w => w.name))
-          console.log('Adapter states:', adapterStates)
-          console.log('Environment:', {
-            isMobile,
-            isAndroid,
-            isPhantomBrowser,
-            phantomExtensionAvailable: phantomAvailable,
-            solanaObject: !!(window as any).solana,
-            phantomObject: !!(window as any).phantom,
-            userAgent: navigator.userAgent
-          })
-          
-            // Android-specific logging
-            if (isAndroid) {
-              console.log('Android device detected - Mobile Wallet Adapter (MWA) is available')
-              console.log('Mobile Wallet Adapter (SolanaMobileWalletAdapter) should handle MWA-compatible wallets')
-              console.log('Available wallet adapters for Android:', adapterStates.filter(a => 
-                ['Solana Mobile', 'Solflare', 'Coinbase', 'Trust'].includes(a.name)
-              ).map(a => a.name))
-              console.log('Note: Phantom is automatically detected as a Standard Wallet and will be available if installed')
-              console.log('Note: SolanaMobileWalletAdapter uses the MWA protocol for better Android wallet compatibility')
-            }
-        }, 500)
-      }
-      
+
       return walletAdapters
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

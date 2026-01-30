@@ -1,34 +1,40 @@
 import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Entry } from '@/lib/types'
+import { withRetry } from '@/lib/db-retry'
 
 export async function getEntryById(id: string) {
-  const { data, error } = await supabase
-    .from('entries')
-    .select('*')
-    .eq('id', id)
-    .single()
+  return withRetry(async () => {
+    const { data, error } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('id', id)
+      .single()
 
-  if (error) {
-    console.error('Error fetching entry:', error)
-    return null
-  }
+    if (error) {
+      console.error('Error fetching entry:', error)
+      return null
+    }
 
-  return data as Entry
+    return data as Entry
+  }, { maxRetries: 2 })
 }
 
 export async function getEntryByTransactionSignature(transactionSignature: string) {
-  const { data, error } = await supabase
-    .from('entries')
-    .select('*')
-    .eq('transaction_signature', transactionSignature)
-    .maybeSingle()
+  return withRetry(async () => {
+    const { data, error } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('transaction_signature', transactionSignature)
+      .maybeSingle()
 
-  if (error) {
-    console.error('Error fetching entry by transaction signature:', error)
-    return null
-  }
+    if (error) {
+      console.error('Error fetching entry by transaction signature:', error)
+      return null
+    }
 
-  return data as Entry | null
+    return data as Entry | null
+  }, { maxRetries: 2 })
 }
 
 export async function createEntry(
@@ -41,18 +47,20 @@ export async function createEntry(
     return null
   }
 
-  const { data, error } = await supabase
-    .from('entries')
-    .insert(entry)
-    .select()
-    .single()
+  return withRetry(async () => {
+    const { data, error } = await getSupabaseAdmin()
+      .from('entries')
+      .insert(entry)
+      .select()
+      .single()
 
-  if (error) {
-    console.error('Error creating entry:', error)
-    return null
-  }
+    if (error) {
+      console.error('Error creating entry:', error)
+      return null
+    }
 
-  return data as Entry
+    return data as Entry
+  }, { maxRetries: 2 })
 }
 
 /**
@@ -85,31 +93,33 @@ export async function updateEntryStatus(
   status: Entry['status'],
   transactionSignature?: string
 ) {
-  const updateData: Partial<Entry> = {
-    status,
-    verified_at: status === 'confirmed' ? new Date().toISOString() : null,
-  }
+  return withRetry(async () => {
+    const updateData: Partial<Entry> = {
+      status,
+      verified_at: status === 'confirmed' ? new Date().toISOString() : null,
+    }
 
-  if (transactionSignature) {
-    updateData.transaction_signature = transactionSignature
-  }
+    if (transactionSignature) {
+      updateData.transaction_signature = transactionSignature
+    }
 
-  const { data, error } = await supabase
-    .from('entries')
-    .update(updateData)
-    .eq('id', id)
-    .select()
-    .single()
+    const { data, error } = await getSupabaseAdmin()
+      .from('entries')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single()
 
-  if (error) {
-    console.error('Error updating entry:', error)
-    console.error('Entry ID:', id)
-    console.error('Update data:', updateData)
-    console.error('Supabase error details:', JSON.stringify(error, null, 2))
-    return null
-  }
+    if (error) {
+      console.error('Error updating entry:', error)
+      console.error('Entry ID:', id)
+      console.error('Update data:', updateData)
+      console.error('Supabase error details:', JSON.stringify(error, null, 2))
+      return null
+    }
 
-  return data as Entry
+    return data as Entry
+  }, { maxRetries: 2 })
 }
 
 export async function deleteEntry(id: string, deletedBy: string) {
@@ -121,7 +131,7 @@ export async function deleteEntry(id: string, deletedBy: string) {
   }
 
   // Store the entry in deleted_entries audit table before deleting
-  const { error: auditError } = await supabase
+  const { error: auditError } = await getSupabaseAdmin()
     .from('deleted_entries')
     .insert({
       original_entry_id: entry.id,
@@ -144,7 +154,7 @@ export async function deleteEntry(id: string, deletedBy: string) {
   }
 
   // Now delete the entry
-  const { error, data } = await supabase
+  const { error, data } = await getSupabaseAdmin()
     .from('entries')
     .delete()
     .eq('id', id)
@@ -195,7 +205,7 @@ export async function markEntryAsRestored(
   id: string,
   restoredBy?: string
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from('entries')
     .update({ 
       restored_at: new Date().toISOString(),

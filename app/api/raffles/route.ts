@@ -5,14 +5,22 @@ import type { Raffle } from '@/lib/types'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
-    
-    const raffles = await getRaffles(activeOnly)
-    
+
+    const { data: raffles, error } = await getRaffles(activeOnly)
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json(raffles, { status: 200 })
   } catch (error) {
     console.error('Error fetching raffles:', error)

@@ -179,9 +179,18 @@ export async function POST(request: NextRequest) {
       } else {
         // No raffle slug provided - try to find matching entry across all raffles
         // BUT only match if transaction amount exactly matches a valid ticket purchase
-        const activeRaffles = await getRaffles(false)
+        const { data: activeRaffles, error: rafflesErr } = await getRaffles(false)
+        if (rafflesErr || !activeRaffles?.length) {
+          return NextResponse.json(
+            {
+              error: 'Could not load raffles',
+              message: rafflesErr?.message || 'No raffles available to match transaction.',
+            },
+            { status: 503 }
+          )
+        }
         const candidateMatches: Array<{ entry: Entry; raffle: Raffle; confidence: number }> = []
-        
+
         for (const candidateRaffle of activeRaffles) {
           // Skip if currency doesn't match
           if (candidateRaffle.currency !== txDetails.currency) {

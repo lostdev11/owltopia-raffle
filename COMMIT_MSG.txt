@@ -1,0 +1,30 @@
+fix(raffles): prevent blank list on mobile, add debug panel and resilient UI
+
+Root cause: Server-side getRaffles() returned [] on error (e.g. RLS/403 or
+missing Supabase config), so the page could not distinguish "error" from
+"empty". If the server threw or client received undefined props, the UI could
+render blank (header/footer only). No wallet filter was applied to the public
+list — confirmed; only admin views filter by wallet.
+
+What changed:
+- getRaffles() now returns { data, error } so callers can show error vs empty.
+- Raffles page: try/catch and config check; on fetch error pass initialError
+  to client so an error card is shown instead of blank or silent empty.
+- Added app/raffles/loading.tsx so "Loading raffles..." shows while server
+  fetches (no blank during load).
+- RafflesPageClient: defensive [] for props; error card with message + code +
+  "Try again"; empty state "No active raffles yet" + Refresh button.
+- Debug panel: ?debug=1 shows wallet (truncated), hostname, fetch status,
+  error message/code, raffles count. No secrets. Client log only when ?debug=1.
+- Removed noisy console.log in RafflesList (handleRaffleDeleted).
+- API route and admin/verify-by-tx updated to use getRaffles() result shape.
+- Runtime Supabase check: config error shows "Missing Supabase config" (no
+  env values in UI).
+
+How to verify on mobile:
+1. Connect wallet on mobile.
+2. Open /raffles (or / which redirects to /raffles).
+3. Expect: list of raffles, or "No active raffles yet" + Refresh, or clear
+   error card with "Try again". No blank screen.
+4. Optional: add ?debug=1 to URL to see diagnostics (wallet truncated,
+   hostname, fetch status, error if any, count).

@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
+import { withRetry } from '@/lib/db-retry'
 
 /**
  * Check if a wallet address is an admin
@@ -8,29 +10,33 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
     return false
   }
 
-  const { data, error } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('wallet_address', walletAddress)
-    .single()
+  const db = getSupabaseForServerRead(supabase)
+  return withRetry(async () => {
+    const { data, error } = await db
+      .from('admins')
+      .select('id')
+      .eq('wallet_address', walletAddress)
+      .single()
 
-  if (error) {
-    // If no admin found, error is expected
-    if (error.code === 'PGRST116') {
+    if (error) {
+      // If no admin found, error is expected
+      if (error.code === 'PGRST116') {
+        return false
+      }
+      console.error('Error checking admin status:', error)
       return false
     }
-    console.error('Error checking admin status:', error)
-    return false
-  }
 
-  return !!data
+    return !!data
+  }, { maxRetries: 2 })
 }
 
 /**
  * Get all admins (admin only function)
  */
 export async function getAdmins() {
-  const { data, error } = await supabase
+  const db = getSupabaseForServerRead(supabase)
+  const { data, error } = await db
     .from('admins')
     .select('*')
     .order('created_at', { ascending: false })
@@ -47,7 +53,7 @@ export async function getAdmins() {
  * Add a new admin (admin only function)
  */
 export async function addAdmin(walletAddress: string, createdBy?: string) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from('admins')
     .insert({
       wallet_address: walletAddress,

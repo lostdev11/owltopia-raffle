@@ -212,19 +212,6 @@ export function WalletConnectButton() {
     }
   }, [mounted, connecting])
 
-  // Monitor connection state changes (debug only in development)
-  useEffect(() => {
-    if (mounted && process.env.NODE_ENV === 'development') {
-      console.log('Wallet state:', { 
-        connected, 
-        connecting, 
-        wallet: wallet?.adapter?.name,
-        publicKey: publicKey?.toBase58(),
-        walletReadyState: wallet?.adapter?.readyState
-      })
-    }
-  }, [mounted, connected, connecting, wallet, publicKey])
-
   // Handle all mobile wallet connections on Android - ensure proper deep linking
   // Fix for Android blank page issue when connecting any mobile wallet
   useEffect(() => {

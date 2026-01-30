@@ -77,10 +77,8 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  appleWebApp: {
-    capable: true,
-    title: 'Owl Raffle',
-    statusBarStyle: 'default',
+  other: {
+    'mobile-web-app-capable': 'yes',
   },
 }
 
