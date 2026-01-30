@@ -6,9 +6,10 @@ import { notFound } from 'next/navigation'
 export default async function EditRafflePage({
   params,
 }: {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }) {
-  const raffle = await getRaffleById(params.id)
+  const { id } = await params
+  const raffle = await getRaffleById(id)
   
   if (!raffle) {
     notFound()

@@ -10,9 +10,10 @@ export const revalidate = 0
 export default async function RaffleDetailPage({
   params,
 }: {
-  params: { slug: string }
+  params: Promise<{ slug: string }>
 }) {
-  let raffle = await getRaffleBySlug(params.slug)
+  const { slug } = await params
+  let raffle = await getRaffleBySlug(slug)
   
   if (!raffle) {
     notFound()
@@ -40,7 +41,7 @@ export default async function RaffleDetailPage({
         
         if (winnerWallet) {
           // Refresh raffle data to get updated winner information
-          raffle = await getRaffleBySlug(params.slug)
+          raffle = await getRaffleBySlug(slug)
           if (!raffle) {
             notFound()
           }
@@ -63,7 +64,7 @@ export default async function RaffleDetailPage({
           })
           
           // Refresh raffle data
-          raffle = await getRaffleBySlug(params.slug)
+          raffle = await getRaffleBySlug(slug)
           if (!raffle) {
             notFound()
           }
@@ -71,7 +72,7 @@ export default async function RaffleDetailPage({
           // Min tickets met but 7 days haven't passed - just update status if needed
           if (raffle.status !== 'pending_min_not_met') {
             await updateRaffle(raffle.id, { status: 'pending_min_not_met' })
-            raffle = await getRaffleBySlug(params.slug)
+            raffle = await getRaffleBySlug(slug)
             if (!raffle) {
               notFound()
             }
