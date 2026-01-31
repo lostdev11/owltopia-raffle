@@ -7,10 +7,14 @@ export const dynamic = 'force-dynamic'
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const params = await context.params
     const entryId = params.id
+    if (typeof entryId !== 'string') {
+      return NextResponse.json({ error: 'Invalid entry id' }, { status: 400 })
+    }
 
     // Check if wallet address is provided (from header or body)
     let walletAddress = request.headers.get('x-wallet-address')

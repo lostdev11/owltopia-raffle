@@ -11,11 +11,15 @@ export const dynamic = 'force-dynamic'
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
     const body = await request.json()
+    const params = await context.params
     const raffleId = params.id
+    if (typeof raffleId !== 'string') {
+      return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
+    }
     const { transaction_signature, wallet_address } = body
 
     // Check if wallet address is provided

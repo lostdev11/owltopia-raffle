@@ -7,11 +7,15 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
     const body = await request.json()
+    const params = await context.params
     const raffleId = params.id
+    if (typeof raffleId !== 'string') {
+      return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
+    }
 
     // Check if wallet address is provided
     const walletAddress = body.wallet_address || request.headers.get('x-wallet-address')
@@ -204,10 +208,14 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const params = await context.params
     const raffleId = params.id
+    if (typeof raffleId !== 'string') {
+      return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
+    }
 
     // Check if wallet address is provided (from header or body)
     let walletAddress = request.headers.get('x-wallet-address')
