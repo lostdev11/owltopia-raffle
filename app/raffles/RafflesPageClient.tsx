@@ -111,9 +111,11 @@ export function RafflesPageClient({
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
-  // Fallback: when server returned no raffles and no error, fetch from API (e.g. RLS or cache edge case)
+  // Fallback: when server returned no raffles OR an error, fetch from API (desktop + mobile resilience)
   useEffect(() => {
-    if (initialError || !isEmptyFromServer || typeof window === 'undefined') return
+    if (typeof window === 'undefined') return
+    // Skip only when we already have server data (no need to fallback)
+    if (!isEmptyFromServer && !initialError) return
     let cancelled = false
     setClientFetchError(null)
     setClientFetchStarted(true)
@@ -132,7 +134,8 @@ export function RafflesPageClient({
           setClientFetchError(data.error)
           return
         }
-        const list = Array.isArray(data) ? data : []
+        // Handle both raw array and wrapped { data: [...] } responses
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
         if (list.length > 0) {
           setClientBuckets(bucketRaffles(list as Raffle[]))
         }
@@ -166,12 +169,14 @@ export function RafflesPageClient({
   }, [router])
 
   const isEmpty = active.length === 0 && future.length === 0 && past.length === 0
-  const hasError = initialError || (isEmpty && clientFetchError)
+  // If we recovered via client fallback, show list and only show error as secondary
+  const recoveredFromError = !!initialError && !!(clientBuckets && (clientBuckets.active.length + clientBuckets.future.length + clientBuckets.past.length > 0))
+  const hasError = (initialError || (isEmpty && clientFetchError)) && !recoveredFromError
   const rawErrorMessage = initialError?.message ?? clientFetchError ?? 'Unknown error'
   const showConnectivityMessage = hasError && isConnectivityError(rawErrorMessage)
 
   return (
-    <div className="container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
+    <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
@@ -225,10 +230,17 @@ export function RafflesPageClient({
         </div>
       )}
 
+      {/* Recovery notice when we loaded from API after server error */}
+      {recoveredFromError && (
+        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+          Raffles loaded. If something looks wrong, try refreshing.
+        </div>
+      )}
+
       {/* Main content: only when no error to show (list or empty state) */}
       {!hasError && (
         <>
-          <div className="mb-8 sm:mb-12">
+          <div className="mb-8 sm:mb-12 w-full min-w-0">
             <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
             {active.length > 0 ? (
               <RafflesList
@@ -259,7 +271,7 @@ export function RafflesPageClient({
           </div>
 
           {past.length > 0 && (
-            <div className="mb-8 sm:mb-12">
+            <div className="mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
               <RafflesList
                 rafflesWithEntries={past}

@@ -286,8 +286,8 @@ export function RafflesList({
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4 sm:mb-6 gap-4">
+    <div className="w-full min-w-0">
+      <div className="flex flex-wrap items-center justify-between mb-4 sm:mb-6 gap-4">
         {title && (
           <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
         )}
@@ -309,7 +309,7 @@ export function RafflesList({
           </div>
         )}
       </div>
-      <div className={gridClasses[size]}>
+      <div className={`w-full min-w-0 ${gridClasses[size]}`}>
         {sortedRaffles.map(({ raffle, entries }, index) => (
           <RaffleCard 
             key={raffle.id} 

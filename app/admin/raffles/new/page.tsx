@@ -1,5 +1,8 @@
 import { CreateRaffleForm } from '@/components/CreateRaffleForm'
 
+// Avoid static prerender: this page uses wallet adapter code that fails during prerender (useMemo on null).
+export const dynamic = 'force-dynamic'
+
 export default function CreateRafflePage() {
   return (
     <div className="container mx-auto py-8 px-4">
