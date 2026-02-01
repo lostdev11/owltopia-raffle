@@ -5,11 +5,13 @@
  * - ?debug=1: diagnostics (wallet truncated, hostname, fetch status, error message/code, count). No secrets.
  * - Error/empty: visible card or "No active raffles yet" + refresh. No blank screen.
  * - When server returns empty, fallback: fetch from GET /api/raffles and bucket client-side so cards show.
+ * - When API also fails: try direct Supabase from browser (different connection path, often works when server times out).
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { RafflesList } from '@/components/RafflesList'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
@@ -65,7 +67,7 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 
-/** Detect DB/connection or timeout errors (e.g. upstream connect, Supabase maintenance) for user-friendly messaging */
+/** Detect DB/connection or timeout errors (e.g. upstream connect, Supabase maintenance/paused) for user-friendly messaging */
 function isConnectivityError(message: string | null | undefined): boolean {
   if (!message) return false
   const m = message.toLowerCase()
@@ -80,7 +82,11 @@ function isConnectivityError(message: string | null | undefined): boolean {
     m.includes('econnrefused') ||
     m.includes('econnreset') ||
     m.includes('etimedout') ||
-    m.includes('server error')
+    m.includes('server error') ||
+    m.includes('503') ||
+    m.includes('502') ||
+    m.includes('service unavailable') ||
+    m.includes('bad gateway')
   )
 }
 
@@ -111,7 +117,7 @@ export function RafflesPageClient({
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
-  // Fallback: when server returned no raffles OR an error, fetch from API (desktop + mobile resilience)
+  // Fallback: when server returned no raffles OR an error, fetch from API then direct Supabase
   useEffect(() => {
     if (typeof window === 'undefined') return
     // Skip only when we already have server data (no need to fallback)
@@ -119,29 +125,66 @@ export function RafflesPageClient({
     let cancelled = false
     setClientFetchError(null)
     setClientFetchStarted(true)
-    fetch('/api/raffles')
-      .then((res) => {
+
+    const tryDirectSupabase = async () => {
+      if (!isSupabaseConfigured() || cancelled) return
+      try {
+        // Direct browser→Supabase fetch; often works when server→Supabase times out
+        const { data, error } = await supabase
+          .from('raffles')
+          .select('*')
+          .in('status', ['live', 'ready_to_draw', 'completed'])
+          .order('created_at', { ascending: false })
         if (cancelled) return
+        if (error) throw new Error(error.message)
+        const list = (data || []) as Partial<Raffle>[]
+        if (list.length > 0) {
+          const normalized = list.map((r: Partial<Raffle>) => ({
+            ...r,
+            prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
+            nft_mint_address: r.nft_mint_address ?? null,
+            nft_collection_name: r.nft_collection_name ?? null,
+            nft_token_id: r.nft_token_id ?? null,
+            nft_metadata_uri: r.nft_metadata_uri ?? null,
+          })) as Raffle[]
+          setClientBuckets(bucketRaffles(normalized))
+          setClientFetchError(null)
+        }
+      } catch {
+        // Ignore - will show API error or empty state
+      }
+    }
+
+    fetch('/api/raffles')
+      .then(async (res) => {
+        if (cancelled) return null
         if (!res.ok) {
           setClientFetchError(res.status === 500 ? 'Server error' : `HTTP ${res.status}`)
-          return res.json().catch(() => ({}))
+          tryDirectSupabase()
+          return null
         }
         return res.json()
       })
       .then((data) => {
-        if (cancelled) return
+        if (cancelled || data == null) return
         if (data?.error) {
           setClientFetchError(data.error)
+          tryDirectSupabase()
           return
         }
         // Handle both raw array and wrapped { data: [...] } responses
         const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
         if (list.length > 0) {
           setClientBuckets(bucketRaffles(list as Raffle[]))
+        } else {
+          tryDirectSupabase()
         }
       })
       .catch((err) => {
-        if (!cancelled) setClientFetchError(err?.message || 'Failed to load raffles')
+        if (!cancelled) {
+          setClientFetchError(err?.message || 'Failed to load raffles')
+          tryDirectSupabase()
+        }
       })
     return () => {
       cancelled = true
@@ -212,7 +255,7 @@ export function RafflesPageClient({
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showConnectivityMessage ? (
             <p className="text-destructive/90 mb-2">
-              We&apos;re experiencing brief connectivity issues. This can happen during database maintenance—please try again in a moment.
+              We&apos;re experiencing brief connectivity issues. This can happen during database maintenance or if your Supabase project was paused (free tier). Check your Supabase dashboard and restore the project if needed, then try again.
             </p>
           ) : (
             <p className="text-destructive/90 mb-2">{rawErrorMessage}</p>
