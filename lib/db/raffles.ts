@@ -108,30 +108,45 @@ function isColumnError(errorMessage: string, errorCode?: string): boolean {
   )
 }
 
+/** Status values for public raffle listing (excludes draft) */
+const PUBLIC_STATUSES = ['live', 'ready_to_draw', 'completed'] as const
+
+/** Status values when admin needs to see drafts too */
+const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed'] as const
+
 /**
  * Fetch raffles for public list. No wallet filter — public list shows all raffles.
+ * - activeOnly=false, includeDraft=false: fetches status IN ('live','ready_to_draw','completed') — excludes draft
+ * - activeOnly=true: fetches status IN ('live','ready_to_draw') — active raffles only
+ * - includeDraft=true: fetches all statuses including draft (for admin)
  * Does a single Supabase round-trip (no separate migration check) to avoid upstream timeouts.
  */
-export async function getRaffles(activeOnly: boolean = false): Promise<GetRafflesResult> {
+export async function getRaffles(
+  activeOnly: boolean = false,
+  options?: { includeDraft?: boolean }
+): Promise<GetRafflesResult> {
   try {
     return await withRetry(async () => {
       const client = getSupabaseForRead()
       const columns = raffleColumnsCache ?? FULL_RAFFLE_COLUMNS
-      let query = client.from('raffles').select(columns).order('created_at', { ascending: false })
-      if (activeOnly) {
-        query = query.eq('is_active', true)
-      }
+      const statuses = options?.includeDraft ? ALL_STATUSES : activeOnly ? ['live', 'ready_to_draw'] : PUBLIC_STATUSES
+      let query = client
+        .from('raffles')
+        .select(columns)
+        .in('status', statuses)
+        .order('created_at', { ascending: false })
       const { data, error } = await query
 
       if (error) {
         if (isColumnError(error.message, error.code)) {
           raffleColumnsCache = getBaseRaffleColumns()
           nftMigrationCache = { applied: false, checked: true }
+          const retryStatuses = options?.includeDraft ? ALL_STATUSES : activeOnly ? ['live', 'ready_to_draw'] : PUBLIC_STATUSES
           let retryQuery = client
             .from('raffles')
             .select(raffleColumnsCache)
+            .in('status', retryStatuses)
             .order('created_at', { ascending: false })
-          if (activeOnly) retryQuery = retryQuery.eq('is_active', true)
           const retry = await retryQuery
           if (retry.error) {
             console.error('Error fetching raffles (retry with base columns):', retry.error)
@@ -508,15 +523,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       console.warn(`Raffle ${raffleId} has not passed 7 days since original end time`)
     }
     
-    // Update status to pending_min_not_met if raffle has ended and min not met
-    const now = new Date()
-    const endTime = new Date(raffle.end_time)
-    if (endTime <= now && !meetsMinTickets && raffle.status !== 'pending_min_not_met') {
-      await getSupabaseAdmin()
-        .from('raffles')
-        .update({ status: 'pending_min_not_met' })
-        .eq('id', raffleId)
-    }
+    // Raffle ended, min not met — no status update; caller may extend and set status to 'live'
     return null
   }
 
@@ -600,7 +607,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const now = new Date()
   const columns = await getRaffleColumns()
   
-  // Fetch all active raffles without winners, then filter in JavaScript
+  // Fetch raffles without winners (status live or ready_to_draw), then filter in JavaScript
   // This ensures we catch all cases including extended raffles where 7 days have passed
   // since original_end_time even if end_time is still in the future
   const { data, error } = await getSupabaseForRead()
@@ -608,7 +615,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     .select(columns)
     .is('winner_wallet', null)
     .is('winner_selected_at', null)
-    .eq('is_active', true)
+    .in('status', ['live', 'ready_to_draw'])
 
   if (error) {
     console.error('Error fetching ended raffles without winner:', error)

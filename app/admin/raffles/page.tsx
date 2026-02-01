@@ -22,7 +22,7 @@ export default async function AdminRafflesPage() {
     )
   }
 
-  const { data: allRaffles, error: rafflesError } = await getRaffles(false)
+  const { data: allRaffles, error: rafflesError } = await getRaffles(false, { includeDraft: true })
   if (rafflesError) {
     return (
       <div className="container mx-auto py-8 px-4">
@@ -54,20 +54,24 @@ export default async function AdminRafflesPage() {
       continue
     }
     
-    // Past raffle: has winner, end time has passed, or is_active is false
-    if (raffle.winner_selected_at || endTimeMs <= nowTime || !raffle.is_active) {
+    // Past raffle: has winner, completed, ready_to_draw, or end time has passed
+    if (raffle.winner_selected_at || raffle.status === 'completed' || raffle.status === 'ready_to_draw') {
+      pastRaffles.push(raffle)
+      continue
+    }
+    if (endTimeMs <= nowTime) {
       pastRaffles.push(raffle)
       continue
     }
     
-    // Future raffle: hasn't started yet (start time is strictly in the future)
-    if (startTimeMs > nowTime) {
+    // Future raffle: status live/draft and hasn't started yet
+    if ((raffle.status === 'live' || raffle.status === 'draft' || !raffle.status) && startTimeMs > nowTime) {
       futureRaffles.push(raffle)
       continue
     }
     
-    // Active raffle: has started (startTime <= now), hasn't ended (endTime > now), and is_active
-    if (startTimeMs <= nowTime && endTimeMs > nowTime && raffle.is_active) {
+    // Active raffle: live, has started, hasn't ended
+    if (raffle.status === 'live' && startTimeMs <= nowTime && endTimeMs > nowTime) {
       activeRaffles.push(raffle)
       continue
     }

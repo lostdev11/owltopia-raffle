@@ -42,15 +42,19 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
       past.push(withEntries(raffle))
       continue
     }
-    if (raffle.winner_selected_at || endTimeMs <= nowTime || !raffle.is_active) {
+    if (raffle.winner_selected_at || raffle.status === 'completed') {
       past.push(withEntries(raffle))
       continue
     }
-    if (startTimeMs > nowTime) {
+    if (raffle.status === 'ready_to_draw') {
+      past.push(withEntries(raffle))
+      continue
+    }
+    if (raffle.status === 'live' && startTimeMs > nowTime) {
       future.push(withEntries(raffle))
       continue
     }
-    if (startTimeMs <= nowTime && endTimeMs > nowTime && raffle.is_active) {
+    if (raffle.status === 'live' && startTimeMs <= nowTime && endTimeMs > nowTime) {
       active.push(withEntries(raffle))
       continue
     }
@@ -61,18 +65,20 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 
-/** Detect DB/connection or timeout errors (e.g. during Supabase maintenance) for user-friendly messaging */
+/** Detect DB/connection or timeout errors (e.g. upstream connect, Supabase maintenance) for user-friendly messaging */
 function isConnectivityError(message: string | null | undefined): boolean {
   if (!message) return false
   const m = message.toLowerCase()
   return (
     m.includes('connection') ||
+    m.includes('upstream') ||
     m.includes('timeout') ||
     m.includes('timed out') ||
     m.includes('database operation failed after') ||
     m.includes('failed to fetch') ||
     m.includes('network') ||
     m.includes('econnrefused') ||
+    m.includes('econnreset') ||
     m.includes('etimedout') ||
     m.includes('server error')
   )

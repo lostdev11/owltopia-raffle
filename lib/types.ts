@@ -4,7 +4,7 @@ export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 
 export type PrizeType = 'crypto' | 'nft'
 
-export type RaffleStatus = 'pending_min_not_met' | 'completed' | null
+export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | null
 
 export interface Raffle {
   id: string

@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
       is_active: true,
       winner_wallet: null,
       winner_selected_at: null,
-      status: null,
+      status: ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status) ? body.status : 'draft',
       nft_transfer_transaction: null,
       rank: rank,
       floor_price: floorPrice,

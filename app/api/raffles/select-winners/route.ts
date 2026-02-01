@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
             await updateRaffle(raffle.id, {
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
-              status: 'pending_min_not_met'
+              status: 'live'
             })
             
             return NextResponse.json(
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
             await updateRaffle(raffle.id, {
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
-              status: 'pending_min_not_met'
+              status: 'live'
             })
             
             results.push({

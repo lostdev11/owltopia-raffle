@@ -60,7 +60,7 @@ export default async function RaffleDetailPage({
           await updateRaffle(raffle.id, {
             original_end_time: originalEndTime,
             end_time: newEndTime.toISOString(),
-            status: 'pending_min_not_met'
+            status: 'live',
           })
           
           // Refresh raffle data
@@ -69,9 +69,9 @@ export default async function RaffleDetailPage({
             notFound()
           }
         } else {
-          // Min tickets met but 7 days haven't passed - just update status if needed
-          if (raffle.status !== 'pending_min_not_met') {
-            await updateRaffle(raffle.id, { status: 'pending_min_not_met' })
+          // Min tickets met but 7 days haven't passed - update to ready_to_draw
+          if (raffle.status !== 'ready_to_draw') {
+            await updateRaffle(raffle.id, { status: 'ready_to_draw' })
             raffle = await getRaffleBySlug(slug)
             if (!raffle) {
               notFound()

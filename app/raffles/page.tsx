@@ -79,6 +79,7 @@ export default async function RafflesPage() {
   const activeRaffles: Raffle[] = []
   const futureRaffles: Raffle[] = []
 
+  // Bucket by status + times (status already filtered: live, ready_to_draw, completed — no draft)
   for (const raffle of allRaffles) {
     const startTime = new Date(raffle.start_time)
     const endTime = new Date(raffle.end_time)
@@ -88,15 +89,19 @@ export default async function RafflesPage() {
       pastRaffles.push(raffle)
       continue
     }
-    if (raffle.winner_selected_at || endTimeMs <= nowTime || !raffle.is_active) {
+    if (raffle.winner_selected_at || raffle.status === 'completed') {
       pastRaffles.push(raffle)
       continue
     }
-    if (startTimeMs > nowTime) {
+    if (raffle.status === 'ready_to_draw') {
+      pastRaffles.push(raffle)
+      continue
+    }
+    if (raffle.status === 'live' && startTimeMs > nowTime) {
       futureRaffles.push(raffle)
       continue
     }
-    if (startTimeMs <= nowTime && endTimeMs > nowTime && raffle.is_active) {
+    if (raffle.status === 'live' && startTimeMs <= nowTime && endTimeMs > nowTime) {
       activeRaffles.push(raffle)
       continue
     }

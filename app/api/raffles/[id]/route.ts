@@ -186,6 +186,12 @@ export async function PATCH(
       updates.edited_after_entries = true
     }
 
+    // Update status if provided (valid values: draft, live, ready_to_draw, completed)
+    const validStatuses = ['draft', 'live', 'ready_to_draw', 'completed']
+    if (body.status !== undefined && validStatuses.includes(body.status)) {
+      updates.status = body.status
+    }
+
     const raffle = await updateRaffle(raffleId, updates)
 
     if (!raffle) {
