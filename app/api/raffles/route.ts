@@ -3,31 +3,60 @@ import { createRaffle, getRaffles, generateUniqueSlug } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
 import type { Raffle } from '@/lib/types'
 
-// Force dynamic rendering since we use request body
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
+
+const SUPABASE_TIMEOUT_MS = 10_000
+
+/** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  step: 'timeout' | 'supabase error'
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Request timed out after ${ms}ms`))
+    }, ms)
+  })
+  try {
+    const result = await Promise.race([promise, timeoutPromise])
+    if (timeoutId) clearTimeout(timeoutId)
+    return result
+  } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId)
+    const e = err as Error & { step?: 'timeout' | 'supabase error' }
+    e.step = e.message?.includes('timed out') ? 'timeout' : step
+    throw e
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
 
-    const { data: raffles, error } = await getRaffles(activeOnly)
+    const result = await withTimeout(getRaffles(activeOnly), SUPABASE_TIMEOUT_MS, 'supabase error')
+    const { data: raffles, error } = result
 
     if (error) {
       return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: 500 }
+        { error: error.message, code: error.code, step: 'supabase error' },
+        { status: 502 }
       )
     }
 
     return NextResponse.json(raffles, { status: 200 })
   } catch (error) {
     console.error('Error fetching raffles:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
+    const err = error as Error & { step?: 'timeout' | 'supabase error' }
+    const step = err.step ?? 'supabase error'
+    const errorMessage = err instanceof Error ? err.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
+      { error: errorMessage, step },
+      { status: 502 }
     )
   }
 }
@@ -47,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is an admin
-    const adminStatus = await isAdmin(walletAddress)
+    const adminStatus = await withTimeout(isAdmin(walletAddress), SUPABASE_TIMEOUT_MS, 'supabase error')
     if (!adminStatus) {
       return NextResponse.json(
         { error: 'Only admins can create raffles' },
@@ -77,7 +106,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Ensure slug is unique
-    slug = await generateUniqueSlug(slug)
+    slug = await withTimeout(generateUniqueSlug(slug), SUPABASE_TIMEOUT_MS, 'supabase error')
     
     // Default start_time to current time if not provided
     const startTime = body.start_time || new Date().toISOString()
@@ -213,15 +242,17 @@ export async function POST(request: NextRequest) {
       floor_price: floorPrice,
     }
 
-    const raffle = await createRaffle(raffleData)
+    const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
     return NextResponse.json(raffle, { status: 201 })
   } catch (error) {
     console.error('Error creating raffle:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
+    const err = error as Error & { step?: 'timeout' | 'supabase error' }
+    const step = err.step ?? 'supabase error'
+    const errorMessage = err instanceof Error ? err.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
+      { error: errorMessage, step },
+      { status: 502 }
     )
   }
 }
