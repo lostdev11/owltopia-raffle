@@ -10,7 +10,22 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    let body: Record<string, unknown>
+    try {
+      const text = await request.text()
+      if (!text || !text.trim()) {
+        return NextResponse.json(
+          { error: 'Request body is required (JSON with raffleId, walletAddress, ticketQuantity)' },
+          { status: 400 }
+        )
+      }
+      body = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
+        { status: 400 }
+      )
+    }
     const { raffleId, walletAddress, ticketQuantity, amountPaid } = body
 
     if (!raffleId || !walletAddress || !ticketQuantity) {
