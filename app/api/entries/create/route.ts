@@ -28,15 +28,25 @@ export async function POST(request: NextRequest) {
     }
     const { raffleId, walletAddress, ticketQuantity, amountPaid } = body
 
-    if (!raffleId || !walletAddress || !ticketQuantity) {
+    if (!raffleId || !walletAddress || ticketQuantity == null) {
       return NextResponse.json(
         { error: 'Missing required fields: raffleId, walletAddress, ticketQuantity' },
         { status: 400 }
       )
     }
 
+    const raffleIdStr = typeof raffleId === 'string' ? raffleId : String(raffleId)
+    const walletAddressStr = typeof walletAddress === 'string' ? walletAddress : String(walletAddress)
+    const ticketQuantityNum = typeof ticketQuantity === 'number' ? ticketQuantity : Number(ticketQuantity)
+    if (!Number.isInteger(ticketQuantityNum) || ticketQuantityNum < 1) {
+      return NextResponse.json(
+        { error: 'ticketQuantity must be a positive integer' },
+        { status: 400 }
+      )
+    }
+
     // Get the raffle
-    const raffle = await getRaffleById(raffleId)
+    const raffle = await getRaffleById(raffleIdStr)
     if (!raffle) {
       return NextResponse.json(
         { error: 'Raffle not found' },
@@ -67,25 +77,26 @@ export async function POST(request: NextRequest) {
         .filter(e => e.status === 'confirmed')
         .reduce((sum, e) => sum + e.ticket_quantity, 0)
       
-      if (totalConfirmedTickets + ticketQuantity > raffle.max_tickets) {
+      if (totalConfirmedTickets + ticketQuantityNum > raffle.max_tickets) {
         return NextResponse.json(
-          { error: `Cannot purchase ${ticketQuantity} tickets: would exceed maximum ticket limit of ${raffle.max_tickets}. Only ${raffle.max_tickets - totalConfirmedTickets} tickets remaining.` },
+          { error: `Cannot purchase ${ticketQuantityNum} tickets: would exceed maximum ticket limit of ${raffle.max_tickets}. Only ${raffle.max_tickets - totalConfirmedTickets} tickets remaining.` },
           { status: 400 }
         )
       }
     }
 
     // Use provided amountPaid if available, otherwise calculate from ticket_price * ticketQuantity
-    const finalAmountPaid = amountPaid !== undefined && amountPaid !== null ? amountPaid : raffle.ticket_price * ticketQuantity
+    const rawAmountPaid = amountPaid !== undefined && amountPaid !== null ? amountPaid : raffle.ticket_price * ticketQuantityNum
+    const finalAmountPaid = typeof rawAmountPaid === 'number' && !Number.isNaN(rawAmountPaid) ? rawAmountPaid : raffle.ticket_price * ticketQuantityNum
     
     // Log calculation for debugging
-    console.log(`Payment calculation: ticket_price=${raffle.ticket_price}, ticketQuantity=${ticketQuantity}, providedAmountPaid=${amountPaid}, finalAmountPaid=${finalAmountPaid}`)
+    console.log(`Payment calculation: ticket_price=${raffle.ticket_price}, ticketQuantity=${ticketQuantityNum}, providedAmountPaid=${amountPaid}, finalAmountPaid=${finalAmountPaid}`)
 
     // Create pending entry
     const entry = await createEntry({
-      raffle_id: raffleId,
-      wallet_address: walletAddress,
-      ticket_quantity: ticketQuantity,
+      raffle_id: raffleIdStr,
+      wallet_address: walletAddressStr,
+      ticket_quantity: ticketQuantityNum,
       transaction_signature: null,
       status: 'pending',
       amount_paid: finalAmountPaid,
