@@ -416,7 +416,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         {/* Outage Recovery: Restore Raffle - only when ended, no winner */}
         {(() => {
           const now = new Date()
-          const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+          // Use end_time only: after restore, end_time is the extended time
+          const endTimeToCheck = new Date(raffle.end_time)
           const hasEnded = endTimeToCheck <= now
           const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
 
@@ -496,9 +497,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         {/* Winner Selection Section */}
         {(() => {
           const now = new Date()
-          // For extended raffles, check original_end_time if it exists
-          // Otherwise check end_time
-          const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+          // Use end_time only: after restore, end_time is the extended time
+          const endTimeToCheck = new Date(raffle.end_time)
           const hasEnded = endTimeToCheck <= now
           const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
           

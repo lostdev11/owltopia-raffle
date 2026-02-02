@@ -20,9 +20,9 @@ export default async function RaffleDetailPage({
   }
 
   // Check if raffle has ended and doesn't have a winner yet
-  // For extended raffles, check original_end_time if it exists
+  // Use end_time only: after restore, end_time is the extended time; original_end_time is for 7-day rule only.
   const now = new Date()
-  const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+  const endTimeToCheck = new Date(raffle.end_time)
   const hasEnded = endTimeToCheck <= now
   const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
 
@@ -47,14 +47,13 @@ export default async function RaffleDetailPage({
           }
         }
       } else {
-        // Check if min tickets are not met - if so, extend the raffle by 7 days
+        // Check if min tickets are not met - if so, extend the raffle by 7 days from current end
         const isEligible = isRaffleEligibleToDraw(raffle, entries)
         
         if (!isEligible) {
-          // Min tickets not met - extend raffle by 7 days
-          // Store original_end_time if not already set
+          // Min tickets not met - extend raffle by 7 days from current end_time (not original)
           const originalEndTime = raffle.original_end_time || raffle.end_time
-          const newEndTime = new Date(originalEndTime)
+          const newEndTime = new Date(raffle.end_time)
           newEndTime.setDate(newEndTime.getDate() + 7)
           
           await updateRaffle(raffle.id, {

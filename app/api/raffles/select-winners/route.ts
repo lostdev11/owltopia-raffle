@@ -33,10 +33,8 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Check if raffle has ended
-      // For extended raffles, check original_end_time if it exists
-      // Otherwise check end_time
-      const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+      // Check if raffle has ended (use end_time only; after restore that is the extended time)
+      const endTimeToCheck = new Date(raffle.end_time)
       if (endTimeToCheck > new Date()) {
         return NextResponse.json(
           { error: 'Raffle has not ended yet' },

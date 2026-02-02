@@ -849,26 +849,11 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     })) as Raffle[]
   }
 
-  // Filter to only include raffles that have "ended" based on our criteria:
-  // 1. end_time has passed, OR
-  // 2. original_end_time exists and 7 days have passed since it
-  const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000
+  // Filter to only include raffles where end_time has passed.
+  // Use end_time only: after restore, end_time is the extended time; don't treat as ended until it passes.
   const filteredRaffles = raffles.filter(raffle => {
     const endTime = new Date(raffle.end_time)
-    const hasEnded = endTime <= now
-    
-    // If original_end_time exists, check if 7 days have passed since it
-    if (raffle.original_end_time) {
-      const originalEndTime = new Date(raffle.original_end_time)
-      const timeSinceOriginalEnd = now.getTime() - originalEndTime.getTime()
-      const sevenDaysPassed = timeSinceOriginalEnd >= sevenDaysInMs
-      
-      // Include if either end_time has passed OR 7 days have passed since original_end_time
-      return hasEnded || sevenDaysPassed
-    }
-    
-    // No original_end_time, just check if end_time has passed
-    return hasEnded
+    return endTime <= now
   })
 
   return filteredRaffles
