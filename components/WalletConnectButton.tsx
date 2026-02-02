@@ -19,6 +19,7 @@ export function WalletConnectButton() {
   const { setVisible } = useWalletModal()
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
+  const [remountKey, setRemountKey] = useState(0)
   const buttonRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -352,6 +353,13 @@ export function WalletConnectButton() {
 
   const handleDisconnect = useCallback(async () => {
     await disconnect()
+    // Force WalletMultiButton remount to clear any stuck state after disconnect.
+    // Without this, reconnecting often fails on subpages until user navigates away and back.
+    setRemountKey((k) => k + 1)
+    // Clear mobile wallet redirect URLs so they don't interfere with reconnect.
+    const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+    walletNames.forEach((name) => sessionStorage.removeItem(`${name}_redirect_url`))
+    sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect])
 
   // Intercept clicks when wallet is connected to disconnect instead of opening modal
@@ -468,7 +476,7 @@ export function WalletConnectButton() {
         }}
       >
         {mounted ? (
-          <WalletMultiButton />
+          <WalletMultiButton key={remountKey} />
         ) : (
           <button
             className="wallet-adapter-button"
