@@ -55,7 +55,8 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
       past.push(withEntries(raffle))
       continue
     }
-    if (raffle.status === 'live' && startTimeMs > nowTime) {
+    // Future: draft or live that haven't started — show for everyone
+    if ((raffle.status === 'draft' || raffle.status === 'live') && startTimeMs > nowTime) {
       future.push(withEntries(raffle))
       continue
     }
@@ -148,7 +149,7 @@ export function RafflesPageClient({
         const { data, error } = await supabase
           .from('raffles')
           .select('*')
-          .in('status', ['live', 'ready_to_draw', 'completed'])
+          .in('status', ['draft', 'live', 'ready_to_draw', 'completed'])
           .order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)

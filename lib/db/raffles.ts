@@ -179,16 +179,21 @@ function isColumnOrSchemaError(message: string): boolean {
 /**
  * Direct REST fetch for raffles (bypasses Supabase JS client).
  * Use for server render and API route to avoid connection timeouts on cold start / paused project.
+ * When includeDraft is true, draft raffles are included so "Future Raffles" can show scheduled drafts to everyone.
  */
 async function fetchRafflesViaRestRaw(
   baseUrl: string,
   apiKey: string,
   activeOnly: boolean,
   select: string,
-  perAttemptMs: number
+  perAttemptMs: number,
+  includeDraft: boolean = false
 ): Promise<Raffle[]> {
   const url = new URL(`${baseUrl}/rest/v1/raffles`)
-  url.searchParams.set('status', 'in.(live,ready_to_draw,completed)')
+  const statusFilter = includeDraft
+    ? 'in.(draft,live,ready_to_draw,completed)'
+    : 'in.(live,ready_to_draw,completed)'
+  url.searchParams.set('status', statusFilter)
   if (activeOnly) url.searchParams.set('is_active', 'is.true')
   url.searchParams.set('order', 'created_at.desc,id.desc')
   url.searchParams.set('limit', '24')
@@ -223,6 +228,8 @@ async function fetchRafflesViaRestRaw(
 
 export interface GetRafflesViaRestOptions {
   activeOnly?: boolean
+  /** Include draft status so future (scheduled) raffles show for everyone */
+  includeDraft?: boolean
   timeoutMs?: number
   maxRetries?: number
   perAttemptMs?: number
@@ -253,17 +260,18 @@ export async function getRafflesViaRest(
   const maxRetries = options.maxRetries ?? 2
   const perAttemptMs = options.perAttemptMs ?? 6_000
 
+  const includeDraft = options?.includeDraft ?? false
   const run = async (): Promise<Raffle[]> => {
     try {
       return await withRetry(
-        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_FULL, perAttemptMs),
+        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_FULL, perAttemptMs, includeDraft),
         { maxRetries, initialDelayMs: 600 }
       )
     } catch (fullErr) {
       const msg = (fullErr as Error)?.message ?? ''
       if (!isColumnOrSchemaError(msg)) throw fullErr
       return await withRetry(
-        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_BASE, perAttemptMs),
+        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_BASE, perAttemptMs, includeDraft),
         { maxRetries, initialDelayMs: 600 }
       )
     }

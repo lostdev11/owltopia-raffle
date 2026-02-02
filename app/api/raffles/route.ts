@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
     const activeOnly = searchParams.get('active') === 'true'
 
     const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
+      includeDraft: true,
       timeoutMs: 8_000,
       maxRetries: 1,
       perAttemptMs: 4_000,

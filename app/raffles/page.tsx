@@ -48,6 +48,7 @@ export default async function RafflesPage() {
   try {
     result = await Promise.race([
       getRafflesViaRest(false, {
+        includeDraft: true,
         timeoutMs: 8_000,
         maxRetries: 1,
         perAttemptMs: 4_000,
@@ -108,7 +109,8 @@ export default async function RafflesPage() {
       pastRaffles.push(raffle)
       continue
     }
-    if (raffle.status === 'live' && startTimeMs > nowTime) {
+    // Future: draft or live that haven't started yet — show for everyone
+    if ((raffle.status === 'draft' || raffle.status === 'live') && startTimeMs > nowTime) {
       futureRaffles.push(raffle)
       continue
     }
