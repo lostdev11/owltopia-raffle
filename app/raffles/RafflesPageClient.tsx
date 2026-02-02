@@ -7,10 +7,13 @@
  * - When server returns empty, fallback: fetch from GET /api/raffles and bucket client-side so cards show.
  * - When API also fails: try direct Supabase from browser (different connection path, often works when server times out).
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
+ * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { RafflesList } from '@/components/RafflesList'
+import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 
@@ -120,7 +123,12 @@ export function RafflesPageClient({
 
   const searchParams = useSearchParams()
   const router = useRouter()
+  const { publicKey, connected } = useWallet()
+  const wallet = publicKey?.toBase58() ?? ''
   const debug = searchParams.get('debug') === '1'
+
+  type Tab = 'all' | 'my-entries'
+  const [tab, setTab] = useState<Tab>('all')
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
@@ -270,6 +278,31 @@ export function RafflesPageClient({
         <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
+        {/* Tabs: All raffles | Raffles entered (wallet-scoped) */}
+        <div className="mt-6 flex gap-2 border-b border-border">
+          <button
+            type="button"
+            onClick={() => setTab('all')}
+            className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'all'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            All raffles
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('my-entries')}
+            className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'my-entries'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Raffles entered
+          </button>
+        </div>
       </div>
 
       {/* Error state: visible card with message. 503 = Supabase paused; other connectivity = generic. */}
@@ -324,6 +357,20 @@ export function RafflesPageClient({
       {/* Main content: only when no error to show (list or empty state) */}
       {!hasError && (
         <>
+          {tab === 'my-entries' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0">
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Raffles you entered</h2>
+              {connected && wallet ? (
+                <MyEntriesList walletAddress={wallet} />
+              ) : (
+                <div className="rounded-lg border border-border bg-card/50 p-8 text-center text-muted-foreground">
+                  <p className="text-lg">Connect your wallet to see raffles you’ve entered.</p>
+                  <p className="mt-2 text-sm">Only you can see your own entries.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
           <div className="mb-8 sm:mb-12 w-full min-w-0">
             <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
             {active.length > 0 ? (
@@ -383,6 +430,8 @@ export function RafflesPageClient({
                 </>
               )}
             </div>
+          )}
+            </>
           )}
         </>
       )}

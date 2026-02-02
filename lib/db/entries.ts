@@ -305,3 +305,53 @@ export async function getRestoredEntries(walletAddress?: string) {
 
   return uniqueRestored as Entry[]
 }
+
+/** Minimal raffle fields needed for "my entries" list */
+export interface RaffleInfoForEntry {
+  id: string
+  slug: string
+  title: string
+  end_time: string
+  status: string | null
+  winner_wallet: string | null
+  winner_selected_at: string | null
+}
+
+export interface EntryWithRaffle {
+  entry: Entry
+  raffle: RaffleInfoForEntry
+}
+
+/**
+ * Get all entries for a wallet with raffle info.
+ * Used so users can see only their own raffles entered, with date and blockchain validation.
+ */
+export async function getEntriesByWallet(walletAddress: string): Promise<EntryWithRaffle[]> {
+  const { data, error } = await supabase
+    .from('entries')
+    .select(`
+      *,
+      raffles (id, slug, title, end_time, status, winner_wallet, winner_selected_at)
+    `)
+    .eq('wallet_address', walletAddress)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching entries by wallet:', error)
+    return []
+  }
+
+  if (!data || data.length === 0) return []
+
+  const result: EntryWithRaffle[] = []
+  for (const row of data as any[]) {
+    const raffle = row.raffles
+    if (!raffle) continue
+    const { raffles: _, ...entryRow } = row
+    result.push({
+      entry: entryRow as Entry,
+      raffle: raffle as RaffleInfoForEntry,
+    })
+  }
+  return result
+}
