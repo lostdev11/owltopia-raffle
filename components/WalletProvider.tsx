@@ -81,7 +81,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider 
         wallets={wallets} 
-        autoConnect={false}
+        autoConnect
         onError={(error) => {
           // Log all errors in development for debugging
           if (process.env.NODE_ENV === 'development') {

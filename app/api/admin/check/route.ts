@@ -7,7 +7,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const walletAddress = searchParams.get('wallet')
+    const raw = searchParams.get('wallet')
+    const walletAddress = raw?.trim() ?? ''
 
     if (!walletAddress) {
       return NextResponse.json(

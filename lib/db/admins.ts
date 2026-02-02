@@ -6,7 +6,8 @@ import { withRetry } from '@/lib/db-retry'
  * Check if a wallet address is an admin
  */
 export async function isAdmin(walletAddress: string): Promise<boolean> {
-  if (!walletAddress) {
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) {
     return false
   }
 
@@ -15,12 +16,15 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
     const { data, error } = await db
       .from('admins')
       .select('id')
-      .eq('wallet_address', walletAddress)
+      .eq('wallet_address', normalized)
       .single()
 
     if (error) {
-      // If no admin found, error is expected
+      // If no admin found, error is expected (PGRST116 = no rows)
       if (error.code === 'PGRST116') {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[Admin check] Wallet not in admins table:', normalized)
+        }
         return false
       }
       console.error('Error checking admin status:', error)
@@ -28,7 +32,7 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
     }
 
     return !!data
-  }, { maxRetries: 2 })
+  }, { maxRetries: 0 })
 }
 
 /**

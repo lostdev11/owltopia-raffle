@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
     "build": "next build --webpack",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",
-    "lint": "next lint",
-    "dev:turbo": "next dev"
+    "lint": "next lint"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",

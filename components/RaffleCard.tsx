@@ -17,6 +17,7 @@ import type { Raffle, Entry } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
 import { Trash2, Edit, Trophy } from 'lucide-react'
@@ -50,7 +51,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const pathname = usePathname()
   const { publicKey, sendTransaction, connected } = useWallet()
   const { connection } = useConnection()
-  const [isAdmin, setIsAdmin] = useState(false)
+  const wallet = publicKey?.toBase58() ?? ''
+  const [isAdmin, setIsAdmin] = useState(() =>
+    typeof window !== 'undefined' && wallet ? (getCachedAdmin(wallet) ?? false) : false
+  )
   const [deleting, setDeleting] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [imageModalOpen, setImageModalOpen] = useState(false)
@@ -95,29 +99,30 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
   const minTickets = getRaffleMinimum(raffle)
   const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
 
-  // Check admin status
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin === true)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   const handleDelete = async (e?: React.MouseEvent) => {

@@ -25,6 +25,7 @@ import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
@@ -74,7 +75,10 @@ export function RaffleDetailClient({
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  const wallet = publicKey?.toBase58() ?? ''
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
+    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+  )
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
   // Make isActive reactive to time passing - critical for mobile connections
@@ -152,29 +156,30 @@ export function RaffleDetailClient({
     ? calculateOwlVisionScore(raffle, entries)
     : owlVisionScore
 
-  // Check admin status
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin === true)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   // Refresh entries when wallet connection status changes

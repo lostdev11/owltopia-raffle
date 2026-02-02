@@ -7,33 +7,39 @@ import { Logo } from '@/components/Logo'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
 import { Settings } from 'lucide-react'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 
 export function Header() {
   const { publicKey, connected } = useWallet()
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  const wallet = publicKey?.toBase58() ?? ''
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
+    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+  )
 
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin === true)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   return (

@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation'
+import { EnterOwlTopia } from '@/components/EnterOwlTopia'
 
 export default function Home() {
-  redirect('/raffles')
+  return <EnterOwlTopia />
 }

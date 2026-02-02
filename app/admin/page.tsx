@@ -10,6 +10,7 @@ import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 
 interface DeletedEntry {
   id: string
@@ -50,8 +51,10 @@ interface RestoredEntry {
 export default function AdminDashboardPage() {
   const router = useRouter()
   const { publicKey, connected } = useWallet()
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
-  const [loading, setLoading] = useState(true)
+  const wallet = publicKey?.toBase58() ?? ''
+  const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
+  const [loading, setLoading] = useState(() => !cachedTrue)
   const [deletedEntries, setDeletedEntries] = useState<DeletedEntry[]>([])
   const [loadingDeleted, setLoadingDeleted] = useState(false)
   const [restoredEntries, setRestoredEntries] = useState<RestoredEntry[]>([])
@@ -65,30 +68,34 @@ export default function AdminDashboardPage() {
   const [verifyError, setVerifyError] = useState<string | null>(null)
 
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        setLoading(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      } finally {
-        setLoading(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      setLoading(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    if (getCachedAdmin(addr) === true) {
+      setIsAdmin(true)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   useEffect(() => {
@@ -240,6 +247,7 @@ export default function AdminDashboardPage() {
   }
 
   if (!isAdmin) {
+    const walletAddr = publicKey?.toBase58() ?? ''
     return (
       <div className="container mx-auto py-8 px-4">
         <div className="max-w-4xl mx-auto">
@@ -247,10 +255,19 @@ export default function AdminDashboardPage() {
             <CardHeader>
               <CardTitle>Access Denied</CardTitle>
               <CardDescription>
-                Only admins can access this dashboard. Your wallet is not authorized.
+                Only admins can access this dashboard. Your wallet is not in the admins list.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {walletAddr && (
+                <div className="rounded-lg border bg-muted/50 p-3 text-sm">
+                  <p className="font-medium text-muted-foreground mb-1">Connected wallet</p>
+                  <p className="font-mono break-all">{walletAddr}</p>
+                  <p className="mt-2 text-muted-foreground text-xs">
+                    If you should have access, contact the site owner.
+                  </p>
+                </div>
+              )}
               <Button onClick={() => router.push('/raffles')} variant="outline">
                 Go to Raffles
               </Button>

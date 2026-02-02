@@ -108,11 +108,195 @@ function isColumnError(errorMessage: string, errorCode?: string): boolean {
   )
 }
 
+/** User-friendly message for connection/timeout errors shown in the UI */
+const CONNECTION_ERROR_MESSAGE =
+  'Unable to load raffles. Please check your connection and try again.'
+
+function toUserFriendlyMessage(rawMessage: string): string {
+  if (!rawMessage || rawMessage === 'unknown') return 'Failed to fetch raffles'
+  const lower = rawMessage.toLowerCase()
+  if (
+    lower.includes('connection') ||
+    lower.includes('timeout') ||
+    lower.includes('upstream') ||
+    lower.includes('disconnect') ||
+    lower.includes('reset') ||
+    lower.includes('network') ||
+    lower.includes('fetch failed')
+  ) {
+    return CONNECTION_ERROR_MESSAGE
+  }
+  return rawMessage
+}
+
+/** Same patterns as isRetryableError; check raw string so we always throw for connection/timeout. */
+function isRetryableMessage(rawMessage: string): boolean {
+  const lower = (rawMessage ?? '').toLowerCase()
+  const patterns = [
+    'connection', 'timeout', 'network', 'upstream', 'disconnect', 'reset',
+    'econnrefused', 'enotfound', 'etimedout', 'socket', 'fetch failed', 'failed to fetch',
+    'rest error', 'postgrest', 'pgrst', 'connection terminated',
+    'server closed the connection', 'connection reset',
+  ]
+  return patterns.some((p) => lower.includes(p))
+}
+
 /** Status values for public raffle listing (excludes draft) */
 const PUBLIC_STATUSES = ['live', 'ready_to_draw', 'completed'] as const
 
 /** Status values when admin needs to see drafts too */
 const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed'] as const
+
+/** REST select: full columns including NFT (matches Raffle type) */
+const RAFFLE_SELECT_FULL =
+  getBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+/** REST select: base only (when NFT migration not applied) */
+const RAFFLE_SELECT_BASE = getBaseRaffleColumns()
+
+function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
+  return {
+    ...row,
+    prize_type: 'crypto' as const,
+    nft_mint_address: null,
+    nft_collection_name: null,
+    nft_token_id: null,
+    nft_metadata_uri: null,
+  } as Raffle
+}
+
+function isColumnOrSchemaError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes('column') ||
+    m.includes('does not exist') ||
+    m.includes('prize_type') ||
+    m.includes('nft_') ||
+    m.includes('42703') ||
+    m.includes('42p01')
+  )
+}
+
+/**
+ * Direct REST fetch for raffles (bypasses Supabase JS client).
+ * Use for server render and API route to avoid connection timeouts on cold start / paused project.
+ */
+async function fetchRafflesViaRestRaw(
+  baseUrl: string,
+  apiKey: string,
+  activeOnly: boolean,
+  select: string,
+  perAttemptMs: number
+): Promise<Raffle[]> {
+  const url = new URL(`${baseUrl}/rest/v1/raffles`)
+  url.searchParams.set('status', 'in.(live,ready_to_draw,completed)')
+  if (activeOnly) url.searchParams.set('is_active', 'is.true')
+  url.searchParams.set('order', 'created_at.desc,id.desc')
+  url.searchParams.set('limit', '24')
+  url.searchParams.set('select', select)
+
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), perAttemptMs)
+  try {
+    const res = await fetch(url.toString(), {
+      headers: {
+        apikey: apiKey,
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        Connection: 'keep-alive',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`rest error: Supabase ${res.status} ${text.slice(0, 200)}`)
+    }
+    const data = await res.json()
+    if (select === RAFFLE_SELECT_BASE && Array.isArray(data)) {
+      return data.map((row: Record<string, unknown>) => normalizeBaseRowToRaffle(row))
+    }
+    return Array.isArray(data) ? data : []
+  } finally {
+    clearTimeout(id)
+  }
+}
+
+export interface GetRafflesViaRestOptions {
+  activeOnly?: boolean
+  timeoutMs?: number
+  maxRetries?: number
+  perAttemptMs?: number
+}
+
+/**
+ * Fetch raffles via direct REST with retries and optional timeout.
+ * Prefer this for server-side raffles list when Supabase may be cold or slow.
+ */
+export async function getRafflesViaRest(
+  activeOnly: boolean = false,
+  options: GetRafflesViaRestOptions = {}
+): Promise<GetRafflesResult> {
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const apiKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!baseUrl || !apiKey) {
+    return {
+      data: [],
+      error: {
+        message: 'Missing NEXT_PUBLIC_SUPABASE_URL or Supabase API key',
+        code: 'CONFIG',
+      },
+    }
+  }
+
+  const timeoutMs = options.timeoutMs ?? 15_000
+  const maxRetries = options.maxRetries ?? 2
+  const perAttemptMs = options.perAttemptMs ?? 6_000
+
+  const run = async (): Promise<Raffle[]> => {
+    try {
+      return await withRetry(
+        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_FULL, perAttemptMs),
+        { maxRetries, initialDelayMs: 600 }
+      )
+    } catch (fullErr) {
+      const msg = (fullErr as Error)?.message ?? ''
+      if (!isColumnOrSchemaError(msg)) throw fullErr
+      return await withRetry(
+        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_BASE, perAttemptMs),
+        { maxRetries, initialDelayMs: 600 }
+      )
+    }
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const withTimeoutPromise =
+    timeoutMs > 0
+      ? Promise.race([
+          run().then((result) => {
+            if (timeoutId) clearTimeout(timeoutId)
+            return result
+          }),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error(`Request timed out after ${timeoutMs}ms`)),
+              timeoutMs
+            )
+          }),
+        ])
+      : run()
+
+  try {
+    const data = await withTimeoutPromise
+    return { data: Array.isArray(data) ? data : [], error: null }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      data: [],
+      error: { message: toUserFriendlyMessage(message), code: message.includes('timed out') ? 'TIMEOUT' : undefined },
+    }
+  }
+}
 
 /**
  * Fetch raffles for public list. No wallet filter — public list shows all raffles.
@@ -149,8 +333,16 @@ export async function getRaffles(
             .order('created_at', { ascending: false })
           const retry = await retryQuery
           if (retry.error) {
-            console.error('Error fetching raffles (retry with base columns):', retry.error)
-            return { data: [], error: { message: retry.error.message || 'Failed to fetch raffles', code: retry.error.code } }
+            const err = retry.error as { message?: string; code?: string; details?: string }
+            const msg = err?.message ?? 'unknown'
+            if (isRetryableMessage(msg)) throw new Error(msg)
+            const code = err?.code ?? ''
+            const details = err?.details ?? ''
+            console.warn(`Error fetching raffles (retry with base columns): message=${msg} code=${code} details=${details}`)
+            return {
+              data: [],
+              error: { message: toUserFriendlyMessage(msg), code: err?.code },
+            }
           }
           const raffles = (retry.data || []).map((r: any) => ({
             ...r,
@@ -162,10 +354,15 @@ export async function getRaffles(
           })) as Raffle[]
           return { data: raffles, error: null }
         }
-        console.error('Error fetching raffles:', error)
+        const err = error as { message?: string; code?: string; details?: string }
+        const msg = err?.message ?? 'unknown'
+        if (isRetryableMessage(msg)) throw new Error(msg)
+        const code = err?.code ?? ''
+        const details = err?.details ?? ''
+        console.warn(`Error fetching raffles: message=${msg} code=${code} details=${details}`)
         return {
           data: [],
-          error: { message: error.message || 'Failed to fetch raffles', code: error.code },
+          error: { message: toUserFriendlyMessage(msg), code: err?.code },
         }
       }
 
@@ -186,10 +383,12 @@ export async function getRaffles(
       return { data: raffles, error: null }
     }, { maxRetries: 2 })
   } catch (error) {
-    console.error('Error fetching raffles after retries:', error)
+    const err = error instanceof Error ? error : new Error(String(error))
+    // Handled: we show a friendly message in the UI; log as warn to avoid red Server error in client
+    console.warn(`Error fetching raffles after retries: message=${err.message} name=${err.name}`)
     return {
       data: [],
-      error: { message: error instanceof Error ? error.message : 'Failed to fetch raffles' },
+      error: { message: toUserFriendlyMessage(err.message) },
     }
   }
 }

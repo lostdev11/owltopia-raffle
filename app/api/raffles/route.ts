@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRaffle, generateUniqueSlug } from '@/lib/db/raffles'
+import { createRaffle, generateUniqueSlug, getRafflesViaRest } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
 import type { Raffle } from '@/lib/types'
 
@@ -8,20 +8,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 10  // Vercel Hobby plan limit
 
 // Timeout must be less than maxDuration to allow for processing time
-const SUPABASE_TIMEOUT_MS = 8_000  // 8 seconds (leaves 2s buffer)
-
-// Small helper to fetch with timeout
-async function fetchWithTimeout(resource: string, opts: RequestInit & { timeout?: number } = {}) {
-  const { timeout = SUPABASE_TIMEOUT_MS, ...init } = opts
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), timeout)
-  try {
-    const res = await fetch(resource, { ...init, signal: controller.signal })
-    return res
-  } finally {
-    clearTimeout(id)
-  }
-}
+const SUPABASE_TIMEOUT_MS = 9_000  // 9 seconds (leaves 1s buffer for maxDuration 10)
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
 async function withTimeout<T>(
@@ -50,68 +37,32 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
 
-    const baseUrl = process.env.SUPABASE_URL
-    const anonKey = process.env.SUPABASE_ANON_KEY
-    if (!baseUrl || !anonKey) {
-      return NextResponse.json(
-        { error: 'Missing SUPABASE_URL or SUPABASE_ANON_KEY' },
-        { status: 500 }
-      )
-    }
-
-    // Build REST URL with lean projection
-    const url = new URL(`${baseUrl}/rest/v1/raffles`)
-    // filters
-    url.searchParams.set('status', 'in.(live,ready_to_draw,completed)')
-    if (activeOnly) url.searchParams.set('is_active', 'is.true')
-    // sort + limit (keep lightweight)
-    url.searchParams.set('order', 'created_at.desc,id.desc')
-    url.searchParams.set('limit', '24')
-    // projection: only what the list needs
-    url.searchParams.set(
-      'select',
-      [
-        'id',
-        'slug',
-        'title',
-        'image_url',
-        'ticket_price',
-        'currency',
-        'prize_type',
-        'prize_amount',
-        'prize_currency',
-        'end_time',
-        'created_at',
-        'status',
-        'is_active',
-      ].join(',')
-    )
-
-    const res = await fetchWithTimeout(url.toString(), {
-      headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        Accept: 'application/json',
-        Connection: 'keep-alive',
-      },
-      cache: 'no-store',
+    const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
+      timeoutMs: 8_000,
+      maxRetries: 1,
+      perAttemptMs: 4_000,
     })
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
+    if (error) {
+      const isUpstreamUnavailable = /503|service unavailable|connection|timeout/i.test(error.message)
+      const status = isUpstreamUnavailable ? 503 : 502
+      const bodyMessage =
+        status === 503
+          ? 'Service temporarily unavailable. Please try again in a moment.'
+          : error.message
+      console.error('[GET /api/raffles]', error.code ?? 'error', error.message)
       return NextResponse.json(
-        { error: 'supabase error', status: res.status, body: text.slice(0, 500) },
-        { status: 502 }
+        { error: bodyMessage, step: error.code === 'TIMEOUT' ? 'timeout' : 'supabase error' },
+        { status }
       )
     }
 
-    const raffles = await res.json()
     return NextResponse.json(raffles, { status: 200 })
-  } catch (error) {
-    const isAbort = (error as Error)?.name === 'AbortError' || /timed out|aborted/i.test(String(error))
-    const step = isAbort ? 'timeout' : 'supabase error'
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Internal server error'
+    console.error('[GET /api/raffles] unexpected error:', err)
     return NextResponse.json(
-      { error: (error as Error)?.message ?? 'Internal error', step },
+      { error: message, step: 'supabase error' },
       { status: 502 }
     )
   }

@@ -67,7 +67,7 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 
-/** Detect DB/connection or timeout errors (e.g. upstream connect, Supabase maintenance/paused) for user-friendly messaging */
+/** Detect DB/connection or timeout errors for user-friendly messaging */
 function isConnectivityError(message: string | null | undefined): boolean {
   if (!message) return false
   const m = message.toLowerCase()
@@ -88,6 +88,13 @@ function isConnectivityError(message: string | null | undefined): boolean {
     m.includes('service unavailable') ||
     m.includes('bad gateway')
   )
+}
+
+/** True when error is 503 / Service Unavailable (Supabase project paused) */
+function isSupabasePausedError(message: string | null | undefined): boolean {
+  if (!message) return false
+  const m = message.toLowerCase()
+  return m.includes('503') || m.includes('service unavailable')
 }
 
 export function RafflesPageClient({
@@ -117,7 +124,7 @@ export function RafflesPageClient({
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
-  // Fallback: when server returned no raffles OR an error, fetch from API then direct Supabase
+  // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel
   useEffect(() => {
     if (typeof window === 'undefined') return
     // Skip only when we already have server data (no need to fallback)
@@ -155,21 +162,36 @@ export function RafflesPageClient({
       }
     }
 
+    // When server already failed, try direct Supabase first (browser path often works)
+    if (initialError) tryDirectSupabase()
+
     fetch('/api/raffles')
       .then(async (res) => {
         if (cancelled) return null
+        const data = await res.json().catch(() => ({}))
         if (!res.ok) {
-          setClientFetchError(res.status === 500 ? 'Server error' : `HTTP ${res.status}`)
-          tryDirectSupabase()
+          const bodyMessage = typeof data?.error === 'string' ? data.error : null
+          const is503 = res.status === 503 || /503|service temporarily unavailable/i.test(bodyMessage ?? '')
+          setClientFetchError(
+            bodyMessage ||
+              (is503
+                ? 'Service temporarily unavailable. Please try again in a moment.'
+                : res.status === 500
+                  ? 'Server error'
+                  : `HTTP ${res.status}`)
+          )
+          // Skip direct Supabase when API returns 503 (Supabase is down; direct call would fail too)
+          if (!is503) tryDirectSupabase()
           return null
         }
-        return res.json()
+        return data
       })
       .then((data) => {
         if (cancelled || data == null) return
         if (data?.error) {
           setClientFetchError(data.error)
-          tryDirectSupabase()
+          const is503 = /503|service temporarily unavailable/i.test(data.error)
+          if (!is503) tryDirectSupabase()
           return
         }
         // Handle both raw array and wrapped { data: [...] } responses
@@ -217,6 +239,7 @@ export function RafflesPageClient({
   const hasError = (initialError || (isEmpty && clientFetchError)) && !recoveredFromError
   const rawErrorMessage = initialError?.message ?? clientFetchError ?? 'Unknown error'
   const showConnectivityMessage = hasError && isConnectivityError(rawErrorMessage)
+  const showPausedMessage = hasError && isSupabasePausedError(rawErrorMessage)
 
   return (
     <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
@@ -249,18 +272,36 @@ export function RafflesPageClient({
         </p>
       </div>
 
-      {/* Error state: visible card with message + code (no secrets). Friendly message for connectivity/maintenance. */}
+      {/* Error state: visible card with message. 503 = Supabase paused; other connectivity = generic. */}
       {hasError && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
-          {showConnectivityMessage ? (
+          {showPausedMessage ? (
+            <>
+              <p className="text-destructive/90 mb-2">
+                Your Supabase project is returning &quot;Service Unavailable&quot; (503). On the free tier, projects pause after inactivity.
+              </p>
+              <p className="text-destructive/90 mb-4">
+                Go to{' '}
+                <a
+                  href="https://supabase.com/dashboard"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  Supabase Dashboard
+                </a>
+                , open your project, and click <strong>Restore project</strong>. Wait a minute for it to wake, then click Try again below.
+              </p>
+            </>
+          ) : showConnectivityMessage ? (
             <p className="text-destructive/90 mb-2">
               We&apos;re experiencing brief connectivity issues. This can happen during database maintenance or if your Supabase project was paused (free tier). Check your Supabase dashboard and restore the project if needed, then try again.
             </p>
           ) : (
             <p className="text-destructive/90 mb-2">{rawErrorMessage}</p>
           )}
-          {initialError?.code && !showConnectivityMessage && (
+          {initialError?.code && !showConnectivityMessage && !showPausedMessage && (
             <p className="text-sm text-muted-foreground mb-4">Code: {initialError.code}</p>
           )}
           <button

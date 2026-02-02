@@ -82,10 +82,38 @@ const config: Config = {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: '0' },
         },
+        'enter-fade-in': {
+          from: { opacity: '0', transform: 'scale(0.92)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+        'enter-glow': {
+          '0%, 100%': { opacity: '0.6' },
+          '50%': { opacity: '1' },
+        },
+        'glow-pulse': {
+          '0%, 100%': {
+            textShadow: '0 0 16px rgba(0, 255, 136, 0.3), 0 0 32px rgba(0, 255, 136, 0.15), 0 0 48px rgba(0, 255, 136, 0.08)',
+          },
+          '50%': {
+            textShadow: '0 0 28px rgba(0, 255, 136, 1), 0 0 56px rgba(0, 255, 136, 0.7), 0 0 84px rgba(0, 255, 136, 0.4)',
+          },
+        },
+        'button-glow-pulse': {
+          '0%, 100%': {
+            boxShadow: '0 0 20px rgba(0, 255, 136, 0.35), 0 0 40px rgba(0, 255, 136, 0.2)',
+          },
+          '50%': {
+            boxShadow: '0 0 32px rgba(0, 255, 136, 0.8), 0 0 64px rgba(0, 255, 136, 0.5), 0 0 96px rgba(0, 255, 136, 0.25)',
+          },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'enter-fade-in': 'enter-fade-in 0.8s ease-out forwards',
+        'enter-glow': 'enter-glow 2s ease-in-out infinite',
+        'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
+        'button-glow-pulse': 'button-glow-pulse 2s ease-in-out infinite',
       },
     },
   },

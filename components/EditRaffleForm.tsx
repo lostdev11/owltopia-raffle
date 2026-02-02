@@ -12,9 +12,10 @@ import { ImageUpload } from '@/components/ImageUpload'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
-import { AlertCircle, Trash2, Trophy } from 'lucide-react'
+import { AlertCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import { canSelectWinner, isRaffleEligibleToDraw, hasSevenDaysPassedSinceOriginalEnd, calculateTicketsSold } from '@/lib/db/raffles'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -27,7 +28,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const { publicKey, connected } = useWallet()
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  const wallet = publicKey?.toBase58() ?? ''
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
+    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+  )
   const [imageUrl, setImageUrl] = useState<string | null>(raffle.image_url)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
@@ -35,30 +39,34 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [selectingWinner, setSelectingWinner] = useState(false)
   const [winnerMessage, setWinnerMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [forceOverride, setForceOverride] = useState(false)
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [restoreExtension, setRestoreExtension] = useState<24 | 72 | 168>(24) // 24h, 3 days, 7 days
 
-  // Check admin status when wallet connects
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -266,6 +274,46 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const handleRestoreRaffle = async () => {
+    if (!connected || !publicKey) {
+      alert('Please connect your wallet to restore a raffle')
+      return
+    }
+
+    if (!isAdmin) {
+      alert('Only admins can restore raffles')
+      return
+    }
+
+    setRestoring(true)
+
+    try {
+      const response = await fetch(`/api/raffles/${raffle.id}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_address: publicKey.toBase58(),
+          extension_hours: restoreExtension,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setRestoreDialogOpen(false)
+        alert(data.message || 'Raffle restored successfully.')
+        router.refresh()
+      } else {
+        alert(data.error || 'Failed to restore raffle')
+      }
+    } catch (error) {
+      console.error('Error restoring raffle:', error)
+      alert('Error restoring raffle. Please try again.')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -364,6 +412,86 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
             )}
           </CardContent>
         </Card>
+
+        {/* Outage Recovery: Restore Raffle - only when ended, no winner */}
+        {(() => {
+          const now = new Date()
+          const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+          const hasEnded = endTimeToCheck <= now
+          const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
+
+          if (!hasEnded || !hasNoWinner) return null
+
+          return (
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <RotateCcw className="h-5 w-5" />
+                  Outage Recovery
+                </CardTitle>
+                <CardDescription>
+                  Use only when tickets couldn&apos;t be purchased due to site or database outage. Extends the raffle end time (24 hours, 3 days, or 7 days) so people can buy tickets again.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Dialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+                      disabled={restoring}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Restore Raffle
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Restore Raffle (Outage Recovery)</DialogTitle>
+                      <DialogDescription>
+                        Extend the raffle end time from now so tickets can be purchased again. Use only when the site or database was down and people couldn&apos;t buy tickets during the scheduled window.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-4">
+                      <Label>Extension length</Label>
+                      <div className="flex flex-wrap gap-3">
+                        {[
+                          { value: 24 as const, label: '24 hours' },
+                          { value: 72 as const, label: '3 days' },
+                          { value: 168 as const, label: '7 days' },
+                        ].map(({ value, label }) => (
+                          <Button
+                            key={value}
+                            type="button"
+                            variant={restoreExtension === value ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setRestoreExtension(value)}
+                            className={restoreExtension === value ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setRestoreDialogOpen(false)} disabled={restoring}>
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleRestoreRaffle}
+                        disabled={restoring}
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        {restoring ? 'Restoring...' : 'Restore Raffle'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          )
+        })()}
 
         {/* Winner Selection Section */}
         {(() => {

@@ -2,6 +2,12 @@ const path = require('path')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Serve icon.png when browser requests favicon.ico (avoids 404 in console)
+  async rewrites() {
+    return [
+      { source: '/favicon.ico', destination: '/icon.png' },
+    ]
+  },
   // Silence Turbopack/webpack config mismatch when using custom webpack config
   turbopack: {
     // Use this directory as workspace root so Next doesn't warn about parent lockfile

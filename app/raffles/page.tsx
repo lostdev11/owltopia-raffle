@@ -4,7 +4,7 @@
  * - Avoids timeout: server does 1 Supabase query instead of 1 + N×entries, so page renders quickly.
  */
 import { Suspense } from 'react'
-import { getRaffles, type GetRafflesResult } from '@/lib/db/raffles'
+import { getRafflesViaRest, type GetRafflesResult } from '@/lib/db/raffles'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
@@ -13,16 +13,6 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 /** Allow longer server run so slow Supabase doesn't hit upstream request timeout */
 export const maxDuration = 60
-
-const RAFFLES_FETCH_TIMEOUT_MS = 25_000
-
-const TIMEOUT_RESULT: GetRafflesResult = {
-  data: [],
-  error: {
-    message: 'Request timed out. Check your internet connection and that your Supabase project is running.',
-    code: 'TIMEOUT',
-  },
-}
 
 type RaffleWithEntries = Array<{ raffle: Raffle; entries: Entry[] }>
 
@@ -51,14 +41,35 @@ export default async function RafflesPage() {
     )
   }
 
-  const fetchWithTimeout = Promise.race([
-    getRaffles(false),
-    new Promise<GetRafflesResult>((resolve) =>
-      setTimeout(() => resolve(TIMEOUT_RESULT), RAFFLES_FETCH_TIMEOUT_MS)
-    ),
-  ])
-  const { data: allRaffles, error: fetchError } = await fetchWithTimeout
+  // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
+  // No second Supabase client call — avoids double requests and connection timeouts.
+  const SERVER_FETCH_TIMEOUT_MS = 10_000
+  let result: GetRafflesResult
+  try {
+    result = await Promise.race([
+      getRafflesViaRest(false, {
+        timeoutMs: 8_000,
+        maxRetries: 1,
+        perAttemptMs: 4_000,
+      }),
+      new Promise<GetRafflesResult>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Server fetch timed out')),
+          SERVER_FETCH_TIMEOUT_MS
+        )
+      ),
+    ])
+  } catch (err) {
+    result = {
+      data: [],
+      error: {
+        message: err instanceof Error ? err.message : 'Server fetch timed out',
+        code: 'TIMEOUT',
+      },
+    }
+  }
 
+  const { data: allRaffles, error: fetchError } = result
   if (fetchError) {
     return (
       <Suspense fallback={<RafflesLoadingFallback />}>

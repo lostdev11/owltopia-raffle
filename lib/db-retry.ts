@@ -82,7 +82,7 @@ export async function withRetry<T>(
  * Determines if an error is worth retrying.
  * Returns true for connection/timeout errors, false for validation/logic errors.
  */
-function isRetryableError(error: Error): boolean {
+export function isRetryableError(error: Error): boolean {
   const message = error.message.toLowerCase()
   const retryablePatterns = [
     'connection',
@@ -95,6 +95,11 @@ function isRetryableError(error: Error): boolean {
     'fetch failed',
     'failed to fetch',
     'rest error',
+    'upstream',
+    'disconnect',
+    'reset',
+    '503',
+    'service unavailable',
     // Supabase-specific patterns
     'postgrest',
     'pgrst',

@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 import { WalletContextProvider } from '@/components/WalletProvider'
-import { Header } from '@/components/Header'
-import { Footer } from '@/components/Footer'
+import { ConditionalHeader } from '@/components/ConditionalHeader'
+import { ConditionalFooter } from '@/components/ConditionalFooter'
 import { ErrorHandler } from '@/components/ErrorHandler'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
@@ -214,11 +214,11 @@ export default function RootLayout({
         <ErrorHandler />
         <WalletContextProvider>
           <div className="flex flex-col min-h-screen">
-            <Header />
+            <ConditionalHeader />
             <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto">
               {children}
             </main>
-            <Footer />
+            <ConditionalFooter />
           </div>
         </WalletContextProvider>
       </body>

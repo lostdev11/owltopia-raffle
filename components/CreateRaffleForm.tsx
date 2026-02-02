@@ -12,41 +12,46 @@ import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 
 export function CreateRaffleForm() {
   const router = useRouter()
   const { publicKey, connected } = useWallet()
+  const wallet = publicKey?.toBase58() ?? ''
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
   const [startTime, setStartTime] = useState(() => new Date().toISOString().slice(0, 16))
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
+    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+  )
   const [imageUrl, setImageUrl] = useState<string | null>(null)
 
-  // Check admin status when wallet connects
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!connected || !publicKey) {
-        setIsAdmin(false)
-        return
-      }
-
-      try {
-        const response = await fetch(`/api/admin/check?wallet=${publicKey.toBase58()}`)
-        if (response.ok) {
-          const data = await response.json()
-          setIsAdmin(data.isAdmin)
-        } else {
-          setIsAdmin(false)
-        }
-      } catch (error) {
-        console.error('Error checking admin status:', error)
-        setIsAdmin(false)
-      }
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      return
     }
-
-    checkAdminStatus()
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        setCachedAdmin(addr, admin)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+    return () => { cancelled = true }
   }, [connected, publicKey])
 
   const handlePresetSelect = (presetName: string) => {
