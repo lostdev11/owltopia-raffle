@@ -1,10 +1,9 @@
 'use client'
 
 /**
- * Minimal global error boundary. During prerender (typeof window === 'undefined')
- * we render only static HTML so no code path uses useContext; on the client
- * we render the same UI with a working reset button. Must provide its own
- * <html> and <body>.
+ * Minimal global error boundary. Must provide its own <html> and <body>.
+ * Prerender of /_global-error is skipped via scripts/postinstall-next-global-error.js
+ * to avoid "Cannot read properties of null (reading 'useContext')" during build.
  */
 const bodyStyle = { margin: 0, fontFamily: 'system-ui, sans-serif', padding: '2rem', textAlign: 'center' as const }
 const titleStyle = { fontSize: '1.5rem', marginBottom: '1rem' }

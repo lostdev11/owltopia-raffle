@@ -8,7 +8,8 @@
     "build": "next build --webpack",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "node scripts/postinstall-next-global-error.js"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",

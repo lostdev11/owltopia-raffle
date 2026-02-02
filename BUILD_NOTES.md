@@ -15,12 +15,5 @@ These happen when Next.js prerenders pages that use client components (wallet ad
 2. **`app/layout.tsx`**  
    Added `export const dynamic = 'force-dynamic'` so app routes are server-rendered on demand instead of at build time, avoiding the prerender React-null issue.
 
-3. **Next.js patch** (in `node_modules/next/dist/build/index.js`)  
-   The `/_global-error` route is still prerendered by Next even when the root is dynamic. To avoid the build error, that route is skipped in two places:
-
-   - In the `sortedStaticPaths.forEach` that fills `defaultMap` (around line 1745): add  
-     `if (originalAppPath === _entryconstants.UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY) return;`  
-     at the start of the callback.
-   - In the `sortedStaticPaths.forEach` that runs prerender (around line 1873): add the same line at the start of the callback.
-
-**After `npm install`**, if the build fails again on `/_global-error`, re-apply the two one-line changes above in `node_modules/next/dist/build/index.js`.
+3. **Next.js global-error prerender skip**  
+   The `/_global-error` route is still prerendered by Next even when the root is dynamic. To avoid the build error, a **postinstall script** (`scripts/postinstall-next-global-error.js`) applies the two one-line skips to `node_modules/next/dist/build/index.js` automatically after every `npm install` (including on Vercel). No manual patching needed.
