@@ -16,6 +16,9 @@ import { RafflesList } from '@/components/RafflesList'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
+import { Eye, Shield } from 'lucide-react'
+import Link from 'next/link'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -128,7 +131,7 @@ export function RafflesPageClient({
   const wallet = publicKey?.toBase58() ?? ''
   const debug = searchParams.get('debug') === '1'
 
-  type Tab = 'all' | 'my-entries'
+  type Tab = 'all' | 'my-entries' | 'owl-vision'
   const [tab, setTab] = useState<Tab>('all')
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
@@ -279,8 +282,8 @@ export function RafflesPageClient({
         <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
-        {/* Tabs: All raffles | Raffles entered (wallet-scoped) */}
-        <div className="mt-6 flex gap-2 border-b border-border">
+        {/* Tabs: All raffles | Raffles entered | Owl Vision */}
+        <div className="mt-6 flex flex-wrap gap-2 border-b border-border">
           <button
             type="button"
             onClick={() => setTab('all')}
@@ -302,6 +305,18 @@ export function RafflesPageClient({
             }`}
           >
             Raffles entered
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('owl-vision')}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'owl-vision'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Eye className="h-4 w-4" />
+            Owl Vision
           </button>
         </div>
       </div>
@@ -358,7 +373,74 @@ export function RafflesPageClient({
       {/* Main content: only when no error to show (list or empty state) */}
       {!hasError && (
         <>
-          {tab === 'my-entries' ? (
+          {tab === 'owl-vision' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
+              <Card className="border-green-500/30 bg-green-500/5">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Eye className="h-5 w-5 text-green-500" />
+                    What is Owl Vision?
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    Owl Vision is a <strong className="text-foreground">trust score (0–100)</strong> shown on each raffle. It helps you see how transparent and fair a raffle is — before you buy a ticket.
+                  </p>
+                  <p>
+                    We believe on-chain raffles should be verifiable. Owl Vision summarizes three things that matter for trust: verified payments, wallet diversity, and time integrity.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Verified Payments (up to 60 points)</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  What share of entries have been confirmed by on-chain verification? A high percentage means most tickets are backed by real, verified transactions.
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Wallet Diversity (up to 30 points)</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  Are many different wallets participating, or is it a few wallets with lots of tickets? Higher diversity suggests a broader, more organic participation.
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Time Integrity (up to 10 points)</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  Was the raffle edited after people had already entered? If not, the raffle gets full integrity points; if it was edited after entries, it gets fewer points so you&apos;re aware.
+                </CardContent>
+              </Card>
+
+              <Card className="border-green-500/30 bg-green-500/5">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Shield className="h-4 w-4 text-green-500" />
+                    How to read the score
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground space-y-2">
+                  <p>
+                    Hover or tap the <strong className="text-foreground">Owl Vision</strong> badge on any raffle card to see the breakdown. On a raffle&apos;s detail page, use the <strong className="text-foreground">Owl Vision</strong> tab for the full breakdown.
+                  </p>
+                  <p>
+                    A higher score means more verified entries, better diversity, and no (or minimal) edits after entries — all signals of a trustworthy raffle.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <p className="text-sm text-muted-foreground pt-2">
+                <Link href="/how-it-works" className="text-green-500 hover:underline">How it works</Link> — full guide to raffles, winner selection, and Owl Vision.
+              </p>
+            </div>
+          ) : tab === 'my-entries' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Raffles you entered</h2>
               {connected && wallet ? (

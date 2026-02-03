@@ -22,8 +22,19 @@ export function Footer() {
           <p className="owltopia-neon text-lg sm:text-xl md:text-2xl font-semibold tracking-wider text-center">
             owltopia
           </p>
-          {/* External Links Section - pill tabs with flair */}
+          {/* Links Section - pill tabs with flair */}
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm">
+            <Link
+              href="/how-it-works"
+              className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground
+                bg-white/5 border border-white/10 hover:border-green-500/50
+                transition-all duration-300 ease-out
+                hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)]
+                hover:bg-green-500/10
+                touch-manipulation min-h-[44px] text-center"
+            >
+              <span>How It Works</span>
+            </Link>
             {externalLinks.map((link) => (
               <a
                 key={link.name}

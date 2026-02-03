@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
@@ -29,7 +30,7 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -62,6 +63,7 @@ export function RaffleDetailClient({
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const [showParticipants, setShowParticipants] = useState(false)
+  const [activeTab, setActiveTab] = useState<'overview' | 'owl-vision'>('overview')
   
   // Calculate purchase amount automatically based on ticket price and quantity
   const purchaseAmount = raffle.ticket_price * ticketQuantity
@@ -939,7 +941,7 @@ export function RaffleDetailClient({
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                <OwlVisionBadge score={currentOwlVisionScore} />
+                <OwlVisionBadge score={currentOwlVisionScore} onOpenInTab={() => setActiveTab('owl-vision')} />
               </div>
             </div>
           </CardHeader>
@@ -1002,6 +1004,15 @@ export function RaffleDetailClient({
           )}
 
           <CardContent className={classes.contentPadding}>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'overview' | 'owl-vision')}>
+              <TabsList className="mb-4 w-full sm:w-auto">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="owl-vision" className="gap-1.5">
+                  <Eye className="h-3.5 w-3.5" />
+                  Owl Vision
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="overview" className="mt-0">
             <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
@@ -1187,6 +1198,44 @@ export function RaffleDetailClient({
                 </Button>
               )}
             </div>
+              </TabsContent>
+              <TabsContent value="owl-vision" className="mt-0">
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                      <Eye className="h-5 w-5 text-green-500" />
+                      Owl Vision Trust Score: {currentOwlVisionScore.score}/100
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      This score summarizes how transparent and fair this raffle is — verified payments, wallet diversity, and time integrity.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+                    <div>
+                      <p className="font-medium text-sm text-muted-foreground">Verified Payments</p>
+                      <p className="text-base font-semibold">
+                        {Math.round(currentOwlVisionScore.verifiedRatio * 100)}% — {currentOwlVisionScore.confirmedEntries} / {currentOwlVisionScore.totalEntries} entries confirmed on-chain
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Higher % means more tickets backed by real, verified transactions.</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm text-muted-foreground">Wallet Diversity</p>
+                      <p className="text-base font-semibold">
+                        {Math.round(currentOwlVisionScore.diversityRatio * 100)}% — {currentOwlVisionScore.uniqueWallets} unique wallets
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Higher diversity suggests broader, more organic participation.</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm text-muted-foreground">Time Integrity</p>
+                      <p className="text-base font-semibold">
+                        {currentOwlVisionScore.integrityScore}/10 — {currentOwlVisionScore.editedAfterEntries ? 'Edited after entries' : 'Not edited after entries'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Full points when the raffle wasn’t changed after people entered.</p>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
