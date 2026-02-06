@@ -141,14 +141,28 @@ export function RafflesList({
       return // All raffles already have pending requests
     }
 
+    // Use same-origin URL so fetch never fails due to wrong base (e.g. SSR or odd env)
+    const apiBase = typeof window !== 'undefined' ? window.location.origin : ''
+
     try {
       // Fetch entries for all active raffles in parallel
       const results = await Promise.all(
         rafflesToFetch.map(async ({ raffle }) => {
           try {
-            const response = await fetch(`/api/entries?raffleId=${raffle.id}&t=${Date.now()}`, {
-              signal: abortController.signal
-            })
+            const url = `${apiBase}/api/entries?raffleId=${encodeURIComponent(raffle.id)}&t=${Date.now()}`
+            const doFetch = () =>
+              fetch(url, { signal: abortController.signal })
+            // Retry once on "Failed to fetch" (e.g. dev server cold start / Turbopack)
+            let response: Response
+            try {
+              response = await doFetch()
+            } catch (err: any) {
+              if (err?.name === 'AbortError') throw err
+              const isNetworkFailure =
+                err?.message === 'Failed to fetch' || err?.name === 'TypeError'
+              if (isNetworkFailure) response = await doFetch()
+              else throw err
+            }
             if (response.ok) {
               const entries = await response.json()
               return { raffleId: raffle.id, entries, raffle }
