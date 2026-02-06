@@ -306,6 +306,24 @@ export async function getRestoredEntries(walletAddress?: string) {
   return uniqueRestored as Entry[]
 }
 
+/**
+ * Get all pending entries (for admin Owl Vision improvement workflow).
+ * Returns entries that could improve Owl Vision score when confirmed.
+ */
+export async function getPendingEntries(): Promise<Entry[]> {
+  const { data, error } = await supabase
+    .from('entries')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching pending entries:', error)
+    return []
+  }
+  return (data || []) as Entry[]
+}
+
 /** Minimal raffle fields needed for "my entries" list */
 export interface RaffleInfoForEntry {
   id: string

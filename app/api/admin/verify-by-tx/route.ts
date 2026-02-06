@@ -62,17 +62,31 @@ export async function POST(request: NextRequest) {
       console.log(`Entry not found by transaction signature. Attempting to restore from transaction: ${transactionSignature}`)
       
       // Get transaction details from Solana
-      const txDetails = await getTransactionDetails(transactionSignature)
-      if (!txDetails) {
+      const txResult = await getTransactionDetails(transactionSignature)
+      if (!txResult.ok) {
+        const isNotFound = txResult.reason === 'NOT_FOUND'
+        const isParseFailed = txResult.reason === 'PARSE_FAILED'
+        const isConfig = txResult.reason === 'CONFIG'
         return NextResponse.json(
-          { 
-            error: 'Entry not found and transaction could not be fetched',
-            message: 'No entry found with this transaction signature, and the transaction could not be retrieved from Solana.',
-            suggestion: 'Try using the check-entry endpoint with the wallet address and raffle slug instead.'
+          {
+            error: isNotFound
+              ? 'Transaction not found on Solana'
+              : isParseFailed
+                ? 'Transaction is not a payment to the raffle wallet'
+                : 'Server configuration error',
+            message: isNotFound
+              ? 'No entry exists with this transaction signature, and the transaction could not be found on Solana. It may still be confirming—try again in a minute, or check the signature on Solscan.'
+              : isParseFailed
+                ? 'The transaction was found but could not be read as a SOL or USDC payment to the configured raffle recipient.'
+                : txResult.detail || 'Recipient wallet may not be configured.',
+            suggestion: isNotFound
+              ? 'Confirm the TX signature is correct (copy from Solscan). If the TX is new, wait a minute and retry.'
+              : 'Ensure the transaction is a SOL or USDC transfer to the raffle wallet. You can also try verifying by wallet + raffle slug instead.',
           },
           { status: 404 }
         )
       }
+      const txDetails = txResult.data
 
       // CRITICAL: Require raffleSlug to prevent matching wrong raffles
       // This ensures we know which raffle the user actually participated in
@@ -455,15 +469,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
+type TxDetailsResult =
+  | { ok: true; data: { walletAddress: string; amount: number; currency: 'SOL' | 'USDC' } }
+  | { ok: false; reason: 'NOT_FOUND' | 'PARSE_FAILED' | 'CONFIG'; detail?: string }
+
 /**
  * Fetch transaction details from Solana blockchain
- * Returns wallet address, amount, and currency
+ * Returns wallet address, amount, and currency, or a reason for failure
  */
-async function getTransactionDetails(transactionSignature: string): Promise<{
-  walletAddress: string
-  amount: number
-  currency: 'SOL' | 'USDC'
-} | null> {
+async function getTransactionDetails(transactionSignature: string): Promise<TxDetailsResult> {
   try {
     let rpcUrl = process.env.SOLANA_RPC_URL?.trim() || 
                  process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
@@ -485,25 +499,30 @@ async function getTransactionDetails(transactionSignature: string): Promise<{
     
     if (!recipientWallet) {
       console.error('Recipient wallet not configured')
-      return null
+      return { ok: false, reason: 'CONFIG', detail: 'Recipient wallet not configured' }
     }
     
     const recipientPubkey = new PublicKey(recipientWallet)
     
-    // Get transaction
-    let transaction = await connection.getTransaction(transactionSignature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0
-    })
-    
-    if (!transaction) {
-      transaction = await connection.getTransaction(transactionSignature, {
-        commitment: 'confirmed'
-      })
+    // Get transaction - try multiple commitments and options (RPCs vary)
+    const fetchOptions = [
+      { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
+      { commitment: 'confirmed' as const },
+      { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
+      { commitment: 'finalized' as const },
+    ]
+    let transaction = null
+    for (const opts of fetchOptions) {
+      transaction = await connection.getTransaction(transactionSignature, opts)
+      if (transaction) break
+      await new Promise(r => setTimeout(r, 500))
     }
     
-    if (!transaction || transaction.meta?.err || !transaction.meta) {
-      return null
+    if (!transaction) {
+      return { ok: false, reason: 'NOT_FOUND' }
+    }
+    if (transaction.meta?.err || !transaction.meta) {
+      return { ok: false, reason: 'PARSE_FAILED', detail: 'Transaction failed on chain or has no balance data' }
     }
     
     const message = transaction.transaction.message
@@ -525,9 +544,12 @@ async function getTransactionDetails(transactionSignature: string): Promise<{
         // Find sender (first signer)
         const senderPubkey = accountKeys[0] // First account is usually the fee payer/sender
         return {
-          walletAddress: senderPubkey.toString(),
-          amount: balanceIncrease,
-          currency: 'SOL'
+          ok: true,
+          data: {
+            walletAddress: senderPubkey.toString(),
+            amount: balanceIncrease,
+            currency: 'SOL'
+          }
         }
       }
     }
@@ -558,17 +580,20 @@ async function getTransactionDetails(transactionSignature: string): Promise<{
           // Find sender
           const senderPubkey = accountKeys[0]
           return {
-            walletAddress: senderPubkey.toString(),
-            amount: increase,
-            currency: 'USDC'
+            ok: true,
+            data: {
+              walletAddress: senderPubkey.toString(),
+              amount: increase,
+              currency: 'USDC'
+            }
           }
         }
       }
     }
     
-    return null
+    return { ok: false, reason: 'PARSE_FAILED', detail: 'No SOL or USDC payment to raffle wallet found in transaction' }
   } catch (error) {
     console.error('Error fetching transaction details:', error)
-    return null
+    return { ok: false, reason: 'NOT_FOUND', detail: error instanceof Error ? error.message : String(error) }
   }
 }

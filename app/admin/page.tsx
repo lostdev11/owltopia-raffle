@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
+import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,6 +48,25 @@ interface RestoredEntry {
   } | null
 }
 
+interface RafflePendingSummary {
+  raffleId: string
+  raffle: { id: string; slug: string; title: string }
+  pendingEntries: Array<{
+    id: string
+    wallet_address: string
+    ticket_quantity: number
+    transaction_signature: string | null
+    amount_paid: number
+    currency: string
+    created_at: string
+  }>
+  withTx: Array<{ id: string; transaction_signature: string | null }>
+  withoutTx: Array<{ id: string }>
+  currentScore: number
+  potentialScore: number
+  scoreImprovement: number
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter()
   const { publicKey, connected } = useWallet()
@@ -66,6 +85,17 @@ export default function AdminDashboardPage() {
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<any>(null)
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  const [verifyErrorMessage, setVerifyErrorMessage] = useState<string | null>(null)
+  const [verifyErrorSuggestion, setVerifyErrorSuggestion] = useState<string | null>(null)
+
+  // Entries to confirm (Owl Vision) state
+  const [entriesToConfirm, setEntriesToConfirm] = useState<{
+    byRaffle: RafflePendingSummary[]
+    summary: { totalPending: number; withTx: number; withoutTx: number; raffleCount: number }
+  } | null>(null)
+  const [loadingEntriesToConfirm, setLoadingEntriesToConfirm] = useState(false)
+  const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
+  const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -167,12 +197,73 @@ export default function AdminDashboardPage() {
     }
   }, [connected, publicKey, isAdmin])
 
+  const fetchEntriesToConfirm = async () => {
+    if (!connected || !publicKey || !isAdmin) return
+
+    setLoadingEntriesToConfirm(true)
+    try {
+      const response = await fetch(
+        `/api/admin/entries-to-confirm?wallet=${publicKey.toBase58()}`,
+        { headers: { 'x-wallet-address': publicKey.toBase58() } }
+      )
+      if (response.ok) {
+        const data = await response.json()
+        setEntriesToConfirm({
+          byRaffle: data.byRaffle || [],
+          summary: data.summary || {
+            totalPending: 0,
+            withTx: 0,
+            withoutTx: 0,
+            raffleCount: 0,
+          },
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching entries to confirm:', error)
+    } finally {
+      setLoadingEntriesToConfirm(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetchEntriesToConfirm()
+    }
+  }, [connected, publicKey, isAdmin])
+
+  const handleBatchVerifyRaffle = async (raffleId: string) => {
+    if (!publicKey) return
+
+    setVerifyingRaffleId(raffleId)
+    try {
+      const response = await fetch('/api/admin/verify-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raffleId,
+          adminWallet: publicKey.toBase58(),
+        }),
+      })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        fetchEntriesToConfirm()
+      }
+    } catch (error) {
+      console.error('Error batch verifying:', error)
+    } finally {
+      setVerifyingRaffleId(null)
+    }
+  }
+
   const handleVerifyTransaction = async () => {
     if (!txSignature.trim()) return
 
     setVerifying(true)
     setVerifyResult(null)
     setVerifyError(null)
+    setVerifyErrorMessage(null)
+    setVerifyErrorSuggestion(null)
 
     try {
       const response = await fetch('/api/admin/verify-by-tx', {
@@ -190,19 +281,18 @@ export default function AdminDashboardPage() {
 
       if (!response.ok) {
         setVerifyError(data.error || data.message || 'Failed to verify transaction')
-        if (data.details) {
-          setVerifyError(`${data.error || 'Failed to verify transaction'}: ${data.details}`)
-        }
+        setVerifyErrorMessage(data.message ?? null)
+        setVerifyErrorSuggestion(data.suggestion ?? null)
       } else {
         setVerifyResult(data)
         // Clear the input on success
         setTxSignature('')
         
-        // If entry was restored, refresh the restored entries list
+        // If entry was restored, refresh the restored entries and entries-to-confirm lists
         if (data.restored) {
-          // Wait a moment for the database to update, then refresh
           setTimeout(() => {
             fetchRestoredEntries()
+            fetchEntriesToConfirm()
           }, 500)
         }
       }
@@ -355,6 +445,8 @@ export default function AdminDashboardPage() {
                       setTxSignature(e.target.value)
                       setVerifyResult(null)
                       setVerifyError(null)
+                      setVerifyErrorMessage(null)
+                      setVerifyErrorSuggestion(null)
                     }}
                     className="font-mono text-sm"
                     disabled={verifying}
@@ -379,9 +471,17 @@ export default function AdminDashboardPage() {
               </div>
 
               {verifyError && (
-                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-                  <p className="text-sm text-red-600 dark:text-red-400 font-semibold mb-1">Error</p>
+                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 space-y-2">
+                  <p className="text-sm text-red-600 dark:text-red-400 font-semibold">Error</p>
                   <p className="text-sm text-red-500 dark:text-red-300">{verifyError}</p>
+                  {verifyErrorMessage && verifyErrorMessage !== verifyError && (
+                    <p className="text-sm text-muted-foreground">{verifyErrorMessage}</p>
+                  )}
+                  {verifyErrorSuggestion && (
+                    <p className="text-sm text-muted-foreground pt-1 border-t border-red-500/20">
+                      <span className="font-medium">Suggestion:</span> {verifyErrorSuggestion}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -423,6 +523,133 @@ export default function AdminDashboardPage() {
                 </div>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Entries to Confirm - Owl Vision Section */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Entries to Confirm
+            </CardTitle>
+            <CardDescription>
+              Pending entries that improve Owl Vision scores when verified
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingEntriesToConfirm ? (
+              <p className="text-center text-muted-foreground py-4">Loading...</p>
+            ) : !entriesToConfirm || entriesToConfirm.summary.totalPending === 0 ? (
+              <p className="text-center text-muted-foreground py-4">All entries confirmed</p>
+            ) : (
+              <div className="space-y-4">
+                {entriesToConfirm.byRaffle.map((row) => {
+                  const isExpanded = expandedConfirmRaffles.has(row.raffleId)
+                  const toggleExpand = () => {
+                    setExpandedConfirmRaffles((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(row.raffleId)) next.delete(row.raffleId)
+                      else next.add(row.raffleId)
+                      return next
+                    })
+                  }
+                  return (
+                    <div
+                      key={row.raffleId}
+                      className="rounded-lg border overflow-hidden"
+                    >
+                      <div
+                        className="flex items-center justify-between gap-4 p-3 cursor-pointer hover:bg-muted/50"
+                        onClick={toggleExpand}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            toggleExpand()
+                          }
+                        }}
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? `Collapse ${row.raffle.title}` : `Expand ${row.raffle.title}`}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {isExpanded ? (
+                            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <Link
+                            href={`/admin/raffles/${row.raffleId}`}
+                            className="font-medium hover:underline text-sm truncate"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {row.raffle.title}
+                          </Link>
+                        </div>
+                        <span className="text-sm text-muted-foreground shrink-0">
+                          {row.pendingEntries.length} pending
+                        </span>
+                        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                          {row.withTx.length > 0 ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleBatchVerifyRaffle(row.raffleId)}
+                              disabled={verifyingRaffleId === row.raffleId}
+                            >
+                              {verifyingRaffleId === row.raffleId ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                                  Verify
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Use TX tool above
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div className="border-t bg-muted/30 px-3 py-2 text-xs space-y-1">
+                          {row.pendingEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1"
+                            >
+                              <span className="font-mono text-muted-foreground break-all" title={entry.wallet_address}>
+                                {entry.wallet_address}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {entry.ticket_quantity} tickets · {entry.amount_paid} {entry.currency}
+                              </span>
+                              {entry.transaction_signature ? (
+                                <a
+                                  href={`https://solscan.io/tx/${entry.transaction_signature}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline font-mono"
+                                >
+                                  Solscan ↗
+                                </a>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400">
+                                  No TX — use TX tool above
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 
