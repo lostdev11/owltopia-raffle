@@ -236,6 +236,8 @@
 /* Footer link tab flair */
 .footer-link-tab {
   position: relative;
+  pointer-events: auto;
+  cursor: pointer;
 }
 .footer-link-tab::after {
   content: '';
@@ -246,6 +248,7 @@
   width: 0;
   background: linear-gradient(90deg, transparent, rgb(34, 197, 94), transparent);
   transition: width 0.3s ease, left 0.3s ease;
+  pointer-events: none; /* allow clicks to reach the link */
 }
 .footer-link-tab:hover::after {
   width: 80%;
