@@ -13,10 +13,8 @@ const fadeIn = (delay: string) => ({
 const externalLinks = [
   { name: 'Staking', url: 'https://www.nftstake.app/owltopia' },
   { name: 'X', url: 'https://x.com/Owltopia_sol' },
-  { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Atlas3', url: 'https://atlas3.io/project/owltopia' },
   { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
 ]
 
@@ -58,24 +56,12 @@ export function EnterOwlTopia() {
         >
           Enter Raffles
         </Link>
-        {/* Links: internal + external */}
+        {/* Links: external only */}
         <div
           className="relative z-10 flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm opacity-0 animate-enter-fade-in"
           style={fadeIn('0.9s')}
           role="navigation"
         >
-          <Link
-            href="/how-it-works"
-            className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground bg-white/5 border border-white/10 hover:border-green-500/50 transition-all duration-300 ease-out hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)] hover:bg-green-500/10 touch-manipulation min-h-[44px] text-center cursor-pointer"
-          >
-            How It Works
-          </Link>
-          <Link
-            href="/terms"
-            className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground bg-white/5 border border-white/10 hover:border-green-500/50 transition-all duration-300 ease-out hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)] hover:bg-green-500/10 touch-manipulation min-h-[44px] text-center cursor-pointer"
-          >
-            Terms
-          </Link>
           {externalLinks.map((link) => (
             <a
               key={link.name}
