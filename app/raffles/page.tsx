@@ -16,7 +16,8 @@ export const revalidate = 0
 export const maxDuration = 60
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE = `${SITE_URL}/icon.png`
+const OG_IMAGE = `${SITE_URL}/opengraph-image`
+const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {
   title: 'Raffles | Owl Raffle',
@@ -28,15 +29,13 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Raffles | Owl Raffle',
     description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
-    images: [
-      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
-    ],
+    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Raffles | Owl Raffle',
     description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
-    images: [OG_IMAGE],
+    images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
 }
 

@@ -26,7 +26,9 @@ export const viewport = {
 
 // Absolute base URL (X and others require absolute HTTPS URLs for card images)
 const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const DEFAULT_OG_IMAGE = `${SITE_BASE}/icon.png`
+// 1200x630 image from app/opengraph-image.tsx - X/Discord prefer this aspect ratio
+const DEFAULT_OG_IMAGE_URL = `${SITE_BASE}/opengraph-image`
+const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 // Default to production URL so link previews (OG/Twitter) work when sharing any page
 export const metadata: Metadata = {
@@ -60,10 +62,10 @@ export const metadata: Metadata = {
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
     images: [
       {
-        url: DEFAULT_OG_IMAGE,
-        width: 512,
-        height: 512,
-        alt: 'Owl Raffle Logo',
+        url: DEFAULT_OG_IMAGE_URL,
+        width: 1200,
+        height: 630,
+        alt: OG_IMAGE_ALT,
         type: 'image/png',
       },
     ],
@@ -72,7 +74,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [DEFAULT_OG_IMAGE],
+    images: [{ url: DEFAULT_OG_IMAGE_URL, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
   robots: {
     index: true,

@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const DEFAULT_OG_IMAGE = `${SITE_URL}/icon.png`
+const DEFAULT_OG_IMAGE = `${SITE_URL}/opengraph-image`
+const DEFAULT_OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 function absoluteImageUrl(imageUrl: string | null): string | null {
   if (!imageUrl) return null
@@ -59,9 +60,9 @@ export async function generateMetadata({
         : [
             {
               url: DEFAULT_OG_IMAGE,
-              width: 512,
-              height: 512,
-              alt: 'Owl Raffle',
+              width: 1200,
+              height: 630,
+              alt: DEFAULT_OG_ALT,
               type: 'image/png',
             },
           ],
@@ -70,7 +71,9 @@ export async function generateMetadata({
       card: 'summary_large_image',
       title,
       description,
-      images: imageUrl ? [imageUrl] : [DEFAULT_OG_IMAGE],
+      images: imageUrl
+        ? [imageUrl]
+        : [{ url: DEFAULT_OG_IMAGE, alt: DEFAULT_OG_ALT, width: 1200, height: 630 }],
     },
   }
 }

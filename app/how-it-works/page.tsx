@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield } from 'lucide-react'
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE = `${SITE_URL}/icon.png`
+const OG_IMAGE = `${SITE_URL}/opengraph-image`
+const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {
   title: 'How It Works | Owl Raffle',
@@ -16,15 +17,13 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'How It Works | Owl Raffle',
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
-    images: [
-      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
-    ],
+    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'How It Works | Owl Raffle',
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
-    images: [OG_IMAGE],
+    images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
 }
 
