@@ -15,7 +15,8 @@ export const revalidate = 0
 /** Allow longer server run so slow Supabase doesn't hit upstream request timeout */
 export const maxDuration = 60
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const OG_IMAGE = `${SITE_URL}/icon.png`
 
 export const metadata: Metadata = {
   title: 'Raffles | Owl Raffle',
@@ -27,13 +28,15 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Raffles | Owl Raffle',
     description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
-    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+    images: [
+      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Raffles | Owl Raffle',
     description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
-    images: ['/icon.png'],
+    images: [OG_IMAGE],
   },
 }
 

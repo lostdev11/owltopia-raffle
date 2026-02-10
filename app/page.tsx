@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import { EnterOwlTopia } from '@/components/EnterOwlTopia'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const OG_IMAGE = `${SITE_URL}/icon.png`
 
 export const metadata: Metadata = {
   title: 'Owl Raffle',
@@ -13,13 +14,15 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+    images: [
+      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: ['/icon.png'],
+    images: [OG_IMAGE],
   },
 }
 

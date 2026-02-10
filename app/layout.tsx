@@ -24,9 +24,13 @@ export const viewport = {
   interactiveWidget: 'resizes-content' as const,
 }
 
+// Absolute base URL (X and others require absolute HTTPS URLs for card images)
+const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const DEFAULT_OG_IMAGE = `${SITE_BASE}/icon.png`
+
 // Default to production URL so link previews (OG/Twitter) work when sharing any page
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'),
+  metadataBase: new URL(SITE_BASE),
   title: 'Owl Raffle',
   description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
   icons: {
@@ -50,17 +54,17 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: 'website',
+    url: SITE_BASE,
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
     images: [
       {
-        // Currently using icon.png. For best results, create og-image.png (1200x630px) 
-        // and update this URL to '/og-image.png'. See public/OG_IMAGE_INSTRUCTIONS.md
-        url: '/icon.png',
+        url: DEFAULT_OG_IMAGE,
         width: 512,
         height: 512,
         alt: 'Owl Raffle Logo',
+        type: 'image/png',
       },
     ],
   },
@@ -68,7 +72,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: ['/icon.png'], // Update to '/og-image.png' when you create the optimized image
+    images: [DEFAULT_OG_IMAGE],
   },
   robots: {
     index: true,

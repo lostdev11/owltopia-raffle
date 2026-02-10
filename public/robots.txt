@@ -1,0 +1,7 @@
+# Allow all crawlers (including Discord, X, Slack, etc.) for link previews
+User-agent: *
+Allow: /
+
+# Explicitly allow Discord's link preview crawler
+User-agent: Discordbot
+Allow: /

@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const OG_IMAGE = `${SITE_URL}/icon.png`
 
 export const metadata: Metadata = {
   title: 'Terms of Service | Owl Raffle',
@@ -15,13 +16,15 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Terms of Service | Owl Raffle',
     description: 'Terms of Service for Owl Raffle platform.',
-    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+    images: [
+      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Terms of Service | Owl Raffle',
     description: 'Terms of Service for Owl Raffle platform.',
-    images: ['/icon.png'],
+    images: [OG_IMAGE],
   },
 }
 

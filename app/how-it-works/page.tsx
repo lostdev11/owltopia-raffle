@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield } from 'lucide-react'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const OG_IMAGE = `${SITE_URL}/icon.png`
 
 export const metadata: Metadata = {
   title: 'How It Works | Owl Raffle',
@@ -15,13 +16,15 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'How It Works | Owl Raffle',
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
-    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+    images: [
+      { url: OG_IMAGE, width: 512, height: 512, alt: 'Owl Raffle', type: 'image/png' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'How It Works | Owl Raffle',
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
-    images: ['/icon.png'],
+    images: [OG_IMAGE],
   },
 }
 

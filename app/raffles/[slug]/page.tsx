@@ -8,7 +8,8 @@ import { notFound } from 'next/navigation'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
+const DEFAULT_OG_IMAGE = `${SITE_URL}/icon.png`
 
 function absoluteImageUrl(imageUrl: string | null): string | null {
   if (!imageUrl) return null
@@ -57,10 +58,11 @@ export async function generateMetadata({
           ]
         : [
             {
-              url: '/icon.png',
+              url: DEFAULT_OG_IMAGE,
               width: 512,
               height: 512,
               alt: 'Owl Raffle',
+              type: 'image/png',
             },
           ],
     },
@@ -68,7 +70,7 @@ export async function generateMetadata({
       card: 'summary_large_image',
       title,
       description,
-      images: imageUrl ? [imageUrl] : ['/icon.png'],
+      images: imageUrl ? [imageUrl] : [DEFAULT_OG_IMAGE],
     },
   }
 }
