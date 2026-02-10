@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createRaffle, generateUniqueSlug, getRafflesViaRest } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
+import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 import type { Raffle } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -155,11 +156,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate currency is USDC or SOL only
-    const validCurrencies = ['USDC', 'SOL']
-    if (body.currency && !validCurrencies.includes(body.currency)) {
+    // Validate currency is SOL, USDC, or OWL
+    if (body.currency && !RAFFLE_CURRENCIES.includes(body.currency)) {
       return NextResponse.json(
-        { error: 'Currency must be either USDC or SOL' },
+        { error: 'Currency must be SOL, USDC, or OWL' },
         { status: 400 }
       )
     }

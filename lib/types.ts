@@ -6,6 +6,9 @@ export type PrizeType = 'crypto' | 'nft'
 
 export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | null
 
+/** Supported raffle ticket currencies */
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
+
 export interface Raffle {
   id: string
   slug: string
@@ -20,7 +23,7 @@ export interface Raffle {
   nft_token_id: string | null
   nft_metadata_uri: string | null
   ticket_price: number
-  currency: string
+  currency: RaffleCurrency
   max_tickets: number | null
   min_tickets: number | null
   start_time: string
@@ -48,7 +51,7 @@ export interface Entry {
   transaction_signature: string | null
   status: EntryStatus
   amount_paid: number
-  currency: string
+  currency: RaffleCurrency
   created_at: string
   verified_at: string | null
   restored_at: string | null

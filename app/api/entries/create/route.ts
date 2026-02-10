@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createEntry } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { isOwlEnabled } from '@/lib/tokens'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -66,6 +67,17 @@ export async function POST(request: NextRequest) {
     if (new Date(raffle.end_time) <= new Date()) {
       return NextResponse.json(
         { error: 'Raffle has ended' },
+        { status: 400 }
+      )
+    }
+
+    // OWL: block checkout if mint is not configured (no on-chain transaction yet)
+    if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[entries/create] OWL raffle checkout blocked: NEXT_PUBLIC_OWL_MINT_ADDRESS not set')
+      }
+      return NextResponse.json(
+        { error: 'OWL entry is not enabled yet — mint address pending.' },
         { status: 400 }
       )
     }

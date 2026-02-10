@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
+import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -45,11 +46,10 @@ export async function PATCH(
       )
     }
 
-    // Validate currency is USDC or SOL only
-    const validCurrencies = ['USDC', 'SOL']
-    if (body.currency && !validCurrencies.includes(body.currency)) {
+    // Validate currency is SOL, USDC, or OWL
+    if (body.currency && !RAFFLE_CURRENCIES.includes(body.currency)) {
       return NextResponse.json(
-        { error: 'Currency must be either USDC or SOL' },
+        { error: 'Currency must be SOL, USDC, or OWL' },
         { status: 400 }
       )
     }

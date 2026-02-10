@@ -27,6 +27,7 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
@@ -45,6 +46,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
+import { LinkifiedText } from '@/components/LinkifiedText'
 
 interface RaffleDetailClientProps {
   raffle: Raffle
@@ -220,6 +222,12 @@ export function RaffleDetailClient({
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
       setError('Please connect your wallet first')
+      return
+    }
+
+    // OWL: block checkout with friendly message if mint not configured
+    if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+      setError('OWL entry is not enabled yet — mint address pending.')
       return
     }
 
@@ -584,6 +592,8 @@ export function RaffleDetailClient({
             []
           )
         )
+      } else if (raffle.currency === 'OWL') {
+        throw new Error('OWL entry is not enabled yet — mint address pending.')
       } else {
         throw new Error(`Unsupported currency: ${raffle.currency}`)
       }
@@ -937,7 +947,7 @@ export function RaffleDetailClient({
               <div className="flex-1">
                 <CardTitle className={classes.title}>{raffle.title}</CardTitle>
                 <CardDescription className={classes.description}>
-                  {raffle.description}
+                  <LinkifiedText text={raffle.description} />
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
@@ -1027,7 +1037,7 @@ export function RaffleDetailClient({
                   <p className={classes.labelText + ' text-muted-foreground'}>Ticket Price</p>
                   <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
                     {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
                   </div>
                 </div>
               )}
@@ -1383,7 +1393,7 @@ export function RaffleDetailClient({
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">
                 {purchaseAmount.toFixed(6)} {raffle.currency}
-                <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={20} className="inline-block" />
+                <CurrencyIcon currency={raffle.currency} size={20} className="inline-block" />
               </div>
             </div>
             

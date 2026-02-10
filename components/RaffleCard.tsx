@@ -18,6 +18,8 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { isOwlEnabled } from '@/lib/tokens'
+import { LinkifiedText } from '@/components/LinkifiedText'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
 import { Trash2, Edit, Trophy } from 'lucide-react'
@@ -201,6 +203,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
       return
     }
 
+    // OWL: block checkout with friendly message if mint not configured
+    if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+      setError('OWL entry is not enabled yet — mint address pending.')
+      return
+    }
+
     setIsProcessing(true)
     setError(null)
     setSuccess(false)
@@ -375,6 +383,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
             lamports,
           })
         )
+      } else if (raffle.currency === 'OWL') {
+        // OWL checkout not implemented yet when mint is set (handled above when !isOwlEnabled)
+        throw new Error('OWL entry is not enabled yet — mint address pending.')
       } else if (raffle.currency === 'USDC') {
         const usdcMint = new PublicKey(paymentDetails.usdcMint)
         const mintInfo = await getMint(connection, usdcMint)
@@ -681,7 +692,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 </div>
               </div>
             <CardDescription className="text-xs text-muted-foreground line-clamp-1 mb-2 min-w-0">
-              {raffle.description}
+              <LinkifiedText text={raffle.description} />
             </CardDescription>
             <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
@@ -694,7 +705,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <span className="text-muted-foreground">Price: </span>
                 <span className="font-semibold flex items-center gap-1.5">
                   {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={14} className="inline-block" />
+                  <CurrencyIcon currency={raffle.currency} size={14} className="inline-block" />
                 </span>
               </span>
               {totalTicketsSold > 0 && (
@@ -781,7 +792,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <span className="text-xs text-muted-foreground">Total</span>
                   <div className="text-sm font-bold flex items-center gap-1">
                     {purchaseAmount.toFixed(6)} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={12} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency} size={12} className="inline-block" />
                   </div>
                 </div>
                 {error && (
@@ -986,7 +997,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     </div>
                   </div>
                   <CardDescription className={`${classes.description} text-white/90`}>
-                    {raffle.description}
+                    <LinkifiedText text={raffle.description} />
                   </CardDescription>
                 </div>
               </div>
@@ -999,7 +1010,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
                       {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block flex-shrink-0" />
+                      <CurrencyIcon currency={raffle.currency} size={16} className="inline-block flex-shrink-0" />
                     </div>
                     <div className={`${classes.footer} text-white/80`}>
                       {totalTicketsSold} entries
@@ -1047,7 +1058,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   </div>
                 </div>
                 <CardDescription className={classes.description}>
-                  {raffle.description}
+                  <LinkifiedText text={raffle.description} />
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -1064,7 +1075,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     <span className="text-muted-foreground">Ticket Price</span>
                     <span className="font-semibold flex items-center gap-1.5">
                       {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
+                      <CurrencyIcon currency={raffle.currency} size={16} className="inline-block" />
                     </span>
                   </div>
                   {totalTicketsSold > 0 && (
@@ -1160,7 +1171,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
                 <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
                   {purchaseAmount.toFixed(6)} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
+                  <CurrencyIcon currency={raffle.currency} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
                 </div>
               </div>
               {error && (

@@ -2,9 +2,10 @@
 
 import { useId, useState } from 'react'
 import Image from 'next/image'
+import type { RaffleCurrency } from '@/lib/types'
 
 interface CurrencyIconProps {
-  currency: 'SOL' | 'USDC'
+  currency: RaffleCurrency
   className?: string
   size?: number
 }
@@ -42,6 +43,24 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
           d="M333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"
           fill={`url(#${gradientId})`}
         />
+      </svg>
+    )
+  }
+
+  if (currency === 'OWL') {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        className={className}
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle cx="12" cy="12" r="10" fill="#8B5CF6" stroke="#A78BFA" strokeWidth="1" />
+        <circle cx="9" cy="10" r="2" fill="white" />
+        <circle cx="15" cy="10" r="2" fill="white" />
+        <path d="M8 15c0 0 1.5 2 4 2s4-2 4-2" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     )
   }
@@ -102,5 +121,10 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
     )
   }
 
-  return null
+  // Fallback for unknown currency (e.g. legacy data)
+  return (
+    <span className={className} style={{ fontSize: size ? `${size * 0.6}px` : undefined }} title={currency}>
+      $
+    </span>
+  )
 }

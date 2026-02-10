@@ -13,6 +13,7 @@ import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { isOwlEnabled } from '@/lib/tokens'
 
 export function CreateRaffleForm() {
   const router = useRouter()
@@ -218,6 +219,7 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
+                {(isOwlEnabled() || isAdmin) && <option value="OWL">OWL</option>}
               </select>
             </div>
           </div>

@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Entry } from '@/lib/types'
 import { withRetry } from '@/lib/db-retry'
+import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 
 export async function getEntryById(id: string) {
   return withRetry(async () => {
@@ -40,10 +41,9 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
 export async function createEntry(
   entry: Omit<Entry, 'id' | 'created_at' | 'verified_at' | 'restored_at' | 'restored_by'>
 ) {
-  // Validate currency is USDC or SOL only
-  const validCurrencies = ['USDC', 'SOL']
-  if (!validCurrencies.includes(entry.currency)) {
-    console.error('Invalid currency for entry. Must be USDC or SOL.')
+  // Validate currency is SOL, USDC, or OWL
+  if (!RAFFLE_CURRENCIES.includes(entry.currency as 'SOL' | 'USDC' | 'OWL')) {
+    console.error('Invalid currency for entry. Must be SOL, USDC, or OWL.')
     return null
   }
 
