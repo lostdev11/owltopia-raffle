@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
@@ -6,6 +7,71 @@ import { notFound } from 'next/navigation'
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+
+function absoluteImageUrl(imageUrl: string | null): string | null {
+  if (!imageUrl) return null
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl
+  const base = SITE_URL.replace(/\/$/, '')
+  const path = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`
+  return `${base}${path}`
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}): Promise<Metadata> {
+  const { slug } = await params
+  const raffle = await getRaffleBySlug(slug)
+  if (!raffle) {
+    return { title: 'Raffle Not Found | Owl Raffle' }
+  }
+
+  const title = `${raffle.title} | Owl Raffle`
+  const description =
+    raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
+    `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
+  const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
+  const imageUrl = absoluteImageUrl(raffle.image_url)
+
+  return {
+    title,
+    description,
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      type: 'website',
+      url: canonicalUrl,
+      siteName: 'Owl Raffle',
+      title,
+      description,
+      images: imageUrl
+        ? [
+            {
+              url: imageUrl,
+              width: 1200,
+              height: 630,
+              alt: raffle.title,
+            },
+          ]
+        : [
+            {
+              url: '/icon.png',
+              width: 512,
+              height: 512,
+              alt: 'Owl Raffle',
+            },
+          ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: imageUrl ? [imageUrl] : ['/icon.png'],
+    },
+  }
+}
 
 export default async function RaffleDetailPage({
   params,

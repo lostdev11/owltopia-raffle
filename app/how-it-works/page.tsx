@@ -1,10 +1,28 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield } from 'lucide-react'
 
-export const metadata = {
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+
+export const metadata: Metadata = {
   title: 'How It Works | Owl Raffle',
   description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+  alternates: { canonical: `${SITE_URL}/how-it-works` },
+  openGraph: {
+    type: 'website',
+    url: `${SITE_URL}/how-it-works`,
+    siteName: 'Owl Raffle',
+    title: 'How It Works | Owl Raffle',
+    description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'How It Works | Owl Raffle',
+    description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+    images: ['/icon.png'],
+  },
 }
 
 export default function HowItWorksPage() {

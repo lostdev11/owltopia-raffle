@@ -24,8 +24,9 @@ export const viewport = {
   interactiveWidget: 'resizes-content' as const,
 }
 
+// Default to production URL so link previews (OG/Twitter) work when sharing any page
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'),
   title: 'Owl Raffle',
   description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
   icons: {

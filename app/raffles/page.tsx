@@ -3,6 +3,7 @@
  * - Public list: fetches ONLY raffles (no entries on server). Entries load client-side via RafflesList poll.
  * - Avoids timeout: server does 1 Supabase query instead of 1 + N×entries, so page renders quickly.
  */
+import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { getRafflesViaRest, type GetRafflesResult } from '@/lib/db/raffles'
 import { getSupabaseConfigError } from '@/lib/supabase'
@@ -13,6 +14,28 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 /** Allow longer server run so slow Supabase doesn't hit upstream request timeout */
 export const maxDuration = 60
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+
+export const metadata: Metadata = {
+  title: 'Raffles | Owl Raffle',
+  description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+  alternates: { canonical: `${SITE_URL}/raffles` },
+  openGraph: {
+    type: 'website',
+    url: `${SITE_URL}/raffles`,
+    siteName: 'Owl Raffle',
+    title: 'Raffles | Owl Raffle',
+    description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Raffles | Owl Raffle',
+    description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+    images: ['/icon.png'],
+  },
+}
 
 type RaffleWithEntries = Array<{ raffle: Raffle; entries: Entry[] }>
 

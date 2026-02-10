@@ -1,10 +1,28 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 
-export const metadata = {
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
+
+export const metadata: Metadata = {
   title: 'Terms of Service | Owl Raffle',
-  description: 'Terms of Service for Owl Raffle platform',
+  description: 'Terms of Service for Owl Raffle platform.',
+  alternates: { canonical: `${SITE_URL}/terms` },
+  openGraph: {
+    type: 'website',
+    url: `${SITE_URL}/terms`,
+    siteName: 'Owl Raffle',
+    title: 'Terms of Service | Owl Raffle',
+    description: 'Terms of Service for Owl Raffle platform.',
+    images: [{ url: '/icon.png', width: 512, height: 512, alt: 'Owl Raffle' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Terms of Service | Owl Raffle',
+    description: 'Terms of Service for Owl Raffle platform.',
+    images: ['/icon.png'],
+  },
 }
 
 export default function TermsPage() {
