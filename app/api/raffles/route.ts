@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createRaffle, generateUniqueSlug, getRafflesViaRest } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
 import type { Raffle } from '@/lib/types'
+import { isOwlEnabled } from '@/lib/tokens'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -155,11 +156,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate currency is USDC or SOL only
-    const validCurrencies = ['USDC', 'SOL']
+    // Validate currency: SOL, USDC, and OWL when enabled
+    const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
     if (body.currency && !validCurrencies.includes(body.currency)) {
       return NextResponse.json(
-        { error: 'Currency must be either USDC or SOL' },
+        { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
         { status: 400 }
       )
     }

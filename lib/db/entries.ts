@@ -40,10 +40,10 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
 export async function createEntry(
   entry: Omit<Entry, 'id' | 'created_at' | 'verified_at' | 'restored_at' | 'restored_by'>
 ) {
-  // Validate currency is USDC or SOL only
-  const validCurrencies = ['USDC', 'SOL']
+  // Validate currency is USDC, SOL, or OWL
+  const validCurrencies = ['USDC', 'SOL', 'OWL']
   if (!validCurrencies.includes(entry.currency)) {
-    console.error('Invalid currency for entry. Must be USDC or SOL.')
+    console.error('Invalid currency for entry. Must be USDC, SOL, or OWL.')
     return null
   }
 

@@ -16,6 +16,7 @@ import { AlertCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import { canSelectWinner, isRaffleEligibleToDraw, hasSevenDaysPassedSinceOriginalEnd, calculateTicketsSold } from '@/lib/db/raffles'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { isOwlEnabled } from '@/lib/tokens'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -767,6 +768,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   >
                     <option value="SOL">SOL</option>
                     <option value="USDC">USDC</option>
+                    {isOwlEnabled() && <option value="OWL">OWL</option>}
                   </select>
                 </div>
               </div>

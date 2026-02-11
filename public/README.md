@@ -30,3 +30,17 @@ public/
 ```
 
 The logo will automatically appear in the header of all pages.
+
+---
+
+## OWL Token Emblem
+
+To use your own OWL token emblem/icon:
+
+1. Place your image in this `public` folder as **`owl.png`** (or **`owl.svg`**).
+2. The app tries `owl.png` first, then `owl.svg`; if neither exists, it uses the built-in OWL icon.
+
+```
+public/
+  └── owl.png   (or owl.svg)
+```

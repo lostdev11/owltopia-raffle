@@ -267,6 +267,56 @@ async function verifyTransaction(
         valid: false, 
         error: `USDC verification failed: Could not verify transfer of ${expectedAmount} USDC` 
       }
+    } else if (expectedCurrency === 'OWL') {
+      // OWL (SPL Token) verification - similar to USDC
+      const { getTokenInfo } = await import('@/lib/tokens')
+      const tokenInfo = getTokenInfo('OWL')
+      if (!tokenInfo.mintAddress) {
+        return { valid: false, error: 'OWL mint address not configured' }
+      }
+      
+      const OWL_MINT = new PublicKey(tokenInfo.mintAddress)
+      const recipientTokenAddress = await getAssociatedTokenAddress(
+        OWL_MINT,
+        recipientPubkey
+      )
+      
+      const preTokenBalances = transaction.meta.preTokenBalances || []
+      const postTokenBalances = transaction.meta.postTokenBalances || []
+      
+      const message = transaction.transaction.message
+      const accountKeys = 'staticAccountKeys' in message
+        ? (message as any).staticAccountKeys
+        : (message as any).accountKeys
+      
+      const recipientTokenIndex = accountKeys.findIndex(
+        (key: PublicKey) => key.equals(recipientTokenAddress)
+      )
+      
+      if (recipientTokenIndex !== -1) {
+        const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
+        if (matchingPostBalance) {
+          const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+          const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
+          const preAmount = matchingPreBalance ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0') : 0
+          const increase = amount - preAmount
+          const tolerance = 0.01
+          
+          if (Math.abs(increase - expectedAmount) <= tolerance) {
+            return { valid: true }
+          } else {
+            return { 
+              valid: false, 
+              error: `OWL amount mismatch: expected ${expectedAmount}, got ${increase}` 
+            }
+          }
+        }
+      }
+      
+      return { 
+        valid: false, 
+        error: `OWL verification failed: Could not verify transfer of ${expectedAmount} OWL` 
+      }
     } else {
       return { valid: false, error: `Unsupported currency: ${expectedCurrency}` }
     }

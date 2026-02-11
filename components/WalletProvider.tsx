@@ -56,6 +56,7 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
             uri: typeof window !== 'undefined' ? window.location.origin : 'https://owltopia.xyz',
             icon: typeof window !== 'undefined' ? `${window.location.origin}/icon.png` : '/icon.png',
           },
+          // Use a cache that clears on disconnect to force re-authorization each time
           authorizationResultCache: createDefaultAuthorizationResultCache(),
           cluster: network === WalletAdapterNetwork.Mainnet 
             ? 'mainnet-beta' 

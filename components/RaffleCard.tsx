@@ -364,6 +364,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
       }
       transaction.feePayer = publicKey
       
+      // Same treasury recipient for SOL, USDC, and OWL (from RAFFLE_RECIPIENT_WALLET)
       const recipientPubkey = new PublicKey(paymentDetails.recipient)
 
       if (raffle.currency === 'SOL') {
@@ -401,6 +402,143 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
               recipientTokenAddress,
               recipientPubkey,
               usdcMint
+            )
+          )
+        }
+
+        transaction.add(
+          createTransferInstruction(
+            senderTokenAddress,
+            recipientTokenAddress,
+            publicKey,
+            amount,
+            []
+          )
+        )
+      } else if (raffle.currency === 'OWL') {
+        // OWL (SPL Token) transfer
+        if (!paymentDetails.owlMint) {
+          throw new Error('OWL mint address not configured in payment details')
+        }
+        const owlMint = new PublicKey(paymentDetails.owlMint)
+        
+        // Get mint info with retry logic for RPC errors
+        let mintInfo
+        let mintRetries = 3
+        while (mintRetries > 0) {
+          try {
+            mintInfo = await getMint(connection, owlMint)
+            break
+          } catch (rpcError: any) {
+            mintRetries--
+            const errorMessage = rpcError?.message || ''
+            const errorCode = rpcError?.code || rpcError?.error?.code
+            const errorName = rpcError?.name || ''
+            
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
+            
+            if (isFetchError ||
+                errorCode === 19 || 
+                errorMessage.includes('Temporary internal error') ||
+                errorMessage.includes('500') ||
+                errorMessage.includes('Network') ||
+                errorMessage.includes('timeout')) {
+              if (mintRetries === 0) {
+                if (isFetchError) {
+                  throw new Error(
+                    'Network connection failed while fetching OWL mint information. This may be a network issue or CORS restriction on mobile. ' +
+                    'Please check your internet connection and try again. ' +
+                    'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                  )
+                } else {
+                  throw new Error(
+                    'Failed to fetch OWL mint information after retries. This may be a temporary RPC issue. ' +
+                    'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                  )
+                }
+              }
+              const backoffDelay = isFetchError ? 2000 * (3 - mintRetries) : 1000 * (3 - mintRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
+            } else {
+              throw rpcError
+            }
+          }
+        }
+        
+        if (!mintInfo) {
+          throw new Error('Failed to get OWL mint information')
+        }
+        
+        const decimals = mintInfo.decimals
+        const amount = BigInt(Math.round(paymentDetails.amount * Math.pow(10, decimals)))
+
+        const senderTokenAddress = await getAssociatedTokenAddress(owlMint, publicKey)
+        const recipientTokenAddress = await getAssociatedTokenAddress(owlMint, recipientPubkey)
+
+        let accountExists = false
+        let accountRetries = 3
+        while (accountRetries > 0 && !accountExists) {
+          try {
+            await getAccount(connection, recipientTokenAddress)
+            accountExists = true
+          } catch (error: any) {
+            const errorMessage = error?.message || ''
+            const errorCode = error?.code || error?.error?.code
+            const errorName = error?.name || ''
+            
+            if (errorMessage.includes('TokenAccountNotFoundError') || 
+                errorMessage.includes('could not find account')) {
+              accountExists = false
+              break
+            }
+            
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
+            
+            if (isFetchError ||
+                errorCode === 19 || 
+                errorMessage.includes('Temporary internal error') ||
+                errorMessage.includes('500') ||
+                errorMessage.includes('Network') ||
+                errorMessage.includes('timeout')) {
+              accountRetries--
+              if (accountRetries === 0) {
+                accountExists = false
+                break
+              }
+              const backoffDelay = isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
+            } else {
+              accountExists = false
+              break
+            }
+          }
+        }
+        
+        if (!accountExists) {
+          transaction.add(
+            createAssociatedTokenAccountInstruction(
+              publicKey,
+              recipientTokenAddress,
+              recipientPubkey,
+              owlMint
             )
           )
         }
@@ -694,7 +832,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <span className="text-muted-foreground">Price: </span>
                 <span className="font-semibold flex items-center gap-1.5">
                   {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={14} className="inline-block" />
+                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={14} className="inline-block" />
                 </span>
               </span>
               {totalTicketsSold > 0 && (
@@ -781,7 +919,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <span className="text-xs text-muted-foreground">Total</span>
                   <div className="text-sm font-bold flex items-center gap-1">
                     {purchaseAmount.toFixed(6)} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={12} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block" />
                   </div>
                 </div>
                 {error && (
@@ -999,7 +1137,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
                       {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block flex-shrink-0" />
+                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={16} className="inline-block flex-shrink-0" />
                     </div>
                     <div className={`${classes.footer} text-white/80`}>
                       {totalTicketsSold} entries
@@ -1064,7 +1202,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                     <span className="text-muted-foreground">Ticket Price</span>
                     <span className="font-semibold flex items-center gap-1.5">
                       {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={16} className="inline-block" />
+                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={16} className="inline-block" />
                     </span>
                   </div>
                   {totalTicketsSold > 0 && (
@@ -1160,7 +1298,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                 <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
                 <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
                   {purchaseAmount.toFixed(6)} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
+                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
                 </div>
               </div>
               {error && (

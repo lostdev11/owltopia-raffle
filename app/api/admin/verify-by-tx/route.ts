@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
                 : txResult.detail || 'Recipient wallet may not be configured.',
             suggestion: isNotFound
               ? 'Confirm the TX signature is correct (copy from Solscan). If the TX is new, wait a minute and retry.'
-              : 'Ensure the transaction is a SOL or USDC transfer to the raffle wallet. You can also try verifying by wallet + raffle slug instead.',
+              : 'Ensure the transaction is a SOL, USDC, or OWL transfer to the raffle wallet. You can also try verifying by wallet + raffle slug instead.',
           },
           { status: 404 }
         )
@@ -470,7 +470,7 @@ export async function POST(request: NextRequest) {
 }
 
 type TxDetailsResult =
-  | { ok: true; data: { walletAddress: string; amount: number; currency: 'SOL' | 'USDC' } }
+  | { ok: true; data: { walletAddress: string; amount: number; currency: 'SOL' | 'USDC' | 'OWL' } }
   | { ok: false; reason: 'NOT_FOUND' | 'PARSE_FAILED' | 'CONFIG'; detail?: string }
 
 /**
@@ -591,7 +591,45 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
       }
     }
     
-    return { ok: false, reason: 'PARSE_FAILED', detail: 'No SOL or USDC payment to raffle wallet found in transaction' }
+    // Try OWL
+    const { getTokenInfo } = await import('@/lib/tokens')
+    const owlTokenInfo = getTokenInfo('OWL')
+    if (owlTokenInfo.mintAddress) {
+      const OWL_MINT = new PublicKey(owlTokenInfo.mintAddress)
+      const recipientOwlTokenAddress = await getAssociatedTokenAddress(
+        OWL_MINT,
+        recipientPubkey
+      )
+      
+      const recipientOwlTokenIndex = accountKeys.findIndex(
+        (key: PublicKey) => key.equals(recipientOwlTokenAddress)
+      )
+      
+      if (recipientOwlTokenIndex !== -1) {
+        const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientOwlTokenIndex)
+        if (matchingPostBalance) {
+          const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+          const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientOwlTokenIndex)
+          const preAmount = matchingPreBalance ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0') : 0
+          const increase = amount - preAmount
+          
+          if (increase > 0) {
+            // Find sender
+            const senderPubkey = accountKeys[0]
+            return {
+              ok: true,
+              data: {
+                walletAddress: senderPubkey.toString(),
+                amount: increase,
+                currency: 'OWL'
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return { ok: false, reason: 'PARSE_FAILED', detail: 'No SOL, USDC, or OWL payment to raffle wallet found in transaction' }
   } catch (error) {
     console.error('Error fetching transaction details:', error)
     return { ok: false, reason: 'NOT_FOUND', detail: error instanceof Error ? error.message : String(error) }
