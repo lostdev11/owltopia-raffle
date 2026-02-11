@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -402,6 +402,20 @@ export default function AdminDashboardPage() {
                 </CardTitle>
                 <CardDescription>
                   View and manage all raffles, including past raffles. Delete raffles from here.
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
+
+          <Card className="hover:border-primary transition-colors cursor-pointer">
+            <Link href="/admin/announcements">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Megaphone className="h-5 w-5" />
+                  Announcements
+                </CardTitle>
+                <CardDescription>
+                  Manage announcements on the landing page, raffles page, and Announcements tab. Mark as new to show a notification icon for users.
                 </CardDescription>
               </CardHeader>
             </Link>

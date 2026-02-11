@@ -36,7 +36,11 @@ export async function generateMetadata({
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
   const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
+  // Absolute URL required so X/Twitter and other crawlers can fetch the image for link previews
   const imageUrl = absoluteImageUrl(raffle.image_url)
+  const ogImage = imageUrl
+    ? { url: imageUrl, width: 1200, height: 630, alt: raffle.title }
+    : { url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: DEFAULT_OG_ALT, type: 'image/png' as const }
 
   return {
     title,
@@ -48,32 +52,14 @@ export async function generateMetadata({
       siteName: 'Owl Raffle',
       title,
       description,
-      images: imageUrl
-        ? [
-            {
-              url: imageUrl,
-              width: 1200,
-              height: 630,
-              alt: raffle.title,
-            },
-          ]
-        : [
-            {
-              url: DEFAULT_OG_IMAGE,
-              width: 1200,
-              height: 630,
-              alt: DEFAULT_OG_ALT,
-              type: 'image/png',
-            },
-          ],
+      images: [ogImage],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: imageUrl
-        ? [imageUrl]
-        : [{ url: DEFAULT_OG_IMAGE, alt: DEFAULT_OG_ALT, width: 1200, height: 630 }],
+      // Explicit image object so X shows the raffle image in the share card
+      images: [{ url: ogImage.url, width: 1200, height: 630, alt: ogImage.alt }],
     },
   }
 }

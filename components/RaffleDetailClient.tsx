@@ -31,7 +31,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2 } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -1078,14 +1078,30 @@ export function RaffleDetailClient({
   return (
     <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-3' : imageSize === 'medium' ? 'py-6 px-3 sm:px-4' : 'py-8 px-3 sm:px-4'}`}>
       <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
-        <Button
-          variant="outline"
-          onClick={() => router.push('/raffles')}
-          className="mb-4 touch-manipulation min-h-[44px] text-sm sm:text-base"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Listings
-        </Button>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push('/raffles')}
+            className="touch-manipulation min-h-[44px] text-sm sm:text-base"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Listings
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
+              const text = `Check out this raffle: ${raffle.title}`
+              const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text, url }).toString()}`
+              window.open(shareUrl, '_blank', 'noopener,noreferrer')
+            }}
+            className="touch-manipulation min-h-[44px] text-sm sm:text-base"
+            title="Share on X (Twitter)"
+          >
+            <Share2 className="mr-2 h-4 w-4" />
+            Share
+          </Button>
+        </div>
         <Card className={getThemeAccentClasses(raffle.theme_accent)} style={borderStyle}>
           <CardHeader className={classes.headerPadding}>
             <div className="flex items-start justify-between gap-4">

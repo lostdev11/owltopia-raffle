@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import { ExternalLink } from 'lucide-react'
 import { Logo } from '@/components/Logo'
+import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 
 const fadeIn = (delay: string) => ({
   animationDelay: delay,
@@ -37,6 +38,7 @@ export function EnterOwlTopia() {
         >
           <Logo width={280} height={105} priority />
         </div>
+        <AnnouncementsBlock placement="hero" variant="hero" className="opacity-0 animate-enter-fade-in" />
         <h1
           className="text-2xl sm:text-3xl font-semibold text-center opacity-0 animate-enter-fade-in text-theme-prime animate-glow-pulse"
           style={fadeIn('0.3s')}

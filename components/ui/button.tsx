@@ -40,12 +40,23 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, onClick, ...props }, ref) => {
+  (props, ref) => {
+    const { className, variant, size, asChild = false, onClick, children, ...rest } = props
+    // Ensure asChild never reaches the DOM (React warning)
+    const restProps = rest as Omit<typeof rest, 'asChild'>
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-      // Stop propagation to prevent parent Link/anchor elements from navigating
-      // This ensures buttons work properly on desktop when inside clickable containers
       e.stopPropagation()
       onClick?.(e)
+    }
+
+    const baseProps = {
+      className: cn(buttonVariants({ variant, size, className })),
+      onClick: handleClick,
+      ...restProps,
+    }
+
+    if (asChild && React.isValidElement(children)) {
+      return React.cloneElement(children, { ...baseProps, ref } as Record<string, unknown>)
     }
 
     return (
@@ -53,8 +64,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         onClick={handleClick}
-        {...props}
-      />
+        {...restProps}
+      >
+        {children}
+      </button>
     )
   }
 )

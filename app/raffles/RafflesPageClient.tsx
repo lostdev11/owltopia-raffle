@@ -16,9 +16,11 @@ import { RafflesList } from '@/components/RafflesList'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import { Eye, Shield } from 'lucide-react'
+import { Eye, Shield, Megaphone } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
+import { MarkdownContent } from '@/components/MarkdownContent'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -131,8 +133,27 @@ export function RafflesPageClient({
   const wallet = publicKey?.toBase58() ?? ''
   const debug = searchParams.get('debug') === '1'
 
-  type Tab = 'all' | 'my-entries' | 'owl-vision'
+  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements'
   const [tab, setTab] = useState<Tab>('all')
+
+  const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
+  const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/announcements?placement=raffles')
+      .then((res) => (cancelled ? undefined : res.json()))
+      .then((data) => {
+        if (cancelled) return
+        if (data && typeof data === 'object' && Array.isArray(data.announcements)) {
+          setAnnouncementsList(data.announcements)
+          setHasNewAnnouncements(Boolean(data.hasNew))
+        } else {
+          setAnnouncementsList(Array.isArray(data) ? data : [])
+        }
+      })
+      .catch(() => { if (!cancelled) setAnnouncementsList([]) })
+    return () => { cancelled = true }
+  }, [])
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
@@ -318,6 +339,24 @@ export function RafflesPageClient({
             <Eye className="h-4 w-4" />
             Owl Vision
           </button>
+          <button
+            type="button"
+            onClick={() => setTab('announcements')}
+            className={`relative flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'announcements'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Megaphone className="h-4 w-4" />
+            Announcements
+            {hasNewAnnouncements && (
+              <span
+                className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-background"
+                aria-label="New announcement"
+              />
+            )}
+          </button>
         </div>
       </div>
 
@@ -439,6 +478,34 @@ export function RafflesPageClient({
               <p className="text-sm text-muted-foreground pt-2">
                 <Link href="/how-it-works" className="text-green-500 hover:underline">How it works</Link> — full guide to raffles, winner selection, and Owl Vision.
               </p>
+            </div>
+          ) : tab === 'announcements' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl">
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 flex items-center gap-2">
+                <Megaphone className="h-6 w-6 text-primary" />
+                Announcements
+              </h2>
+              {announcementsList.length > 0 ? (
+                <div className="space-y-3">
+                  {announcementsList.map((a) => (
+                    <div
+                      key={a.id}
+                      className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3"
+                    >
+                      <div className="font-medium text-foreground">
+                        <MarkdownContent content={a.title} compact />
+                      </div>
+                      {a.body && (
+                        <div className="mt-1 text-sm text-muted-foreground">
+                          <MarkdownContent content={a.body} compact />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">No announcements at the moment. Check back later!</p>
+              )}
             </div>
           ) : tab === 'my-entries' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0">

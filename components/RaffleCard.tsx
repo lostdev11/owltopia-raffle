@@ -22,7 +22,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit, Trophy } from 'lucide-react'
+import { Trash2, Edit, Trophy, Share2 } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -1261,15 +1261,35 @@ export function RaffleCard({ raffle, entries, size = 'medium', onDeleted, priori
                   </div>
                 )}
                 {!showQuickBuy && (
-                  <Button 
-                    type="button"
-                    className="w-full touch-manipulation min-h-[44px] text-base sm:text-sm" 
-                    size={displaySize === 'large' ? 'lg' : 'default'}
-                    onClick={handleToggleQuickBuy}
-                    disabled={!isActive || isFuture || (availableTickets !== null && availableTickets <= 0)}
-                  >
-                    {isFuture ? 'Starts Soon' : (isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
-                  </Button>
+                  <>
+                    <Button 
+                      type="button"
+                      className="w-full touch-manipulation min-h-[44px] text-base sm:text-sm" 
+                      size={displaySize === 'large' ? 'lg' : 'default'}
+                      onClick={handleToggleQuickBuy}
+                      disabled={!isActive || isFuture || (availableTickets !== null && availableTickets <= 0)}
+                    >
+                      {isFuture ? 'Starts Soon' : (isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size={displaySize === 'large' ? 'default' : 'sm'}
+                      className="w-full touch-manipulation min-h-[40px] text-sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
+                        const text = `Check out this raffle: ${raffle.title}`
+                        const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text, url }).toString()}`
+                        window.open(shareUrl, '_blank', 'noopener,noreferrer')
+                      }}
+                      title="Share this raffle on X"
+                    >
+                      <Share2 className="mr-2 h-4 w-4" />
+                      Share
+                    </Button>
+                  </>
                 )}
                 {showQuickBuy && isActive && !isFuture && (
             <div className="w-full space-y-3 pt-2">
