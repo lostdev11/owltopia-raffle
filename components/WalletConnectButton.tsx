@@ -20,7 +20,96 @@ export function WalletConnectButton() {
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
   const [remountKey, setRemountKey] = useState(0)
+  const [showCancelButton, setShowCancelButton] = useState(false)
   const buttonRef = useRef<HTMLDivElement>(null)
+  const connectingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const connectingStartTimeRef = useRef<number | null>(null)
+  const cancelButtonTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Handle stuck "connecting" state with timeout
+  useEffect(() => {
+    if (connecting) {
+      // Track when connection started
+      if (!connectingStartTimeRef.current) {
+        connectingStartTimeRef.current = Date.now()
+        setShowCancelButton(false)
+      }
+
+      // Show cancel button after 10 seconds of connecting
+      cancelButtonTimeoutRef.current = setTimeout(() => {
+        if (connecting && !connected) {
+          setShowCancelButton(true)
+        }
+      }, 10000) // Show cancel button after 10 seconds
+
+      // Set timeout to auto-cancel stuck connections (30 seconds)
+      connectingTimeoutRef.current = setTimeout(() => {
+        const elapsed = Date.now() - (connectingStartTimeRef.current || 0)
+        if (elapsed >= 30000 && connecting && !connected) {
+          console.warn('Wallet connection timeout - resetting connection state')
+          // Disconnect to reset the stuck state
+          disconnect().catch((err) => {
+            console.error('Error disconnecting after timeout:', err)
+          })
+          // Force remount to clear any stuck state
+          setRemountKey((k) => k + 1)
+          // Reset tracking
+          connectingStartTimeRef.current = null
+          setShowCancelButton(false)
+        }
+      }, 30000) // 30 second timeout
+    } else {
+      // Connection completed or cancelled - clear timeouts and reset tracking
+      if (connectingTimeoutRef.current) {
+        clearTimeout(connectingTimeoutRef.current)
+        connectingTimeoutRef.current = null
+      }
+      if (cancelButtonTimeoutRef.current) {
+        clearTimeout(cancelButtonTimeoutRef.current)
+        cancelButtonTimeoutRef.current = null
+      }
+      connectingStartTimeRef.current = null
+      setShowCancelButton(false)
+    }
+
+    return () => {
+      if (connectingTimeoutRef.current) {
+        clearTimeout(connectingTimeoutRef.current)
+        connectingTimeoutRef.current = null
+      }
+      if (cancelButtonTimeoutRef.current) {
+        clearTimeout(cancelButtonTimeoutRef.current)
+        cancelButtonTimeoutRef.current = null
+      }
+    }
+  }, [connecting, connected, disconnect])
+
+  // Manual cancel handler
+  const handleCancelConnection = useCallback(async () => {
+    console.log('User cancelled stuck wallet connection')
+    // Clear timeouts
+    if (connectingTimeoutRef.current) {
+      clearTimeout(connectingTimeoutRef.current)
+      connectingTimeoutRef.current = null
+    }
+    if (cancelButtonTimeoutRef.current) {
+      clearTimeout(cancelButtonTimeoutRef.current)
+      cancelButtonTimeoutRef.current = null
+    }
+    
+    // Try to disconnect
+    try {
+      await disconnect()
+    } catch (err) {
+      console.error('Error disconnecting:', err)
+    }
+    
+    // Force remount to clear any stuck state
+    setRemountKey((k) => k + 1)
+    // Reset tracking
+    connectingStartTimeRef.current = null
+    setShowCancelButton(false)
+  }, [disconnect])
 
   useEffect(() => {
     setMounted(true)
@@ -352,7 +441,48 @@ export function WalletConnectButton() {
   }, [mounted, connecting, wallet])
 
   const handleDisconnect = useCallback(async () => {
+    // Clear any pending connection timeouts
+    if (connectingTimeoutRef.current) {
+      clearTimeout(connectingTimeoutRef.current)
+      connectingTimeoutRef.current = null
+    }
+    if (cancelButtonTimeoutRef.current) {
+      clearTimeout(cancelButtonTimeoutRef.current)
+      cancelButtonTimeoutRef.current = null
+    }
+    connectingStartTimeRef.current = null
+    setShowCancelButton(false)
+    
     await disconnect()
+    
+    // Clear authorization cache ONLY when user explicitly disconnects
+    // This ensures next connection will require approval again
+    try {
+      if (typeof window !== 'undefined' && 'localStorage' in window) {
+        // Clear Solana Mobile Wallet authorization cache only on explicit disconnect
+        const mobileWalletKeys = Object.keys(localStorage).filter(key => 
+          key.includes('solana-mobile-wallet') || 
+          key.includes('solana_mobile')
+        )
+        mobileWalletKeys.forEach(key => localStorage.removeItem(key))
+        
+        // Clear wallet adapter connection state (but keep other preferences)
+        const adapterKeys = Object.keys(localStorage).filter(key =>
+          key.includes('wallet-adapter') && key.includes('walletName')
+        )
+        adapterKeys.forEach(key => localStorage.removeItem(key))
+        
+        // Clear sessionStorage wallet-related items
+        const sessionKeys = Object.keys(sessionStorage).filter(key =>
+          key.includes('wallet') || key.includes('solana')
+        )
+        sessionKeys.forEach(key => sessionStorage.removeItem(key))
+      }
+    } catch (e) {
+      // Ignore errors clearing storage
+      console.warn('Could not clear wallet cache:', e)
+    }
+    
     // Force WalletMultiButton remount to clear any stuck state after disconnect.
     // Without this, reconnecting often fails on subpages until user navigates away and back.
     setRemountKey((k) => k + 1)
@@ -362,7 +492,8 @@ export function WalletConnectButton() {
     sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect])
 
-  // Intercept clicks when wallet is connected to disconnect instead of opening modal
+  // When connected, clicking should show wallet info or disconnect option
+  // Don't force reconnection - let wallet stay connected until user disconnects
   useEffect(() => {
     if (!mounted || !buttonRef.current || !connected) {
       return
@@ -374,7 +505,8 @@ export function WalletConnectButton() {
         return
       }
 
-      // Intercept click to disconnect instead of opening wallet modal
+      // When connected, clicking disconnects (standard behavior)
+      // Don't force reconnection - wallet will remember connection until disconnect
       const handleClick = (e: Event) => {
         e.preventDefault()
         e.stopPropagation()
@@ -400,8 +532,6 @@ export function WalletConnectButton() {
       return
     }
 
-    let cleanupFn: (() => void) | null = null
-    
     const timeoutId = setTimeout(() => {
       // Ensure the button is fully rendered and interactive
       const button = buttonRef.current?.querySelector('button')
@@ -431,34 +561,12 @@ export function WalletConnectButton() {
       }
 
       // Ensure the button opens the modal on first click for both mobile and desktop
-      // Add a click handler that ensures modal opens immediately
-      const handleButtonClick = (e: Event) => {
-        if (!connected) {
-          // Always ensure modal opens - call setVisible in a microtask so native handler
-          // has a chance first, but still feels instant to the user
-          Promise.resolve().then(() => {
-            // Double-check connection state in case it changed
-            if (!connected) {
-              setVisible(true)
-            }
-          })
-        }
-      }
-
-      // Add click handler that ensures modal opens on first click
-      button.addEventListener('click', handleButtonClick, { passive: true, capture: false })
-
-      // Store cleanup function
-      cleanupFn = () => {
-        button.removeEventListener('click', handleButtonClick)
-      }
+      // Let WalletMultiButton handle the click naturally - it will open modal when not connected
+      // No need to intercept - WalletMultiButton already handles this correctly
     }, 200)
     
     return () => {
       clearTimeout(timeoutId)
-      if (cleanupFn) {
-        cleanupFn()
-      }
     }
   }, [mounted, connected, setVisible])
 
@@ -476,7 +584,24 @@ export function WalletConnectButton() {
         }}
       >
         {mounted ? (
-          <WalletMultiButton key={remountKey} />
+          <>
+            <WalletMultiButton key={remountKey} />
+            {showCancelButton && connecting && !connected && (
+              <Button
+                onClick={handleCancelConnection}
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                style={{
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  height: 'auto',
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+          </>
         ) : (
           <button
             className="wallet-adapter-button"

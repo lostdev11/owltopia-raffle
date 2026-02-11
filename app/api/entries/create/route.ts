@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createEntry } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
-import { isOwlEnabled } from '@/lib/tokens'
+import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -122,8 +122,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get recipient wallet address from environment variable
-    // This should be the wallet that receives payments
+    // Treasury/recipient wallet: same for SOL, USDC, and OWL. All ticket payments
+    // (native SOL, USDC SPL, OWL SPL) are sent to this wallet for verification.
     const recipientWallet = process.env.RAFFLE_RECIPIENT_WALLET || process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
 
     if (!recipientWallet) {
@@ -133,15 +133,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Return entry and payment details for transaction generation
+    // Get token info for the raffle currency (for SPL tokens like USDC/OWL)
+    const tokenInfo = getTokenInfo(raffle.currency as 'SOL' | 'USDC' | 'OWL')
+    
+    // Return entry and payment details for transaction generation. Client sends
+    // SOL to recipient; USDC/OWL to recipient's associated token accounts (ATA).
     return NextResponse.json({
       entry,
       paymentDetails: {
-        recipient: recipientWallet,
+        recipient: recipientWallet, // treasury for SOL, USDC, and OWL
         amount: finalAmountPaid,
         currency: raffle.currency,
-        // USDC mint address on Solana mainnet
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        owlMint: tokenInfo.mintAddress,
+        tokenDecimals: tokenInfo.decimals,
       },
     })
   } catch (error) {

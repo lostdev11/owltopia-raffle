@@ -1,6 +1,7 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import type { Entry, Raffle } from '@/lib/types'
+import { getTokenInfo } from '@/lib/tokens'
 
 /**
  * Verify transaction on Solana blockchain
@@ -37,7 +38,8 @@ export async function verifyTransaction(
     
     const connection = new Connection(rpcUrl, 'confirmed')
     
-    // Get recipient wallet from environment
+    // Treasury/recipient wallet (same for SOL, USDC, OWL). Verification ensures
+    // funds were sent to this wallet (native SOL) or its token accounts (USDC/OWL).
     const recipientWallet = process.env.RAFFLE_RECIPIENT_WALLET || 
                            process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
     
@@ -176,6 +178,57 @@ export async function verifyTransaction(
       return { 
         valid: false, 
         error: `USDC verification failed: Could not verify transfer of ${expectedAmount} USDC to raffle wallet. Transaction may still be processing. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` 
+      }
+    } else if (expectedCurrency === 'OWL') {
+      // OWL (SPL Token) verification - similar to USDC
+      const tokenInfo = getTokenInfo('OWL')
+      if (!tokenInfo.mintAddress) {
+        const error = 'OWL mint address not configured'
+        console.error(error)
+        return { valid: false, error }
+      }
+      
+      const OWL_MINT = new PublicKey(tokenInfo.mintAddress)
+      
+      const recipientTokenAddress = await getAssociatedTokenAddress(
+        OWL_MINT,
+        recipientPubkey
+      )
+      
+      const preTokenBalances = transaction.meta.preTokenBalances || []
+      const postTokenBalances = transaction.meta.postTokenBalances || []
+      
+      const message = transaction.transaction.message
+      const accountKeys = 'staticAccountKeys' in message
+        ? (message as any).staticAccountKeys
+        : (message as any).accountKeys
+      
+      const recipientTokenIndex = accountKeys.findIndex(
+        (key: PublicKey) => key.equals(recipientTokenAddress)
+      )
+      
+      if (recipientTokenIndex !== -1) {
+        const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
+        if (matchingPostBalance) {
+          const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+          const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
+          const preAmount = matchingPreBalance ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0') : 0
+          const increase = amount - preAmount
+          const tolerance = 0.01
+          
+          if (Math.abs(increase - expectedAmount) <= tolerance) {
+            return { valid: true }
+          } else {
+            const error = `OWL amount mismatch: expected ${expectedAmount}, got ${increase}. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}`
+            console.error(error)
+            return { valid: false, error }
+          }
+        }
+      }
+      
+      return { 
+        valid: false, 
+        error: `OWL verification failed: Could not verify transfer of ${expectedAmount} OWL to raffle wallet. Transaction may still be processing. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` 
       }
     } else {
       const error = `Unsupported currency: ${expectedCurrency}`

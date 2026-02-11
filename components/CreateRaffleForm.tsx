@@ -348,19 +348,41 @@ export function CreateRaffleForm() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="end_time">End Time * (Max 7 days from start)</Label>
-              <Input
-                id="end_time"
-                type="datetime-local"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                required
-                className="text-base sm:text-sm"
-                max={startTime ? (() => {
-                  const maxDate = new Date(startTime)
-                  maxDate.setDate(maxDate.getDate() + 7)
-                  return maxDate.toISOString().slice(0, 16)
-                })() : undefined}
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="end_time"
+                  name="end_time"
+                  type="datetime-local"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  required
+                  className="text-base sm:text-sm flex-1"
+                  max={startTime ? (() => {
+                    const maxDate = new Date(startTime)
+                    maxDate.setDate(maxDate.getDate() + 7)
+                    return maxDate.toISOString().slice(0, 16)
+                  })() : undefined}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const base = startTime ? new Date(startTime) : new Date()
+                    const maxDate = new Date(base)
+                    maxDate.setDate(maxDate.getDate() + 7)
+                    const year = maxDate.getFullYear()
+                    const month = String(maxDate.getMonth() + 1).padStart(2, '0')
+                    const day = String(maxDate.getDate()).padStart(2, '0')
+                    const hours = String(maxDate.getHours()).padStart(2, '0')
+                    const minutes = String(maxDate.getMinutes()).padStart(2, '0')
+                    setEndTime(`${year}-${month}-${day}T${hours}:${minutes}`)
+                  }}
+                  title="Set to 7 days from start"
+                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
+                >
+                  Max
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Raffles have a maximum duration of 7 days.
               </p>

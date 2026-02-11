@@ -425,6 +425,7 @@ export function RaffleDetailClient({
       }
       transaction.feePayer = publicKey
       
+      // Same treasury recipient for SOL, USDC, and OWL (from RAFFLE_RECIPIENT_WALLET)
       const recipientPubkey = new PublicKey(paymentDetails.recipient)
 
       if (raffle.currency === 'SOL') {
@@ -593,7 +594,151 @@ export function RaffleDetailClient({
           )
         )
       } else if (raffle.currency === 'OWL') {
-        throw new Error('OWL entry is not enabled yet — mint address pending.')
+        // OWL (SPL Token) transfer
+        if (!paymentDetails.owlMint) {
+          throw new Error('OWL mint address not configured in payment details')
+        }
+        const owlMint = new PublicKey(paymentDetails.owlMint)
+        
+        // Get mint info with retry logic for RPC errors
+        let mintInfo
+        let mintRetries = 3
+        while (mintRetries > 0) {
+          try {
+            mintInfo = await getMint(connection, owlMint)
+            break
+          } catch (rpcError: any) {
+            mintRetries--
+            const errorMessage = rpcError?.message || ''
+            const errorCode = rpcError?.code || rpcError?.error?.code
+            const errorName = rpcError?.name || ''
+            
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
+            
+            if (isFetchError ||
+                errorCode === 19 || 
+                errorMessage.includes('Temporary internal error') ||
+                errorMessage.includes('500') ||
+                errorMessage.includes('Network') ||
+                errorMessage.includes('timeout')) {
+              if (mintRetries === 0) {
+                if (isFetchError) {
+                  throw new Error(
+                    'Network connection failed while fetching OWL mint information. This may be a network issue or CORS restriction on mobile. ' +
+                    'Please check your internet connection and try again. ' +
+                    'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                  )
+                } else {
+                  throw new Error(
+                    'Failed to fetch OWL mint information after retries. This may be a temporary RPC issue. ' +
+                    'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
+                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                  )
+                }
+              }
+              const backoffDelay = isFetchError ? 2000 * (3 - mintRetries) : 1000 * (3 - mintRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
+            } else {
+              throw rpcError
+            }
+          }
+        }
+        
+        if (!mintInfo) {
+          throw new Error('Failed to get OWL mint information')
+        }
+        
+        const decimals = mintInfo.decimals
+        const amount = BigInt(Math.round(paymentDetails.amount * Math.pow(10, decimals)))
+
+        // Get associated token addresses
+        const senderTokenAddress = await getAssociatedTokenAddress(
+          owlMint,
+          publicKey
+        )
+        const recipientTokenAddress = await getAssociatedTokenAddress(
+          owlMint,
+          recipientPubkey
+        )
+
+        // Check if recipient token account exists, create if it doesn't
+        let accountExists = false
+        let accountRetries = 3
+        while (accountRetries > 0 && !accountExists) {
+          try {
+            await getAccount(connection, recipientTokenAddress)
+            accountExists = true
+          } catch (error: any) {
+            const errorMessage = error?.message || ''
+            const errorCode = error?.code || error?.error?.code
+            const errorName = error?.name || ''
+            
+            if (errorMessage.includes('TokenAccountNotFoundError') || 
+                errorMessage.includes('could not find account')) {
+              accountExists = false
+              break
+            }
+            
+            const isFetchError = 
+              errorMessage.includes('failed to fetch') ||
+              errorMessage.includes('Failed to fetch') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('Network request failed') ||
+              errorName === 'TypeError' ||
+              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
+              errorMessage.includes('CORS') ||
+              errorMessage.includes('network')
+            
+            if (isFetchError ||
+                errorCode === 19 || 
+                errorMessage.includes('Temporary internal error') ||
+                errorMessage.includes('500') ||
+                errorMessage.includes('Network') ||
+                errorMessage.includes('timeout')) {
+              accountRetries--
+              if (accountRetries === 0) {
+                accountExists = false
+                break
+              }
+              const backoffDelay = isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)
+              await new Promise(resolve => setTimeout(resolve, backoffDelay))
+            } else {
+              accountExists = false
+              break
+            }
+          }
+        }
+        
+        if (!accountExists) {
+          transaction.add(
+            createAssociatedTokenAccountInstruction(
+              publicKey,
+              recipientTokenAddress,
+              recipientPubkey,
+              owlMint
+            )
+          )
+        }
+
+        // Create transfer instruction
+        transaction.add(
+          createTransferInstruction(
+            senderTokenAddress,
+            recipientTokenAddress,
+            publicKey,
+            amount,
+            []
+          )
+        )
       } else {
         throw new Error(`Unsupported currency: ${raffle.currency}`)
       }
@@ -1000,6 +1145,7 @@ export function RaffleDetailClient({
                     fill
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
                     priority
+                    loading="eager"
                     className="object-contain"
                     onError={() => setImageError(true)}
                     unoptimized={raffle.image_url.startsWith('http://')}
@@ -1037,7 +1183,7 @@ export function RaffleDetailClient({
                   <p className={classes.labelText + ' text-muted-foreground'}>Ticket Price</p>
                   <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
                     {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
                   </div>
                 </div>
               )}
@@ -1393,7 +1539,7 @@ export function RaffleDetailClient({
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">
                 {purchaseAmount.toFixed(6)} {raffle.currency}
-                <CurrencyIcon currency={raffle.currency} size={20} className="inline-block" />
+                <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={20} className="inline-block" />
               </div>
             </div>
             

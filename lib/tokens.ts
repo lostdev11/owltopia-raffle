@@ -82,7 +82,9 @@ export function getTokenInfo(currency: RaffleCurrency): TokenInfo {
   }
 }
 
-/** All supported currency codes (for validation). */
+/**
+ * All supported currency codes (for validation).
+ */
 export const RAFFLE_CURRENCIES: RaffleCurrency[] = ['SOL', 'USDC', 'OWL']
 
 export function isRaffleCurrency(s: string): s is RaffleCurrency {
