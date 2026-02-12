@@ -50,12 +50,17 @@ export async function GET(request: NextRequest) {
       const isUpstreamUnavailable =
         isConfig || /503|service unavailable|connection|timeout|missing/i.test(error.message)
       const status = isUpstreamUnavailable ? 503 : 502
-      const bodyMessage =
-        status === 503
-          ? isConfig
-            ? 'Raffles service is not configured. Please try again later.'
-            : 'Service temporarily unavailable. Please try again in a moment.'
-          : error.message
+      const isDev = process.env.NODE_ENV === 'development'
+      let bodyMessage: string
+      if (status === 503) {
+        bodyMessage = isConfig
+          ? isDev
+            ? 'Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) to .env.local.'
+            : 'Raffles service is not configured. Please try again later.'
+          : 'Service temporarily unavailable. Please try again in a moment.'
+      } else {
+        bodyMessage = isDev ? `${error.message} (check .env.local and Supabase project)` : error.message
+      }
       console.error('[GET /api/raffles]', error.code ?? 'error', error.message)
       return NextResponse.json(
         { error: bodyMessage, step: error.code === 'TIMEOUT' ? 'timeout' : isConfig ? 'config' : 'supabase error' },
@@ -66,9 +71,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(raffles, { status: 200 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error'
+    const isDev = process.env.NODE_ENV === 'development'
     console.error('[GET /api/raffles] unexpected error:', err)
     return NextResponse.json(
-      { error: message, step: 'supabase error' },
+      {
+        error: isDev ? `${message} — check .env.local and that Supabase project is not paused.` : message,
+        step: 'supabase error',
+      },
       { status: 502 }
     )
   }

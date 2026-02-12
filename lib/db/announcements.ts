@@ -32,7 +32,9 @@ export async function getActiveAnnouncements(placement: Placement): Promise<Anno
     .order('created_at', { ascending: true })
 
   if (error) {
-    console.error('Error fetching announcements:', error)
+    const msg = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message) : String(error)
+    const isHtmlOr522 = msg.length > 200 && (msg.trimStart().startsWith('<') || msg.includes('522'))
+    console.error('Error fetching announcements:', isHtmlOr522 ? 'Supabase unavailable (522 or HTML response)' : error)
     return []
   }
   return (data || []) as Announcement[]
@@ -54,7 +56,9 @@ export async function hasNewAnnouncements(placement: Placement): Promise<boolean
     .limit(1)
 
   if (error) {
-    console.error('Error checking new announcements:', error)
+    const msg = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message) : String(error)
+    const isHtmlOr522 = msg.length > 200 && (msg.trimStart().startsWith('<') || msg.includes('522'))
+    console.error('Error checking new announcements:', isHtmlOr522 ? 'Supabase unavailable (522 or HTML response)' : error)
     return false
   }
   return (data?.length ?? 0) > 0
@@ -73,7 +77,9 @@ export async function getAllAnnouncements(): Promise<Announcement[]> {
       .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('Error fetching all announcements:', error)
+      const msg = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message) : String(error)
+      const isHtmlOr522 = msg.length > 200 && (msg.trimStart().startsWith('<') || msg.includes('522'))
+      console.error('Error fetching all announcements:', isHtmlOr522 ? 'Supabase unavailable (522 or HTML response)' : error)
       return []
     }
     return (data || []) as Announcement[]

@@ -122,7 +122,9 @@ function toUserFriendlyMessage(rawMessage: string): string {
     lower.includes('disconnect') ||
     lower.includes('reset') ||
     lower.includes('network') ||
-    lower.includes('fetch failed')
+    lower.includes('fetch failed') ||
+    lower.includes('aborted') ||
+    lower.includes('522')
   ) {
     return CONNECTION_ERROR_MESSAGE
   }

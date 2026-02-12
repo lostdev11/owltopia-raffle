@@ -89,7 +89,7 @@ export function useRealtimeEntries({
               filter: `raffle_id=eq.${raffleId}`,
             },
             (payload) => {
-              console.log('Realtime update received:', payload.eventType)
+              console.debug('Realtime update received:', payload.eventType)
               // When any entry changes, refetch all entries for this raffle
               // This ensures we have the complete, up-to-date list
               fetchEntries()
@@ -97,13 +97,13 @@ export function useRealtimeEntries({
           )
           .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-              console.log('Realtime subscription active for raffle:', raffleId)
+              console.debug('Realtime subscription active for raffle:', raffleId)
               isRealtimeActiveRef.current = true
               setIsUsingRealtime(true)
               // Initial fetch
               fetchEntries().then(() => setIsLoading(false))
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-              console.warn('Realtime subscription closed, falling back to polling')
+              console.debug('Realtime subscription closed, falling back to polling')
               isRealtimeActiveRef.current = false
               setIsUsingRealtime(false)
               // Only fall back to polling if still enabled
@@ -120,7 +120,7 @@ export function useRealtimeEntries({
         const fallbackTimeout = setTimeout(() => {
           // Only start polling if still enabled (raffle hasn't ended)
           if (!isRealtimeActiveRef.current && channelRef.current && enabled) {
-            console.warn('Realtime subscription timeout, using polling fallback')
+            console.debug('Realtime subscription timeout, using polling fallback')
             supabase.removeChannel(channelRef.current)
             channelRef.current = null
             isRealtimeActiveRef.current = false

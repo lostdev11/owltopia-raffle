@@ -94,8 +94,11 @@ function isConnectivityError(message: string | null | undefined): boolean {
     m.includes('server error') ||
     m.includes('503') ||
     m.includes('502') ||
+    m.includes('522') ||
+    m.includes('aborted') ||
     m.includes('service unavailable') ||
-    m.includes('bad gateway')
+    m.includes('bad gateway') ||
+    m.includes('unable to load raffles')
   )
 }
 
@@ -166,6 +169,11 @@ export function RafflesPageClient({
     setClientFetchError(null)
     setClientFetchStarted(true)
 
+    // Skip direct Supabase when the error suggests Supabase is down (avoids CORS noise from 522 responses)
+    const isLikelySupabaseDown = (msg: string | null) =>
+      !msg ||
+      /503|service unavailable|rest error|522|connection|timeout|supabase|\.supabase\.co/i.test(msg)
+
     const tryDirectSupabase = async () => {
       if (!isSupabaseConfigured() || cancelled) return
       try {
@@ -191,12 +199,12 @@ export function RafflesPageClient({
           setClientFetchError(null)
         }
       } catch {
-        // Ignore - will show API error or empty state
+        // Ignore - keep existing API error message (avoids CORS/network noise)
       }
     }
 
-    // When server already failed, try direct Supabase first (browser path often works)
-    if (initialError) tryDirectSupabase()
+    // When server already failed, try direct Supabase only if error doesn't suggest Supabase is down
+    if (initialError && !isLikelySupabaseDown(initialError.message)) tryDirectSupabase()
 
     fetch('/api/raffles')
       .then(async (res) => {
@@ -205,16 +213,18 @@ export function RafflesPageClient({
         if (!res.ok) {
           const bodyMessage = typeof data?.error === 'string' ? data.error : null
           const is503 = res.status === 503 || /503|service temporarily unavailable/i.test(bodyMessage ?? '')
+          const skipDirectSupabase = is503 || isLikelySupabaseDown(bodyMessage)
           setClientFetchError(
             bodyMessage ||
               (is503
                 ? 'Service temporarily unavailable. Please try again in a moment.'
-                : res.status === 500
-                  ? 'Server error'
-                  : `HTTP ${res.status}`)
+                : res.status === 502
+                  ? 'Raffles could not be loaded. If this continues, check that your Supabase project is running (Supabase dashboard).'
+                  : res.status === 500
+                    ? 'Server error'
+                    : `HTTP ${res.status}`)
           )
-          // Skip direct Supabase when API returns 503 (Supabase is down; direct call would fail too)
-          if (!is503) tryDirectSupabase()
+          if (!skipDirectSupabase) tryDirectSupabase()
           return null
         }
         return data
@@ -224,7 +234,7 @@ export function RafflesPageClient({
         if (data?.error) {
           setClientFetchError(data.error)
           const is503 = /503|service temporarily unavailable/i.test(data.error)
-          if (!is503) tryDirectSupabase()
+          if (!is503 && !isLikelySupabaseDown(data.error)) tryDirectSupabase()
           return
         }
         // Handle both raw array and wrapped { data: [...] } responses
