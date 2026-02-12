@@ -8,8 +8,8 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 10  // Vercel Hobby plan limit
 
-// Timeout must be less than maxDuration to allow for processing time
-const SUPABASE_TIMEOUT_MS = 9_000  // 9 seconds (leaves 1s buffer for maxDuration 10)
+// Timeout must be less than maxDuration (10s on Vercel) so we can return JSON before platform kills request
+const SUPABASE_TIMEOUT_MS = 7_000
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
 async function withTimeout<T>(
@@ -40,21 +40,25 @@ export async function GET(request: NextRequest) {
 
     const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
       includeDraft: true,
-      timeoutMs: 8_000,
+      timeoutMs: 5_000,
       maxRetries: 1,
-      perAttemptMs: 4_000,
+      perAttemptMs: 3_000,
     })
 
     if (error) {
-      const isUpstreamUnavailable = /503|service unavailable|connection|timeout/i.test(error.message)
+      const isConfig = error.code === 'CONFIG'
+      const isUpstreamUnavailable =
+        isConfig || /503|service unavailable|connection|timeout|missing/i.test(error.message)
       const status = isUpstreamUnavailable ? 503 : 502
       const bodyMessage =
         status === 503
-          ? 'Service temporarily unavailable. Please try again in a moment.'
+          ? isConfig
+            ? 'Raffles service is not configured. Please try again later.'
+            : 'Service temporarily unavailable. Please try again in a moment.'
           : error.message
       console.error('[GET /api/raffles]', error.code ?? 'error', error.message)
       return NextResponse.json(
-        { error: bodyMessage, step: error.code === 'TIMEOUT' ? 'timeout' : 'supabase error' },
+        { error: bodyMessage, step: error.code === 'TIMEOUT' ? 'timeout' : isConfig ? 'config' : 'supabase error' },
         { status }
       )
     }

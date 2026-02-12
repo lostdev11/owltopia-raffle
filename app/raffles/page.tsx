@@ -12,8 +12,8 @@ import type { Raffle, Entry } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-/** Allow longer server run so slow Supabase doesn't hit upstream request timeout */
-export const maxDuration = 60
+/** Stay within Vercel serverless limit (10s on Hobby) so we don't get 500/502 from platform timeout */
+export const maxDuration = 10
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE = `${SITE_URL}/opengraph-image`
@@ -47,56 +47,125 @@ function toRaffleWithEntries(raffles: Raffle[]): RaffleWithEntries {
 
 // Runtime check: Supabase config must be present (e.g. Vercel env vars). No secrets exposed in UI.
 export default async function RafflesPage() {
-  const configError = getSupabaseConfigError()
-  if (configError) {
-    return (
-      <div className="container mx-auto py-8 px-4">
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-6">
-            <h1 className="text-2xl font-bold text-destructive mb-4">Missing Supabase config</h1>
-            <p className="text-destructive mb-4">{configError}</p>
-            <p className="text-sm text-muted-foreground mb-4">
-              Set <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
-              <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment.
-            </p>
-            <p className="text-sm text-muted-foreground mt-4">See README.md for setup.</p>
+  try {
+    const configError = getSupabaseConfigError()
+    if (configError) {
+      return (
+        <div className="container mx-auto py-8 px-4">
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-6">
+              <h1 className="text-2xl font-bold text-destructive mb-4">Missing Supabase config</h1>
+              <p className="text-destructive mb-4">{configError}</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                Set <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
+                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment.
+              </p>
+              <p className="text-sm text-muted-foreground mt-4">See README.md for setup.</p>
+            </div>
           </div>
         </div>
-      </div>
-    )
-  }
-
-  // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
-  // No second Supabase client call — avoids double requests and connection timeouts.
-  const SERVER_FETCH_TIMEOUT_MS = 10_000
-  let result: GetRafflesResult
-  try {
-    result = await Promise.race([
-      getRafflesViaRest(false, {
-        includeDraft: true,
-        timeoutMs: 8_000,
-        maxRetries: 1,
-        perAttemptMs: 4_000,
-      }),
-      new Promise<GetRafflesResult>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Server fetch timed out')),
-          SERVER_FETCH_TIMEOUT_MS
-        )
-      ),
-    ])
-  } catch (err) {
-    result = {
-      data: [],
-      error: {
-        message: err instanceof Error ? err.message : 'Server fetch timed out',
-        code: 'TIMEOUT',
-      },
+      )
     }
-  }
 
-  const { data: allRaffles, error: fetchError } = result
-  if (fetchError) {
+    // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
+    // Timeout under maxDuration (10s) so we respond before Vercel kills the request.
+    const SERVER_FETCH_TIMEOUT_MS = 7_000
+    let result: GetRafflesResult
+    try {
+      result = await Promise.race([
+        getRafflesViaRest(false, {
+          includeDraft: true,
+          timeoutMs: 5_000,
+          maxRetries: 1,
+          perAttemptMs: 3_000,
+        }),
+        new Promise<GetRafflesResult>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Server fetch timed out')),
+            SERVER_FETCH_TIMEOUT_MS
+          )
+        ),
+      ])
+    } catch (err) {
+      result = {
+        data: [],
+        error: {
+          message: err instanceof Error ? err.message : 'Server fetch timed out',
+          code: 'TIMEOUT',
+        },
+      }
+    }
+
+    const { data: allRaffles, error: fetchError } = result
+    if (fetchError) {
+      return (
+        <Suspense fallback={<RafflesLoadingFallback />}>
+          <RafflesPageClient
+            activeRafflesWithEntries={[]}
+            futureRafflesWithEntries={[]}
+            pastRafflesWithEntries={[]}
+            fetchStatus="error"
+            initialError={{ message: fetchError.message, code: fetchError.code }}
+          />
+        </Suspense>
+      )
+    }
+
+    const now = new Date()
+    const nowTime = now.getTime()
+    const pastRaffles: Raffle[] = []
+    const activeRaffles: Raffle[] = []
+    const futureRaffles: Raffle[] = []
+
+    // Bucket by status + times (status already filtered: live, ready_to_draw, completed — no draft)
+    for (const raffle of allRaffles) {
+      const startTime = new Date(raffle.start_time)
+      const endTime = new Date(raffle.end_time)
+      const startTimeMs = startTime.getTime()
+      const endTimeMs = endTime.getTime()
+      if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
+        pastRaffles.push(raffle)
+        continue
+      }
+      if (raffle.winner_selected_at || raffle.status === 'completed') {
+        pastRaffles.push(raffle)
+        continue
+      }
+      if (raffle.status === 'ready_to_draw') {
+        pastRaffles.push(raffle)
+        continue
+      }
+      // Future: draft or live that haven't started yet — show for everyone
+      if ((raffle.status === 'draft' || raffle.status === 'live') && startTimeMs > nowTime) {
+        futureRaffles.push(raffle)
+        continue
+      }
+      if (raffle.status === 'live' && startTimeMs <= nowTime && endTimeMs > nowTime) {
+        activeRaffles.push(raffle)
+        continue
+      }
+      pastRaffles.push(raffle)
+    }
+
+    const pastRafflesWithEntries = toRaffleWithEntries(pastRaffles)
+    const activeRafflesWithEntries = toRaffleWithEntries(activeRaffles)
+    const futureRafflesWithEntries = toRaffleWithEntries(futureRaffles)
+    const totalCount = allRaffles.length
+    const fetchStatus = totalCount === 0 ? 'empty' : 'success'
+
+    return (
+      <Suspense fallback={<RafflesLoadingFallback />}>
+        <RafflesPageClient
+          activeRafflesWithEntries={activeRafflesWithEntries}
+          futureRafflesWithEntries={futureRafflesWithEntries}
+          pastRafflesWithEntries={pastRafflesWithEntries}
+          fetchStatus={fetchStatus}
+          rafflesTotalCount={totalCount}
+        />
+      </Suspense>
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to load raffles'
     return (
       <Suspense fallback={<RafflesLoadingFallback />}>
         <RafflesPageClient
@@ -104,65 +173,11 @@ export default async function RafflesPage() {
           futureRafflesWithEntries={[]}
           pastRafflesWithEntries={[]}
           fetchStatus="error"
-          initialError={{ message: fetchError.message, code: fetchError.code }}
+          initialError={{ message, code: 'PAGE_ERROR' }}
         />
       </Suspense>
     )
   }
-
-  const now = new Date()
-  const nowTime = now.getTime()
-  const pastRaffles: Raffle[] = []
-  const activeRaffles: Raffle[] = []
-  const futureRaffles: Raffle[] = []
-
-  // Bucket by status + times (status already filtered: live, ready_to_draw, completed — no draft)
-  for (const raffle of allRaffles) {
-    const startTime = new Date(raffle.start_time)
-    const endTime = new Date(raffle.end_time)
-    const startTimeMs = startTime.getTime()
-    const endTimeMs = endTime.getTime()
-    if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
-      pastRaffles.push(raffle)
-      continue
-    }
-    if (raffle.winner_selected_at || raffle.status === 'completed') {
-      pastRaffles.push(raffle)
-      continue
-    }
-    if (raffle.status === 'ready_to_draw') {
-      pastRaffles.push(raffle)
-      continue
-    }
-    // Future: draft or live that haven't started yet — show for everyone
-    if ((raffle.status === 'draft' || raffle.status === 'live') && startTimeMs > nowTime) {
-      futureRaffles.push(raffle)
-      continue
-    }
-    if (raffle.status === 'live' && startTimeMs <= nowTime && endTimeMs > nowTime) {
-      activeRaffles.push(raffle)
-      continue
-    }
-    pastRaffles.push(raffle)
-  }
-
-  const pastRafflesWithEntries = toRaffleWithEntries(pastRaffles)
-  const activeRafflesWithEntries = toRaffleWithEntries(activeRaffles)
-  const futureRafflesWithEntries = toRaffleWithEntries(futureRaffles)
-  const totalCount = allRaffles.length
-  const fetchStatus = totalCount === 0 ? 'empty' : 'success'
-
-  return (
-    <Suspense fallback={<RafflesLoadingFallback />}>
-      <RafflesPageClient
-        activeRafflesWithEntries={activeRafflesWithEntries}
-        futureRafflesWithEntries={futureRafflesWithEntries}
-        pastRafflesWithEntries={pastRafflesWithEntries}
-        fetchStatus={fetchStatus}
-        rafflesTotalCount={totalCount}
-      />
-    </Suspense>
-  )
 }
 
 function RafflesLoadingFallback() {
