@@ -5,7 +5,7 @@
  */
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
-import { getRafflesViaRest, type GetRafflesResult } from '@/lib/db/raffles'
+import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
@@ -66,6 +66,9 @@ export default async function RafflesPage() {
         </div>
       )
     }
+
+    // Promote any draft raffles whose start_time has passed to live (so they show as active)
+    await promoteDraftRafflesToLive()
 
     // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
     // Timeout under maxDuration (10s) so we respond before Vercel kills the request.

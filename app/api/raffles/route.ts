@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRaffle, generateUniqueSlug, getRafflesViaRest } from '@/lib/db/raffles'
+import { createRaffle, generateUniqueSlug, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
 import { isAdmin } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { Raffle } from '@/lib/types'
@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
+
+    await promoteDraftRafflesToLive()
 
     const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
       includeDraft: true,

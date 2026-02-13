@@ -642,6 +642,25 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   return data as unknown as Raffle
 }
 
+/**
+ * Promote draft raffles to live when their start_time has passed and end_time has not.
+ * Call this when loading the raffles list with includeDraft so future raffles become active automatically.
+ */
+export async function promoteDraftRafflesToLive(): Promise<void> {
+  const now = new Date().toISOString()
+  const { error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({ status: 'live', updated_at: now })
+    .eq('status', 'draft')
+    .lte('start_time', now)
+    .gt('end_time', now)
+
+  if (error) {
+    console.error('Error promoting draft raffles to live:', error)
+    // Don't throw — page can still render; next load or manual fix will correct
+  }
+}
+
 export async function updateRaffle(
   id: string,
   updates: Partial<Raffle> & { edited_after_entries?: boolean }
