@@ -237,7 +237,7 @@ export default function AdminAnnouncementsPage() {
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardHeader>
-              <CardTitle>Admin – Announcements</CardTitle>
+              <CardTitle>Owl Vision – Announcements</CardTitle>
               <CardDescription>Connect your wallet to manage announcements</CardDescription>
             </CardHeader>
             <CardContent className="flex justify-center">
@@ -260,7 +260,7 @@ export default function AdminAnnouncementsPage() {
             </CardHeader>
             <CardContent>
               <Button onClick={() => router.push('/admin')} variant="outline">
-                Back to Dashboard
+                Back to Owl Vision
               </Button>
             </CardContent>
           </Card>
@@ -275,7 +275,7 @@ export default function AdminAnnouncementsPage() {
         <div className="mb-6 flex items-center gap-4">
           <Link
             href="/admin"
-            aria-label="Back to dashboard"
+            aria-label="Back to Owl Vision"
             className="inline-flex h-10 w-10 items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
           >
             <ArrowLeft className="h-5 w-5" />

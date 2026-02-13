@@ -7,11 +7,14 @@ import { RafflesList } from '@/components/RafflesList'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+
+export type RaffleWithEntriesAndProfit = { raffle: Raffle; entries: Entry[]; profitInfo: RaffleProfitInfo }
 
 interface AdminRafflesPageClientProps {
-  activeRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
-  futureRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
-  pastRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
+  activeRafflesWithEntries: RaffleWithEntriesAndProfit[]
+  futureRafflesWithEntries: RaffleWithEntriesAndProfit[]
+  pastRafflesWithEntries: RaffleWithEntriesAndProfit[]
 }
 
 export function AdminRafflesPageClient({
@@ -47,7 +50,7 @@ export function AdminRafflesPageClient({
           <Link href="/admin">
             <Button variant="outline" size="sm">
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
+              Back to Owl Vision
             </Button>
           </Link>
         </div>

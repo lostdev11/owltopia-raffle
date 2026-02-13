@@ -4,13 +4,20 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { RaffleCard } from '@/components/RaffleCard'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import type { Raffle, Entry } from '@/lib/types'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
 type SectionType = 'active' | 'future' | 'past'
 
+interface RaffleWithEntriesItem {
+  raffle: Raffle
+  entries: Entry[]
+  profitInfo?: RaffleProfitInfo
+}
+
 interface RafflesListProps {
-  rafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
+  rafflesWithEntries: Array<RaffleWithEntriesItem>
   title?: string
   showViewSizeControls?: boolean
   size?: CardSize
@@ -190,9 +197,10 @@ export function RafflesList({
           // Create a map for efficient lookup
           const updatedMap = new Map(current.map(r => [r.raffle.id, r]))
           
-          // Apply all updates
+          // Apply all updates (preserve profitInfo from current item when polling)
           updates.forEach(({ raffleId, entries, raffle }) => {
-            updatedMap.set(raffleId, { raffle, entries })
+            const current = updatedMap.get(raffleId)
+            updatedMap.set(raffleId, { raffle, entries, profitInfo: current?.profitInfo })
           })
           
           const updated = Array.from(updatedMap.values())
@@ -324,12 +332,13 @@ export function RafflesList({
         )}
       </div>
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
-        {sortedRaffles.map(({ raffle, entries }, index) => (
+        {sortedRaffles.map(({ raffle, entries, profitInfo }, index) => (
           <RaffleCard 
             key={raffle.id} 
             raffle={raffle} 
             entries={entries} 
             size={size}
+            profitInfo={profitInfo}
             onDeleted={handleRaffleDeleted}
             priority={index < 6} // Prioritize first 6 images (above the fold)
           />

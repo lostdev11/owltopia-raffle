@@ -1,4 +1,5 @@
 import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { AdminRafflesPageClient } from './AdminRafflesPageClient'
 
@@ -80,12 +81,13 @@ export default async function AdminRafflesPage() {
     pastRaffles.push(raffle)
   }
   
-  // Get entries for all raffles
+  // Get entries and profit info for all raffles (threshold = prize value; revenue above = profitable)
   const getRafflesWithEntries = async (raffles: typeof allRaffles) => {
     return Promise.all(
       raffles.map(async raffle => {
         const entries = await getEntriesByRaffleId(raffle.id)
-        return { raffle, entries }
+        const profitInfo = getRaffleProfitInfo(raffle, entries)
+        return { raffle, entries, profitInfo }
       })
     )
   }

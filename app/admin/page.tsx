@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Edit, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -74,6 +74,7 @@ export default function AdminDashboardPage() {
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
   const [loading, setLoading] = useState(() => !cachedTrue)
+  const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
   const [deletedEntries, setDeletedEntries] = useState<DeletedEntry[]>([])
   const [loadingDeleted, setLoadingDeleted] = useState(false)
   const [restoredEntries, setRestoredEntries] = useState<RestoredEntry[]>([])
@@ -97,36 +98,52 @@ export default function AdminDashboardPage() {
   const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
   const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
 
+  // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
+  const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
+  const [loadingRevenue, setLoadingRevenue] = useState(false)
+
+  const runAdminCheck = useCallback(async () => {
+    if (!publicKey) return
+    const addr = publicKey.toBase58()
+    setAdminCheckError(null)
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = (data?.error as string) || 'Could not verify admin status.'
+        setAdminCheckError(msg)
+        setIsAdmin(false)
+        setCachedAdmin(addr, false)
+        return
+      }
+      const admin = data?.isAdmin === true
+      setCachedAdmin(addr, admin)
+      setIsAdmin(admin)
+    } catch (e) {
+      setAdminCheckError('Network error. Please check your connection and try again.')
+      setIsAdmin(false)
+    } finally {
+      setLoading(false)
+    }
+  }, [publicKey])
+
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
       setLoading(false)
+      setAdminCheckError(null)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
       setLoading(false)
+      setAdminCheckError(null)
       return
     }
-    setLoading(true)
-    let cancelled = false
-    fetch(`/api/admin/check?wallet=${addr}`)
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
-      .then((data) => {
-        if (cancelled) return
-        const admin = data?.isAdmin === true
-        setCachedAdmin(addr, admin)
-        setIsAdmin(admin)
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [connected, publicKey])
+    runAdminCheck()
+  }, [connected, publicKey, runAdminCheck])
 
   useEffect(() => {
     const fetchDeletedEntries = async () => {
@@ -231,6 +248,28 @@ export default function AdminDashboardPage() {
     }
   }, [connected, publicKey, isAdmin])
 
+  useEffect(() => {
+    const fetchRevenue = async () => {
+      if (!connected || !publicKey || !isAdmin) return
+      setLoadingRevenue(true)
+      try {
+        const res = await fetch(
+          `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
+          { headers: { 'x-wallet-address': publicKey.toBase58() } }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setRevenue(data)
+        }
+      } catch (e) {
+        console.error('Error fetching projected revenue:', e)
+      } finally {
+        setLoadingRevenue(false)
+      }
+    }
+    if (isAdmin) fetchRevenue()
+  }, [connected, publicKey, isAdmin])
+
   const handleBatchVerifyRaffle = async (raffleId: string) => {
     if (!publicKey) return
 
@@ -324,8 +363,8 @@ export default function AdminDashboardPage() {
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardHeader>
-              <CardTitle>Admin Dashboard</CardTitle>
-              <CardDescription>Please connect your wallet to access the admin dashboard</CardDescription>
+              <CardTitle>Owl Vision</CardTitle>
+              <CardDescription>Please connect your wallet to access Owl Vision</CardDescription>
             </CardHeader>
             <CardContent className="flex justify-center">
               <WalletConnectButton />
@@ -343,12 +382,19 @@ export default function AdminDashboardPage() {
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardHeader>
-              <CardTitle>Access Denied</CardTitle>
+              <CardTitle>{adminCheckError ? 'Something went wrong' : 'Access Denied'}</CardTitle>
               <CardDescription>
-                Only admins can access this dashboard. Your wallet is not in the admins list.
+                {adminCheckError
+                  ? adminCheckError
+                  : 'Only admins can access Owl Vision. Your wallet is not in the admins list.'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {adminCheckError && (
+                <Button onClick={() => runAdminCheck()} disabled={loading}>
+                  Try again
+                </Button>
+              )}
               {walletAddr && (
                 <div className="rounded-lg border bg-muted/50 p-3 text-sm">
                   <p className="font-medium text-muted-foreground mb-1">Connected wallet</p>
@@ -372,11 +418,173 @@ export default function AdminDashboardPage() {
     <div className="container mx-auto py-8 px-4">
       <div className="max-w-6xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Admin Dashboard</h1>
+          <h1 className="text-4xl font-bold mb-2">Owl Vision</h1>
           <p className="text-muted-foreground">
             Manage raffles and oversee the Owl Raffle platform
           </p>
         </div>
+
+        {/* Projected Revenue - confirmed entries only */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Projected Revenue
+            </CardTitle>
+            <CardDescription>
+              Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingRevenue ? (
+              <p className="text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading…
+              </p>
+            ) : revenue ? (
+              <div className="space-y-6">
+                {/* All-time totals */}
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3">All time</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="rounded-lg border bg-muted/30 p-4">
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                        <DollarSign className="h-4 w-4" />
+                        USDC
+                      </div>
+                      <p className="text-2xl font-bold tabular-nums">
+                        {revenue.allTime.usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-4">
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                        <Coins className="h-4 w-4" />
+                        SOL
+                      </div>
+                      <p className="text-2xl font-bold tabular-nums">
+                        {revenue.allTime.sol.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-4">
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                        <Ticket className="h-4 w-4" />
+                        Tickets sold
+                      </div>
+                      <p className="text-2xl font-bold tabular-nums">
+                        {revenue.allTime.ticketsSold.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-4">
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                        <Users className="h-4 w-4" />
+                        Confirmed entries
+                      </div>
+                      <p className="text-2xl font-bold tabular-nums">
+                        {revenue.allTime.confirmedEntries.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 7-day and 30-day averages */}
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4" />
+                    7-day and 30-day
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="rounded-lg border p-4 space-y-3">
+                      <p className="text-sm font-medium">Last 7 days</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">USDC</span>
+                          <p className="font-semibold tabular-nums">{revenue.last7Days.usdc.toFixed(2)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.usdc.toFixed(2)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">SOL</span>
+                          <p className="font-semibold tabular-nums">{revenue.last7Days.sol.toFixed(4)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.sol.toFixed(4)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">OWL</span>
+                          <p className="font-semibold tabular-nums">{revenue.last7Days.owl.toFixed(4)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.owl.toFixed(4)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Tickets</span>
+                          <p className="font-semibold tabular-nums">{revenue.last7Days.ticketsSold}</p>
+                          <p className="text-xs text-muted-foreground">avg {(revenue.avgPerDay7.ticketsSold).toFixed(1)}/day</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4 space-y-3">
+                      <p className="text-sm font-medium">Last 30 days</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">USDC</span>
+                          <p className="font-semibold tabular-nums">{revenue.last30Days.usdc.toFixed(2)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.usdc.toFixed(2)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">SOL</span>
+                          <p className="font-semibold tabular-nums">{revenue.last30Days.sol.toFixed(4)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.sol.toFixed(4)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">OWL</span>
+                          <p className="font-semibold tabular-nums">{revenue.last30Days.owl.toFixed(4)}</p>
+                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.owl.toFixed(4)}/day</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Tickets</span>
+                          <p className="font-semibold tabular-nums">{revenue.last30Days.ticketsSold}</p>
+                          <p className="text-xs text-muted-foreground">avg {(revenue.avgPerDay30.ticketsSold).toFixed(1)}/day</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Revenue (tickets sold) and profit (amount over threshold) by currency */}
+                {revenue.thresholds && revenue.byCurrency && (revenue.thresholds.usdc != null || revenue.thresholds.sol != null || revenue.thresholds.owl != null) && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground mb-3">Revenue (tickets sold) &amp; profit</h3>
+                    <p className="text-xs text-muted-foreground mb-3">Revenue is total from tickets sold. Profit is the amount over the threshold.</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {revenue.byCurrency.usdc != null && revenue.thresholds.usdc != null && (
+                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
+                          <p className="text-sm font-medium text-muted-foreground">USDC</p>
+                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.usdc.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></p>
+                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.usdc.profit.toFixed(2)}</span></p>
+                        </div>
+                      )}
+                      {revenue.byCurrency.sol != null && revenue.thresholds.sol != null && (
+                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
+                          <p className="text-sm font-medium text-muted-foreground">SOL</p>
+                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.sol.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</span></p>
+                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.sol.toLocaleString(undefined, { minimumFractionDigits: 4 })}</span></p>
+                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.sol.profit.toFixed(4)}</span></p>
+                        </div>
+                      )}
+                      {revenue.byCurrency.owl != null && revenue.thresholds.owl != null && (
+                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
+                          <p className="text-sm font-medium text-muted-foreground">OWL</p>
+                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.owl.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</span></p>
+                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.owl.toLocaleString(undefined, { minimumFractionDigits: 4 })}</span></p>
+                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.owl.profit.toFixed(4)}</span></p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">No revenue data</p>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <Card className="hover:border-primary transition-colors cursor-pointer">

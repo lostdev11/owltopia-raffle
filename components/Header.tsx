@@ -54,8 +54,8 @@ export function Header() {
               <Link href="/admin">
                 <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
                   <Settings className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Admin Dashboard</span>
-                  <span className="sm:hidden">Admin</span>
+                  <span className="hidden sm:inline">Owl Vision</span>
+                  <span className="sm:hidden">Owl Vision</span>
                 </Button>
               </Link>
             )}
