@@ -570,6 +570,15 @@ export function WalletConnectButton() {
     }
   }, [mounted, connected, setVisible])
 
+  // When not connected, any click on the wrapper opens the modal (ensures desktop works even if inner button fails)
+  const handleWrapperClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!mounted || connected || connecting) return
+      setVisible(true)
+    },
+    [mounted, connected, connecting, setVisible]
+  )
+
   return (
     <>
       <div 
@@ -582,6 +591,16 @@ export function WalletConnectButton() {
           position: 'relative',
           zIndex: 10,
         }}
+        onClick={handleWrapperClick}
+        tabIndex={connected ? -1 : 0}
+        onKeyDown={(e) => {
+          if (connected) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setVisible(true)
+          }
+        }}
+        aria-label={connected ? 'Disconnect wallet' : 'Connect wallet'}
       >
         {mounted ? (
           <>

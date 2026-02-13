@@ -85,10 +85,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
 
     const formData = new FormData(e.currentTarget)
 
-    // Validate 7-day maximum duration
+    // Validate 7-day maximum duration (skip for extended raffles — they already have a longer end time)
     const startTimeValue = formData.get('start_time') as string
     const endTimeValue = formData.get('end_time') as string
-    if (startTimeValue && endTimeValue) {
+    if (startTimeValue && endTimeValue && !raffle.original_end_time) {
       const startDate = new Date(localDateTimeToUtc(startTimeValue))
       const endDate = new Date(localDateTimeToUtc(endTimeValue))
       const durationMs = endDate.getTime() - startDate.getTime()
@@ -863,7 +863,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="start_time">Start Time *</Label>
                   <Input
@@ -885,8 +885,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     className="text-base sm:text-sm"
                     max={(() => {
                       const startDate = new Date(raffle.start_time)
-                      const maxDate = new Date(startDate)
-                      maxDate.setDate(maxDate.getDate() + 7)
+                      const maxFromStart = new Date(startDate)
+                      maxFromStart.setDate(maxFromStart.getDate() + 7)
+                      // If raffle was extended (e.g. Restore), allow current end_time so the saved value doesn't trigger validation
+                      const maxDate =
+                        raffle.original_end_time && new Date(raffle.end_time) > maxFromStart
+                          ? new Date(raffle.end_time)
+                          : maxFromStart
                       return utcToLocalDateTime(maxDate.toISOString())
                     })()}
                   />

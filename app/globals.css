@@ -76,6 +76,20 @@
   tap-highlight-color: rgba(34, 197, 94, 0.3) !important;
 }
 
+/* Desktop: ensure wallet adapter modal appears above header and other UI */
+@media (hover: hover) and (pointer: fine) {
+  .wallet-adapter-modal,
+  .wallet-adapter-modal-overlay {
+    z-index: 10000 !important;
+  }
+  .wallet-adapter-modal-container {
+    z-index: 10001 !important;
+  }
+  .wallet-adapter-modal-wrapper {
+    z-index: 10002 !important;
+  }
+}
+
 .wallet-connect-wrapper * {
   pointer-events: auto !important;
 }
