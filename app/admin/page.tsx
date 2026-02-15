@@ -100,6 +100,9 @@ export default function AdminDashboardPage() {
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
+  const [revShareSchedule, setRevShareSchedule] = useState<{ next_date: string | null; total_sol: number | null; total_usdc: number | null } | null>(null)
+  const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
+  const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
   const [loadingRevenue, setLoadingRevenue] = useState(false)
 
   const runAdminCheck = useCallback(async () => {
@@ -269,6 +272,56 @@ export default function AdminDashboardPage() {
     }
     if (isAdmin) fetchRevenue()
   }, [connected, publicKey, isAdmin])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin) return
+    const fetchRevShareSchedule = async () => {
+      try {
+        const res = await fetch(`/api/admin/rev-share-schedule?wallet=${publicKey.toBase58()}`, {
+          headers: { 'x-wallet-address': publicKey.toBase58() },
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setRevShareSchedule(data)
+          setRevShareScheduleEdit({
+            next_date: data.next_date ?? '',
+            total_sol: data.total_sol != null ? String(data.total_sol) : '',
+            total_usdc: data.total_usdc != null ? String(data.total_usdc) : '',
+          })
+        }
+      } catch (e) {
+        console.error('Error fetching rev share schedule:', e)
+      }
+    }
+    fetchRevShareSchedule()
+  }, [connected, publicKey, isAdmin])
+
+  const saveRevShareSchedule = async () => {
+    if (!publicKey) return
+    setRevShareScheduleSaving(true)
+    try {
+      const res = await fetch('/api/admin/rev-share-schedule', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-wallet-address': publicKey.toBase58(),
+        },
+        body: JSON.stringify({
+          next_date: revShareScheduleEdit.next_date.trim() || null,
+          total_sol: revShareScheduleEdit.total_sol === '' ? null : parseFloat(revShareScheduleEdit.total_sol),
+          total_usdc: revShareScheduleEdit.total_usdc === '' ? null : parseFloat(revShareScheduleEdit.total_usdc),
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRevShareSchedule(data)
+      }
+    } catch (e) {
+      console.error('Error saving rev share schedule:', e)
+    } finally {
+      setRevShareScheduleSaving(false)
+    }
+  }
 
   const handleBatchVerifyRaffle = async (raffleId: string) => {
     if (!publicKey) return
@@ -578,47 +631,103 @@ export default function AdminDashboardPage() {
                       )}
                     </div>
 
-                    {/* Rev Share: 50% founder / 50% community in SOL and USDC */}
-                    {(revenue.byCurrency.sol != null || revenue.byCurrency.usdc != null) && (
-                      <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-                        <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% founder / 50% community)</h3>
-                        <p className="text-xs text-muted-foreground mb-3">Amounts in SOL and USDC from profit over threshold.</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="font-medium text-muted-foreground mb-1">Founder (50%)</p>
-                            <p className="tabular-nums">
-                              {revenue.byCurrency.sol != null && (
-                                <span><span className="font-semibold">{(revenue.byCurrency.sol.profit * 0.5).toFixed(4)}</span> SOL</span>
-                              )}
-                              {revenue.byCurrency.sol != null && revenue.byCurrency.usdc != null && ' · '}
-                              {revenue.byCurrency.usdc != null && (
-                                <span><span className="font-semibold">{(revenue.byCurrency.usdc.profit * 0.5).toFixed(2)}</span> USDC</span>
-                              )}
-                              {revenue.byCurrency.sol == null && revenue.byCurrency.usdc == null && '—'}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="font-medium text-muted-foreground mb-1">Community (50%)</p>
-                            <p className="tabular-nums">
-                              {revenue.byCurrency.sol != null && (
-                                <span><span className="font-semibold">{(revenue.byCurrency.sol.profit * 0.5).toFixed(4)}</span> SOL</span>
-                              )}
-                              {revenue.byCurrency.sol != null && revenue.byCurrency.usdc != null && ' · '}
-                              {revenue.byCurrency.usdc != null && (
-                                <span><span className="font-semibold">{(revenue.byCurrency.usdc.profit * 0.5).toFixed(2)}</span> USDC</span>
-                              )}
-                              {revenue.byCurrency.sol == null && revenue.byCurrency.usdc == null && '—'}
-                            </p>
-                          </div>
+                    {/* Rev Share: 50% founder / 50% community — always show SOL and USDC (actual numbers) */}
+                    <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% founder / 50% community)</h3>
+                      <p className="text-xs text-muted-foreground mb-3">Amounts in SOL and USDC from profit over threshold.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="font-medium text-muted-foreground mb-1">Founder (50%)</p>
+                          <p className="tabular-nums">
+                            <span><span className="font-semibold">{(revenue.byCurrency.sol?.profit != null ? (revenue.byCurrency.sol.profit * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
+                            {' · '}
+                            <span><span className="font-semibold">{(revenue.byCurrency.usdc?.profit != null ? (revenue.byCurrency.usdc.profit * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-muted-foreground mb-1">Community (50%)</p>
+                          <p className="tabular-nums">
+                            <span><span className="font-semibold">{(revenue.byCurrency.sol?.profit != null ? (revenue.byCurrency.sol.profit * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
+                            {' · '}
+                            <span><span className="font-semibold">{(revenue.byCurrency.usdc?.profit != null ? (revenue.byCurrency.usdc.profit * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
+                          </p>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
             ) : (
               <p className="text-muted-foreground">No revenue data</p>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Next Rev Share — founder-editable date and total SOL/USDC for homepage */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Coins className="h-5 w-5" />
+              Next Rev Share (homepage)
+            </CardTitle>
+            <CardDescription>
+              Set the date and total amounts for the next rev share. Shown on the main page. Not auto-calculated — add and edit as needed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+              <div>
+                <Label htmlFor="rev-next-date">Next rev share date</Label>
+                <Input
+                  id="rev-next-date"
+                  type="text"
+                  placeholder="e.g. 28 Feb"
+                  value={revShareScheduleEdit.next_date}
+                  onChange={(e) => setRevShareScheduleEdit((p) => ({ ...p, next_date: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="rev-total-sol">Total SOL to be shared</Label>
+                <Input
+                  id="rev-total-sol"
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="e.g. 2"
+                  value={revShareScheduleEdit.total_sol}
+                  onChange={(e) => setRevShareScheduleEdit((p) => ({ ...p, total_sol: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="rev-total-usdc">Total USDC to be shared (optional)</Label>
+                <Input
+                  id="rev-total-usdc"
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="e.g. 100"
+                  value={revShareScheduleEdit.total_usdc}
+                  onChange={(e) => setRevShareScheduleEdit((p) => ({ ...p, total_usdc: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <Button
+              onClick={saveRevShareSchedule}
+              disabled={revShareScheduleSaving}
+              className="mt-4"
+            >
+              {revShareScheduleSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving…
+                </>
+              ) : (
+                'Save'
+              )}
+            </Button>
           </CardContent>
         </Card>
 

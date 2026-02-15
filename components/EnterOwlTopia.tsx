@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Coins } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 
@@ -19,14 +19,44 @@ const externalLinks = [
   { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
 ]
 
+type NextRevShareSchedule = {
+  next_date: string | null
+  total_sol: number | null
+  total_usdc: number | null
+}
+
 /**
  * Entry page: "Enter Owl Topia" with entrance animation.
  * Warms the backend (GET /api/raffles) on mount so /raffles is more likely to load quickly.
- * Uses Link instead of useRouter to avoid useContext hydration issues.
+ * Rev Share card shows founder-set "next rev share" date and total SOL/USDC (editable in admin).
  */
 export function EnterOwlTopia() {
+  const [schedule, setSchedule] = useState<NextRevShareSchedule | null>(null)
+
   useEffect(() => {
     fetch('/api/raffles', { cache: 'no-store' }).catch(() => {})
+  }, [])
+
+  // Fetch next rev share schedule (founder-editable)
+  useEffect(() => {
+    const fetchSchedule = () => {
+      fetch('/api/rev-share-schedule', { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data): NextRevShareSchedule | null =>
+          data && (data.next_date != null || data.total_sol != null || data.total_usdc != null)
+            ? {
+                next_date: data.next_date ?? null,
+                total_sol: data.total_sol != null ? Number(data.total_sol) : null,
+                total_usdc: data.total_usdc != null ? Number(data.total_usdc) : null,
+              }
+            : null
+        )
+        .then(setSchedule)
+        .catch(() => setSchedule(null))
+    }
+    fetchSchedule()
+    const interval = setInterval(fetchSchedule, 30_000) // refresh every 30s
+    return () => clearInterval(interval)
   }, [])
 
   return (
@@ -45,19 +75,45 @@ export function EnterOwlTopia() {
         >
           Enter Owl Topia
         </h1>
-        <p
-          className="squid-game-text rev-share-glow text-3xl sm:text-4xl md:text-5xl text-center opacity-0 animate-enter-fade-in tracking-wide uppercase"
+
+        {/* Rev Share card — founder-set next rev share (date + total SOL/USDC) */}
+        <div
+          className="rev-share-pool-card w-full max-w-[360px] rounded-xl p-4 sm:p-5 opacity-0 animate-enter-fade-in"
           style={fadeIn('0.35s')}
-          aria-label="Rev Share"
         >
-          Rev Share
-        </p>
-        <p
-          className="text-muted-foreground text-center text-sm max-w-[340px] opacity-0 animate-enter-fade-in"
-          style={fadeIn('0.4s')}
-        >
-          After ticket sale thresholds, 50% to founder and 50% to community — amounts shown in SOL and USDC.
-        </p>
+          <div className="flex items-center gap-2 mb-2">
+            <Coins className="h-5 w-5 text-theme-prime drop-shadow-[0_0_6px_rgba(0,255,136,0.5)]" aria-hidden />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-theme-prime drop-shadow-[0_0_8px_rgba(0,255,136,0.4)]">
+              Rev Share
+            </h2>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Any amount over each raffle&apos;s threshold is split 50% founder, 50% community.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-0.5">Next rev share</p>
+              <p className="pool-value-glow text-xl sm:text-2xl font-bold text-theme-prime tabular-nums">
+                {schedule?.next_date ?? '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-0.5">Total SOL to be shared</p>
+              <p className="pool-value-glow text-2xl sm:text-3xl font-bold text-theme-prime tabular-nums">
+                {schedule?.total_sol != null ? schedule.total_sol.toFixed(4) : '—'} <span className="text-xl sm:text-2xl">SOL</span>
+              </p>
+            </div>
+            {(schedule?.total_usdc != null && schedule.total_usdc > 0) && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Total USDC to be shared</p>
+                <p className="pool-value-glow text-2xl sm:text-3xl font-bold text-theme-prime tabular-nums">
+                  {schedule.total_usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xl sm:text-2xl">USDC</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         <p
           className="text-muted-foreground text-center text-sm opacity-0 animate-enter-fade-in"
           style={fadeIn('0.5s')}

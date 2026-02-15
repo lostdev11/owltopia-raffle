@@ -89,3 +89,32 @@ export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RafflePro
     isProfitable,
   }
 }
+
+export interface RevShareAmounts {
+  founderSol: number
+  founderUsdc: number
+  communitySol: number
+  communityUsdc: number
+}
+
+/**
+ * Rev share (50% founder / 50% community) in SOL and USDC for display.
+ * Profit is only in the raffle's threshold currency; other currency amounts are 0.
+ */
+export function getRevShareAmounts(raffle: Raffle, entries: Entry[]): RevShareAmounts {
+  const revenue = getRaffleRevenue(entries)
+  const th = getRaffleThreshold(raffle)
+  const out: RevShareAmounts = { founderSol: 0, founderUsdc: 0, communitySol: 0, communityUsdc: 0 }
+  if (!th || th.currency === 'OWL') return out
+  const revInCur = revenueInCurrency(revenue, th.currency)
+  const profit = Math.max(0, revInCur - th.value)
+  const half = profit * 0.5
+  if (th.currency === 'SOL') {
+    out.founderSol = half
+    out.communitySol = half
+  } else {
+    out.founderUsdc = half
+    out.communityUsdc = half
+  }
+  return out
+}

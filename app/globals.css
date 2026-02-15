@@ -306,6 +306,35 @@
   animation: rev-share-glow-pulse 2s ease-in-out infinite;
 }
 
+/* Rev Share card: themed to site (dark + green) */
+.rev-share-pool-card {
+  background: linear-gradient(135deg, rgba(10, 28, 18, 0.96) 0%, rgba(6, 20, 12, 0.98) 50%, rgba(12, 26, 16, 0.96) 100%);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  box-shadow:
+    0 0 20px rgba(34, 197, 94, 0.15),
+    0 0 40px rgba(0, 255, 136, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Pulsing glow for pool value (theme green) */
+@keyframes pool-value-glow {
+  0%, 100% {
+    text-shadow:
+      0 0 8px rgba(0, 255, 136, 0.4),
+      0 0 20px rgba(34, 197, 94, 0.2);
+  }
+  50% {
+    text-shadow:
+      0 0 16px rgba(0, 255, 136, 0.8),
+      0 0 32px rgba(34, 197, 94, 0.5),
+      0 0 48px rgba(0, 255, 136, 0.25);
+  }
+}
+
+.pool-value-glow {
+  animation: pool-value-glow 2.5s ease-in-out infinite;
+}
+
 /* Owltopia neon text */
 .owltopia-neon {
   color: rgb(34, 197, 94);
