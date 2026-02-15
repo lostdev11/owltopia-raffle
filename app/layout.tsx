@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Plus_Jakarta_Sans } from 'next/font/google'
+import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { WalletContextProvider } from '@/components/WalletProvider'
@@ -14,6 +14,12 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
   variable: '--font-plus-jakarta-sans',
   weight: ['300', '400', '500', '600', '700', '800'],
+})
+
+const bebasNeue = Bebas_Neue({
+  subsets: ['latin'],
+  variable: '--font-bebas-neue',
+  weight: '400',
 })
 
 export const viewport = {
@@ -100,7 +106,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${plusJakartaSans.variable} font-sans min-h-full flex flex-col`}>
+      <body className={`${plusJakartaSans.variable} ${bebasNeue.variable} font-sans min-h-full flex flex-col`}>
         <script
           dangerouslySetInnerHTML={{
             __html: `

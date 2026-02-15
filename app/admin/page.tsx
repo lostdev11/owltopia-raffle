@@ -577,6 +577,42 @@ export default function AdminDashboardPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Rev Share: 50% founder / 50% community in SOL and USDC */}
+                    {(revenue.byCurrency.sol != null || revenue.byCurrency.usdc != null) && (
+                      <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+                        <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% founder / 50% community)</h3>
+                        <p className="text-xs text-muted-foreground mb-3">Amounts in SOL and USDC from profit over threshold.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="font-medium text-muted-foreground mb-1">Founder (50%)</p>
+                            <p className="tabular-nums">
+                              {revenue.byCurrency.sol != null && (
+                                <span><span className="font-semibold">{(revenue.byCurrency.sol.profit * 0.5).toFixed(4)}</span> SOL</span>
+                              )}
+                              {revenue.byCurrency.sol != null && revenue.byCurrency.usdc != null && ' · '}
+                              {revenue.byCurrency.usdc != null && (
+                                <span><span className="font-semibold">{(revenue.byCurrency.usdc.profit * 0.5).toFixed(2)}</span> USDC</span>
+                              )}
+                              {revenue.byCurrency.sol == null && revenue.byCurrency.usdc == null && '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="font-medium text-muted-foreground mb-1">Community (50%)</p>
+                            <p className="tabular-nums">
+                              {revenue.byCurrency.sol != null && (
+                                <span><span className="font-semibold">{(revenue.byCurrency.sol.profit * 0.5).toFixed(4)}</span> SOL</span>
+                              )}
+                              {revenue.byCurrency.sol != null && revenue.byCurrency.usdc != null && ' · '}
+                              {revenue.byCurrency.usdc != null && (
+                                <span><span className="font-semibold">{(revenue.byCurrency.usdc.profit * 0.5).toFixed(2)}</span> USDC</span>
+                              )}
+                              {revenue.byCurrency.sol == null && revenue.byCurrency.usdc == null && '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

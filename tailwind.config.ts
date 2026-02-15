@@ -19,6 +19,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ['var(--font-plus-jakarta-sans)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-bebas-neue)', 'Impact', 'sans-serif'],
       },
       colors: {
         border: 'hsl(var(--border))',

@@ -46,6 +46,19 @@ export function EnterOwlTopia() {
           Enter Owl Topia
         </h1>
         <p
+          className="squid-game-text rev-share-glow text-3xl sm:text-4xl md:text-5xl text-center opacity-0 animate-enter-fade-in tracking-wide uppercase"
+          style={fadeIn('0.35s')}
+          aria-label="Rev Share"
+        >
+          Rev Share
+        </p>
+        <p
+          className="text-muted-foreground text-center text-sm max-w-[340px] opacity-0 animate-enter-fade-in"
+          style={fadeIn('0.4s')}
+        >
+          After ticket sale thresholds, 50% to founder and 50% to community — amounts shown in SOL and USDC.
+        </p>
+        <p
           className="text-muted-foreground text-center text-sm opacity-0 animate-enter-fade-in"
           style={fadeIn('0.5s')}
         >

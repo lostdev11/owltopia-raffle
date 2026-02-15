@@ -1,6 +1,7 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
 
 interface MarkdownContentProps {
@@ -25,6 +26,7 @@ export function MarkdownContent({ content, className, compact }: MarkdownContent
       )}
     >
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children, ...props }) => (
             <span className="block my-1 first:mt-0 last:mb-0" {...props}>

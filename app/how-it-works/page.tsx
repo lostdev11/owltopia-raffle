@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Eye, Ticket, Users, Shield } from 'lucide-react'
+import { ArrowLeft, Eye, Ticket, Users, Shield, Percent } from 'lucide-react'
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE = `${SITE_URL}/opengraph-image`
@@ -120,6 +120,17 @@ export default function HowItWorksPage() {
               Hover or tap the <strong>Owl Vision</strong> badge on any raffle card or detail page to see the breakdown: verified payments %, wallet diversity %, and time integrity. A higher score means more verified entries, better diversity, and no (or minimal) edits after entries — all signals of a trustworthy raffle.
             </p>
           </div>
+        </section>
+
+        {/* Rev Share */}
+        <section className="mb-10">
+          <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+            <Percent className="h-6 w-6 text-green-500" />
+            Rev Share
+          </h2>
+          <p className="mb-4">
+            For any ticket sales <strong>after</strong> the raffle&apos;s threshold is met, <strong>50%</strong> goes to the founder and <strong>50%</strong> goes to the community as revenue share. Amounts are shown in <strong>SOL</strong> and <strong>USDC</strong>. This applies to every raffle that hits its minimum.
+          </p>
         </section>
 
         {/* Who can participate */}
