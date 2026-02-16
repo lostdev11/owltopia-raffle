@@ -81,6 +81,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
   const isFuture = startTime > now
   const isActive = endTime > now && raffle.is_active && !isFuture
   const isWinner = !isActive && raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
+  const userHasEntered = !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
   // Use red for future, blue for past, theme accent for active
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
@@ -793,11 +794,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
           }}
         >
           <Card
-            className={`${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''}`}
+            className={`${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
             style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
           >
             {isWinner && (
               <div className="winner-golden-overlay absolute inset-0 rounded-lg pointer-events-none z-0" />
+            )}
+            {userHasEntered && !isWinner && (
+              <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
             )}
             {raffle.image_url && !imageError && (
               <div 
@@ -1108,11 +1112,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
         }}
       >
         <Card
-          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''}`}
+          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
           style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
         >
           {isWinner && (
             <div className="winner-golden-overlay absolute inset-0 rounded-xl pointer-events-none z-0" />
+          )}
+          {userHasEntered && !isWinner && (
+            <div className="raffle-entered-overlay absolute inset-0 rounded-xl z-0" />
           )}
           {raffle.image_url && !imageError && (
             <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-xl m-0 p-0">

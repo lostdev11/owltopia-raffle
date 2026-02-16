@@ -5,7 +5,7 @@ import { Header } from '@/components/Header'
 
 /**
  * Renders the header only when the user is not on the home page.
- * On "/" we show a clean landing (Enter Owl Topia); header appears after they hit "Enter Raffles".
+ * Home redirects to /raffles, so header is shown on the main raffles view.
  */
 export function ConditionalHeader() {
   const pathname = usePathname()

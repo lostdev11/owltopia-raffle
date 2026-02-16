@@ -107,11 +107,46 @@ const config: Config = {
             boxShadow: '0 0 32px rgba(0, 255, 136, 0.8), 0 0 64px rgba(0, 255, 136, 0.5), 0 0 96px rgba(0, 255, 136, 0.25)',
           },
         },
+        /* Hero: gentle rise + fade for landing */
+        'hero-rise': {
+          from: { opacity: '0', transform: 'translateY(20px) scale(0.97)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        /* Floating orbs background */
+        'hero-float-1': {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '33%': { transform: 'translate(8%, -6%) scale(1.05)' },
+          '66%': { transform: 'translate(-5%, 4%) scale(0.98)' },
+        },
+        'hero-float-2': {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '50%': { transform: 'translate(-10%, 8%) scale(1.08)' },
+        },
+        'hero-float-3': {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '25%': { transform: 'translate(6%, 5%) scale(1.03)' },
+          '75%': { transform: 'translate(-4%, -7%) scale(0.97)' },
+        },
+        'hero-float-4': {
+          '0%, 100%': { transform: 'translate(0, 0)' },
+          '50%': { transform: 'translate(5%, -10%)' },
+        },
+        /* Matrix-style falling text */
+        'matrix-scroll': {
+          '0%': { transform: 'translateY(0)' },
+          '100%': { transform: 'translateY(-50%)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'enter-fade-in': 'enter-fade-in 0.8s ease-out forwards',
+        'hero-rise': 'hero-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards',
+        'hero-float-1': 'hero-float-1 18s ease-in-out infinite',
+        'hero-float-2': 'hero-float-2 22s ease-in-out infinite',
+        'hero-float-3': 'hero-float-3 20s ease-in-out infinite',
+        'hero-float-4': 'hero-float-4 25s ease-in-out infinite',
+        'matrix-scroll': 'matrix-scroll 28s linear infinite',
         'enter-glow': 'enter-glow 2s ease-in-out infinite',
         'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
         'button-glow-pulse': 'button-glow-pulse 2s ease-in-out infinite',

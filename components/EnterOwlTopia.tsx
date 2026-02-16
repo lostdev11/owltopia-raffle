@@ -1,10 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { ExternalLink, Coins } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
+
+/** Repeated "owltopia" lines for matrix-style scroll (duplicated for seamless loop) */
+const MATRIX_LINES = Array.from({ length: 80 }, () => 'owltopia')
 
 const fadeIn = (delay: string) => ({
   animationDelay: delay,
@@ -26,15 +29,31 @@ type NextRevShareSchedule = {
 }
 
 /**
- * Entry page: "Enter Owl Topia" with entrance animation.
+ * Entry page with entrance animation.
  * Warms the backend (GET /api/raffles) on mount so /raffles is more likely to load quickly.
  * Rev Share card shows founder-set "next rev share" date and total SOL/USDC (editable in admin).
  */
 export function EnterOwlTopia() {
   const [schedule, setSchedule] = useState<NextRevShareSchedule | null>(null)
+  const [scrollProgress, setScrollProgress] = useState(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetch('/api/raffles', { cache: 'no-store' }).catch(() => {})
+  }, [])
+
+  // Scroll-driven animation: update progress for parallax / reveal
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el
+      const maxScroll = scrollHeight - clientHeight
+      setScrollProgress(maxScroll > 0 ? scrollTop / maxScroll : 0)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
   // Fetch next rev share schedule (founder-editable)
@@ -60,8 +79,52 @@ export function EnterOwlTopia() {
   }, [])
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full">
+    <div
+      ref={scrollRef}
+      className="relative min-h-screen flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8 overflow-auto overflow-x-hidden"
+    >
+      {/* Background: matrix-style falling "owltopia" columns */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden>
+        {/* Left column */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-24 sm:w-28 overflow-hidden pl-3 sm:pl-4"
+          style={{
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+          }}
+        >
+          <div className="animate-matrix-scroll flex flex-col items-start text-left pt-0 w-full min-w-0" style={{ animationDuration: '28s' }}>
+            {[...MATRIX_LINES, ...MATRIX_LINES].map((line, i) => (
+              <span key={`l-${i}`} className="font-mono text-[10px] sm:text-xs leading-relaxed text-theme-prime opacity-[0.07] whitespace-nowrap">
+                {line}
+              </span>
+            ))}
+          </div>
+        </div>
+        {/* Right column — offset for depth */}
+        <div
+          className="absolute right-0 top-0 bottom-0 w-24 sm:w-28 overflow-hidden pr-3 sm:pr-4"
+          style={{
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+          }}
+        >
+          <div className="animate-matrix-scroll flex flex-col items-end text-right pt-0 w-full min-w-0" style={{ animationDuration: '32s', animationDelay: '-8s' }}>
+            {[...MATRIX_LINES, ...MATRIX_LINES].map((line, i) => (
+              <span key={`r-${i}`} className="font-mono text-[10px] sm:text-xs leading-relaxed text-theme-prime opacity-[0.05] whitespace-nowrap">
+                {line}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Hero content: scrollable so button is always reachable */}
+      <div
+        className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto overflow-x-hidden transition-transform duration-300 ease-out shrink-0"
+        style={{ transform: `translateY(${scrollProgress * -8}px)` }}
+      >
+        <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-8 sm:py-10">
         <div
           className="opacity-0 animate-enter-fade-in"
           style={fadeIn('0.1s')}
@@ -69,12 +132,6 @@ export function EnterOwlTopia() {
           <Logo width={280} height={105} priority />
         </div>
         <AnnouncementsBlock placement="hero" variant="hero" className="opacity-0 animate-enter-fade-in" />
-        <h1
-          className="text-2xl sm:text-3xl font-semibold text-center opacity-0 animate-enter-fade-in text-theme-prime animate-glow-pulse"
-          style={fadeIn('0.3s')}
-        >
-          Enter Owl Topia
-        </h1>
 
         {/* Rev Share card — founder-set next rev share (date + total SOL/USDC) */}
         <div
@@ -122,8 +179,7 @@ export function EnterOwlTopia() {
         </p>
         <Link
           href="/raffles"
-          className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-lg px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 opacity-0 animate-enter-fade-in animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
-          style={fadeIn('0.7s')}
+          className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-lg px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation opacity-100"
         >
           Enter Raffles
         </Link>
@@ -146,7 +202,10 @@ export function EnterOwlTopia() {
             </a>
           ))}
         </div>
+        </div>
       </div>
+      {/* Spacer so page can scroll and trigger scroll-based animation */}
+      <div className="relative z-10 min-h-[40vh] w-full shrink-0" aria-hidden />
     </div>
   )
 }

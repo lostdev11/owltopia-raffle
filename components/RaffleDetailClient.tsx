@@ -765,12 +765,22 @@ export function RaffleDetailClient({
           maxRetries: 3,
         })
       } catch (walletError: any) {
-        console.error('Wallet error details:', walletError)
-        
         // Provide more helpful error messages for wallet errors
         const errorMessage = walletError?.message || walletError?.toString() || 'Unknown error'
         const errorCode = walletError?.code
         const errorName = walletError?.name || ''
+        
+        // User cancelled in wallet — don't log as error, show friendly message only
+        const isUserRejection =
+          errorCode === 4001 ||
+          errorMessage.includes('User rejected') ||
+          errorMessage.includes('rejected the request') ||
+          errorMessage.includes('rejected')
+        if (isUserRejection) {
+          throw new Error('Transaction was cancelled. Please try again if you want to continue.')
+        }
+        
+        console.error('Wallet error details:', walletError)
         
         // Check if this is an Android/mobile device
         const isMobile = typeof window !== 'undefined' && /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
@@ -779,10 +789,6 @@ export function RaffleDetailClient({
         const isAndroid = typeof window !== 'undefined' && /android/i.test(
           navigator.userAgent || navigator.vendor || (window as any).opera || ''
         )
-        
-        if (errorCode === 4001 || errorMessage.includes('User rejected') || errorMessage.includes('rejected')) {
-          throw new Error('Transaction was cancelled. Please try again if you want to continue.')
-        }
         if (errorMessage.includes('insufficient funds') || errorMessage.includes('Insufficient')) {
           throw new Error('Insufficient funds in your wallet. Please ensure you have enough SOL/USDC to cover the transaction and fees.')
         }
@@ -1022,6 +1028,8 @@ export function RaffleDetailClient({
 
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
+  const isWinnerDetail = hasEnded && !!raffle.winner_wallet && wallet === raffle.winner_wallet
+  const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
   // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
   const showNftTransferButton = 
     hasEnded && 
@@ -1102,7 +1110,10 @@ export function RaffleDetailClient({
             Share
           </Button>
         </div>
-        <Card className={getThemeAccentClasses(raffle.theme_accent)} style={borderStyle}>
+        <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={borderStyle}>
+          {userHasEnteredDetail && (
+            <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
+          )}
           <CardHeader className={classes.headerPadding}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">

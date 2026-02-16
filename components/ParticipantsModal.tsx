@@ -83,7 +83,7 @@ export function ParticipantsModal({
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {participant.transactions.map((tx, txIndex) => (
                         <a
-                          key={tx}
+                          key={`${participant.wallet}-${txIndex}-${tx}`}
                           href={getSolanaExplorerUrl(tx)}
                           target="_blank"
                           rel="noopener noreferrer"
