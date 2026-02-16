@@ -161,8 +161,11 @@ export async function POST(request: NextRequest) {
     // Validate currency: SOL, USDC, and OWL when enabled
     const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
     if (body.currency && !validCurrencies.includes(body.currency)) {
+      const message = body.currency === 'OWL' && !isOwlEnabled()
+        ? 'OWL is not enabled on this server. Set NEXT_PUBLIC_OWL_MINT_ADDRESS in your environment to use OWL, or choose SOL or USDC.'
+        : `Currency must be one of: ${validCurrencies.join(', ')}`
       return NextResponse.json(
-        { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
+        { error: message },
         { status: 400 }
       )
     }

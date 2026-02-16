@@ -768,7 +768,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   >
                     <option value="SOL">SOL</option>
                     <option value="USDC">USDC</option>
-                    {(isOwlEnabled() || isAdmin || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
+                    {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
                   </select>
                 </div>
               </div>

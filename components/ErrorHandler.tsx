@@ -86,10 +86,11 @@ export function ErrorHandler() {
     console.warn = (...args: any[]) => {
       const warnString = args.join(' ')
       
-      // Suppress known harmless extension warnings
+      // Suppress known harmless extension warnings and intentional recovery messages
       if (
         warnString.includes('runtime.lastError') ||
-        warnString.includes('Extension context')
+        warnString.includes('Extension context') ||
+        warnString.includes('Wallet connection timeout')
       ) {
         // Silently ignore these warnings
         return

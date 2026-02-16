@@ -219,7 +219,7 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
-                {(isOwlEnabled() || isAdmin) && <option value="OWL">OWL</option>}
+                {isOwlEnabled() && <option value="OWL">OWL</option>}
               </select>
             </div>
           </div>

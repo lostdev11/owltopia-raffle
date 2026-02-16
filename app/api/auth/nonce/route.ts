@@ -21,8 +21,16 @@ export async function GET(request: NextRequest) {
     const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET
     if (!secret || secret.length < 16) {
       console.error('[auth/nonce] SESSION_SECRET or AUTH_SECRET missing or too short')
+      console.error('[auth/nonce] NODE_ENV:', process.env.NODE_ENV)
+      console.error('[auth/nonce] Available env vars:', Object.keys(process.env).filter(k => k.includes('SESSION') || k.includes('AUTH')))
+      
+      const isDev = process.env.NODE_ENV === 'development'
+      const errorMessage = isDev
+        ? 'Server configuration error: SESSION_SECRET or AUTH_SECRET not found. Please ensure .env.local exists with SESSION_SECRET set (min 16 chars) and restart your dev server.'
+        : 'Server configuration error: authentication secret not configured. Please set SESSION_SECRET or AUTH_SECRET in your hosting platform\'s environment variables.'
+      
       return NextResponse.json(
-        { error: 'Server configuration error: authentication secret not configured' },
+        { error: errorMessage },
         { status: 500 }
       )
     }

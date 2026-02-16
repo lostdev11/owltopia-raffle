@@ -4,6 +4,137 @@ import type { Entry } from '@/lib/types'
 import { withRetry } from '@/lib/db-retry'
 import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 
+/** Thrown when the DB rejects a duplicate transaction_signature (unique index). */
+export class TransactionSignatureAlreadyUsedError extends Error {
+  constructor() {
+    super('Transaction signature already used for another entry')
+    this.name = 'TransactionSignatureAlreadyUsedError'
+  }
+}
+
+/** Thrown when confirm_entry_with_tx RPC raises tx_already_used (replay). */
+export class TxAlreadyUsedError extends Error {
+  constructor() {
+    super('Transaction signature already used for another entry')
+    this.name = 'TxAlreadyUsedError'
+  }
+}
+
+/** Thrown when confirm_entry_with_tx RPC raises insufficient_tickets. */
+export class InsufficientTicketsError extends Error {
+  constructor(message = 'Would exceed maximum ticket limit') {
+    super(message)
+    this.name = 'InsufficientTicketsError'
+  }
+}
+
+/** Thrown when confirm_entry_with_tx RPC raises invalid_state. */
+export class ConfirmEntryInvalidStateError extends Error {
+  constructor(message = 'Invalid entry state for confirmation') {
+    super(message)
+    this.name = 'ConfirmEntryInvalidStateError'
+  }
+}
+
+export type ClaimVerifiedTransactionResult =
+  | { claimed: true }
+  | { claimed: false; existingEntryId: string }
+
+/**
+ * Idempotency lock: claim a transaction signature at DB level before any entry update.
+ * INSERT into verified_transactions; duplicate → return existing entry_id for same-tx retry check.
+ * @deprecated Prefer confirmEntryWithTx RPC for atomic verify flow.
+ */
+export async function claimOrGetVerifiedTransaction(
+  txSig: string,
+  raffleId: string,
+  entryId: string,
+  walletAddress: string,
+  amountPaid: number
+): Promise<ClaimVerifiedTransactionResult> {
+  const { error: insertError } = await getSupabaseAdmin()
+    .from('verified_transactions')
+    .insert({
+      tx_sig: txSig,
+      raffle_id: raffleId,
+      entry_id: entryId,
+      wallet_address: walletAddress,
+      amount_paid: amountPaid,
+    })
+
+  if (!insertError) {
+    return { claimed: true }
+  }
+
+  if (insertError.code !== '23505') {
+    console.error('Error inserting verified_transaction:', insertError)
+    throw insertError
+  }
+
+  const { data: existing, error: selectError } = await getSupabaseAdmin()
+    .from('verified_transactions')
+    .select('entry_id')
+    .eq('tx_sig', txSig)
+    .single()
+
+  if (selectError || !existing?.entry_id) {
+    console.error('Duplicate tx_sig but failed to load row:', selectError)
+    throw new TransactionSignatureAlreadyUsedError()
+  }
+
+  return { claimed: false, existingEntryId: existing.entry_id as string }
+}
+
+/** Result of successful confirm_entry_with_tx RPC (entry is snake_case from DB). */
+export interface ConfirmEntryWithTxResult {
+  success: true
+  entry: Entry
+}
+
+function mapRpcError(message: string): never {
+  if (message.includes('tx_already_used')) throw new TxAlreadyUsedError()
+  if (message.includes('insufficient_tickets')) throw new InsufficientTicketsError()
+  if (message.includes('invalid_state')) throw new ConfirmEntryInvalidStateError(message)
+  if (message.includes('entry_not_found')) throw new Error('Entry not found')
+  if (message.includes('raffle_not_found')) throw new Error('Raffle not found')
+  throw new Error(message)
+}
+
+/**
+ * Atomic confirm entry with tx via Postgres RPC.
+ * Locks raffle + entry, validates, inserts verified_transactions, enforces max_tickets, updates entry.
+ * Idempotent: same entry + same tx returns success (already confirmed).
+ * @throws TxAlreadyUsedError, InsufficientTicketsError, ConfirmEntryInvalidStateError
+ */
+export async function confirmEntryWithTx(
+  entryId: string,
+  raffleId: string,
+  walletAddress: string,
+  txSig: string,
+  amountPaid: number,
+  ticketQuantity: number
+): Promise<ConfirmEntryWithTxResult> {
+  const { data, error } = await getSupabaseAdmin().rpc('confirm_entry_with_tx', {
+    p_entry_id: entryId,
+    p_raffle_id: raffleId,
+    p_wallet_address: walletAddress,
+    p_tx_sig: txSig,
+    p_amount_paid: amountPaid,
+    p_ticket_quantity: ticketQuantity,
+  })
+
+  if (error) {
+    mapRpcError(error.message)
+  }
+
+  if (!data || typeof data !== 'object' || !('entry' in data) || data.success !== true) {
+    console.error('Unexpected confirm_entry_with_tx response:', data)
+    throw new Error('Invalid response from confirm_entry_with_tx')
+  }
+
+  return { success: true, entry: data.entry as Entry }
+}
+
 export async function getEntryById(id: string) {
   return withRetry(async () => {
     const { data, error } = await supabase
@@ -79,6 +210,9 @@ export async function saveTransactionSignature(
     .single()
 
   if (error) {
+    if (error.code === '23505') {
+      throw new TransactionSignatureAlreadyUsedError()
+    }
     console.error('Error saving transaction signature:', error)
     console.error('Entry ID:', id)
     console.error('Supabase error details:', JSON.stringify(error, null, 2))
@@ -111,6 +245,9 @@ export async function updateEntryStatus(
       .single()
 
     if (error) {
+      if (error.code === '23505') {
+        throw new TransactionSignatureAlreadyUsedError()
+      }
       console.error('Error updating entry:', error)
       console.error('Entry ID:', id)
       console.error('Update data:', updateData)

@@ -24,6 +24,6 @@ WHERE transaction_signature IS NOT NULL
   );
 
 -- Step 2: Create unique index so no future duplicate signatures can be stored
-CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_transaction_signature_unique
-  ON public.entries(transaction_signature)
+CREATE UNIQUE INDEX IF NOT EXISTS entries_transaction_signature_unique
+  ON public.entries (transaction_signature)
   WHERE transaction_signature IS NOT NULL;
