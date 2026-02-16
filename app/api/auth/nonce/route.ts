@@ -16,12 +16,26 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       )
     }
+    
+    // Check if SESSION_SECRET is available before proceeding
+    const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET
+    if (!secret || secret.length < 16) {
+      console.error('[auth/nonce] SESSION_SECRET or AUTH_SECRET missing or too short')
+      return NextResponse.json(
+        { error: 'Server configuration error: authentication secret not configured' },
+        { status: 500 }
+      )
+    }
+    
     const nonce = generateNonce(wallet)
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
     const message = buildSignInMessage(nonce, expiresAt)
     return NextResponse.json({ nonce, message, expiresAt: expiresAt.toISOString() })
   } catch (error) {
-    console.error('[auth/nonce]', error)
+    console.error('[auth/nonce] Error:', error instanceof Error ? error.message : String(error))
+    if (error instanceof Error && error.stack) {
+      console.error('[auth/nonce] Stack:', error.stack)
+    }
     const message = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
       { error: message },
