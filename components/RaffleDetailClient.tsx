@@ -47,6 +47,7 @@ import {
 } from '@solana/spl-token'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { LinkifiedText } from '@/components/LinkifiedText'
+import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 
 interface RaffleDetailClientProps {
   raffle: Raffle
@@ -839,6 +840,10 @@ export function RaffleDetailClient({
         throw new Error('Transaction confirmation timeout. Please check your wallet or transaction explorer.')
       }
 
+      // Celebrate as soon as the transaction is confirmed (before verify) so OWL and others get confetti even if server verification is delayed or fails
+      setSuccess(true)
+      requestAnimationFrame(() => fireGreenConfetti())
+
       // Step 5: Verify entry with transaction signature
       const verifyResponse = await fetch('/api/entries/verify', {
         method: 'POST',
@@ -856,7 +861,7 @@ export function RaffleDetailClient({
         
         // Handle temporary verification failures (202 Accepted)
         if (verifyResponse.status === 202) {
-          // Transaction signature saved, verification will retry automatically
+          // Transaction signature saved, verification will retry automatically (confetti already fired on tx confirm)
           setSuccess(true)
           setError(null)
           // Show a message that verification is pending
@@ -883,7 +888,6 @@ export function RaffleDetailClient({
       }
 
       setSuccess(true)
-      
       // Immediately refresh server-side data to ensure consistency
       router.refresh()
       
@@ -964,7 +968,7 @@ export function RaffleDetailClient({
   }
 
   const handleOpenEnterRaffleDialog = () => {
-    // Reset state when opening dialog
+    preloadConfetti()
     setTicketQuantity(1)
     setTicketQuantityDisplay('1')
     setError(null)
@@ -1116,9 +1120,9 @@ export function RaffleDetailClient({
           )}
           <CardHeader className={classes.headerPadding}>
             <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <CardTitle className={classes.title}>{raffle.title}</CardTitle>
-                <CardDescription className={classes.description}>
+                <CardDescription className={`${classes.description} break-words`}>
                   <LinkifiedText text={raffle.description} />
                 </CardDescription>
               </div>

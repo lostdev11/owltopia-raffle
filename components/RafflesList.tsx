@@ -338,6 +338,7 @@ export function RafflesList({
             raffle={raffle} 
             entries={entries} 
             size={size}
+            section={section}
             profitInfo={profitInfo}
             onDeleted={handleRaffleDeleted}
             priority={index < 6} // Prioritize first 6 images (above the fold)

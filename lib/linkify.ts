@@ -25,8 +25,11 @@ function normalizeTextForUrls(text: string): string {
   return out
 }
 
-/** Matches http:// and https:// URLs; avoids trailing punctuation that's not part of the URL */
-const URL_REGEX = /(https?:\/\/[^\s<>"{}|\\^`[\]]+?)(?=[\s,)\.\]}>"']|$)/gi
+/** Matches http:// and https:// URLs; dots allowed (e.g. .com, .pdf). No dot in lookahead so full URL is captured. */
+const URL_REGEX = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)(?=[\s,)\]\}>"']|$)/gi
+
+/** Trailing punctuation that is not part of a URL (strip from captured value so href is clean). */
+const TRAILING_PUNCT = /[.,;:!?)\]\}>"']+$/
 
 export type LinkifySegment = { type: 'text'; value: string } | { type: 'link'; url: string; value: string }
 
@@ -46,9 +49,13 @@ export function linkifySegments(text: string | null | undefined): LinkifySegment
     if (m.index > lastIndex) {
       segments.push({ type: 'text', value: normalized.slice(lastIndex, m.index) })
     }
-    const url = m[1]
+    let url = m[1]
+    const trailing = url.match(TRAILING_PUNCT)
+    if (trailing) {
+      url = url.slice(0, url.length - trailing[0].length)
+    }
     segments.push({ type: 'link', url, value: url })
-    lastIndex = m.index + url.length
+    lastIndex = m.index + m[1].length
   }
   if (lastIndex < normalized.length) {
     segments.push({ type: 'text', value: normalized.slice(lastIndex) })

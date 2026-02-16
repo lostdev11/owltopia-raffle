@@ -38,25 +38,31 @@ import {
   getAccount,
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token'
+import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 
 type CardSize = 'small' | 'medium' | 'large'
+type SectionType = 'active' | 'future' | 'past'
 
 interface RaffleCardProps {
   raffle: Raffle
   entries: Entry[]
   size?: CardSize
+  /** List section: used for border styling so server and client match (avoids hydration) */
+  section?: SectionType
   /** When set (e.g. admin list), show profitable vs not and revenue vs threshold */
   profitInfo?: RaffleProfitInfo
   onDeleted?: (raffleId: string) => void
   priority?: boolean
 }
 
-export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDeleted, priority = false }: RaffleCardProps) {
+export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false }: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
   const { publicKey, sendTransaction, connected } = useWallet()
   const { connection } = useConnection()
   const wallet = publicKey?.toBase58() ?? ''
+  const [mounted, setMounted] = useState(false)
+  const [now, setNow] = useState<Date | null>(null)
   const [isAdmin, setIsAdmin] = useState(() =>
     typeof window !== 'undefined' && wallet ? (getCachedAdmin(wallet) ?? false) : false
   )
@@ -74,16 +80,25 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
   const [success, setSuccess] = useState(false)
   const [imageError, setImageError] = useState(false)
   
+  useEffect(() => {
+    setMounted(true)
+    setNow(new Date())
+  }, [])
+
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
-  const now = new Date()
   const startTime = new Date(raffle.start_time)
   const endTime = new Date(raffle.end_time)
-  const isFuture = startTime > now
-  const isActive = endTime > now && raffle.is_active && !isFuture
-  const isWinner = !isActive && raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
-  const userHasEntered = !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
+  // Use section when provided (list view) so server/client match; otherwise use now after mount
+  const isFuture = section !== undefined
+    ? section === 'future'
+    : now !== null && startTime > now
+  const isActive = section !== undefined
+    ? section === 'active'
+    : now !== null && endTime > now && raffle.is_active && !(now !== null && startTime > now)
+  const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
+  const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
-  // Use red for future, blue for past, theme accent for active
+  // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const borderStyle = isFuture
     ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
@@ -655,6 +670,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
         throw new Error('Transaction confirmation timeout')
       }
 
+      // Celebrate as soon as the transaction is confirmed (before verify) so OWL and others get confetti even if server verification is delayed or fails
+      setSuccess(true)
+      requestAnimationFrame(() => fireGreenConfetti())
+
       // Step 5: Verify entry
       const verifyResponse = await fetch('/api/entries/verify', {
         method: 'POST',
@@ -672,7 +691,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
         
         // Handle temporary verification failures (202 Accepted)
         if (verifyResponse.status === 202) {
-          // Transaction signature saved, verification will retry automatically
+          // Transaction signature saved, verification will retry automatically (confetti already fired on tx confirm)
           setSuccess(true)
           setError(null)
           console.log('Verification pending:', errorData.message || errorData.details)
@@ -768,6 +787,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
     e.preventDefault()
     e.stopPropagation()
     if (!showQuickBuy) {
+      preloadConfetti()
       setTicketQuantity(1)
       setTicketQuantityDisplay('1')
       setError(null)
