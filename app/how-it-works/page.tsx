@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield, Percent } from 'lucide-react'
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE = `${SITE_URL}/og-image.png`
+const OG_IMAGE = `${SITE_URL}/opengraph-image`
 const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {

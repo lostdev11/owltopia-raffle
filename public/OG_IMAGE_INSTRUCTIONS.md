@@ -1,32 +1,28 @@
 # Open Graph Image Instructions
 
-## Creating an Optimized Social Media Preview Image
+## Where the image lives
 
-For the best link preview experience on social media platforms (Twitter, Facebook, LinkedIn, Discord, etc.), create an optimized Open Graph image.
+The site uses **Next.js file convention**: `app/opengraph-image.png` is served at `/opengraph-image` and used for link previews. A copy is also kept in `public/og-image.png` for reference.
 
-## Recommended Specifications
+## Recommended specs for the image
 
-- **File name:** `og-image.png` (place in the `public` folder)
 - **Dimensions:** 1200 x 630 pixels (1.91:1 aspect ratio)
 - **Format:** PNG or JPG
 - **File size:** Under 1MB (ideally under 300KB)
-- **Content:** Your logo/branding with a clean, readable design
+- **Content:** Logo/branding, clean and readable
 
-## Quick Steps
+## Updating the preview image
 
-1. Create or export your logo/branding image at 1200x630 pixels
-2. Save it as `og-image.png` in the `public` folder
-3. The metadata is already configured to use this file automatically
+1. Replace `app/opengraph-image.png` with your new image (1200x630).
+2. Optionally update `app/opengraph-image.alt.txt` for the image alt text.
 
-## Alternative: Using Existing Images
+## If link previews still show the old image
 
-If you don't create `og-image.png`, the system will automatically fall back to `icon.png`. However, for best results on social media, a properly sized `og-image.png` is recommended.
+Platforms cache previews. After deploying:
 
-## Testing Your Image
+1. **Facebook:** [Sharing Debugger](https://developers.facebook.com/tools/debug/) → enter your URL → click **Scrape Again**.
+2. **Twitter/X:** [Card Validator](https://cards-dev.twitter.com/validator) → enter URL → validate again.
+3. **LinkedIn:** [Post Inspector](https://www.linkedin.com/post-inspector/).
+4. **Discord:** Previews can take time to refresh; try sharing in a new channel or wait 24–48 hours.
 
-After deploying, test your link preview using:
-- [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/)
-- [Twitter Card Validator](https://cards-dev.twitter.com/validator)
-- [LinkedIn Post Inspector](https://www.linkedin.com/post-inspector/)
-
-Note: Social media platforms cache previews, so you may need to clear the cache or wait a few minutes for changes to appear.
+Always use your **live site URL** (e.g. `https://www.owltopia.xyz`) when testing; localhost and preview URLs won’t show the correct preview.
