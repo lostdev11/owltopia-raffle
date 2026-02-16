@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createRaffle, generateUniqueSlug, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { Raffle } from '@/lib/types'
+import { safeErrorMessage } from '@/lib/safe-error'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -52,17 +54,12 @@ export async function GET(request: NextRequest) {
       const isUpstreamUnavailable =
         isConfig || /503|service unavailable|connection|timeout|missing/i.test(error.message)
       const status = isUpstreamUnavailable ? 503 : 502
-      const isDev = process.env.NODE_ENV === 'development'
-      let bodyMessage: string
-      if (status === 503) {
-        bodyMessage = isConfig
-          ? isDev
-            ? 'Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) to .env.local.'
-            : 'Raffles service is not configured. Please try again later.'
-          : 'Service temporarily unavailable. Please try again in a moment.'
-      } else {
-        bodyMessage = isDev ? `${error.message} (check .env.local and Supabase project)` : error.message
-      }
+      const bodyMessage =
+        status === 503
+          ? isConfig
+            ? 'Raffles service is not configured. Please try again later.'
+            : 'Service temporarily unavailable. Please try again in a moment.'
+          : safeErrorMessage(error)
       console.error('[GET /api/raffles]', error.code ?? 'error', error.message)
       return NextResponse.json(
         { error: bodyMessage, step: error.code === 'TIMEOUT' ? 'timeout' : isConfig ? 'config' : 'supabase error' },
@@ -72,14 +69,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(raffles, { status: 200 })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    const isDev = process.env.NODE_ENV === 'development'
     console.error('[GET /api/raffles] unexpected error:', err)
     return NextResponse.json(
-      {
-        error: isDev ? `${message} — check .env.local and that Supabase project is not paused.` : message,
-        step: 'supabase error',
-      },
+      { error: safeErrorMessage(err), step: 'supabase error' },
       { status: 502 }
     )
   }
@@ -87,26 +79,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    
-    // Check if wallet address is provided
-    const walletAddress = body.wallet_address || request.headers.get('x-wallet-address')
-    
-    if (!walletAddress) {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
+    const ip = getClientIp(request)
+    const rl = rateLimit(`raffles:${ip}`, 20, 60_000)
+    if (!rl.allowed) {
       return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
+        { error: 'Too many requests. Try again later.' },
+        { status: 429, headers: { 'Retry-After': '60' } }
       )
     }
 
-    // Check if user is an admin
-    const adminStatus = await withTimeout(isAdmin(walletAddress), SUPABASE_TIMEOUT_MS, 'supabase error')
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can create raffles' },
-        { status: 403 }
-      )
-    }
+    const body = await request.json()
     
     // Validate required fields
     const requiredFields = ['title', 'ticket_price', 'end_time']
@@ -119,6 +104,8 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    const walletAddress = session.wallet
+
     // Generate slug from title if not provided, or use provided slug
     let slug = body.slug
     if (!slug) {
@@ -273,9 +260,8 @@ export async function POST(request: NextRequest) {
     console.error('Error creating raffle:', error)
     const err = error as Error & { step?: 'timeout' | 'supabase error' }
     const step = err.step ?? 'supabase error'
-    const errorMessage = err instanceof Error ? err.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage, step },
+      { error: safeErrorMessage(err), step },
       { status: 502 }
     )
   }

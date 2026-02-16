@@ -137,8 +137,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
       e.stopPropagation()
     }
 
-    console.log('handleDelete called', { connected, publicKey: publicKey?.toBase58(), isAdmin, raffleId: raffle.id })
-
     if (!connected || !publicKey) {
       alert('Please connect your wallet to delete a raffle')
       setDeleteDialogOpen(false)
@@ -155,7 +153,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', profitInfo, onDel
 
     try {
       const walletAddress = publicKey.toBase58()
-      console.log('Sending delete request', { raffleId: raffle.id, walletAddress })
       
       const response = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'DELETE',

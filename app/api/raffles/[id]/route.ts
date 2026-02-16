@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -11,30 +12,14 @@ export async function PATCH(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const body = await request.json()
     const params = await context.params
     const raffleId = params.id
     if (typeof raffleId !== 'string') {
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
-    }
-
-    // Check if wallet address is provided
-    const walletAddress = body.wallet_address || request.headers.get('x-wallet-address')
-    
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    // Check if user is an admin
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can update raffles' },
-        { status: 403 }
-      )
     }
 
     // Check if raffle exists
@@ -207,9 +192,8 @@ export async function PATCH(
     return NextResponse.json(raffle)
   } catch (error) {
     console.error('Error updating raffle:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -226,33 +210,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
     }
 
-    // Check if wallet address is provided (from header or body)
-    let walletAddress = request.headers.get('x-wallet-address')
-    
-    if (!walletAddress) {
-      try {
-        const body = await request.json()
-        walletAddress = body.wallet_address
-      } catch {
-        // Body might be empty or invalid, that's okay
-      }
-    }
-
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    // Check if user is an admin
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can delete raffles' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
 
     // Check if raffle exists
     const existingRaffle = await getRaffleById(raffleId)
@@ -277,7 +236,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Error deleting raffle:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

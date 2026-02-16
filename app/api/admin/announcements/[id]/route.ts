@@ -1,38 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { updateAnnouncement, deleteAnnouncement } from '@/lib/db/announcements'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
-function getAdminWallet(request: NextRequest): string | null {
-  const authHeader = request.headers.get('authorization')
-  if (!authHeader?.startsWith('Bearer ')) return null
-  return authHeader.replace('Bearer ', '').trim() || null
-}
-
 /**
  * PATCH /api/admin/announcements/[id]
- * Update announcement (admin only).
+ * Update announcement. Admin only (session required).
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const wallet = getAdminWallet(request)
-    if (!wallet) {
-      return NextResponse.json(
-        { error: 'Authorization required (Bearer wallet)' },
-        { status: 401 }
-      )
-    }
-    const admin = await isAdmin(wallet)
-    if (!admin) {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
     const { id } = await params
     if (!id) {
       return NextResponse.json(
@@ -60,7 +43,7 @@ export async function PATCH(
   } catch (error) {
     console.error('Error updating announcement:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -68,27 +51,15 @@ export async function PATCH(
 
 /**
  * DELETE /api/admin/announcements/[id]
- * Delete announcement (admin only).
+ * Delete announcement. Admin only (session required).
  */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const wallet = getAdminWallet(request)
-    if (!wallet) {
-      return NextResponse.json(
-        { error: 'Authorization required (Bearer wallet)' },
-        { status: 401 }
-      )
-    }
-    const admin = await isAdmin(wallet)
-    if (!admin) {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
     const { id } = await params
     if (!id) {
       return NextResponse.json(
@@ -107,7 +78,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Error deleting announcement:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

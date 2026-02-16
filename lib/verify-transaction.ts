@@ -45,8 +45,7 @@ export async function verifyTransaction(
     
     if (!recipientWallet) {
       console.error('Recipient wallet not configured for verification')
-      // Still allow verification if wallet not configured (for development)
-      return { valid: true }
+      return { valid: false, error: 'Recipient wallet not configured. Set RAFFLE_RECIPIENT_WALLET.' }
     }
     
     const recipientPubkey = new PublicKey(recipientWallet)
@@ -138,7 +137,8 @@ export async function verifyTransaction(
       }
     } else if (expectedCurrency === 'USDC') {
       const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
-      
+      const decimals = getTokenInfo('USDC').decimals
+
       const recipientTokenAddress = await getAssociatedTokenAddress(
         USDC_MINT,
         recipientPubkey
@@ -158,20 +158,22 @@ export async function verifyTransaction(
       
       if (recipientTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
-        if (matchingPostBalance) {
-          const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+        const rawPostUsdc = matchingPostBalance?.uiTokenAmount?.amount
+        if (rawPostUsdc != null) {
+          const postRaw = BigInt(rawPostUsdc)
           const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
-          const preAmount = matchingPreBalance ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0') : 0
-          const increase = amount - preAmount
-          const tolerance = 0.01
-          
-          if (Math.abs(increase - expectedAmount) <= tolerance) {
+          const preRaw = matchingPreBalance?.uiTokenAmount?.amount != null
+            ? BigInt(matchingPreBalance.uiTokenAmount.amount)
+            : BigInt(0)
+          const increaseRaw = postRaw - preRaw
+          const expectedRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
+          const toleranceRaw = BigInt(1)
+          if (increaseRaw >= expectedRaw - toleranceRaw && increaseRaw <= expectedRaw + toleranceRaw) {
             return { valid: true }
-          } else {
-            const error = `USDC amount mismatch: expected ${expectedAmount}, got ${increase}. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}`
-            console.error(error)
-            return { valid: false, error }
           }
+          const error = `USDC amount mismatch: expected ${expectedAmount}, got ${increaseRaw.toString()} raw. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}`
+          console.error(error)
+          return { valid: false, error }
         }
       }
       
@@ -180,14 +182,13 @@ export async function verifyTransaction(
         error: `USDC verification failed: Could not verify transfer of ${expectedAmount} USDC to raffle wallet. Transaction may still be processing. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` 
       }
     } else if (expectedCurrency === 'OWL') {
-      // OWL (SPL Token) verification - similar to USDC
       const tokenInfo = getTokenInfo('OWL')
       if (!tokenInfo.mintAddress) {
         const error = 'OWL mint address not configured'
         console.error(error)
         return { valid: false, error }
       }
-      
+      const decimals = tokenInfo.decimals
       const OWL_MINT = new PublicKey(tokenInfo.mintAddress)
       
       const recipientTokenAddress = await getAssociatedTokenAddress(
@@ -209,20 +210,22 @@ export async function verifyTransaction(
       
       if (recipientTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
-        if (matchingPostBalance) {
-          const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+        const rawPostOwl = matchingPostBalance?.uiTokenAmount?.amount
+        if (rawPostOwl != null) {
+          const postRaw = BigInt(rawPostOwl)
           const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
-          const preAmount = matchingPreBalance ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0') : 0
-          const increase = amount - preAmount
-          const tolerance = 0.01
-          
-          if (Math.abs(increase - expectedAmount) <= tolerance) {
+          const preRaw = matchingPreBalance?.uiTokenAmount?.amount != null
+            ? BigInt(matchingPreBalance.uiTokenAmount.amount)
+            : BigInt(0)
+          const increaseRaw = postRaw - preRaw
+          const expectedRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
+          const toleranceRaw = BigInt(1)
+          if (increaseRaw >= expectedRaw - toleranceRaw && increaseRaw <= expectedRaw + toleranceRaw) {
             return { valid: true }
-          } else {
-            const error = `OWL amount mismatch: expected ${expectedAmount}, got ${increase}. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}`
-            console.error(error)
-            return { valid: false, error }
           }
+          const error = `OWL amount mismatch: expected ${expectedAmount}, got ${increaseRaw.toString()} raw. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}`
+          console.error(error)
+          return { valid: false, error }
         }
       }
       

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createEntry } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
+import { entriesCreateBody, parseOr400 } from '@/lib/validations'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -11,40 +14,37 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    let body: Record<string, unknown>
+    const ip = getClientIp(request)
+    const rl = rateLimit(`entries-create:${ip}`, 30, 60_000)
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Try again later.' },
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
+    }
+
+    let body: unknown
     try {
       const text = await request.text()
-      if (!text || !text.trim()) {
+      if (!text?.trim()) {
         return NextResponse.json(
           { error: 'Request body is required (JSON with raffleId, walletAddress, ticketQuantity)' },
           { status: 400 }
         )
       }
-      body = JSON.parse(text) as Record<string, unknown>
+      body = JSON.parse(text) as unknown
     } catch {
       return NextResponse.json(
         { error: 'Invalid JSON in request body' },
         { status: 400 }
       )
     }
-    const { raffleId, walletAddress, ticketQuantity, amountPaid } = body
 
-    if (!raffleId || !walletAddress || ticketQuantity == null) {
-      return NextResponse.json(
-        { error: 'Missing required fields: raffleId, walletAddress, ticketQuantity' },
-        { status: 400 }
-      )
+    const parsed = parseOr400(entriesCreateBody, body)
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
-
-    const raffleIdStr = typeof raffleId === 'string' ? raffleId : String(raffleId)
-    const walletAddressStr = typeof walletAddress === 'string' ? walletAddress : String(walletAddress)
-    const ticketQuantityNum = typeof ticketQuantity === 'number' ? ticketQuantity : Number(ticketQuantity)
-    if (!Number.isInteger(ticketQuantityNum) || ticketQuantityNum < 1) {
-      return NextResponse.json(
-        { error: 'ticketQuantity must be a positive integer' },
-        { status: 400 }
-      )
-    }
+    const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum } = parsed.data
 
     // Get the raffle
     const raffle = await getRaffleById(raffleIdStr)
@@ -97,12 +97,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use provided amountPaid if available, otherwise calculate from ticket_price * ticketQuantity
-    const rawAmountPaid = amountPaid !== undefined && amountPaid !== null ? amountPaid : raffle.ticket_price * ticketQuantityNum
-    const finalAmountPaid = typeof rawAmountPaid === 'number' && !Number.isNaN(rawAmountPaid) ? rawAmountPaid : raffle.ticket_price * ticketQuantityNum
-    
-    // Log calculation for debugging
-    console.log(`Payment calculation: ticket_price=${raffle.ticket_price}, ticketQuantity=${ticketQuantityNum}, providedAmountPaid=${amountPaid}, finalAmountPaid=${finalAmountPaid}`)
+    // Always compute amount server-side from ticket_price * ticketQuantity. Never trust client-supplied amountPaid (underpayment risk).
+    const finalAmountPaid = Number(raffle.ticket_price) * ticketQuantityNum
+    if (!Number.isFinite(finalAmountPaid) || finalAmountPaid <= 0) {
+      return NextResponse.json(
+        { error: 'Invalid ticket price or quantity' },
+        { status: 400 }
+      )
+    }
 
     // Create pending entry
     const entry = await createEntry({
@@ -152,7 +154,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating entry:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

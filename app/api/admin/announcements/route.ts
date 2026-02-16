@@ -1,35 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { getAllAnnouncements, createAnnouncement } from '@/lib/db/announcements'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
-function getAdminWallet(request: NextRequest): string | null {
-  const authHeader = request.headers.get('authorization')
-  if (!authHeader?.startsWith('Bearer ')) return null
-  return authHeader.replace('Bearer ', '').trim() || null
-}
-
 /**
  * GET /api/admin/announcements
- * List all announcements (admin only).
+ * List all announcements. Admin only (session required).
  */
 export async function GET(request: NextRequest) {
   try {
-    const wallet = getAdminWallet(request)
-    if (!wallet) {
-      return NextResponse.json(
-        { error: 'Authorization required (Bearer wallet)' },
-        { status: 401 }
-      )
-    }
-    const admin = await isAdmin(wallet)
-    if (!admin) {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
     let list: Awaited<ReturnType<typeof getAllAnnouncements>>
     try {
       list = await getAllAnnouncements()
@@ -42,7 +25,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching admin announcements:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -50,24 +33,12 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/admin/announcements
- * Create announcement (admin only).
+ * Create announcement. Admin only (session required).
  */
 export async function POST(request: NextRequest) {
   try {
-    const wallet = getAdminWallet(request)
-    if (!wallet) {
-      return NextResponse.json(
-        { error: 'Authorization required (Bearer wallet)' },
-        { status: 401 }
-      )
-    }
-    const admin = await isAdmin(wallet)
-    if (!admin) {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
     const body = await request.json().catch(() => ({}))
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     if (!title) {
@@ -87,22 +58,15 @@ export async function POST(request: NextRequest) {
     })
     if (!announcement) {
       return NextResponse.json(
-        { error: 'Failed to create announcement. Check server logs and ensure SUPABASE_SERVICE_ROLE_KEY is set and migrations are applied.' },
+        { error: 'Failed to create announcement' },
         { status: 500 }
       )
     }
     return NextResponse.json(announcement)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
     console.error('Error creating announcement:', error)
-    if (message.includes('SUPABASE_SERVICE_ROLE_KEY')) {
-      return NextResponse.json(
-        { error: 'Server misconfigured: ' + message + ' Add it in .env.local (Supabase Dashboard → Settings → API).' },
-        { status: 503 }
-      )
-    }
     return NextResponse.json(
-      { error: process.env.NODE_ENV === 'development' ? message : 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

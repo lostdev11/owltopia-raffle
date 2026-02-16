@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteEntry, getEntryById } from '@/lib/db/entries'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -10,41 +11,15 @@ export async function DELETE(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const params = await context.params
     const entryId = params.id
     if (typeof entryId !== 'string') {
       return NextResponse.json({ error: 'Invalid entry id' }, { status: 400 })
     }
 
-    // Check if wallet address is provided (from header or body)
-    let walletAddress = request.headers.get('x-wallet-address')
-    
-    if (!walletAddress) {
-      try {
-        const body = await request.json()
-        walletAddress = body.wallet_address
-      } catch {
-        // Body might be empty or invalid, that's okay
-      }
-    }
-
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    // Check if user is an admin
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can delete entries' },
-        { status: 403 }
-      )
-    }
-
-    // Check if entry exists
     const existingEntry = await getEntryById(entryId)
     if (!existingEntry) {
       return NextResponse.json(
@@ -53,8 +28,7 @@ export async function DELETE(
       )
     }
 
-    // Delete the entry (pass wallet address for audit trail)
-    const success = await deleteEntry(entryId, walletAddress)
+    const success = await deleteEntry(entryId, session.wallet)
 
     if (!success) {
       return NextResponse.json(
@@ -67,7 +41,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Error deleting entry:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

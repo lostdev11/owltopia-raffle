@@ -71,7 +71,7 @@ export async function saveTransactionSignature(
   id: string,
   transactionSignature: string
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseAdmin()
     .from('entries')
     .update({ transaction_signature: transactionSignature })
     .eq('id', id)

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPendingEntries } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
+import { safeErrorMessage, safeErrorDetails } from '@/lib/safe-error'
 import type { Entry, Raffle } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -30,24 +31,8 @@ export interface RafflePendingSummary {
  */
 export async function GET(request: NextRequest) {
   try {
-    const walletAddress =
-      request.headers.get('x-wallet-address') ||
-      request.nextUrl.searchParams.get('wallet')
-
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can view entries to confirm' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
 
     const pendingEntries = await getPendingEntries()
     if (pendingEntries.length === 0) {
@@ -135,8 +120,8 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching entries to confirm:', error)
     return NextResponse.json(
       {
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : String(error),
+        error: safeErrorMessage(error),
+        ...(safeErrorDetails(error) && { details: safeErrorDetails(error) }),
       },
       { status: 500 }
     )

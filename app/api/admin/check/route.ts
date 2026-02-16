@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ isAdmin: adminStatus })
   } catch (error) {
-    console.error('Error checking admin status:', error)
+    console.error('Error checking admin status:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

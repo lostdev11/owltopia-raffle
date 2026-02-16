@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -8,35 +9,21 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/raffles/[id]/restore
  * Restore a raffle for outage recovery – extend end_time so tickets can be purchased again.
- * Use only when tickets couldn't be purchased due to site/database outage.
+ * Admin only (session required).
  */
 export async function POST(
   request: NextRequest,
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
-    const body = await request.json().catch(() => ({}))
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const params = await context.params
     const raffleId = params.id
 
     if (typeof raffleId !== 'string') {
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
-    }
-
-    const walletAddress = body.wallet_address || request.headers.get('x-wallet-address')
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can restore raffles' },
-        { status: 403 }
-      )
     }
 
     const raffle = await getRaffleById(raffleId)
@@ -87,9 +74,8 @@ export async function POST(
     })
   } catch (error) {
     console.error('Error restoring raffle:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

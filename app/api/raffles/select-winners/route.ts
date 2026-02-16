@@ -8,6 +8,8 @@ import {
   canSelectWinner,
   updateRaffle
 } from '@/lib/db/raffles'
+import { requireAdminSession } from '@/lib/auth-server'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -15,10 +17,13 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/raffles/select-winners
  * Selects winners for all ended raffles that don't have a winner yet.
- * Can also be called with a specific raffleId to select winner for that raffle only.
+ * Admin only (session required).
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const body = await request.json().catch(() => ({}))
     const { raffleId } = body
 
@@ -206,9 +211,8 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error selecting winners:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -216,10 +220,13 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET /api/raffles/select-winners
- * Returns list of ended raffles without winners (for monitoring/debugging)
+ * Returns list of ended raffles without winners. Admin only (session required).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const endedRaffles = await getEndedRafflesWithoutWinner()
     
     return NextResponse.json({
@@ -233,9 +240,8 @@ export async function GET() {
     })
   } catch (error) {
     console.error('Error fetching ended raffles:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { safeErrorMessage, safeErrorDetails } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,31 +131,12 @@ function aggregateWithTicketCounts(rows: Array<{ amount_paid: unknown; currency:
 
 /**
  * GET /api/admin/projected-revenue
- * Returns projected revenue from confirmed entries (USDC, SOL, OWL), tickets sold,
- * with 7-day and 30-day buckets and averages. Thresholds are computed from
- * raffle prize/floor values (env REVENUE_THRESHOLD_* overrides if set).
- * Admin only.
+ * Returns projected revenue from confirmed entries. Admin only (session required).
  */
 export async function GET(request: NextRequest) {
   try {
-    const walletAddress =
-      request.headers.get('x-wallet-address') ||
-      request.nextUrl.searchParams.get('wallet')
-
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can view projected revenue' },
-        { status: 403 }
-      )
-    }
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
 
     const { data: entries, error } = await getSupabaseAdmin()
       .from('entries')
@@ -274,8 +256,8 @@ export async function GET(request: NextRequest) {
     console.error('Error in projected-revenue:', error)
     return NextResponse.json(
       {
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : String(error),
+        error: safeErrorMessage(error),
+        ...(safeErrorDetails(error) && { details: safeErrorDetails(error) }),
       },
       { status: 500 }
     )

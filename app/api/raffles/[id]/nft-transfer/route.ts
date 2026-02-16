@@ -1,45 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
 
 /**
  * PATCH /api/raffles/[id]/nft-transfer
- * Updates the NFT transfer transaction signature for a raffle (admin only)
+ * Updates the NFT transfer transaction signature for a raffle. Admin only (session required).
  */
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const body = await request.json()
     const params = await context.params
     const raffleId = params.id
     if (typeof raffleId !== 'string') {
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
     }
-    const { transaction_signature, wallet_address } = body
-
-    // Check if wallet address is provided
-    const walletAddress = wallet_address || request.headers.get('x-wallet-address')
-    
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'Wallet address is required' },
-        { status: 401 }
-      )
-    }
-
-    // Check if user is an admin
-    const adminStatus = await isAdmin(walletAddress)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Only admins can update NFT transfer transactions' },
-        { status: 403 }
-      )
-    }
+    const { transaction_signature } = body
 
     // Validate transaction signature
     if (!transaction_signature || typeof transaction_signature !== 'string') {
@@ -93,9 +78,8 @@ export async function PATCH(
     })
   } catch (error) {
     console.error('Error updating NFT transfer transaction:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

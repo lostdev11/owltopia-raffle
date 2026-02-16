@@ -1,36 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { getEntriesByRaffleId, getRaffleById } from '@/lib/db/raffles'
 import { updateEntryStatus, getEntryById } from '@/lib/db/entries'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import type { Entry, Raffle } from '@/lib/types'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
 
 /**
- * Admin endpoint to batch verify pending entries for a raffle
- * Checks transaction signatures and verifies payments on-chain
+ * Admin endpoint to batch verify pending entries for a raffle.
+ * Admin only (session required). Body: { raffleId }
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { raffleId, adminWallet } = body
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
 
-    if (!raffleId || !adminWallet) {
+    const body = await request.json().catch(() => ({}))
+    const { raffleId } = body
+
+    if (!raffleId) {
       return NextResponse.json(
-        { error: 'Missing required fields: raffleId and adminWallet' },
+        { error: 'Missing required field: raffleId' },
         { status: 400 }
-      )
-    }
-
-    // Check admin status
-    const adminStatus = await isAdmin(adminWallet)
-    if (!adminStatus) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Admin access required' },
-        { status: 403 }
       )
     }
 
@@ -101,9 +96,10 @@ export async function POST(request: NextRequest) {
       errors: results.errors
     })
   } catch (error) {
-    console.error('Error in batch verify entries:', error)
+    // Don't log full error object which might contain wallet addresses
+    console.error('Error in batch verify entries:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

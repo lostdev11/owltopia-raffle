@@ -458,11 +458,11 @@ export async function POST(request: NextRequest) {
       restored: wasRestored
     })
   } catch (error) {
-    console.error('Error verifying entry by transaction signature:', error)
+    // Don't log full error object which might contain wallet addresses
+    console.error('Error verifying entry by transaction signature:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
       { 
-        error: 'Internal server error', 
-        details: error instanceof Error ? error.message : String(error) 
+        error: 'Internal server error'
       },
       { status: 500 }
     )
@@ -631,7 +631,8 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
     
     return { ok: false, reason: 'PARSE_FAILED', detail: 'No SOL, USDC, or OWL payment to raffle wallet found in transaction' }
   } catch (error) {
-    console.error('Error fetching transaction details:', error)
+    // Don't log full error object which might contain wallet addresses
+    console.error('Error fetching transaction details:', error instanceof Error ? error.message : 'Unknown error')
     return { ok: false, reason: 'NOT_FOUND', detail: error instanceof Error ? error.message : String(error) }
   }
 }

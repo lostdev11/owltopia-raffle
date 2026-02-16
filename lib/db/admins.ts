@@ -22,12 +22,10 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
     if (error) {
       // If no admin found, error is expected (PGRST116 = no rows)
       if (error.code === 'PGRST116') {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[Admin check] Wallet not in admins table:', normalized)
-        }
+        // Don't log wallet addresses for security
         return false
       }
-      console.error('Error checking admin status:', error)
+      console.error('Error checking admin status:', error.message || 'Unknown error')
       return false
     }
 
@@ -46,7 +44,7 @@ export async function getAdmins() {
     .order('created_at', { ascending: false })
 
   if (error) {
-    console.error('Error fetching admins:', error)
+    console.error('Error fetching admins:', error.message || 'Unknown error')
     return []
   }
 
@@ -67,7 +65,8 @@ export async function addAdmin(walletAddress: string, createdBy?: string) {
     .single()
 
   if (error) {
-    console.error('Error adding admin:', error)
+    // Don't log wallet addresses - only log error message
+    console.error('Error adding admin:', error.message || 'Unknown error')
     return null
   }
 

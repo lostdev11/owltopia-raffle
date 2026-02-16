@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdminSession } from '@/lib/auth-server'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
 // Create a server-side Supabase client with service role key for uploads
-// Use service role key if available, otherwise fall back to anon key
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-// Use service role key for server-side operations (bypasses RLS)
-// If not available, use anon key (may have permission issues)
 const supabase = createClient(
   supabaseUrl || '',
   supabaseServiceKey || supabaseAnonKey || ''
@@ -19,6 +18,10 @@ const supabase = createClient(
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireAdminSession(request)
+    if (session instanceof NextResponse) return session
+    const formData = await request.formData()
+
     // Check if Supabase is configured
     if (!supabaseUrl) {
       return NextResponse.json(
@@ -27,7 +30,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const formData = await request.formData()
     const file = formData.get('file') as File
 
     if (!file) {
@@ -104,9 +106,8 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error('Error in image upload:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: errorMessage },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

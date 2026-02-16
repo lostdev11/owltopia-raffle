@@ -1,34 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { updateEntryStatus, getEntryById, saveTransactionSignature } from '@/lib/db/entries'
+import { updateEntryStatus, getEntryById, saveTransactionSignature, getEntryByTransactionSignature } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
+import { entriesVerifyBody, parseOr400 } from '@/lib/validations'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
 
 /**
- * Server-side payment verification endpoint
- * 
- * This is a placeholder implementation. In production, you would:
- * 1. Verify the transaction signature on Solana RPC
- * 2. Check the transaction amount matches the expected payment
- * 3. Verify the recipient wallet address
- * 4. Check transaction confirmation status
- * 
- * For now, this accepts a transaction signature and marks the entry as confirmed
- * after a brief delay (simulating verification time).
+ * Server-side payment verification endpoint.
+ * Verifies transaction on Solana RPC, then confirms entry.
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { entryId, transactionSignature } = body
-
-    if (!entryId || !transactionSignature) {
+    const ip = getClientIp(request)
+    const rl = rateLimit(`entries-verify:${ip}`, 60, 60_000)
+    if (!rl.allowed) {
       return NextResponse.json(
-        { error: 'Missing entryId or transactionSignature' },
-        { status: 400 }
+        { error: 'Too many requests. Try again later.' },
+        { status: 429, headers: { 'Retry-After': '60' } }
       )
     }
+
+    const body = await request.json().catch(() => ({}))
+    const parsed = parseOr400(entriesVerifyBody, body)
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
+    }
+    const { entryId, transactionSignature } = parsed.data
 
     // Get the entry to check raffle and ticket quantity
     let entry = await getEntryById(entryId)
@@ -45,6 +46,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Raffle not found' },
         { status: 404 }
+      )
+    }
+
+    // Replay protection: transaction signature must not already be used by another entry
+    const existingWithSig = await getEntryByTransactionSignature(transactionSignature)
+    if (existingWithSig && existingWithSig.id !== entryId) {
+      return NextResponse.json(
+        { error: 'Transaction signature already used for another entry' },
+        { status: 400 }
       )
     }
 
@@ -145,7 +155,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error verifying entry:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: safeErrorMessage(error) },
       { status: 500 }
     )
   }

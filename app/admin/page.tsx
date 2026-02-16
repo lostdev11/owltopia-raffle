@@ -69,12 +69,15 @@ interface RafflePendingSummary {
 
 export default function AdminDashboardPage() {
   const router = useRouter()
-  const { publicKey, connected } = useWallet()
+  const { publicKey, connected, signMessage: walletSignMessage } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
+  const [sessionReady, setSessionReady] = useState<boolean | null>(null)
+  const [signingIn, setSigningIn] = useState(false)
+  const [signInError, setSignInError] = useState<string | null>(null)
   const [deletedEntries, setDeletedEntries] = useState<DeletedEntry[]>([])
   const [loadingDeleted, setLoadingDeleted] = useState(false)
   const [restoredEntries, setRestoredEntries] = useState<RestoredEntry[]>([])
@@ -136,6 +139,7 @@ export default function AdminDashboardPage() {
       setIsAdmin(false)
       setLoading(false)
       setAdminCheckError(null)
+      setSessionReady(null)
       return
     }
     const addr = publicKey.toBase58()
@@ -149,8 +153,69 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, runAdminCheck])
 
   useEffect(() => {
+    if (!connected || !publicKey || !isAdmin) {
+      setSessionReady(null)
+      return
+    }
+    let cancelled = false
+    fetch('/api/auth/session', { credentials: 'include' })
+      .then((res) => {
+        if (cancelled) return
+        setSessionReady(res.ok)
+      })
+      .catch(() => {
+        if (!cancelled) setSessionReady(false)
+      })
+    return () => { cancelled = true }
+  }, [connected, publicKey, isAdmin])
+
+  const handleSignIn = useCallback(async () => {
+    if (!publicKey || !walletSignMessage) {
+      setSignInError('Your wallet does not support message signing.')
+      return
+    }
+    setSignInError(null)
+    setSigningIn(true)
+    try {
+      const nonceRes = await fetch(
+        `/api/auth/nonce?wallet=${encodeURIComponent(publicKey.toBase58())}`,
+        { credentials: 'include' }
+      )
+      if (!nonceRes.ok) {
+        const data = await nonceRes.json().catch(() => ({}))
+        throw new Error(data?.error || 'Failed to get sign-in nonce')
+      }
+      const { message } = await nonceRes.json()
+      const messageBytes = new TextEncoder().encode(message)
+      const signature = await walletSignMessage(messageBytes)
+      const signatureBase64 = typeof signature === 'string'
+        ? btoa(signature)
+        : btoa(String.fromCharCode(...new Uint8Array(signature)))
+      const verifyRes = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          wallet: publicKey.toBase58(),
+          message,
+          signature: signatureBase64,
+        }),
+      })
+      if (!verifyRes.ok) {
+        const data = await verifyRes.json().catch(() => ({}))
+        throw new Error(data?.error || 'Sign-in verification failed')
+      }
+      setSessionReady(true)
+    } catch (e) {
+      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+    } finally {
+      setSigningIn(false)
+    }
+  }, [publicKey, walletSignMessage])
+
+  useEffect(() => {
     const fetchDeletedEntries = async () => {
-      if (!connected || !publicKey || !isAdmin) {
+      if (!connected || !publicKey || !isAdmin || !sessionReady) {
         return
       }
 
@@ -158,11 +223,7 @@ export default function AdminDashboardPage() {
       try {
         const response = await fetch(
           `/api/admin/deleted-entries?wallet=${publicKey.toBase58()}`,
-          {
-            headers: {
-              'x-wallet-address': publicKey.toBase58(),
-            },
-          }
+          { credentials: 'include' }
         )
         if (response.ok) {
           const data = await response.json()
@@ -177,13 +238,13 @@ export default function AdminDashboardPage() {
       }
     }
 
-    if (isAdmin) {
+    if (isAdmin && sessionReady) {
       fetchDeletedEntries()
     }
-  }, [connected, publicKey, isAdmin])
+  }, [connected, publicKey, isAdmin, sessionReady])
 
   const fetchRestoredEntries = async () => {
-    if (!connected || !publicKey || !isAdmin) {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) {
       return
     }
 
@@ -191,11 +252,7 @@ export default function AdminDashboardPage() {
     try {
       const response = await fetch(
         `/api/admin/restored-entries?wallet=${publicKey.toBase58()}`,
-        {
-          headers: {
-            'authorization': `Bearer ${publicKey.toBase58()}`,
-          },
-        }
+        { credentials: 'include' }
       )
       if (response.ok) {
         const data = await response.json()
@@ -212,19 +269,19 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isAdmin && sessionReady) {
       fetchRestoredEntries()
     }
-  }, [connected, publicKey, isAdmin])
+  }, [connected, publicKey, isAdmin, sessionReady])
 
   const fetchEntriesToConfirm = async () => {
-    if (!connected || !publicKey || !isAdmin) return
+    if (!connected || !publicKey || !isAdmin || !sessionReady) return
 
     setLoadingEntriesToConfirm(true)
     try {
       const response = await fetch(
         `/api/admin/entries-to-confirm?wallet=${publicKey.toBase58()}`,
-        { headers: { 'x-wallet-address': publicKey.toBase58() } }
+        { credentials: 'include' }
       )
       if (response.ok) {
         const data = await response.json()
@@ -246,19 +303,19 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isAdmin && sessionReady) {
       fetchEntriesToConfirm()
     }
-  }, [connected, publicKey, isAdmin])
+  }, [connected, publicKey, isAdmin, sessionReady])
 
   useEffect(() => {
     const fetchRevenue = async () => {
-      if (!connected || !publicKey || !isAdmin) return
+      if (!connected || !publicKey || !isAdmin || !sessionReady) return
       setLoadingRevenue(true)
       try {
         const res = await fetch(
           `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
-          { headers: { 'x-wallet-address': publicKey.toBase58() } }
+          { credentials: 'include' }
         )
         if (res.ok) {
           const data = await res.json()
@@ -270,15 +327,15 @@ export default function AdminDashboardPage() {
         setLoadingRevenue(false)
       }
     }
-    if (isAdmin) fetchRevenue()
-  }, [connected, publicKey, isAdmin])
+    if (isAdmin && sessionReady) fetchRevenue()
+  }, [connected, publicKey, isAdmin, sessionReady])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin) return
+    if (!connected || !publicKey || !isAdmin || !sessionReady) return
     const fetchRevShareSchedule = async () => {
       try {
         const res = await fetch(`/api/admin/rev-share-schedule?wallet=${publicKey.toBase58()}`, {
-          headers: { 'x-wallet-address': publicKey.toBase58() },
+          credentials: 'include',
         })
         if (res.ok) {
           const data = await res.json()
@@ -294,7 +351,7 @@ export default function AdminDashboardPage() {
       }
     }
     fetchRevShareSchedule()
-  }, [connected, publicKey, isAdmin])
+  }, [connected, publicKey, isAdmin, sessionReady])
 
   const saveRevShareSchedule = async () => {
     if (!publicKey) return
@@ -302,10 +359,8 @@ export default function AdminDashboardPage() {
     try {
       const res = await fetch('/api/admin/rev-share-schedule', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-wallet-address': publicKey.toBase58(),
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           next_date: revShareScheduleEdit.next_date.trim() || null,
           total_sol: revShareScheduleEdit.total_sol === '' ? null : parseFloat(revShareScheduleEdit.total_sol),
@@ -330,6 +385,7 @@ export default function AdminDashboardPage() {
     try {
       const response = await fetch('/api/admin/verify-entries', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           raffleId,
@@ -360,10 +416,8 @@ export default function AdminDashboardPage() {
     try {
       const response = await fetch('/api/admin/verify-by-tx', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'authorization': `Bearer ${publicKey?.toBase58() || ''}`,
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transactionSignature: txSignature.trim(),
         }),
@@ -460,6 +514,63 @@ export default function AdminDashboardPage() {
               <Button onClick={() => router.push('/raffles')} variant="outline">
                 Go to Raffles
               </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (sessionReady === false) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="max-w-4xl mx-auto">
+          <Card>
+            <CardHeader>
+              <CardTitle>Sign in to Owl Vision</CardTitle>
+              <CardDescription>
+                Prove ownership of your admin wallet by signing a one-time message. No transaction or fee is required.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {signInError && (
+                <p className="text-sm text-destructive">{signInError}</p>
+              )}
+              <Button
+                onClick={handleSignIn}
+                disabled={signingIn || !walletSignMessage}
+              >
+                {signingIn ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Signing…
+                  </>
+                ) : (
+                  'Sign in with wallet'
+                )}
+              </Button>
+              {!walletSignMessage && (
+                <p className="text-sm text-muted-foreground">
+                  Your connected wallet does not support message signing. Try another wallet.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (sessionReady !== true) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="max-w-4xl mx-auto">
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-center text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Verifying session…
+              </p>
             </CardContent>
           </Card>
         </div>

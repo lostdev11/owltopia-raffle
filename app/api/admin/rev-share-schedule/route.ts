@@ -1,40 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { requireAdminSession } from '@/lib/auth-server'
 import { getRevShareSchedule, updateRevShareSchedule } from '@/lib/db/rev-share-schedule'
+import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
-function getWallet(request: NextRequest): string | null {
-  return request.headers.get('x-wallet-address') || request.nextUrl.searchParams.get('wallet') || null
-}
-
 /**
  * GET /api/admin/rev-share-schedule
- * Admin only. Returns current next rev share settings.
+ * Admin only (session required).
  */
 export async function GET(request: NextRequest) {
-  const wallet = getWallet(request)
-  if (!wallet) return NextResponse.json({ error: 'Wallet required' }, { status: 401 })
-  const admin = await isAdmin(wallet)
-  if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const session = await requireAdminSession(request)
+  if (session instanceof NextResponse) return session
   try {
     const schedule = await getRevShareSchedule()
     return NextResponse.json(schedule ?? { next_date: null, total_sol: null, total_usdc: null })
   } catch (e) {
     console.error(e)
-    return NextResponse.json({ error: 'Failed to load' }, { status: 500 })
+    return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
   }
 }
 
 /**
  * PATCH /api/admin/rev-share-schedule
- * Admin only. Body: { next_date?: string | null, total_sol?: number | null, total_usdc?: number | null }
+ * Admin only (session required). Body: { next_date?, total_sol?, total_usdc? }
  */
 export async function PATCH(request: NextRequest) {
-  const wallet = getWallet(request)
-  if (!wallet) return NextResponse.json({ error: 'Wallet required' }, { status: 401 })
-  const admin = await isAdmin(wallet)
-  if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const session = await requireAdminSession(request)
+  if (session instanceof NextResponse) return session
   try {
     const body = await request.json().catch(() => ({}))
     const next_date = body.next_date !== undefined ? (body.next_date == null ? null : String(body.next_date)) : undefined
@@ -44,6 +37,6 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json(updated ?? { next_date: null, total_sol: null, total_usdc: null })
   } catch (e) {
     console.error(e)
-    return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
+    return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
   }
 }
