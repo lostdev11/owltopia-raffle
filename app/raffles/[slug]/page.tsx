@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.gif`
+const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.png`
 const DEFAULT_OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 function absoluteImageUrl(imageUrl: string | null): string | null {
@@ -40,7 +40,7 @@ export async function generateMetadata({
   const imageUrl = absoluteImageUrl(raffle.image_url)
   const ogImage = imageUrl
     ? { url: imageUrl, width: 1200, height: 630, alt: raffle.title }
-    : { url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: DEFAULT_OG_ALT, type: 'image/gif' as const }
+    : { url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: DEFAULT_OG_ALT, type: 'image/png' as const }
 
   return {
     title,

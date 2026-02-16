@@ -33,8 +33,8 @@ export const viewport = {
 
 // Absolute base URL (X and others require absolute HTTPS URLs for card images)
 const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-// 1200x630 static image from public/og-image.gif - X/Discord prefer this aspect ratio
-const DEFAULT_OG_IMAGE_URL = `${SITE_BASE}/og-image.gif`
+// 1200x630 static image from public/og-image.png - X/Discord prefer this aspect ratio
+const DEFAULT_OG_IMAGE_URL = `${SITE_BASE}/og-image.png`
 const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 // Default to production URL so link previews (OG/Twitter) work when sharing any page
@@ -73,7 +73,7 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         alt: OG_IMAGE_ALT,
-        type: 'image/gif',
+        type: 'image/png',
       },
     ],
   },
