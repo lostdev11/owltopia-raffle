@@ -50,6 +50,14 @@ export async function POST(
       )
     }
 
+    // Parse request body for optional extension_hours
+    let body: { extension_hours?: number } = {}
+    try {
+      body = await request.json()
+    } catch {
+      // If no body or invalid JSON, use defaults
+    }
+
     // Extend by 24 hours from now (outage recovery buffer)
     const extensionHours = body.extension_hours ?? 24
     const validHours = Math.min(168, Math.max(1, Number(extensionHours) || 24)) // 1–168 hours
