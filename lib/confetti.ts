@@ -6,12 +6,16 @@ const GREEN_OPTS = {
   colors: ['#22c55e', '#16a34a', '#15803d', '#166534', '#14532d', '#4ade80', '#86efac'],
 }
 
-let confettiPromise: Promise<typeof import('canvas-confetti').default> | null = null
+type ConfettiFn = typeof import('canvas-confetti')
+let confettiPromise: Promise<ConfettiFn | null> | null = null
 
 function getConfetti() {
   if (typeof window === 'undefined') return Promise.resolve(null)
   if (!confettiPromise) {
-    confettiPromise = import('canvas-confetti').then((m) => m.default)
+    confettiPromise = import('canvas-confetti').then((m) => {
+      const fn = (m as { default?: ConfettiFn }).default ?? (m as ConfettiFn)
+      return fn
+    })
   }
   return confettiPromise
 }
