@@ -13,7 +13,8 @@ function getConfetti() {
   if (typeof window === 'undefined') return Promise.resolve(null)
   if (!confettiPromise) {
     confettiPromise = import('canvas-confetti').then((m) => {
-      const fn = (m as { default?: ConfettiFn }).default ?? (m as ConfettiFn)
+      const fn =
+        (m as { default?: ConfettiFn }).default ?? (m as unknown as ConfettiFn)
       return fn
     })
   }
