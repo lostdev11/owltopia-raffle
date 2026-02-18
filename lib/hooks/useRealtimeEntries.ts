@@ -31,10 +31,12 @@ export function useRealtimeEntries({
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isRealtimeActiveRef = useRef(false) // Track subscription status synchronously
 
-  // Fetch entries from API
+  // Fetch entries from API (absolute URL to avoid "Failed to fetch" with Turbopack/relative URLs)
   const fetchEntries = useCallback(async () => {
+    if (typeof window === 'undefined') return null
+    const url = `${window.location.origin}/api/entries?raffleId=${encodeURIComponent(raffleId)}&_t=${Date.now()}`
     try {
-      const response = await fetch(`/api/entries?raffleId=${raffleId}&_t=${Date.now()}`, {
+      const response = await fetch(url, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',

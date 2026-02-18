@@ -16,6 +16,7 @@ import {
   createDefaultWalletNotFoundHandler,
 } from '@solana-mobile/wallet-adapter-mobile'
 
+import { isMobileDevice } from '@/lib/utils'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -46,32 +47,36 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
   }, [network])
 
   // Configure wallet adapters. Phantom & Jupiter are discovered via Standard Wallet—do not add them.
+  // Only add SolanaMobileWalletAdapter on mobile; on desktop it can block or break extension wallets (Phantom, etc.).
   const wallets = useMemo(
     () => {
-      const walletAdapters = [
-        new SolanaMobileWalletAdapter({
-          addressSelector: createDefaultAddressSelector(),
-          appIdentity: {
-            name: 'Owl Raffle',
-            uri: typeof window !== 'undefined' ? window.location.origin : 'https://owltopia.xyz',
-            icon: typeof window !== 'undefined' ? `${window.location.origin}/icon.png` : '/icon.png',
-          },
-          // Use a cache that clears on disconnect to force re-authorization each time
-          authorizationResultCache: createDefaultAuthorizationResultCache(),
-          cluster: network === WalletAdapterNetwork.Mainnet 
-            ? 'mainnet-beta' 
-            : network === WalletAdapterNetwork.Devnet 
-            ? 'devnet' 
-            : network === WalletAdapterNetwork.Testnet 
-            ? 'testnet' 
-            : 'mainnet-beta',
-          onWalletNotFound: createDefaultWalletNotFoundHandler(),
-        }),
+      const walletAdapters = []
+      if (typeof window !== 'undefined' && isMobileDevice()) {
+        walletAdapters.push(
+          new SolanaMobileWalletAdapter({
+            addressSelector: createDefaultAddressSelector(),
+            appIdentity: {
+              name: 'Owl Raffle',
+              uri: window.location.origin,
+              icon: `${window.location.origin}/icon.png`,
+            },
+            authorizationResultCache: createDefaultAuthorizationResultCache(),
+            cluster: network === WalletAdapterNetwork.Mainnet
+              ? 'mainnet-beta'
+              : network === WalletAdapterNetwork.Devnet
+              ? 'devnet'
+              : network === WalletAdapterNetwork.Testnet
+              ? 'testnet'
+              : 'mainnet-beta',
+            onWalletNotFound: createDefaultWalletNotFoundHandler(),
+          })
+        )
+      }
+      walletAdapters.push(
         new SolflareWalletAdapter({ network }),
         new CoinbaseWalletAdapter({ network }),
-        new TrustWalletAdapter({ network }),
-      ]
-
+        new TrustWalletAdapter({ network })
+      )
       return walletAdapters
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

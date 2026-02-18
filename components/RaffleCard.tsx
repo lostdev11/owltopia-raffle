@@ -20,7 +20,7 @@ import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
-import { LinkifiedText } from '@/components/LinkifiedText'
+import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
 import { Trash2, Edit, Trophy, Share2 } from 'lucide-react'
@@ -811,6 +811,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             }
           }}
         >
+          <LinkifiedTextInsideLinkProvider>
           <Card
             className={`${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
             style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
@@ -855,7 +856,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </div>
               </div>
             <CardDescription className="text-xs text-muted-foreground line-clamp-1 mb-2 min-w-0">
-              <LinkifiedText text={raffle.description} />
+              <LinkifiedText text={raffle.description} nestedInLink />
             </CardDescription>
             <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
@@ -998,6 +999,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             )}
           </div>
         </Card>
+          </LinkifiedTextInsideLinkProvider>
       </Link>
       {isAdmin && (
         <>
@@ -1129,6 +1131,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           }
         }}
       >
+        <LinkifiedTextInsideLinkProvider>
         <Card
           className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
           style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
@@ -1177,7 +1180,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     </div>
                   </div>
                   <CardDescription className={`${classes.description} text-white/90`}>
-                    <LinkifiedText text={raffle.description} />
+                    <LinkifiedText text={raffle.description} nestedInLink />
                   </CardDescription>
                 </div>
               </div>
@@ -1238,7 +1241,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   </div>
                 </div>
                 <CardDescription className={classes.description}>
-                  <LinkifiedText text={raffle.description} />
+                  <LinkifiedText text={raffle.description} nestedInLink />
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -1425,6 +1428,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             </>
           )}
         </Card>
+        </LinkifiedTextInsideLinkProvider>
       </Link>
     {isAdmin && (
       <>

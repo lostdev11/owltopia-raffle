@@ -34,3 +34,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local-only (solo dev; not for repo)
+.cursor/
+docs/SECURITY_MINDSET.md
