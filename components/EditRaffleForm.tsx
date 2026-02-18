@@ -695,20 +695,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         {entry.amount_paid} {entry.currency} • {new Date(entry.created_at).toLocaleString()}
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDeleteEntry(entry.id)}
-                      disabled={deletingEntryId === entry.id}
-                      className="ml-4 flex-shrink-0"
-                    >
-                      {deletingEntryId === entry.id ? (
-                        'Deleting...'
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
+                    {entry.status === 'pending' && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeleteEntry(entry.id)}
+                        disabled={deletingEntryId === entry.id}
+                        className="ml-4 flex-shrink-0"
+                      >
+                        {deletingEntryId === entry.id ? (
+                          'Deleting...'
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>

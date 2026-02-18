@@ -303,7 +303,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         throw new Error(errorData.error || 'Failed to create entry')
       }
 
-      const { entry, paymentDetails } = await createResponse.json()
+      const { entryId, paymentDetails } = await createResponse.json()
+      if (!entryId) throw new Error('Invalid create response')
 
       // Step 2: Build transaction
       let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
@@ -681,7 +682,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          entryId: entry.id,
+          entryId,
           transactionSignature: signature,
         }),
       })

@@ -169,6 +169,26 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
   }, { maxRetries: 2 })
 }
 
+/**
+ * Invalidate all pending entries for the same raffle + wallet (no keepEntryId).
+ * Call before insert so only one pending entry can exist at a time (no race window).
+ */
+export async function invalidateAllPendingEntriesForWallet(
+  raffleId: string,
+  walletAddress: string
+): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({ status: 'rejected' })
+    .eq('raffle_id', raffleId)
+    .eq('wallet_address', walletAddress)
+    .eq('status', 'pending')
+
+  if (error) {
+    console.error('Error invalidating previous pending entries:', error)
+  }
+}
+
 export async function createEntry(
   entry: Omit<Entry, 'id' | 'created_at' | 'verified_at' | 'restored_at' | 'restored_by'>
 ) {
@@ -179,6 +199,9 @@ export async function createEntry(
   }
 
   return withRetry(async () => {
+    // Invalidate first so only one pending per wallet+raffle (eliminates race)
+    await invalidateAllPendingEntriesForWallet(entry.raffle_id, entry.wallet_address)
+
     const { data, error } = await getSupabaseAdmin()
       .from('entries')
       .insert(entry)

@@ -80,6 +80,36 @@ export async function verifyTransaction(
       console.error(error)
       return { valid: false, error }
     }
+
+    // Reject transactions older than 1 hour
+    const txWithBlockTime = transaction as { blockTime?: number | null }
+    if (typeof txWithBlockTime.blockTime === 'number') {
+      const ageSeconds = Date.now() / 1000 - txWithBlockTime.blockTime
+      const maxAgeSeconds = 3600 // 1 hour
+      if (ageSeconds > maxAgeSeconds) {
+        const error = `Transaction expired. Transactions older than 1 hour cannot be used for verification. This transaction is ${Math.round(ageSeconds / 60)} minutes old.`
+        console.error(error)
+        return { valid: false, error }
+      }
+    }
+
+    // Ensure the transaction was signed by the entry's wallet (fee payer = first account)
+    const message = transaction.transaction.message
+    const accountKeys = 'staticAccountKeys' in message
+      ? (message as any).staticAccountKeys
+      : (message as any).accountKeys
+    const feePayerKey = accountKeys?.[0]
+    const expectedWalletPubkey = new PublicKey(entry.wallet_address)
+    const feePayerMatches =
+      feePayerKey != null &&
+      (typeof feePayerKey === 'string'
+        ? feePayerKey === entry.wallet_address
+        : (feePayerKey as PublicKey).equals(expectedWalletPubkey))
+    if (!feePayerMatches) {
+      const error = `Transaction wallet mismatch: this transaction was not signed by the entry wallet (${entry.wallet_address}). Verification denied.`
+      console.error(error)
+      return { valid: false, error }
+    }
     
     // Check if transaction was successful
     if (transaction.meta?.err) {

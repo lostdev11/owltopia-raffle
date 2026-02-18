@@ -310,7 +310,8 @@ export function RaffleDetailClient({
         throw new Error(errorData.error || 'Failed to create entry')
       }
 
-      const { entry, paymentDetails } = await createResponse.json()
+      const { entryId, paymentDetails } = await createResponse.json()
+      if (!entryId) throw new Error('Invalid create response')
       
       // Log payment details for debugging
       console.log(`Payment details: amount=${paymentDetails.amount}, currency=${paymentDetails.currency}, ticketQuantity=${ticketQuantity}`)
@@ -851,7 +852,7 @@ export function RaffleDetailClient({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          entryId: entry.id,
+          entryId,
           transactionSignature: signature,
         }),
       })

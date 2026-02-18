@@ -100,6 +100,7 @@ export default function AdminDashboardPage() {
   const [loadingEntriesToConfirm, setLoadingEntriesToConfirm] = useState(false)
   const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
   const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
+  const [removingEntryId, setRemovingEntryId] = useState<string | null>(null)
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
@@ -401,6 +402,29 @@ export default function AdminDashboardPage() {
       console.error('Error batch verifying:', error)
     } finally {
       setVerifyingRaffleId(null)
+    }
+  }
+
+  const handleRemovePendingEntry = async (entryId: string) => {
+    if (!confirm('Remove this pending entry? It will be deleted and cannot be recovered.')) return
+    setRemovingEntryId(entryId)
+    try {
+      const response = await fetch(`/api/entries/${entryId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (response.ok) {
+        fetchEntriesToConfirm()
+      } else {
+        const data = await response.json().catch(() => ({}))
+        alert(data.error || 'Failed to remove entry')
+      }
+    } catch (error) {
+      console.error('Error removing entry:', error)
+      alert('Failed to remove entry')
+    } finally {
+      setRemovingEntryId(null)
     }
   }
 
@@ -1119,6 +1143,26 @@ export default function AdminDashboardPage() {
                                   No TX — use TX tool above
                                 </span>
                               )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleRemovePendingEntry(entry.id)
+                                }}
+                                disabled={removingEntryId === entry.id}
+                              >
+                                {removingEntryId === entry.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                    Remove
+                                  </>
+                                )}
+                              </Button>
                             </div>
                           ))}
                         </div>

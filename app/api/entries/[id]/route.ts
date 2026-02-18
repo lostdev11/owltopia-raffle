@@ -28,6 +28,13 @@ export async function DELETE(
       )
     }
 
+    if (existingEntry.status !== 'pending') {
+      return NextResponse.json(
+        { error: 'Only pending entries can be removed. Confirmed or rejected entries cannot be deleted.' },
+        { status: 400 }
+      )
+    }
+
     const success = await deleteEntry(entryId, session.wallet)
 
     if (!success) {
