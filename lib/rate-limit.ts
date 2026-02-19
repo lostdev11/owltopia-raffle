@@ -1,6 +1,8 @@
 /**
  * In-memory rate limiter (v1). Use Redis/Upstash for production at scale.
  * Keys by identifier (e.g. IP or IP+wallet); allows N requests per windowMs.
+ * In serverless environments with multiple instances, each instance has its own
+ * store — use a shared store (e.g. Upstash Redis) for strict cross-instance limits.
  */
 
 type Entry = { count: number; resetAt: number }

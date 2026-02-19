@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, ReactNode } from 'react'
+import { useMemo, useState, useEffect, ReactNode } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
@@ -29,25 +29,18 @@ interface WalletContextProviderProps {
   children: ReactNode
 }
 
-export function WalletContextProvider({ children }: WalletContextProviderProps) {
-  // You can also provide a custom RPC endpoint
-  // IMPORTANT: Public RPC endpoints (clusterApiUrl) are rate-limited and may return 403 errors
-  // For production, use a private RPC endpoint from Helius, QuickNode, or Alchemy
-  // Set NEXT_PUBLIC_SOLANA_RPC_URL in your .env.local file
+/** Inner provider that runs only after client mount and autoConnect delay. */
+function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const network = WalletAdapterNetwork.Mainnet
   const endpoint = useMemo(() => {
     const customRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
-    // Validate that the RPC URL is a valid HTTP/HTTPS URL
     if (customRpc && (customRpc.startsWith('http://') || customRpc.startsWith('https://'))) {
       return customRpc
     }
-    // Fallback to a more reliable public endpoint (drpc.org has better rate limits)
-    // For production, always set NEXT_PUBLIC_SOLANA_RPC_URL to a private endpoint
     return 'https://solana.drpc.org'
-  }, [network])
+  }, [])
 
-  // Configure wallet adapters. Phantom & Jupiter are discovered via Standard Wallet—do not add them.
-  // Only add SolanaMobileWalletAdapter on mobile; on desktop it can block or break extension wallets (Phantom, etc.).
+  // Build wallets only on client so extension/Standard Wallet is available and no SSR mismatch
   const wallets = useMemo(
     () => {
       const walletAdapters = []
@@ -79,15 +72,24 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
       )
       return walletAdapters
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [network]
   )
+
+  // Delay autoConnect until after wallet extension (Phantom, etc.) is injected and ready.
+  // Fixes "connect only works after refresh" by avoiding autoConnect before extension is ready.
+  const [autoConnectReady, setAutoConnectReady] = useState(false)
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setAutoConnectReady(true))
+    })
+    return () => cancelAnimationFrame(rafId)
+  }, [])
 
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider 
         wallets={wallets} 
-        autoConnect
+        autoConnect={autoConnectReady}
         onError={(error) => {
           // Log all errors in development for debugging
           if (process.env.NODE_ENV === 'development') {
@@ -189,4 +191,29 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
       </WalletProvider>
     </ConnectionProvider>
   )
+}
+
+/**
+ * Renders the wallet provider only after client mount to avoid:
+ * - SSR/hydration mismatch (wallets differ when window is undefined)
+ * - autoConnect running before the wallet extension is injected
+ * Shows a minimal loading state until then so the tree never sees a missing provider.
+ */
+export function WalletContextProvider({ children }: WalletContextProviderProps) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex flex-col bg-black" aria-busy="true" aria-label="Loading">
+        <div className="flex-1 flex items-center justify-center">
+          <span className="text-green-500/80 text-sm">Loading…</span>
+        </div>
+      </div>
+    )
+  }
+
+  return <WalletContextProviderInner>{children}</WalletContextProviderInner>
 }

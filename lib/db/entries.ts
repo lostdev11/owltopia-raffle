@@ -170,6 +170,28 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
 }
 
 /**
+ * Get IDs of pending entries for a raffle + wallet.
+ * Used to avoid invalidating an entry that is currently being verified.
+ */
+export async function getPendingEntryIdsForWalletAndRaffle(
+  raffleId: string,
+  walletAddress: string
+): Promise<string[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('id')
+    .eq('raffle_id', raffleId)
+    .eq('wallet_address', walletAddress)
+    .eq('status', 'pending')
+
+  if (error) {
+    console.error('Error fetching pending entry IDs:', error)
+    return []
+  }
+  return (data || []).map((row) => row.id as string)
+}
+
+/**
  * Invalidate all pending entries for the same raffle + wallet (no keepEntryId).
  * Call before insert so only one pending entry can exist at a time (no race window).
  */

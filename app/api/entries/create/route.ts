@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createEntry } from '@/lib/db/entries'
+import {
+  createEntry,
+  getPendingEntryIdsForWalletAndRaffle,
+} from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { hasAnyInVerification } from '@/lib/verify-in-flight'
 import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
 import { entriesCreateBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -71,20 +75,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
-    if (raffle.max_tickets) {
-      const allEntries = await getEntriesByRaffleId(raffle.id)
-      const totalConfirmedTickets = allEntries
-        .filter(e => e.status === 'confirmed')
-        .reduce((sum, e) => sum + e.ticket_quantity, 0)
-      
-      if (totalConfirmedTickets + ticketQuantityNum > raffle.max_tickets) {
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+    // Coerce DB numerics (can be string from Supabase) so logic works for all clients (desktop + mobile)
+    const ticketPrice = Number(raffle.ticket_price)
+    if (!Number.isFinite(ticketPrice) || ticketPrice <= 0) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    if (raffle.max_tickets != null) {
+      const maxTickets = Number(raffle.max_tickets)
+      if (Number.isFinite(maxTickets) && maxTickets > 0) {
+        const allEntries = await getEntriesByRaffleId(raffle.id)
+        const totalConfirmedTickets = allEntries
+          .filter(e => e.status === 'confirmed')
+          .reduce((sum, e) => sum + Number(e.ticket_quantity), 0)
+        if (totalConfirmedTickets + ticketQuantityNum > maxTickets) {
+          return NextResponse.json(ERROR_BODY, { status: 400 })
+        }
       }
     }
 
-    const finalAmountPaid = Number(raffle.ticket_price) * ticketQuantityNum
+    const finalAmountPaid = ticketPrice * ticketQuantityNum
     if (!Number.isFinite(finalAmountPaid) || finalAmountPaid <= 0) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    // Do not invalidate (reset) a pending entry that is currently being verified.
+    // Entry must only be "released" after verification completes (race-condition hardening).
+    const pendingIds = await getPendingEntryIdsForWalletAndRaffle(
+      raffleIdStr,
+      walletAddressStr
+    )
+    if (pendingIds.length > 0 && hasAnyInVerification(pendingIds)) {
+      return NextResponse.json(
+        ERROR_BODY,
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
     }
 
     // Create pending entry

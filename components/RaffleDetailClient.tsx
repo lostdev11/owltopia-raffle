@@ -288,9 +288,8 @@ export function RaffleDetailClient({
           if (fetchRetries === 0) {
             if (isFetchError || errorName === 'AbortError') {
               throw new Error(
-                'Network connection failed. This may be a connectivity issue on mobile. ' +
-                'Please check your internet connection and try again. ' +
-                'If the issue persists, try switching between WiFi and mobile data.'
+                'Network connection failed. Please check your internet connection and try again. ' +
+                'On mobile, try switching between WiFi and mobile data.'
               )
             }
             throw fetchErr
@@ -306,12 +305,32 @@ export function RaffleDetailClient({
       }
 
       if (!createResponse.ok) {
-        const errorData = await createResponse.json()
-        throw new Error(errorData.error || 'Failed to create entry')
+        // Safe parse for desktop and mobile: proxy/502 often return HTML; avoid JSON parse errors
+        let errorMessage = 'Failed to create entry. Please try again.'
+        try {
+          const contentType = createResponse.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            const errorData = await createResponse.json()
+            if (typeof errorData?.error === 'string') errorMessage = errorData.error
+          }
+        } catch {
+          // Non-JSON or empty body (common on 502/timeout on any device)
+        }
+        throw new Error(errorMessage)
       }
 
-      const { entryId, paymentDetails } = await createResponse.json()
-      if (!entryId) throw new Error('Invalid create response')
+      let entryId: string
+      let paymentDetails: { recipient: string; amount: number; currency: string; usdcMint: string; owlMint: string | null; tokenDecimals: number }
+      try {
+        const data = await createResponse.json()
+        entryId = data?.entryId
+        paymentDetails = data?.paymentDetails
+      } catch {
+        throw new Error('Invalid response from server. Please try again.')
+      }
+      if (!entryId || !paymentDetails) {
+        throw new Error('Invalid create response')
+      }
       
       // Log payment details for debugging
       console.log(`Payment details: amount=${paymentDetails.amount}, currency=${paymentDetails.currency}, ticketQuantity=${ticketQuantity}`)
@@ -858,32 +877,38 @@ export function RaffleDetailClient({
       })
 
       if (!verifyResponse.ok) {
-        const errorData = await verifyResponse.json()
-        
+        // Safe parse for desktop and mobile: avoid JSON errors on 502/non-JSON bodies
+        let errorData: { error?: string; details?: string; message?: string } = {}
+        try {
+          const contentType = verifyResponse.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            errorData = await verifyResponse.json()
+          }
+        } catch {
+          // Non-JSON or empty body
+        }
+
         // Handle temporary verification failures (202 Accepted)
         if (verifyResponse.status === 202) {
           // Transaction signature saved, verification will retry automatically (confetti already fired on tx confirm)
           setSuccess(true)
           setError(null)
-          // Show a message that verification is pending
           console.log('Verification pending:', errorData.message || errorData.details)
-          
-          // Refresh to pick up the entry with saved signature
+
           router.refresh()
           await new Promise(resolve => setTimeout(resolve, 1000))
           fetchEntries()
-          
-          // Close dialog after showing success message
+
           setTimeout(() => {
             setShowEnterRaffleDialog(false)
           }, 2000)
-          return // Exit early - verification will complete in background
+          return
         }
-        
+
         // Permanent failure
-        const errorMessage = errorData.details 
-          ? `${errorData.error}: ${errorData.details}` 
-          : errorData.error || 'Failed to verify transaction'
+        const errorMessage = errorData.details && errorData.error
+          ? `${errorData.error}: ${errorData.details}`
+          : (errorData.error || 'Failed to verify transaction. Please try again.')
         console.error('Verification error details:', errorData)
         throw new Error(errorMessage)
       }
@@ -1012,8 +1037,17 @@ export function RaffleDetailClient({
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to record NFT transfer transaction')
+        let msg = 'Failed to record NFT transfer transaction.'
+        try {
+          const contentType = response.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            const errorData = await response.json()
+            if (typeof errorData?.error === 'string') msg = errorData.error
+          }
+        } catch {
+          // keep default msg
+        }
+        throw new Error(msg)
       }
 
       setTransferSuccess(true)
