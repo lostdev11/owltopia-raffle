@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 touch-manipulation cursor-pointer",
   {
     variants: {
       variant: {
@@ -39,19 +39,40 @@ export interface ButtonProps
   asChild?: boolean
 }
 
+const INVOKE_DEBOUNCE_MS = 400
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (props, ref) => {
     const { className, variant, size, asChild = false, onClick, children, ...rest } = props
-    // Ensure asChild never reaches the DOM (React warning)
+    const lastInvokeRef = React.useRef<number>(0)
     const restProps = rest as Omit<typeof rest, 'asChild'>
+
+    const invokeClick = React.useCallback(
+      (e: React.MouseEvent<HTMLButtonElement>) => {
+        if (restProps.disabled) return
+        const now = Date.now()
+        if (now - lastInvokeRef.current < INVOKE_DEBOUNCE_MS) return
+        lastInvokeRef.current = now
+        e.stopPropagation()
+        onClick?.(e)
+      },
+      [onClick, restProps.disabled]
+    )
+
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation()
-      onClick?.(e)
+      invokeClick(e)
+    }
+
+    const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0 && e.button !== undefined) return
+      if (restProps.disabled) return
+      invokeClick(e as unknown as React.MouseEvent<HTMLButtonElement>)
     }
 
     const baseProps = {
       className: cn(buttonVariants({ variant, size, className })),
       onClick: handleClick,
+      onPointerUp: handlePointerUp,
       ...restProps,
     }
 
@@ -63,8 +84,9 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        onClick={handleClick}
         {...restProps}
+        onClick={handleClick}
+        onPointerUp={handlePointerUp}
       >
         {children}
       </button>

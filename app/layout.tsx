@@ -6,6 +6,7 @@ import { WalletContextProvider } from '@/components/WalletProvider'
 import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
 import { ErrorHandler } from '@/components/ErrorHandler'
+import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -225,6 +226,7 @@ export default function RootLayout({
           }}
         />
         <ErrorHandler />
+        <SolflareTouchFix />
         <WalletContextProvider>
           <div className="flex flex-col min-h-screen">
             <ConditionalHeader />

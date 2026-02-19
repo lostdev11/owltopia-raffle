@@ -579,6 +579,16 @@ export function WalletConnectButton() {
     [mounted, connected, connecting, setVisible]
   )
 
+  // Solflare in-app browser (mobile) often doesn't fire click from touch; pointerup fires reliably
+  const handleWrapperPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0 && e.button !== undefined) return
+      if (!mounted || connected || connecting) return
+      setVisible(true)
+    },
+    [mounted, connected, connecting, setVisible]
+  )
+
   return (
     <>
       <div 
@@ -592,6 +602,7 @@ export function WalletConnectButton() {
           zIndex: 10,
         }}
         onClick={handleWrapperClick}
+        onPointerUp={handleWrapperPointerUp}
         tabIndex={connected ? -1 : 0}
         onKeyDown={(e) => {
           if (connected) return
