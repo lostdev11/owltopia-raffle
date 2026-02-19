@@ -131,7 +131,7 @@ function sleep(ms: number): Promise<void> {
  * ```
  */
 export async function withQueryRetry<T>(
-  queryPromise: Promise<{ data: T | null; error: any }>,
+  queryPromise: PromiseLike<{ data: T | null; error: any }>,
   options: RetryOptions = {}
 ): Promise<{ data: T | null; error: any }> {
   return withRetry(async () => {
