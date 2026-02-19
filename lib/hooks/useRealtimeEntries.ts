@@ -31,16 +31,20 @@ export function useRealtimeEntries({
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isRealtimeActiveRef = useRef(false) // Track subscription status synchronously
 
-  // Fetch entries from API (absolute URL to avoid "Failed to fetch" with Turbopack/relative URLs)
+  // Fetch entries from API (absolute URL to avoid "Failed to fetch" with Turbopack/relative URLs).
+  // Use AbortSignal + timeout so a stuck server or Supabase connection cannot hold the request for minutes.
+  const ENTRY_FETCH_TIMEOUT_MS = 15_000
+
   const fetchEntries = useCallback(async () => {
     if (typeof window === 'undefined') return null
     const url = `${window.location.origin}/api/entries?raffleId=${encodeURIComponent(raffleId)}&_t=${Date.now()}`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), ENTRY_FETCH_TIMEOUT_MS)
     try {
       const response = await fetch(url, {
         cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-        },
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: controller.signal,
       })
       if (response.ok) {
         const updatedEntries = await response.json()
@@ -49,7 +53,11 @@ export function useRealtimeEntries({
         return updatedEntries
       }
     } catch (error) {
-      console.error('Error fetching entries:', error)
+      if ((error as Error)?.name !== 'AbortError') {
+        console.error('Error fetching entries:', error)
+      }
+    } finally {
+      clearTimeout(timeoutId)
     }
     return null
   }, [raffleId, onUpdate])

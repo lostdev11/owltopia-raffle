@@ -89,6 +89,7 @@ export function isRetryableError(error: Error): boolean {
     'timeout',
     'network',
     'econnrefused',
+    'econnreset',
     'enotfound',
     'etimedout',
     'socket',

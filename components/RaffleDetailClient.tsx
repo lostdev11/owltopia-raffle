@@ -61,7 +61,7 @@ export function RaffleDetailClient({
   owlVisionScore,
 }: RaffleDetailClientProps) {
   const router = useRouter()
-  const { publicKey, sendTransaction, connected } = useWallet()
+  const { publicKey, sendTransaction, connected, wallet } = useWallet()
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
@@ -819,6 +819,10 @@ export function RaffleDetailClient({
         }
         if (isMobile && (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))) {
           throw new Error('Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.')
+        }
+        // Solflare-specific: give clearer guidance (connection/signing issues common with extension)
+        if (errorMessage.toLowerCase().includes('solflare') || (wallet?.adapter?.name && String(wallet.adapter.name).toLowerCase().includes('solflare'))) {
+          throw new Error('Solflare wallet error. Please try: 1) Refreshing the page and reconnecting Solflare, 2) Updating the Solflare extension to the latest version, 3) Using Solflare in a different browser if the issue persists.')
         }
         if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
           throw new Error('Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.')

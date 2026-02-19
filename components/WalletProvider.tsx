@@ -4,8 +4,8 @@ import { useMemo, useState, useEffect, ReactNode } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
+import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare'
 import {
-  SolflareWalletAdapter,
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
@@ -65,8 +65,9 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           })
         )
       }
+      // Use dedicated Solflare adapter (better compatibility than bundle). No options per Solflare docs.
       walletAdapters.push(
-        new SolflareWalletAdapter({ network }),
+        new SolflareWalletAdapter(),
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network })
       )
@@ -122,6 +123,16 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
             errorString.includes('walletnotready') ||
             errorStack.includes('walletnotready')
           
+          // Solflare-specific: iframe/CSP, connection, or extension errors (common with Solflare)
+          const isSolflareError =
+            errorMessage.includes('solflare') ||
+            errorString.includes('solflare') ||
+            errorStack.includes('solflare') ||
+            errorMessage.includes('Solflare') ||
+            errorStack.includes('content security policy') ||
+            errorMessage.includes('Content Security Policy') ||
+            (errorMessage.includes('iframe') && (errorStack.includes('solflare') || errorString.includes('solflare')))
+          
           // These are common extension errors that don't affect functionality
           if (
             // WalletNotReadyError - expected on mobile when wallet isn't installed
@@ -158,7 +169,9 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
               errorString.includes('solana') ||
               errorMessage.includes('wallet') ||
               errorMessage.includes('extension')
-            ))
+            )) ||
+            // Solflare: iframe/CSP or connection errors — avoid noisy logs
+            isSolflareError
           ) {
             // Silently ignore - these are from browser extensions or user-initiated cancellations
             // WalletNotReadyError is expected on mobile when wallet isn't installed

@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Raffle, Entry } from '@/lib/types'
-import { withRetry } from '@/lib/db-retry'
+import { withRetry, withQueryRetry } from '@/lib/db-retry'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -502,12 +502,16 @@ export async function getEntriesByRaffleId(raffleId: string) {
   let hasMore = true
 
   while (hasMore) {
-    const { data, error } = await getSupabaseForRead()
-      .from('entries')
-      .select('*')
-      .eq('raffle_id', raffleId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + pageSize - 1)
+    const result = await withQueryRetry(
+      getSupabaseForRead()
+        .from('entries')
+        .select('*')
+        .eq('raffle_id', raffleId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1),
+      { maxRetries: 2 }
+    )
+    const { data, error } = result
 
     if (error) {
       console.error('Error fetching entries:', error)

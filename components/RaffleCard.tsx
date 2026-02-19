@@ -632,6 +632,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         if (isMobile && (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))) {
           throw new Error('Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.')
         }
+        // Solflare-specific: give clearer guidance
+        if (errorMessage.toLowerCase().includes('solflare')) {
+          throw new Error('Solflare wallet error. Please try: 1) Refreshing the page and reconnecting Solflare, 2) Updating the Solflare extension to the latest version, 3) Using Solflare in a different browser if the issue persists.')
+        }
         if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
           throw new Error('Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.')
         }
