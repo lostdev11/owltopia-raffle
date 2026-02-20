@@ -269,12 +269,14 @@ export function WalletConnectButton() {
         }
         
         // Clean up URL parameters after processing (but keep them for adapter to process)
-        // Only clean if we're not in the middle of a connection
+        // Only clean if we're not in the middle of a connection. Solflare needs longer to process data/nonce.
+        const isSolflareCallback = urlParams.has('data') || urlParams.has('nonce') || hashParams.has('data') || hashParams.has('nonce')
+        const cleanDelay = isSolflareCallback ? 2500 : 1000
         if (!connecting) {
           setTimeout(() => {
             const cleanUrl = window.location.pathname
             window.history.replaceState({}, '', cleanUrl)
-          }, 1000) // Delay to allow adapter to process callback
+          }, cleanDelay)
         }
       }
     }
@@ -571,9 +573,18 @@ export function WalletConnectButton() {
   }, [mounted, connected, setVisible])
 
   // When not connected, any click on the wrapper opens the modal (ensures desktop works even if inner button fails)
+  // On mobile: store current URL before opening modal so any wallet (Solflare, Phantom, etc.) can redirect back
   const handleWrapperClick = useCallback(
     (e: React.MouseEvent) => {
       if (!mounted || connected || connecting) return
+      if (isMobileDevice()) {
+        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+        if (currentUrl) {
+          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+      }
       setVisible(true)
     },
     [mounted, connected, connecting, setVisible]
@@ -584,6 +595,14 @@ export function WalletConnectButton() {
     (e: React.PointerEvent) => {
       if (e.button !== 0 && e.button !== undefined) return
       if (!mounted || connected || connecting) return
+      if (isMobileDevice()) {
+        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+        if (currentUrl) {
+          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+      }
       setVisible(true)
     },
     [mounted, connected, connecting, setVisible]

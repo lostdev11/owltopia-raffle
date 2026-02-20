@@ -65,9 +65,9 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           })
         )
       }
-      // Use dedicated Solflare adapter (better compatibility than bundle). No options per Solflare docs.
+      // Use dedicated Solflare adapter. Pass network for SDK (mainnet); helps mobile connect flow.
       walletAdapters.push(
-        new SolflareWalletAdapter(),
+        new SolflareWalletAdapter({ network }),
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network })
       )
