@@ -5,10 +5,10 @@ import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
-  SolflareWalletAdapter,
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
+import { SolflareWalletAdapterMobile } from '@/lib/solflare-adapter-mobile'
 import {
   SolanaMobileWalletAdapter,
   createDefaultAddressSelector,
@@ -65,9 +65,9 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           })
         )
       }
-      // Use dedicated Solflare adapter. Pass network for SDK (mainnet); helps mobile connect flow.
+      // Solflare: use adapter that passes redirect_link so mobile returns to this page and connection completes.
       walletAdapters.push(
-        new SolflareWalletAdapter({ network }),
+        new SolflareWalletAdapterMobile({ network }),
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network })
       )

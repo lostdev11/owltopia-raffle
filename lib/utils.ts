@@ -177,3 +177,13 @@ export function isSolflareBrowser(): boolean {
   const userAgent = navigator.userAgent || ''
   return userAgent.toLowerCase().includes('solflare')
 }
+
+/**
+ * Opens the current page in Solflare's in-app browser so connection stays in-app (no redirect out and back).
+ */
+export function redirectToSolflareBrowser(): void {
+  if (typeof window === 'undefined') return
+  const url = encodeURIComponent(window.location.href)
+  const ref = encodeURIComponent(window.location.origin)
+  window.location.href = `https://solflare.com/ul/v1/browse/${url}?ref=${ref}`
+}

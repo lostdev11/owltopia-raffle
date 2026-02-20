@@ -12,13 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, redirectToPhantomBrowser } from '@/lib/utils'
+import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, isSolflareBrowser, redirectToPhantomBrowser, redirectToSolflareBrowser } from '@/lib/utils'
 
 export function WalletConnectButton() {
   const { publicKey, connected, disconnect, wallet, connecting } = useWallet()
   const { setVisible } = useWalletModal()
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
+  const [showMobileInAppDialog, setShowMobileInAppDialog] = useState(false)
   const [remountKey, setRemountKey] = useState(0)
   const [showCancelButton, setShowCancelButton] = useState(false)
   const buttonRef = useRef<HTMLDivElement>(null)
@@ -268,10 +269,15 @@ export function WalletConnectButton() {
           }
         }
         
-        // Clean up URL parameters after processing (but keep them for adapter to process)
-        // Only clean if we're not in the middle of a connection. Solflare needs longer to process data/nonce.
+        // Clean up URL parameters after processing (but keep them for adapter to process).
+        // Solflare on mobile: do NOT clean data/nonce here — the SDK reads them from the URL
+        // when the iframe loads after redirect. Cleaning too soon leaves the UI stuck on "Connecting".
         const isSolflareCallback = urlParams.has('data') || urlParams.has('nonce') || hashParams.has('data') || hashParams.has('nonce')
-        const cleanDelay = isSolflareCallback ? 2500 : 1000
+        if (isSolflareCallback) {
+          // Solflare params are cleaned when we become connected (see effect below)
+          return
+        }
+        const cleanDelay = 1000
         if (!connecting) {
           setTimeout(() => {
             const cleanUrl = window.location.pathname
@@ -297,6 +303,17 @@ export function WalletConnectButton() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [mounted, connecting])
+
+  // When Solflare connection completes, clean callback params from URL (we skipped cleaning earlier so the SDK could read them)
+  useEffect(() => {
+    if (!mounted || !connected) return
+    const urlParams = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(window.location.hash.substring(1))
+    const hasSolflareCallback = urlParams.has('data') || urlParams.has('nonce') || hashParams.has('data') || hashParams.has('nonce')
+    if (hasSolflareCallback) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [mounted, connected])
 
   // Handle all mobile wallet connections on Android - ensure proper deep linking
   // Fix for Android blank page issue when connecting any mobile wallet
@@ -572,8 +589,8 @@ export function WalletConnectButton() {
     }
   }, [mounted, connected, setVisible])
 
-  // When not connected, any click on the wrapper opens the modal (ensures desktop works even if inner button fails)
-  // On mobile: store current URL before opening modal so any wallet (Solflare, Phantom, etc.) can redirect back
+  // When not connected, any click on the wrapper opens the modal (or on mobile, offers in-app first)
+  // On mobile: offer "Open in Solflare/Phantom" so the whole flow stays in-app; else store redirect URL and open modal
   const handleWrapperClick = useCallback(
     (e: React.MouseEvent) => {
       if (!mounted || connected || connecting) return
@@ -583,6 +600,11 @@ export function WalletConnectButton() {
           const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+        // If not already in a wallet browser, offer in-app first so connection stays in-app
+        if (!isSolflareBrowser() && !isPhantomBrowser()) {
+          setShowMobileInAppDialog(true)
+          return
         }
       }
       setVisible(true)
@@ -602,6 +624,10 @@ export function WalletConnectButton() {
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
         }
+        if (!isSolflareBrowser() && !isPhantomBrowser()) {
+          setShowMobileInAppDialog(true)
+          return
+        }
       }
       setVisible(true)
     },
@@ -618,6 +644,10 @@ export function WalletConnectButton() {
           const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+        if (!isSolflareBrowser() && !isPhantomBrowser()) {
+          setShowMobileInAppDialog(true)
+          return
         }
       }
       setVisible(true)
@@ -688,6 +718,48 @@ export function WalletConnectButton() {
           </button>
         )}
       </div>
+      
+      {/* Mobile: offer in-app first so connection stays entirely in-app (no redirect out and back) */}
+      <Dialog open={showMobileInAppDialog} onOpenChange={setShowMobileInAppDialog}>
+        <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
+          <DialogHeader>
+            <DialogTitle>Connect wallet</DialogTitle>
+            <DialogDescription className="pt-2">
+              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no switching back and forth.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            <Button
+              onClick={() => {
+                redirectToSolflareBrowser()
+                setShowMobileInAppDialog(false)
+              }}
+              className="w-full bg-[#02050a] hover:bg-[#02050a]/90 text-[#ffef46] border border-[#ffef46]/30"
+            >
+              Open in Solflare
+            </Button>
+            <Button
+              onClick={() => {
+                redirectToPhantomBrowser()
+                setShowMobileInAppDialog(false)
+              }}
+              className="w-full bg-purple-600 hover:bg-purple-700"
+            >
+              Open in Phantom
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowMobileInAppDialog(false)
+                setVisible(true)
+              }}
+              className="w-full"
+            >
+              Continue in this browser
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       
       {/* Phantom Browser Redirect Dialog */}
       <Dialog open={showPhantomRedirectDialog} onOpenChange={setShowPhantomRedirectDialog}>
