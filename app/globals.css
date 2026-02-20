@@ -94,11 +94,22 @@
   pointer-events: auto !important;
 }
 
-/* Solflare in-app browser: ensure buttons and clickable elements respond to touch */
+/* Solflare in-app browser: ensure ALL interactive elements respond to touch (fixes "can't hit any buttons") */
+body.solflare-browser {
+  touch-action: manipulation !important;
+}
 body.solflare-browser button,
 body.solflare-browser [role="button"],
+body.solflare-browser a[href],
+body.solflare-browser input[type="button"],
+body.solflare-browser input[type="submit"],
+body.solflare-browser input[type="checkbox"],
+body.solflare-browser input[type="radio"],
+body.solflare-browser select,
+body.solflare-browser [tabindex="0"],
 body.solflare-browser .wallet-connect-wrapper,
-body.solflare-browser .wallet-adapter-button {
+body.solflare-browser .wallet-adapter-button,
+body.solflare-browser [class*="wallet-adapter"] button {
   touch-action: manipulation !important;
   -webkit-tap-highlight-color: rgba(34, 197, 94, 0.3) !important;
   cursor: pointer !important;
@@ -141,10 +152,11 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
-/* Mobile wallet modal improvements - ensure overlay shows page behind */
+/* Mobile wallet modal improvements - only when modal is OPEN so we don't block touches when closed */
 @media (hover: none) and (pointer: coarse) {
-  /* Wallet adapter modal root - ensure it has backdrop overlay */
-  .wallet-adapter-modal {
+  /* When closed, do NOT force display/visibility - library hides modal; our !important was blocking all touches */
+  /* When open (fade-in class), apply visible styles */
+  .wallet-adapter-modal.wallet-adapter-modal-fade-in {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -161,8 +173,7 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
     visibility: visible !important;
   }
 
-  /* Wallet adapter modal overlay - ensure backdrop is visible */
-  .wallet-adapter-modal-overlay {
+  .wallet-adapter-modal.wallet-adapter-modal-fade-in .wallet-adapter-modal-overlay {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -174,8 +185,7 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
     pointer-events: auto !important;
   }
 
-  /* Wallet adapter modal container - centers content */
-  .wallet-adapter-modal-container {
+  .wallet-adapter-modal.wallet-adapter-modal-fade-in .wallet-adapter-modal-container {
     position: relative !important;
     z-index: 10001 !important;
     display: flex !important;
@@ -186,8 +196,7 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
     padding: 1rem !important;
   }
 
-  /* Wallet adapter modal wrapper - the actual modal content */
-  .wallet-adapter-modal-wrapper {
+  .wallet-adapter-modal.wallet-adapter-modal-fade-in .wallet-adapter-modal-wrapper {
     position: relative !important;
     z-index: 10002 !important;
     background: hsl(var(--background)) !important;
@@ -196,11 +205,6 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
     max-height: 90vh !important;
     overflow-y: auto !important;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.2) !important;
-  }
-
-  /* Ensure wallet adapter modal is visible and accessible on mobile */
-  [class*="wallet-adapter-modal"]:not(.wallet-adapter-modal-wrapper):not(.wallet-adapter-modal-container) {
-    z-index: 10000 !important;
   }
   
   /* Ensure wallet buttons in modal are tappable on mobile */
