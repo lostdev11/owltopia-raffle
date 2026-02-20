@@ -4,8 +4,8 @@ import { useMemo, useState, useEffect, ReactNode } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
-import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare'
 import {
+  SolflareWalletAdapter,
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
@@ -29,7 +29,7 @@ interface WalletContextProviderProps {
   children: ReactNode
 }
 
-/** Inner provider that runs only after client mount and autoConnect delay. */
+/** Inner provider; mounts only when page/extensions are ready, with autoConnect true from the start. */
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const network = WalletAdapterNetwork.Mainnet
   const endpoint = useMemo(() => {
@@ -76,21 +76,12 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
     [network]
   )
 
-  // Delay autoConnect until after wallet extension (Phantom, etc.) is injected and ready.
-  // Fixes "connect only works after refresh" by avoiding autoConnect before extension is ready.
-  const [autoConnectReady, setAutoConnectReady] = useState(false)
-  useEffect(() => {
-    const rafId = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setAutoConnectReady(true))
-    })
-    return () => cancelAnimationFrame(rafId)
-  }, [])
-
+  // Mount with autoConnect true from the start so the adapter's effect runs once and restores session.
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider 
         wallets={wallets} 
-        autoConnect={autoConnectReady}
+        autoConnect
         onError={(error) => {
           // Log all errors in development for debugging
           if (process.env.NODE_ENV === 'development') {
@@ -206,19 +197,50 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   )
 }
 
+// Delay (ms) before showing wallet provider so extensions (Phantom, Standard Wallet) can inject.
+// Avoids "wallet only connects after refresh" on desktop and mobile.
+const WALLET_READY_DELAY_MS = 400
+
 /**
- * Renders the wallet provider only after client mount to avoid:
- * - SSR/hydration mismatch (wallets differ when window is undefined)
- * - autoConnect running before the wallet extension is injected
- * Shows a minimal loading state until then so the tree never sees a missing provider.
+ * Renders the wallet provider only after client mount and a short delay (or load event) so that:
+ * - SSR/hydration mismatch is avoided (wallets differ when window is undefined)
+ * - Wallet extensions (Phantom, etc.) and Standard Wallet have time to inject before autoConnect runs
+ * - Inner provider mounts once with autoConnect=true so the adapter restores session without needing a refresh
  */
 export function WalletContextProvider({ children }: WalletContextProviderProps) {
-  const [mounted, setMounted] = useState(false)
+  const [ready, setReady] = useState(false)
+
   useEffect(() => {
-    setMounted(true)
+    let cancelled = false
+    let loadTimeoutId: ReturnType<typeof setTimeout> | null = null
+    const go = () => {
+      if (!cancelled) setReady(true)
+    }
+
+    // If document already loaded (e.g. client nav), wait a short delay so extensions are ready.
+    if (typeof document !== 'undefined' && document.readyState === 'complete') {
+      const t = setTimeout(go, WALLET_READY_DELAY_MS)
+      return () => {
+        cancelled = true
+        clearTimeout(t)
+      }
+    }
+
+    // Otherwise wait for load event (ensures extensions have injected), then small delay.
+    const onLoad = () => {
+      loadTimeoutId = setTimeout(go, 50)
+    }
+    window.addEventListener('load', onLoad, { once: true })
+    const fallback = setTimeout(go, Math.max(WALLET_READY_DELAY_MS, 800))
+    return () => {
+      cancelled = true
+      window.removeEventListener('load', onLoad)
+      if (loadTimeoutId !== null) clearTimeout(loadTimeoutId)
+      clearTimeout(fallback)
+    }
   }, [])
 
-  if (!mounted) {
+  if (!ready) {
     return (
       <div className="min-h-screen flex flex-col bg-black" aria-busy="true" aria-label="Loading">
         <div className="flex-1 flex items-center justify-center">
