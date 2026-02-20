@@ -608,6 +608,23 @@ export function WalletConnectButton() {
     [mounted, connected, connecting, setVisible]
   )
 
+  // Backup for mobile WebViews (e.g. Solflare) where click/pointerUp sometimes don't fire; touchEnd opens modal
+  const handleWrapperTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (!mounted || connected || connecting) return
+      if (isMobileDevice()) {
+        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+        if (currentUrl) {
+          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+      }
+      setVisible(true)
+    },
+    [mounted, connected, connecting, setVisible]
+  )
+
   return (
     <>
       <div 
@@ -622,6 +639,7 @@ export function WalletConnectButton() {
         }}
         onClick={handleWrapperClick}
         onPointerUp={handleWrapperPointerUp}
+        onTouchEnd={handleWrapperTouchEnd}
         tabIndex={connected ? -1 : 0}
         onKeyDown={(e) => {
           if (connected) return
