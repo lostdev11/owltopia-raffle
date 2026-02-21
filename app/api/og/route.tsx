@@ -1,11 +1,12 @@
 import { ImageResponse } from 'next/og'
 
+// Edge runtime recommended for OG image generation on Vercel
 export const runtime = 'edge'
-export const alt = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
-export const size = { width: 1200, height: 630 }
-export const contentType = 'image/png'
 
-export default function Image() {
+const WIDTH = 1200
+const HEIGHT = 630
+
+export async function GET() {
   return new ImageResponse(
     (
       <div
@@ -44,6 +45,9 @@ export default function Image() {
         </div>
       </div>
     ),
-    { ...size }
+    {
+      width: WIDTH,
+      height: HEIGHT,
+    },
   )
 }

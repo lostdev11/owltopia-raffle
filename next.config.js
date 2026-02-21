@@ -33,8 +33,8 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Cache OG image so Discord and other crawlers get fast, cacheable responses
-        source: '/opengraph-image',
+        // Cache default OG image (Vercel OG API route) so crawlers get fast, cacheable responses
+        source: '/api/og',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
         ],

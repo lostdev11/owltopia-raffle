@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const DEFAULT_OG_IMAGE = `${SITE_URL}/opengraph-image`
+const DEFAULT_OG_IMAGE = `${SITE_URL}/api/og`
 const DEFAULT_OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 /** Per-raffle OG image URL (generated when raffle has no image_url). */

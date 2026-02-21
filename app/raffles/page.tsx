@@ -16,7 +16,7 @@ export const revalidate = 0
 export const maxDuration = 10
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE = `${SITE_URL}/opengraph-image`
+const OG_IMAGE = `${SITE_URL}/api/og`
 const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {

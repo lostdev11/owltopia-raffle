@@ -34,7 +34,7 @@ export const viewport = {
 
 // Absolute base URL (X and others require absolute HTTPS URLs for card images)
 const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-// Use Next.js file convention: app/opengraph-image.png is served at /opengraph-image (absolute via metadataBase)
+// OG image: app/api/og/route.tsx (Vercel OG); metadataBase makes URLs absolute for crawlers
 const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 // Default to production URL so link previews (OG/Twitter) work when sharing any page
@@ -69,7 +69,7 @@ export const metadata: Metadata = {
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
     images: [
       {
-        url: `${SITE_BASE}/opengraph-image`,
+        url: `${SITE_BASE}/api/og`,
         width: 1200,
         height: 630,
         alt: OG_IMAGE_ALT,
@@ -81,7 +81,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [{ url: `${SITE_BASE}/opengraph-image`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
+    images: [{ url: `${SITE_BASE}/api/og`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
   other: {
     'mobile-web-app-capable': 'yes',
