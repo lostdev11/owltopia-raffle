@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/draw-ended-raffles",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

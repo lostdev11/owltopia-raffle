@@ -8,6 +8,7 @@ import {
   canSelectWinner,
   updateRaffle
 } from '@/lib/db/raffles'
+import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -129,83 +130,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Otherwise, process all ended raffles without winners
-    const endedRaffles = await getEndedRafflesWithoutWinner()
-    
-    if (endedRaffles.length === 0) {
-      return NextResponse.json({
-        success: true,
-        message: 'No ended raffles without winners found',
-        processedCount: 0
-      })
-    }
-
-    const results = []
-    
-    for (const raffle of endedRaffles) {
-      try {
-        // Check if raffle can have winner selected (min tickets met AND 7 days passed)
-        const entries = await getEntriesByRaffleId(raffle.id)
-        const canDraw = canSelectWinner(raffle, entries)
-        const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
-        
-        if (!canDraw) {
-          // If min tickets not met, extend the raffle by 7 days
-          if (!meetsMinTickets) {
-            const now = new Date()
-            const endTime = new Date(raffle.end_time)
-            const originalEndTime = raffle.original_end_time || raffle.end_time
-            const newEndTime = new Date(endTime)
-            newEndTime.setDate(newEndTime.getDate() + 7)
-            
-            await updateRaffle(raffle.id, {
-              original_end_time: originalEndTime,
-              end_time: newEndTime.toISOString(),
-              status: 'live'
-            })
-            
-            results.push({
-              raffleId: raffle.id,
-              raffleTitle: raffle.title,
-              success: false,
-              winnerWallet: null,
-              error: `Minimum requirements not met (min: ${raffle.min_tickets || 'N/A'}, sold: ${entries.filter(e => e.status === 'confirmed').reduce((sum, entry) => sum + entry.ticket_quantity, 0)}). Extended by 7 days.`,
-              extended: true
-            })
-          } else {
-            // Min tickets met but 7 days haven't passed
-            results.push({
-              raffleId: raffle.id,
-              raffleTitle: raffle.title,
-              success: false,
-              winnerWallet: null,
-              error: `Raffle must wait 7 days after original end time before drawing winner`
-            })
-          }
-          continue
-        }
-        
-        const winnerWallet = await selectWinner(raffle.id)
-        results.push({
-          raffleId: raffle.id,
-          raffleTitle: raffle.title,
-          success: !!winnerWallet,
-          winnerWallet: winnerWallet || null,
-          error: winnerWallet ? null : 'No confirmed entries found'
-        })
-      } catch (error) {
-        results.push({
-          raffleId: raffle.id,
-          raffleTitle: raffle.title,
-          success: false,
-          winnerWallet: null,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        })
-      }
-    }
+    // Otherwise, process all ended raffles without winners (same logic as cron)
+    const results = await processEndedRafflesWithoutWinners()
 
     return NextResponse.json({
       success: true,
+      message: results.length === 0 ? 'No ended raffles without winners found' : undefined,
       processedCount: results.length,
       results
     })
