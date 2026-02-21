@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
@@ -79,6 +79,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [imageError, setImageError] = useState(false)
+  // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
+  const touchStartRef = useRef({ x: 0, y: 0 })
+  const scrollDetectedRef = useRef(false)
+  const TOUCH_MOVE_THRESHOLD = 10
+
+  const handleLinkClick = (e: React.MouseEvent, extraPrevent?: boolean) => {
+    if (scrollDetectedRef.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    const target = e.target as HTMLElement
+    if (target.closest('button') || target.closest('input') || target.closest('label')) {
+      e.preventDefault()
+    }
+    if (extraPrevent) e.preventDefault()
+  }
   
   useEffect(() => {
     setMounted(true)
@@ -807,13 +824,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       <div className="relative z-10 md:hover:z-50">
         <Link 
           href={`/raffles/${raffle.slug}`}
-          onClick={(e) => {
-            const target = e.target as HTMLElement
-            // Prevent navigation if clicking on buttons or interactive form elements
-            if (target.closest('button') || target.closest('input') || target.closest('label')) {
-              e.preventDefault()
+          onTouchStart={(e) => {
+            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+            scrollDetectedRef.current = false
+          }}
+          onTouchMove={(e) => {
+            const { x, y } = touchStartRef.current
+            if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+              scrollDetectedRef.current = true
             }
           }}
+          onClick={(e) => handleLinkClick(e)}
         >
           <LinkifiedTextInsideLinkProvider>
           <Card
@@ -1122,18 +1143,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   return (
     <div className="relative z-10 md:hover:z-50">
       <Link 
-        href={`/raffles/${raffle.slug}`} 
-        onClick={(e) => {
-          const target = e.target as HTMLElement
-          // Prevent navigation if clicking on buttons or interactive form elements
-          if (target.closest('button') || target.closest('input') || target.closest('label')) {
-            e.preventDefault()
-          }
-          // Prevent navigation for future raffles
-          if (isFuture) {
-            e.preventDefault()
+        href={`/raffles/${raffle.slug}`}
+        onTouchStart={(e) => {
+          touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+          scrollDetectedRef.current = false
+        }}
+        onTouchMove={(e) => {
+          const { x, y } = touchStartRef.current
+          if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+            scrollDetectedRef.current = true
           }
         }}
+        onClick={(e) => handleLinkClick(e, isFuture)}
       >
         <LinkifiedTextInsideLinkProvider>
         <Card
@@ -1343,17 +1364,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         e.preventDefault()
                         e.stopPropagation()
                         const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
-                        const prefix = 'Check out this raffle: '
-                        const maxTitleLen = 280 - prefix.length - url.length - 2
-                        const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
-                        const text = `${prefix}${title} ${url}`
                         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
                           navigator.clipboard.writeText(url).catch(() => {})
                         }
+                        const prefix = 'Check out this raffle: '
+                        const maxTitleLen = 280 - prefix.length - 1
+                        const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
+                        const text = `${prefix}${title}`
                         const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text }).toString()}`
                         window.open(shareUrl, '_blank', 'noopener,noreferrer')
                       }}
-                      title="Share this raffle on X. Link is also copied so you can paste it."
+                      title="Share this raffle on X. Link is copied — paste it into the post."
                     >
                       <Share2 className="mr-2 h-4 w-4" />
                       Share

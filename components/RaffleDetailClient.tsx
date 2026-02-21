@@ -1142,18 +1142,18 @@ export function RaffleDetailClient({
             variant="outline"
             onClick={() => {
               const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
-              const prefix = 'Check out this raffle: '
-              const maxTitleLen = 280 - prefix.length - url.length - 2
-              const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
-              const text = `${prefix}${title} ${url}`
               if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
                 navigator.clipboard.writeText(url).catch(() => {})
               }
+              const prefix = 'Check out this raffle: '
+              const maxTitleLen = 280 - prefix.length - 1
+              const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
+              const text = `${prefix}${title}`
               const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text }).toString()}`
               window.open(shareUrl, '_blank', 'noopener,noreferrer')
             }}
             className="touch-manipulation min-h-[44px] text-sm sm:text-base"
-            title="Share on X (Twitter). Link is also copied so you can paste it."
+            title="Share on X (Twitter). Link is copied — paste it into the post."
           >
             <Share2 className="mr-2 h-4 w-4" />
             Share
