@@ -69,7 +69,8 @@ export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
       ;(this as unknown as { _publicKey: PublicKey | null })._publicKey = publicKey
       this.emit('connect', publicKey)
     } catch (error) {
-      this.emit('error', error as Error)
+      const err = error instanceof Error ? error : new Error(String(error))
+      this.emit('error', new WalletConnectionError(err.message, err))
       throw error
     } finally {
       ;(this as unknown as { _connecting: boolean })._connecting = false

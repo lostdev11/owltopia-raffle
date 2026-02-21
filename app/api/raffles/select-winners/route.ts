@@ -8,7 +8,7 @@ import {
   canSelectWinner,
   updateRaffle
 } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const body = await request.json().catch(() => ({}))
@@ -224,7 +224,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const endedRaffles = await getEndedRafflesWithoutWinner()

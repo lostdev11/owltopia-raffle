@@ -33,6 +33,20 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Cache OG image so Discord and other crawlers get fast, cacheable responses
+        source: '/opengraph-image',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
+        ],
+      },
+      {
+        // Cache per-raffle OG images (generated for each slug)
+        source: '/raffles/:slug/opengraph-image',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
+        ],
+      },
+      {
         // Apply security headers to all routes
         source: '/:path*',
         headers: [

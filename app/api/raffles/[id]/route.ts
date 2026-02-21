@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
+import { getAdminRole } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -12,7 +13,7 @@ export async function PATCH(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const body = await request.json()
@@ -223,6 +224,15 @@ export async function DELETE(
         { error: 'Raffle not found' },
         { status: 404 }
       )
+    }
+
+    const role = await getAdminRole(session.wallet)
+    if (role === 'raffle_creator') {
+      const creator = (existingRaffle.created_by ?? '').trim()
+      const wallet = session.wallet.trim()
+      if (creator !== wallet) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // Delete the raffle (entries will be cascade deleted)

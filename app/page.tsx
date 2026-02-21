@@ -14,13 +14,13 @@ export const metadata: Metadata = {
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
+    images: [{ url: `${SITE_URL}/opengraph-image`, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [{ url: '/opengraph-image', alt: OG_ALT, width: 1200, height: 630 }],
+    images: [{ url: `${SITE_URL}/opengraph-image`, alt: OG_ALT, width: 1200, height: 630 }],
   },
 }
 

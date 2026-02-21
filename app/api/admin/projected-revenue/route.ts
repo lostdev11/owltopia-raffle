@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { safeErrorMessage, safeErrorDetails } from '@/lib/safe-error'
 
@@ -135,7 +135,7 @@ function aggregateWithTicketCounts(rows: Array<{ amount_paid: unknown; currency:
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const { data: entries, error } = await getSupabaseAdmin()

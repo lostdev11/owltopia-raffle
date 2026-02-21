@@ -63,13 +63,13 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: 'website',
-    url: SITE_BASE,
+    url: `${SITE_BASE}/`,
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
     images: [
       {
-        url: '/opengraph-image',
+        url: `${SITE_BASE}/opengraph-image`,
         width: 1200,
         height: 630,
         alt: OG_IMAGE_ALT,
@@ -81,7 +81,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
-    images: [{ url: '/opengraph-image', alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
+    images: [{ url: `${SITE_BASE}/opengraph-image`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
   robots: {
     index: true,

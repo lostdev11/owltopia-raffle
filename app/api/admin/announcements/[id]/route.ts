@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { updateAnnouncement, deleteAnnouncement } from '@/lib/db/announcements'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -14,7 +14,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
     const { id } = await params
     if (!id) {
@@ -58,7 +58,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
     const { id } = await params
     if (!id) {

@@ -3,7 +3,7 @@ import { getEntryByTransactionSignature, updateEntryStatus, saveTransactionSigna
 import { getRaffleById, getEntriesByRaffleId, getRaffles, getRaffleBySlug } from '@/lib/db/raffles'
 import type { Entry, Raffle } from '@/lib/types'
 import { verifyTransaction } from '@/lib/verify-transaction'
-import { isAdmin } from '@/lib/db/admins'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 
@@ -26,24 +26,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Optional: Check if user is admin (for security)
-    const authHeader = request.headers.get('authorization')
-    let adminWallet: string | undefined
-    if (authHeader) {
-      try {
-        const walletFromHeader = authHeader.replace('Bearer ', '')
-        const isUserAdmin = await isAdmin(walletFromHeader)
-        if (!isUserAdmin) {
-          return NextResponse.json(
-            { error: 'Unauthorized: Admin access required' },
-            { status: 403 }
-          )
-        }
-        adminWallet = walletFromHeader
-      } catch (e) {
-        // If auth check fails, continue anyway (for flexibility)
-      }
-    }
+    // Full admin session required (for security and to record adminWallet on restore)
+    const session = await requireFullAdminSession(request)
+    if (session instanceof NextResponse) return session
+    const adminWallet = session.wallet
 
     // Find entry by transaction signature
     let entry = await getEntryByTransactionSignature(transactionSignature)

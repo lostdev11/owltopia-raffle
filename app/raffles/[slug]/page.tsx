@@ -12,6 +12,11 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz'
 const DEFAULT_OG_IMAGE = `${SITE_URL}/opengraph-image`
 const DEFAULT_OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
+/** Per-raffle OG image URL (generated when raffle has no image_url). */
+function raffleOgImageUrl(slug: string) {
+  return `${SITE_URL}/raffles/${slug}/opengraph-image`
+}
+
 function absoluteImageUrl(imageUrl: string | null): string | null {
   if (!imageUrl) return null
   if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl
@@ -36,11 +41,12 @@ export async function generateMetadata({
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
   const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
-  // Absolute URL required so X/Twitter and other crawlers can fetch the image for link previews
+  // Absolute URL required so Discord/X and other crawlers can fetch the image for link previews.
+  // Use raffle image when set; otherwise use per-raffle generated OG image (title + prize).
   const imageUrl = absoluteImageUrl(raffle.image_url)
   const ogImage = imageUrl
     ? { url: imageUrl, width: 1200, height: 630, alt: raffle.title }
-    : { url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: DEFAULT_OG_ALT, type: 'image/png' as const }
+    : { url: raffleOgImageUrl(raffle.slug), width: 1200, height: 630, alt: raffle.title, type: 'image/png' as const }
 
   return {
     title,

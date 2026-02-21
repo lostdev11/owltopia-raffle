@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { getRevShareSchedule, updateRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
  * Admin only (session required).
  */
 export async function GET(request: NextRequest) {
-  const session = await requireAdminSession(request)
+  const session = await requireFullAdminSession(request)
   if (session instanceof NextResponse) return session
   try {
     const schedule = await getRevShareSchedule()
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
  * Admin only (session required). Body: { next_date?, total_sol?, total_usdc? }
  */
 export async function PATCH(request: NextRequest) {
-  const session = await requireAdminSession(request)
+  const session = await requireFullAdminSession(request)
   if (session instanceof NextResponse) return session
   try {
     const body = await request.json().catch(() => ({}))

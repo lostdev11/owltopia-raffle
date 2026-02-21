@@ -493,6 +493,42 @@ export async function getRaffleById(id: string) {
   }, { maxRetries: 2 })
 }
 
+/**
+ * Fetch raffles created by a given wallet (for "My raffles" admin list).
+ */
+export async function getRafflesByCreator(walletAddress: string): Promise<Raffle[]> {
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) return []
+
+  return withRetry(async () => {
+    const columns = await getRaffleColumns()
+    const { data, error } = await getSupabaseForRead()
+      .from('raffles')
+      .select(columns)
+      .eq('created_by', normalized)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching raffles by creator:', error)
+      return []
+    }
+
+    const hasNftSupport = await checkNftMigrationApplied()
+    let raffles = (data || []) as unknown as Raffle[]
+    if (!hasNftSupport && raffles.length) {
+      raffles = raffles.map((r: any) => ({
+        ...r,
+        prize_type: 'crypto' as const,
+        nft_mint_address: null,
+        nft_collection_name: null,
+        nft_token_id: null,
+        nft_metadata_uri: null,
+      })) as Raffle[]
+    }
+    return raffles
+  }, { maxRetries: 2 })
+}
+
 export async function getEntriesByRaffleId(raffleId: string) {
   // Fetch all entries using pagination to handle any Supabase row limits
   // Supabase defaults to 1000 rows per query, but projects can have custom limits

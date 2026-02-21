@@ -1,36 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRestoredEntries } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
+import { requireFullAdminSession } from '@/lib/auth-server'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
 /**
- * GET restored entries
+ * GET restored entries. Full admin only (session required).
  * Query params: wallet - optional wallet address to filter by
  */
 export async function GET(request: NextRequest) {
   try {
+    const session = await requireFullAdminSession(request)
+    if (session instanceof NextResponse) return session
+
     const { searchParams } = new URL(request.url)
     const walletAddress = searchParams.get('wallet')
-
-    // Optional: Check if user is admin (for security)
-    const authHeader = request.headers.get('authorization')
-    if (authHeader) {
-      try {
-        const walletFromHeader = authHeader.replace('Bearer ', '')
-        const isUserAdmin = await isAdmin(walletFromHeader)
-        if (!isUserAdmin) {
-          return NextResponse.json(
-            { error: 'Unauthorized: Admin access required' },
-            { status: 403 }
-          )
-        }
-      } catch (e) {
-        // If auth check fails, continue anyway (for flexibility)
-      }
-    }
 
     // Get restored entries
     const restoredEntries = await getRestoredEntries(walletAddress || undefined)

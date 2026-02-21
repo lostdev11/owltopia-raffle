@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { getAllAnnouncements, createAnnouncement } from '@/lib/db/announcements'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
     let list: Awaited<ReturnType<typeof getAllAnnouncements>>
     try {
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
     const body = await request.json().catch(() => ({}))
     const title = typeof body.title === 'string' ? body.title.trim() : ''

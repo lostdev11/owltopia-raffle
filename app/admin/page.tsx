@@ -10,7 +10,7 @@ import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 
 interface DeletedEntry {
   id: string
@@ -72,7 +72,9 @@ export default function AdminDashboardPage() {
   const { publicKey, connected, signMessage: walletSignMessage } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
+  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
+  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -125,8 +127,10 @@ export default function AdminDashboardPage() {
         return
       }
       const admin = data?.isAdmin === true
-      setCachedAdmin(addr, admin)
+      const role = admin && data?.role ? data.role : null
+      setCachedAdmin(addr, admin, role)
       setIsAdmin(admin)
+      setAdminRole(role)
     } catch (e) {
       setAdminCheckError('Network error. Please check your connection and try again.')
       setIsAdmin(false)
@@ -138,6 +142,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
+      setAdminRole(null)
       setLoading(false)
       setAdminCheckError(null)
       setSessionReady(null)
@@ -146,12 +151,20 @@ export default function AdminDashboardPage() {
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
+      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       setAdminCheckError(null)
       return
     }
     runAdminCheck()
   }, [connected, publicKey, runAdminCheck])
+
+  // Junior admin (raffle_creator) must not see Owl Vision dashboard; redirect to create raffle
+  useEffect(() => {
+    if (isAdmin && sessionReady === true && adminRole === 'raffle_creator') {
+      router.replace('/admin/raffles/new')
+    }
+  }, [isAdmin, sessionReady, adminRole, router])
 
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin) {

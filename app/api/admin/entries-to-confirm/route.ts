@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPendingEntries } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { safeErrorMessage, safeErrorDetails } from '@/lib/safe-error'
 import type { Entry, Raffle } from '@/lib/types'
@@ -31,7 +31,7 @@ export interface RafflePendingSummary {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const pendingEntries = await getPendingEntries()

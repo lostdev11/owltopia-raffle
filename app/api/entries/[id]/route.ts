@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteEntry, getEntryById } from '@/lib/db/entries'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body and params
@@ -11,8 +11,8 @@ export async function DELETE(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
-    const session = await requireAdminSession(request)
-    if (session instanceof NextResponse) return session
+const session = await requireFullAdminSession(request)
+  if (session instanceof NextResponse) return session
 
     const params = await context.params
     const entryId = params.id

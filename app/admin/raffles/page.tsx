@@ -1,6 +1,10 @@
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { getSupabaseConfigError } from '@/lib/supabase'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { AdminRafflesPageClient } from './AdminRafflesPageClient'
 
 // Force dynamic rendering to prevent caching stale data
@@ -8,6 +12,12 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function AdminRafflesPage() {
+  const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
+  const role = session ? await getAdminRole(session.wallet) : null
+  if (role !== 'full') {
+    redirect('/admin/raffles/new')
+  }
+
   // Check if Supabase is configured
   const configError = getSupabaseConfigError()
   if (configError) {

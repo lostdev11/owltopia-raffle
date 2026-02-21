@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
-import { isAdmin } from '@/lib/db/admins'
+import { getAdminRole, isAdmin } from '@/lib/db/admins'
 
 export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
@@ -112,8 +112,15 @@ export function getSessionFromRequest(request: NextRequest): { wallet: string } 
   return parseSessionCookie(cookie)
 }
 
+/** Parse session from cookie value (for server components that use cookies() from next/headers). */
+export function parseSessionCookieValue(value: string | undefined): { wallet: string } | null {
+  if (!value?.trim()) return null
+  return parseSessionCookie(`${SESSION_COOKIE_NAME}=${value.trim()}`)
+}
+
 /**
  * Use in admin routes: returns 401/403 response or the admin wallet.
+ * Allows any admin role (full or raffle_creator).
  */
 export async function requireAdminSession(
   request: NextRequest
@@ -127,6 +134,22 @@ export async function requireAdminSession(
   }
   const admin = await isAdmin(session.wallet)
   if (!admin) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return session
+}
+
+/**
+ * Use for Owl Vision and all privileged actions: requires full admin role.
+ * raffle_creator gets 403.
+ */
+export async function requireFullAdminSession(
+  request: NextRequest
+): Promise<{ wallet: string } | NextResponse> {
+  const session = await requireAdminSession(request)
+  if (session instanceof NextResponse) return session
+  const role = await getAdminRole(session.wallet)
+  if (role !== 'full') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return session

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 // Force dynamic rendering since we use request body and params
@@ -15,7 +15,7 @@ export async function PATCH(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const body = await request.json()

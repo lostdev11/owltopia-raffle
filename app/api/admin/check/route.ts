@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdmin } from '@/lib/db/admins'
+import { getAdminRole } from '@/lib/db/admins'
 
 // Force dynamic rendering since we use searchParams
 export const dynamic = 'force-dynamic'
@@ -17,9 +17,13 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const adminStatus = await isAdmin(walletAddress)
+    const role = await getAdminRole(walletAddress)
+    const isAdmin = role !== null
 
-    return NextResponse.json({ isAdmin: adminStatus })
+    return NextResponse.json({
+      isAdmin,
+      role: isAdmin ? role : undefined,
+    })
   } catch (error) {
     console.error('Error checking admin status:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
