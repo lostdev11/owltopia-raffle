@@ -1,6 +1,10 @@
 /**
  * Process all ended raffles without winners: draw winner when eligible, or extend by 7 days when min not met.
  * Used by admin select-winners API and by cron job so winner selection runs on a schedule.
+ *
+ * Works for any raffle duration (1 day, 2 days, 3 days, etc.): each raffle has its own start_time/end_time.
+ * When end_time has passed and threshold (min_tickets) is met, a winner is selected; otherwise the raffle
+ * is extended or set to ready_to_draw as per the 7-day extension rules.
  */
 import {
   getEndedRafflesWithoutWinner,
@@ -57,6 +61,10 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
             extended: true,
           })
         } else {
+          // Threshold met but 7 days not passed since original end — mark as ready_to_draw so raffle is visibly ended
+          if (raffle.status !== 'ready_to_draw') {
+            await updateRaffle(raffle.id, { status: 'ready_to_draw' })
+          }
           results.push({
             raffleId: raffle.id,
             raffleTitle: raffle.title,
