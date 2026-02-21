@@ -17,7 +17,7 @@ export const maxDuration = 10
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
-const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}`
+const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
 const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 const OG_DESCRIPTION = `Browse and enter trusted raffles. Every entry verified on-chain. ${SITE_URL}/raffles`
 

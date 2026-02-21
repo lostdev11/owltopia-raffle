@@ -35,11 +35,14 @@ export const viewport = {
 // Absolute base URL (X and others require absolute HTTPS URLs for card images)
 const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 // OG image: NEXT_PUBLIC_OG_IMAGE overrides; default /og-image.png (custom image in public/) so it works in production without env
-const OG_IMAGE_URL = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
+const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
+// Cache-bust so Discord and other platforms re-fetch after updates (bump when you change the image)
+const OG_IMAGE_VERSION = '1'
+const OG_IMAGE_URL = `${SITE_BASE}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}${OG_IMAGE_PATH.includes('?') ? '&' : '?'}v=${OG_IMAGE_VERSION}`
 const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
 
-// Default to production URL so link previews (OG/Twitter) work when sharing any page
+// Default to production URL so link previews (OG/Twitter/Discord) work when sharing any page
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_BASE),
   title: 'Owl Raffle',
@@ -71,7 +74,7 @@ export const metadata: Metadata = {
     description: OG_DESCRIPTION,
     images: [
       {
-        url: `${SITE_BASE}${OG_IMAGE_URL.startsWith('/') ? OG_IMAGE_URL : `/${OG_IMAGE_URL}`}`,
+        url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
         alt: OG_IMAGE_ALT,
@@ -83,7 +86,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Owl Raffle',
     description: OG_DESCRIPTION,
-    images: [{ url: `${SITE_BASE}${OG_IMAGE_URL.startsWith('/') ? OG_IMAGE_URL : `/${OG_IMAGE_URL}`}`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
+    images: [{ url: OG_IMAGE_URL, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
   other: {
     'mobile-web-app-capable': 'yes',
