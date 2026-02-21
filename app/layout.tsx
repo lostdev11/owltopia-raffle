@@ -34,8 +34,8 @@ export const viewport = {
 
 // Absolute base URL (X and others require absolute HTTPS URLs for card images)
 const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-// OG image: use NEXT_PUBLIC_OG_IMAGE (e.g. /og-image.png) for a custom image in public/; else app/api/og
-const OG_IMAGE_URL = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/api/og'
+// OG image: NEXT_PUBLIC_OG_IMAGE overrides; default /og-image.png (custom image in public/) so it works in production without env
+const OG_IMAGE_URL = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
 const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
 
