@@ -1343,11 +1343,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         e.preventDefault()
                         e.stopPropagation()
                         const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
-                        const text = `Check out this raffle: ${raffle.title}`
-                        const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text, url }).toString()}`
+                        const prefix = 'Check out this raffle: '
+                        const maxTitleLen = 280 - prefix.length - url.length - 2
+                        const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
+                        const text = `${prefix}${title} ${url}`
+                        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(url).catch(() => {})
+                        }
+                        const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text }).toString()}`
                         window.open(shareUrl, '_blank', 'noopener,noreferrer')
                       }}
-                      title="Share this raffle on X"
+                      title="Share this raffle on X. Link is also copied so you can paste it."
                     >
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
