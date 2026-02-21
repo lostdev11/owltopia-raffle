@@ -16,25 +16,27 @@ export const revalidate = 0
 export const maxDuration = 10
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE = `${SITE_URL}/api/og`
+const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/api/og'
+const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}`
 const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
+const OG_DESCRIPTION = `Browse and enter trusted raffles. Every entry verified on-chain. ${SITE_URL}/raffles`
 
 export const metadata: Metadata = {
   title: 'Raffles | Owl Raffle',
-  description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+  description: OG_DESCRIPTION,
   alternates: { canonical: `${SITE_URL}/raffles` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/raffles`,
     siteName: 'Owl Raffle',
-    title: 'Raffles | Owl Raffle',
-    description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+    title: 'Owl Raffle',
+    description: OG_DESCRIPTION,
     images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Raffles | Owl Raffle',
-    description: 'Browse and enter trusted raffles. Every entry verified on-chain.',
+    title: 'Owl Raffle',
+    description: OG_DESCRIPTION,
     images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
 }

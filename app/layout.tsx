@@ -37,12 +37,13 @@ const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz
 // OG image: use NEXT_PUBLIC_OG_IMAGE (e.g. /og-image.png) for a custom image in public/; else app/api/og
 const OG_IMAGE_URL = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/api/og'
 const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
+const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
 
 // Default to production URL so link previews (OG/Twitter) work when sharing any page
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_BASE),
   title: 'Owl Raffle',
-  description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+  description: OG_DESCRIPTION,
   icons: {
     icon: [
       { url: '/icon.png', sizes: '32x32', type: 'image/png' },
@@ -67,7 +68,7 @@ export const metadata: Metadata = {
     url: `${SITE_BASE}/`,
     siteName: 'Owl Raffle',
     title: 'Owl Raffle',
-    description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+    description: OG_DESCRIPTION,
     images: [
       {
         url: `${SITE_BASE}${OG_IMAGE_URL.startsWith('/') ? OG_IMAGE_URL : `/${OG_IMAGE_URL}`}`,
@@ -81,7 +82,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Owl Raffle',
-    description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
+    description: OG_DESCRIPTION,
     images: [{ url: `${SITE_BASE}${OG_IMAGE_URL.startsWith('/') ? OG_IMAGE_URL : `/${OG_IMAGE_URL}`}`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
   other: {
