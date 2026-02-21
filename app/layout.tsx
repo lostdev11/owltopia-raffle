@@ -83,6 +83,10 @@ export const metadata: Metadata = {
     description: 'Trusted raffles with full transparency. Every entry verified on-chain.',
     images: [{ url: `${SITE_BASE}/opengraph-image`, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
   },
+  other: {
+    'mobile-web-app-capable': 'yes',
+    'twitter:url': `${SITE_BASE}/`,
+  },
   robots: {
     index: true,
     follow: true,
@@ -93,9 +97,6 @@ export const metadata: Metadata = {
       'max-image-preview': 'large',
       'max-snippet': -1,
     },
-  },
-  other: {
-    'mobile-web-app-capable': 'yes',
   },
 }
 
