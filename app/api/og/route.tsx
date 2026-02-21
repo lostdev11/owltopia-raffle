@@ -1,7 +1,6 @@
 import { ImageResponse } from 'next/og'
 
-// Edge runtime recommended for OG image generation on Vercel
-export const runtime = 'edge'
+export const runtime = 'nodejs'
 
 const WIDTH = 1200
 const HEIGHT = 630
