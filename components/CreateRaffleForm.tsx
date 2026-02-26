@@ -296,6 +296,22 @@ export function CreateRaffleForm() {
             </select>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="theme_accent">Theme Accent *</Label>
+            <select
+              id="theme_accent"
+              name="theme_accent"
+              value={themeAccent}
+              onChange={(e) => setThemeAccent(e.target.value as ThemeAccent)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              required
+            >
+              <option value="prime">Prime Time (Electric Green)</option>
+              <option value="midnight">Midnight Drop (Cool Teal)</option>
+              <option value="dawn">Dawn Run (Soft Lime)</option>
+            </select>
+          </div>
+
           <div className="space-y-4">
             <Label>Night Mode Presets (optional)</Label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
