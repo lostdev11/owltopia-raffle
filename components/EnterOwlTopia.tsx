@@ -15,7 +15,7 @@ const fadeIn = (delay: string) => ({
 })
 
 const externalLinks = [
-  { name: 'Staking', url: 'https://www.nftstake.app/owltopia' },
+  { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
   { name: 'X', url: 'https://x.com/Owltopia_sol' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
