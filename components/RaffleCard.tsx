@@ -82,7 +82,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
-  const TOUCH_MOVE_THRESHOLD = 10
+  const TOUCH_MOVE_THRESHOLD = 12
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (scrollDetectedRef.current) {
+      e.preventDefault()
+    }
+  }
 
   const handleLinkClick = (e: React.MouseEvent, extraPrevent?: boolean) => {
     if (scrollDetectedRef.current) {
@@ -834,6 +840,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               scrollDetectedRef.current = true
             }
           }}
+          onTouchEnd={handleTouchEnd}
           onClick={(e) => handleLinkClick(e)}
         >
           <LinkifiedTextInsideLinkProvider>
@@ -1154,6 +1161,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             scrollDetectedRef.current = true
           }
         }}
+        onTouchEnd={handleTouchEnd}
         onClick={(e) => handleLinkClick(e, isFuture)}
       >
         <LinkifiedTextInsideLinkProvider>
