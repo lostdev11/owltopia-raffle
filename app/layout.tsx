@@ -6,6 +6,7 @@ import { WalletContextProvider } from '@/components/WalletProvider'
 import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
 import { ErrorHandler } from '@/components/ErrorHandler'
+import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
@@ -237,7 +238,7 @@ export default function RootLayout({
           <div className="flex flex-col min-h-screen">
             <ConditionalHeader />
             <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto">
-              {children}
+              <PageTransition>{children}</PageTransition>
             </main>
             <ConditionalFooter />
           </div>

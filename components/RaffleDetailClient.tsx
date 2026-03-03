@@ -25,6 +25,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
+import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -1337,6 +1338,47 @@ export function RaffleDetailClient({
                 </div>
               </div>
             )}
+
+            {(() => {
+              const profitInfo = getRaffleProfitInfo(raffle, entries)
+              const cur = profitInfo.thresholdCurrency ?? raffle.currency
+              const revenueInCur = cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
+              const threshold = profitInfo.threshold
+              const amountOver = threshold != null && threshold > 0 && revenueInCur > threshold
+                ? revenueInCur - threshold
+                : null
+              const thresholdLabel = raffle.prize_type === 'nft' ? 'Floor (threshold)' : 'Threshold'
+              return (
+                <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
+                  <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Revenue &amp; threshold</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Revenue (from tickets)</p>
+                      <p className={classes.contentText + ' font-semibold'}>
+                        {revenueInCur.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                      </p>
+                    </div>
+                    <div>
+                      <p className={classes.labelText + ' text-muted-foreground'}>{thresholdLabel}</p>
+                      <p className={classes.contentText + ' font-semibold'}>
+                        {threshold != null && threshold > 0
+                          ? `${threshold.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`
+                          : 'Not set'}
+                      </p>
+                    </div>
+                    {amountOver != null && amountOver > 0 && (
+                      <div>
+                        <p className={classes.labelText + ' text-muted-foreground'}>Amount over threshold</p>
+                        <p className={classes.contentText + ' font-semibold text-emerald-600 dark:text-emerald-400'}>
+                          +{amountOver.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">This amount goes to rev share (50% founder / 50% community).</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
 
             {connected && (
               <div className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20`}>

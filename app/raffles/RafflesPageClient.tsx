@@ -13,10 +13,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { RafflesList } from '@/components/RafflesList'
+import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import { Eye, Shield, Megaphone } from 'lucide-react'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+import { Eye, Shield, Megaphone, Flame } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -75,6 +77,83 @@ function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future
 }
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
+type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
+
+function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
+  const list = items ?? []
+  const [index, setIndex] = useState(0)
+  const total = list.length
+
+  if (total === 0) return null
+
+  const clampIndex = (value: number) => {
+    if (value < 0) return total - 1
+    if (value >= total) return 0
+    return value
+  }
+
+  const goPrev = () => {
+    setIndex((prev) => clampIndex(prev - 1))
+  }
+
+  const goNext = () => {
+    setIndex((prev) => clampIndex(prev + 1))
+  }
+
+  const current = list[clampIndex(index)]
+
+  // Auto-advance through past raffles when there is more than one.
+  // Keep interval modest so users have time to read each card.
+  useEffect(() => {
+    if (total <= 1) return
+    const id = setInterval(() => {
+      setIndex((prev) => clampIndex(prev + 1))
+    }, 6000)
+    return () => clearInterval(id)
+  }, [total])
+
+  return (
+    <div className="w-full min-w-0">
+      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Browse past raffles</span>
+          <span className="text-xs">
+            {clampIndex(index) + 1} of {total}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={goPrev}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            disabled={total <= 1}
+            aria-label="Previous past raffle"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            disabled={total <= 1}
+            aria-label="Next past raffle"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div className="w-full min-w-0">
+        <RaffleCard
+          raffle={current.raffle}
+          entries={current.entries}
+          size="small"
+          section="past"
+          priority
+        />
+      </div>
+    </div>
+  )
+}
 
 /** Detect DB/connection or timeout errors for user-friendly messaging */
 function isConnectivityError(message: string | null | undefined): boolean {
@@ -138,6 +217,7 @@ export function RafflesPageClient({
 
   type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements'
   const [tab, setTab] = useState<Tab>('all')
+  const [topProfitableActive, setTopProfitableActive] = useState<RaffleWithEntriesAndProfit[]>([])
 
   const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
@@ -276,6 +356,23 @@ export function RafflesPageClient({
     router.refresh()
   }, [router])
 
+  // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
+  useEffect(() => {
+    if (tab !== 'all') return
+    const interval = setInterval(() => {
+      router.refresh()
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [tab, router])
+
+  // Refresh when user returns to the tab so threshold/raffle edits are visible
+  useEffect(() => {
+    if (tab !== 'all') return
+    const onFocus = () => router.refresh()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [tab, router])
+
   const isEmpty = active.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
   const recoveredFromError = !!initialError && !!(clientBuckets && (clientBuckets.active.length + clientBuckets.future.length + clientBuckets.past.length > 0))
@@ -313,6 +410,51 @@ export function RafflesPageClient({
         <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
+        {tab === 'all' && topProfitableActive.length > 0 && (
+          <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
+              const threshold = profitInfo?.threshold ?? null
+              const cur = profitInfo?.thresholdCurrency ?? raffle.currency
+              let revenueValue: number | null = null
+              if (profitInfo) {
+                if (profitInfo.thresholdCurrency === 'USDC') revenueValue = profitInfo.revenue.usdc
+                else if (profitInfo.thresholdCurrency === 'SOL') revenueValue = profitInfo.revenue.sol
+                else if (profitInfo.thresholdCurrency === 'OWL') revenueValue = profitInfo.revenue.owl
+              }
+              return (
+                <Link
+                  key={raffle.id}
+                  href={`/raffles/${raffle.slug}`}
+                  className="relative overflow-hidden rounded-xl border border-emerald-400/70 bg-gradient-to-br from-emerald-500/15 via-emerald-400/5 to-transparent shadow-[0_0_25px_rgba(16,185,129,0.7)] px-3 py-3 sm:px-4 sm:py-4 hover:border-emerald-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.85)] transition-all cursor-pointer"
+                >
+                  <div className="pointer-events-none absolute -inset-px bg-[radial-gradient(circle_at_0_0,rgba(74,222,128,0.35),transparent_55%),radial-gradient(circle_at_100%_0,rgba(16,185,129,0.4),transparent_50%)] opacity-70" />
+                  <div className="relative flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm sm:text-base font-semibold text-emerald-50">
+                        {raffle.title}
+                      </p>
+                      <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-emerald-200">
+                        Over threshold
+                      </span>
+                    </div>
+                    {revenueValue != null && (
+                      <p className="text-[11px] sm:text-xs text-emerald-100/80">
+                        Revenue:{' '}
+                        <span className="font-semibold">
+                          {revenueValue.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                        </span>{' '}
+                        · {raffle.prize_type === 'nft' ? 'Floor' : 'Threshold'}:{' '}
+                        <span className="font-semibold">
+                          {threshold != null ? threshold.toFixed(cur === 'USDC' ? 2 : 4) : '0.0000'} {cur}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
         {/* Tabs: All raffles | Raffles entered | Owl Vision */}
         <div className="mt-6 flex flex-wrap gap-2 border-b border-border">
           <button
@@ -538,6 +680,7 @@ export function RafflesPageClient({
                 rafflesWithEntries={active}
                 title={undefined}
                 section="active"
+                onTopProfitableChange={setTopProfitableActive}
               />
             ) : (
               <div className="text-center py-8">
@@ -564,11 +707,15 @@ export function RafflesPageClient({
           {past.length > 0 && (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
-              <RafflesList
-                rafflesWithEntries={past}
-                title={undefined}
-                section="past"
-              />
+              {past.length > 3 ? (
+                <PastRafflesCarousel items={past} />
+              ) : (
+                <RafflesList
+                  rafflesWithEntries={past}
+                  title={undefined}
+                  section="past"
+                />
+              )}
             </div>
           )}
 

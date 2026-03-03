@@ -27,6 +27,12 @@ const config: Config = {
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        /* M3 surface hierarchy */
+        surface: 'hsl(var(--surface))',
+        'surface-container': 'hsl(var(--surface-container))',
+        'surface-container-high': 'hsl(var(--surface-container-high))',
+        outline: 'hsl(var(--outline))',
+        'outline-variant': 'hsl(var(--outline-variant))',
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
@@ -73,6 +79,11 @@ const config: Config = {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+        /* M3 shape scale */
+        'shape-sm': 'var(--shape-sm)',
+        'shape-md': 'var(--shape-md)',
+        'shape-lg': 'var(--shape-lg)',
+        'shape-full': 'var(--shape-full)',
       },
       keyframes: {
         'accordion-down': {
@@ -136,11 +147,17 @@ const config: Config = {
           '0%': { transform: 'translateY(0)' },
           '100%': { transform: 'translateY(-50%)' },
         },
+        /* Page enter: subtle slide-up + fade */
+        'page-enter': {
+          from: { opacity: '0', transform: 'translateY(10px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'enter-fade-in': 'enter-fade-in 0.8s ease-out forwards',
+        'page-enter': 'page-enter 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards',
         'hero-rise': 'hero-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards',
         'hero-float-1': 'hero-float-1 18s ease-in-out infinite',
         'hero-float-2': 'hero-float-2 22s ease-in-out infinite',

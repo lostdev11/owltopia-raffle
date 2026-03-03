@@ -934,15 +934,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 >
                   {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                 </Badge>
-                {profitInfo != null && profitInfo.thresholdCurrency != null && (
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] sm:text-xs ${profitInfo.isProfitable ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-amber-500/20 border-amber-500 text-amber-400'}`}
-                    title={profitInfo.threshold != null ? `Revenue vs threshold (${profitInfo.thresholdCurrency})` : undefined}
-                  >
-                    {profitInfo.isProfitable ? 'Profitable' : 'Not profitable'}
-                  </Badge>
-                )}
                 {isActive && (
                   <Button 
                     type="button"
@@ -955,11 +946,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 )}
               </div>
             </div>
-            {profitInfo != null && profitInfo.threshold != null && profitInfo.thresholdCurrency && (
-              <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-                Revenue: {profitInfo.thresholdCurrency === 'USDC' ? profitInfo.revenue.usdc.toFixed(2) : profitInfo.thresholdCurrency === 'SOL' ? profitInfo.revenue.sol.toFixed(4) : profitInfo.revenue.owl.toFixed(4)} {profitInfo.thresholdCurrency} · Threshold: {profitInfo.thresholdCurrency === 'USDC' ? profitInfo.threshold.toFixed(2) : profitInfo.thresholdCurrency === 'SOL' ? profitInfo.threshold.toFixed(4) : profitInfo.threshold.toFixed(4)} {profitInfo.thresholdCurrency}
-              </div>
-            )}
             {!isActive && !isFuture && raffle.winner_wallet && (
               <div className="mt-2 pt-2 border-t flex items-center gap-2">
                 <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
@@ -1318,22 +1304,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     >
                       {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                     </Badge>
-                    {profitInfo != null && profitInfo.thresholdCurrency != null && (
-                      <Badge
-                        variant="outline"
-                        className={profitInfo.isProfitable ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-amber-500/20 border-amber-500 text-amber-400'}
-                        title={profitInfo.threshold != null ? `Revenue vs threshold (${profitInfo.thresholdCurrency}): ${profitInfo.isProfitable ? 'above' : 'below'}` : undefined}
-                      >
-                        {profitInfo.isProfitable ? 'Profitable' : 'Not profitable'}
-                      </Badge>
-                    )}
                   </div>
                 </div>
-                {profitInfo != null && profitInfo.threshold != null && profitInfo.thresholdCurrency && (
-                  <div className="w-full mt-1.5 text-xs text-muted-foreground">
-                    Revenue: {profitInfo.thresholdCurrency === 'USDC' ? profitInfo.revenue.usdc.toFixed(2) : profitInfo.thresholdCurrency === 'SOL' ? profitInfo.revenue.sol.toFixed(4) : profitInfo.revenue.owl.toFixed(4)} {profitInfo.thresholdCurrency} · Threshold: {profitInfo.thresholdCurrency === 'USDC' ? profitInfo.threshold.toFixed(2) : profitInfo.thresholdCurrency === 'SOL' ? profitInfo.threshold.toFixed(4) : profitInfo.threshold.toFixed(4)} {profitInfo.thresholdCurrency}
-                  </div>
-                )}
                 {!isActive && !isFuture && raffle.winner_wallet && (
                   <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
                     <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />

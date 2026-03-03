@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { ImageUpload } from '@/components/ImageUpload'
@@ -606,12 +607,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 <div className="space-y-3">
                   {!canDraw && (
                     <div className="flex items-start gap-2 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10">
-                      <input
-                        type="checkbox"
+                      <Switch
                         id="force-override"
+                        name="force-override"
+                        ariaLabel="Force override: bypass restrictions and select winner anyway"
                         checked={forceOverride}
-                        onChange={(e) => setForceOverride(e.target.checked)}
-                        className="mt-0.5"
+                        onCheckedChange={setForceOverride}
+                        className="mt-0.5 shrink-0"
                       />
                       <label htmlFor="force-override" className="text-sm text-muted-foreground cursor-pointer flex-1">
                         <span className="font-semibold text-yellow-600 dark:text-yellow-400">Force Override:</span> Bypass restrictions and select winner anyway
@@ -820,16 +822,16 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="floor_price">Floor Price (optional)</Label>
+                  <Label htmlFor="floor_price">Floor Price (prize value for NFT)</Label>
                   <Input
                     id="floor_price"
                     name="floor_price"
                     type="text"
                     defaultValue={raffle.floor_price || ''}
-                    placeholder="e.g., 5.5 SOL or 1000"
+                    placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Optional floor price metadata (text or numeric)
+                    Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
                   </p>
                 </div>
               </div>

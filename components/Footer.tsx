@@ -1,7 +1,9 @@
 'use client'
 
+import React from 'react'
 import Link from 'next/link'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Globe, Coins } from 'lucide-react'
+import { SocialGlassCard } from '@/components/SocialGlassCard'
 
 const externalLinks = [
   { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
@@ -13,6 +15,22 @@ const externalLinks = [
   { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
 ]
 
+const iconByLink: Record<string, React.ReactNode> = {
+  Staking: <Coins className="h-6 w-6" />,
+  X: <Twitter className="h-6 w-6" />,
+  Whitepaper: <FileText className="h-6 w-6" />,
+  ME: <Store className="h-6 w-6" />,
+  Tensor: <LayoutGrid className="h-6 w-6" />,
+  Atlas3: <Globe className="h-6 w-6" />,
+  Discord: <MessageCircle className="h-6 w-6" />,
+}
+
+const glassCardItems = externalLinks.map((link) => ({
+  label: link.name,
+  href: link.url,
+  icon: iconByLink[link.name] ?? <ExternalLink className="h-6 w-6" />,
+}))
+
 export function Footer() {
   return (
     <footer className="w-full bg-black border-t border-green-500/40 mt-auto">
@@ -22,7 +40,11 @@ export function Footer() {
           <p className="owltopia-neon text-lg sm:text-xl md:text-2xl font-semibold tracking-wider text-center">
             owltopia
           </p>
-          {/* Links Section - pill tabs with flair */}
+          {/* Primary links: glass icon card (mobile-first, always visible) */}
+          <div className="w-full flex justify-center px-1">
+            <SocialGlassCard items={glassCardItems} className="w-full max-w-2xl mx-auto glass-icon-card-row glass-icon-card-mobile" />
+          </div>
+          {/* How it works + pill links (How it works always visible for mobile) */}
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm">
             <Link
               href="/how-it-works"

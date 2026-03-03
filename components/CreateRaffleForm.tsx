@@ -267,15 +267,15 @@ export function CreateRaffleForm() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="floor_price">Floor Price (optional)</Label>
+              <Label htmlFor="floor_price">Floor Price (prize value for NFT)</Label>
               <Input
                 id="floor_price"
                 name="floor_price"
                 type="text"
-                placeholder="e.g., 5.5 SOL or 1000"
+                placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
               />
               <p className="text-xs text-muted-foreground">
-                Optional floor price metadata (text or numeric)
+                Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
               </p>
             </div>
           </div>
