@@ -1,0 +1,26 @@
+---
+description: Security-first mindset for all code, API design, and commits. Minimize attack surface and avoid leaking information to attackers.
+alwaysApply: true
+---
+
+# Security-first mindset
+
+Approach every change with a security mindset. Assume attackers will probe the system; give them no useful signals or opportunities.
+
+## Code and API
+
+- **Never trust client input** for amounts, identity, or state. Validate and derive server-side (e.g. amount from raffle price × quantity).
+- **API responses**: Use a single generic error body (e.g. `{ success: false, error: 'server error' }`) for all failures. Do not distinguish rate limit, validation, or internal state in the response body. Success responses: return only the minimum fields the frontend needs.
+- **Rate limit** by both IP and wallet where abuse is possible (create, verify). Use consistent, non-revealing error messages.
+- **Auth**: Admin and sensitive actions require session/signature verification. Do not rely on headers or body alone for identity.
+- **Idempotency and replay**: One transaction must map to one logical action (e.g. one tx → one confirmed entry). Use DB constraints and atomic RPCs; log and return generic errors.
+- **Secrets**: Never commit `.env`, keys, or `NEXT_PUBLIC_*` with secrets. Do not log or expose internal config in responses.
+
+## Commits
+
+- **Commit messages must not aid attackers.** Do not describe exploit steps, vulnerability details, or “how it was abused” in commit messages. Public history should not be a reconnaissance source.
+- **Prefer neutral, factual language**: e.g. “Harden entry verification”, “Restrict entry deletion to pending”, “Use generic API error body” instead of “Fix double-spend by invalidating previous entry IDs” or “Prevent attacker from …”.
+- **Keep messages short and professional.** If a fix relates to a security issue, say “security” or “harden” without explaining the attack.
+- **Never commit** secrets, env files, temporary debug endpoints, or commented-out credentials.
+
+When suggesting or writing commits, apply these rules so the repository stays safe and professional.
