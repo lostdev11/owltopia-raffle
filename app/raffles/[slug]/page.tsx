@@ -83,7 +83,7 @@ export default async function RaffleDetailPage({
   }
 
   // Check if raffle has ended and doesn't have a winner yet
-  // Use end_time only: after restore, end_time is the extended time; original_end_time is for 7-day rule only.
+  // Use end_time only: after restore, end_time is the extended time.
   const now = new Date()
   const endTimeToCheck = new Date(raffle.end_time)
   const hasEnded = endTimeToCheck <= now
@@ -94,10 +94,10 @@ export default async function RaffleDetailPage({
       // Get entries to check eligibility
       const entries = await getEntriesByRaffleId(raffle.id)
       const { updateRaffle } = await import('@/lib/db/raffles')
-      
-      // Check if raffle can have a winner selected (min tickets met AND 7 days passed)
+
+      // Check if raffle can have a winner selected (threshold met and at least one confirmed ticket)
       const canDraw = canSelectWinner(raffle, entries)
-      
+
       if (canDraw) {
         // Automatically select a winner based on ticket quantities
         const winnerWallet = await selectWinner(raffle.id)
@@ -110,28 +110,36 @@ export default async function RaffleDetailPage({
           }
         }
       } else {
-        // Check if min tickets are not met - if so, extend the raffle by 7 days from current end
-        const isEligible = isRaffleEligibleToDraw(raffle, entries)
-        
-        if (!isEligible) {
-          // Min tickets not met - extend raffle by 7 days from current end_time (not original)
+        // Threshold not met: only extend when a minimum is configured and not reached yet
+        const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
+        const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
+
+        if (hasMinTickets && !meetsMinTickets) {
+          // Min tickets not met - extend raffle by its original duration (or 7 days fallback)
           const originalEndTime = raffle.original_end_time || raffle.end_time
-          const newEndTime = new Date(raffle.end_time)
-          newEndTime.setDate(newEndTime.getDate() + 7)
-          
+          const startTimeMs = new Date(raffle.start_time).getTime()
+          const originalEndMs = new Date(originalEndTime).getTime()
+          const baseDurationMs = originalEndMs - startTimeMs
+          const durationMs =
+            baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+
+          const currentEndMs = new Date(raffle.end_time).getTime()
+          const newEndTime = new Date(currentEndMs + durationMs)
+
           await updateRaffle(raffle.id, {
             original_end_time: originalEndTime,
             end_time: newEndTime.toISOString(),
             status: 'live',
           })
-          
+
           // Refresh raffle data
           raffle = await getRaffleBySlug(slug)
           if (!raffle) {
             notFound()
           }
-        } else {
-          // Min tickets met but 7 days haven't passed - update to ready_to_draw
+        } else if (!hasMinTickets) {
+          // No minimum configured and either zero tickets or some other non-drawable state:
+          // mark as ready_to_draw so admins can decide how to handle it.
           if (raffle.status !== 'ready_to_draw') {
             await updateRaffle(raffle.id, { status: 'ready_to_draw' })
             raffle = await getRaffleBySlug(slug)

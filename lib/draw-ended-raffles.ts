@@ -41,10 +41,16 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
 
       if (!canDraw) {
         if (!meetsMinTickets) {
-          const endTime = new Date(raffle.end_time)
+          // Threshold not met: extend raffle by its original duration (or 7 days fallback)
           const originalEndTime = raffle.original_end_time || raffle.end_time
-          const newEndTime = new Date(endTime)
-          newEndTime.setDate(newEndTime.getDate() + 7)
+          const startTimeMs = new Date(raffle.start_time).getTime()
+          const originalEndMs = new Date(originalEndTime).getTime()
+          const baseDurationMs = originalEndMs - startTimeMs
+          const durationMs =
+            baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+
+          const currentEndMs = new Date(raffle.end_time).getTime()
+          const newEndTime = new Date(currentEndMs + durationMs)
 
           await updateRaffle(raffle.id, {
             original_end_time: originalEndTime,
@@ -57,11 +63,17 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
             raffleTitle: raffle.title,
             success: false,
             winnerWallet: null,
-            error: `Minimum requirements not met (min: ${raffle.min_tickets ?? 'N/A'}, sold: ${entries.filter(e => e.status === 'confirmed').reduce((sum, entry) => sum + entry.ticket_quantity, 0)}). Extended by 7 days.`,
+            error: `Minimum requirements not met (min: ${
+              raffle.min_tickets ?? 'N/A'
+            }, sold: ${entries
+              .filter((e) => e.status === 'confirmed')
+              .reduce((sum, entry) => sum + entry.ticket_quantity, 0)}). Extended by ${
+              durationMs / (24 * 60 * 60 * 1000)
+            } days.`,
             extended: true,
           })
         } else {
-          // Threshold met but 7 days not passed since original end — mark as ready_to_draw so raffle is visibly ended
+          // Threshold met but caller decided not to draw yet – mark as ready_to_draw
           if (raffle.status !== 'ready_to_draw') {
             await updateRaffle(raffle.id, { status: 'ready_to_draw' })
           }
@@ -70,7 +82,8 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
             raffleTitle: raffle.title,
             success: false,
             winnerWallet: null,
-            error: 'Raffle must wait 7 days after original end time before drawing winner',
+            error:
+              'Raffle is ready to draw but winner selection was not run in this cycle.',
           })
         }
         continue

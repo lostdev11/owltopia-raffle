@@ -61,22 +61,27 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Check if raffle can have winner selected (min tickets met AND 7 days passed) unless force override
+      // Check if raffle can have winner selected (threshold met and at least one confirmed ticket) unless force override
       const entries = await getEntriesByRaffleId(raffleId)
       const forceOverride = body.forceOverride === true
       
       if (!forceOverride) {
         const canDraw = canSelectWinner(raffle, entries)
-        const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
+        const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
+        const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
         
         if (!canDraw) {
-          // If min tickets not met, extend the raffle by 7 days
-          if (!meetsMinTickets) {
-            const now = new Date()
-            const endTime = new Date(raffle.end_time)
+          // If a minimum is configured but not met, extend the raffle by its original duration (or 7 days fallback)
+          if (hasMinTickets && !meetsMinTickets) {
             const originalEndTime = raffle.original_end_time || raffle.end_time
-            const newEndTime = new Date(endTime)
-            newEndTime.setDate(newEndTime.getDate() + 7)
+            const startTimeMs = new Date(raffle.start_time).getTime()
+            const originalEndMs = new Date(originalEndTime).getTime()
+            const baseDurationMs = originalEndMs - startTimeMs
+            const durationMs =
+              baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+
+            const currentEndMs = new Date(raffle.end_time).getTime()
+            const newEndTime = new Date(currentEndMs + durationMs)
             
             await updateRaffle(raffle.id, {
               original_end_time: originalEndTime,
@@ -86,7 +91,7 @@ export async function POST(request: NextRequest) {
             
             return NextResponse.json(
               { 
-                error: 'Raffle does not meet minimum ticket requirements. Extended by 7 days.',
+                error: 'Raffle does not meet minimum ticket requirements. Extended by another period.',
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
                 ticketsSold: entries.filter(e => e.status === 'confirmed')
@@ -96,16 +101,15 @@ export async function POST(request: NextRequest) {
               },
               { status: 400 }
             )
-          } else {
-            // Min tickets met but 7 days haven't passed
+          } else if (!hasMinTickets) {
+            // No minimum configured and either zero tickets or some other non-drawable state
             return NextResponse.json(
               { 
-                error: 'Raffle must wait 7 days after original end time before drawing winner',
+                error: 'Raffle has no minimum threshold and cannot draw a winner (no confirmed tickets).',
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
                 ticketsSold: entries.filter(e => e.status === 'confirmed')
                   .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
-                originalEndTime: raffle.original_end_time || raffle.end_time
               },
               { status: 400 }
             )

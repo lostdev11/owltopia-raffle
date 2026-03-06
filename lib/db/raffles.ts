@@ -978,30 +978,27 @@ export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
 }
 
 /**
- * Check if a raffle can have a winner selected
- * - If no min_tickets: winner can be selected immediately when raffle ends
- * - If min_tickets set:
- *   - If raffle hasn't been extended (no original_end_time): can select immediately when min tickets met and raffle ended
- *   - If raffle was extended (has original_end_time): requires both min tickets met AND 7 days passed since original end time
+ * Check if a raffle can have a winner selected.
+ *
+ * Behaviour:
+ * - When a minimum ticket threshold is set (min_tickets > 0), the raffle becomes
+ *   eligible to draw as soon as confirmed tickets >= min_tickets.
+ * - When no minimum is set, the raffle is eligible to draw as long as there is
+ *   at least one confirmed ticket.
+ *
+ * NOTE: Callers are responsible for ensuring the raffle has actually ended
+ * (end_time has passed) before calling this helper.
  */
 export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
-  // If no minimum is set, raffle can be drawn immediately when it ends
-  if (!raffle.min_tickets) {
-    return true
+  const confirmedTickets = calculateTicketsSold(entries)
+
+  // If a minimum is configured, require that threshold to be met
+  if (raffle.min_tickets && raffle.min_tickets > 0) {
+    return confirmedTickets >= raffle.min_tickets
   }
 
-  // Check minimum tickets requirement
-  const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
-  
-  // If raffle was extended (has original_end_time), require 7 days to pass
-  // This gives people time to buy more tickets after the extension
-  if (raffle.original_end_time) {
-    const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
-    return meetsMinTickets && sevenDaysPassed
-  }
-  
-  // If raffle hasn't been extended and min tickets are met, can select immediately when raffle ends
-  return meetsMinTickets
+  // No minimum configured: need at least one confirmed ticket
+  return confirmedTickets > 0
 }
 
 /**
