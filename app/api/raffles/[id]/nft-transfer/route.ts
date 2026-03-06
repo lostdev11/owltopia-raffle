@@ -11,11 +11,11 @@ export const dynamic = 'force-dynamic'
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const body = await request.json()
-    const raffleId = params.id
+    const { id: raffleId } = await params
     const { transaction_signature, wallet_address } = body
 
     // Check if wallet address is provided

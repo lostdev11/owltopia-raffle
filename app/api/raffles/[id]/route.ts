@@ -7,11 +7,11 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const body = await request.json()
-    const raffleId = params.id
+    const { id: raffleId } = await params
 
     // Check if wallet address is provided
     const walletAddress = body.wallet_address || request.headers.get('x-wallet-address')
@@ -192,10 +192,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const raffleId = params.id
+    const { id: raffleId } = await params
 
     // Check if wallet address is provided (from header or body)
     let walletAddress = request.headers.get('x-wallet-address')
