@@ -99,6 +99,12 @@ export function RaffleDetailClient({
     const now = new Date()
     return startTime > now
   })
+  // Delay "entered" card styling to avoid flash when wallet/entries resolve on open (mobile)
+  const [showEnteredStyle, setShowEnteredStyle] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShowEnteredStyle(true), 200)
+    return () => clearTimeout(t)
+  }, [])
 
   // Update isActive and isFuture when time passes (e.g., raffle ends or starts while page is open)
   useEffect(() => {
@@ -1159,8 +1165,8 @@ export function RaffleDetailClient({
             Share
           </Button>
         </div>
-        <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={borderStyle}>
-          {userHasEnteredDetail && (
+        <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${showEnteredStyle && userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={borderStyle}>
+          {showEnteredStyle && userHasEnteredDetail && (
             <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
           )}
           <CardHeader className={classes.headerPadding}>
