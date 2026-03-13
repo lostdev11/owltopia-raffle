@@ -2,6 +2,9 @@ import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Raffle, Entry } from '@/lib/types'
 import { withRetry, withQueryRetry } from '@/lib/db-retry'
+import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
+import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
+import { getRaffleRevenue } from '@/lib/raffle-profit'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -70,7 +73,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
  * Get the base columns that exist before NFT migration
  */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,rank,floor_price'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
@@ -529,6 +532,41 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
   }, { maxRetries: 2 })
 }
 
+/**
+ * Sum of creator_payout_amount for completed raffles where this wallet is the creator.
+ * Used for user dashboard revenue.
+ */
+export async function getCreatorRevenueByWallet(walletAddress: string): Promise<{
+  totalCreatorRevenue: number
+  byCurrency: Record<string, number>
+}> {
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) return { totalCreatorRevenue: 0, byCurrency: {} }
+
+  const { data, error } = await getSupabaseForRead()
+    .from('raffles')
+    .select('creator_payout_amount, currency')
+    .eq('status', 'completed')
+    .not('creator_payout_amount', 'is', null)
+    .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
+
+  if (error) {
+    console.error('Error fetching creator revenue:', error)
+    return { totalCreatorRevenue: 0, byCurrency: {} }
+  }
+
+  const byCurrency: Record<string, number> = {}
+  let total = 0
+  for (const row of data || []) {
+    const amount = Number(row.creator_payout_amount ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    const cur = (row.currency as string) || 'SOL'
+    byCurrency[cur] = (byCurrency[cur] ?? 0) + amount
+    total += amount
+  }
+  return { totalCreatorRevenue: total, byCurrency }
+}
+
 export async function getEntriesByRaffleId(raffleId: string) {
   // Fetch all entries using pagination to handle any Supabase row limits
   // Supabase defaults to 1000 rows per query, but projects can have custom limits
@@ -623,6 +661,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     theme_accent: raffle.theme_accent,
     edited_after_entries: raffle.edited_after_entries,
     created_by: raffle.created_by,
+    creator_wallet: raffle.creator_wallet,
     is_active: raffle.is_active,
     winner_wallet: raffle.winner_wallet,
     winner_selected_at: raffle.winner_selected_at,
@@ -640,9 +679,14 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.nft_metadata_uri = raffle.nft_metadata_uri
   }
 
-  // Include optional metadata fields
+  // Include optional metadata and settlement fields
   insertData.rank = raffle.rank
   insertData.floor_price = raffle.floor_price
+  insertData.fee_bps_applied = raffle.fee_bps_applied
+  insertData.fee_tier_reason = raffle.fee_tier_reason
+  insertData.platform_fee_amount = raffle.platform_fee_amount
+  insertData.creator_payout_amount = raffle.creator_payout_amount
+  insertData.settled_at = raffle.settled_at
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
@@ -824,7 +868,21 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     if (random <= 0) {
       const winnerWallet = wallets[i]
       
-      // Update the raffle with the winner
+      // Compute settlement amounts (fee + creator payout) at settlement time
+      const revenue = getRaffleRevenue(entries)
+      const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
+      const grossRevenue =
+        revenueCurrency === 'USDC'
+          ? revenue.usdc
+          : revenueCurrency === 'SOL'
+          ? revenue.sol
+          : revenue.owl
+
+      const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+      const { feeBps, reason } = await getCreatorFeeTier(creatorWallet)
+      const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
+
+      // Update the raffle with the winner and settlement info
       const now = new Date().toISOString()
       const { error } = await getSupabaseAdmin()
         .from('raffles')
@@ -832,6 +890,12 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
           winner_wallet: winnerWallet,
           winner_selected_at: now,
           status: 'completed',
+          creator_wallet: creatorWallet || null,
+          fee_bps_applied: feeBps,
+          fee_tier_reason: reason,
+          platform_fee_amount: platformFee,
+          creator_payout_amount: creatorPayout,
+          settled_at: now,
         })
         .eq('id', raffleId)
 
@@ -847,6 +911,20 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
   // Fallback to last wallet (should not happen due to random <= 0 check)
   const winnerWallet = wallets[wallets.length - 1]
+  // Compute settlement amounts for fallback path
+  const revenue = getRaffleRevenue(entries)
+  const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
+  const grossRevenue =
+    revenueCurrency === 'USDC'
+      ? revenue.usdc
+      : revenueCurrency === 'SOL'
+      ? revenue.sol
+      : revenue.owl
+
+  const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const { feeBps, reason } = await getCreatorFeeTier(creatorWallet)
+  const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
+
   const now = new Date().toISOString()
   const { error } = await getSupabaseAdmin()
     .from('raffles')
@@ -854,6 +932,12 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       winner_wallet: winnerWallet,
       winner_selected_at: now,
       status: 'completed',
+      creator_wallet: creatorWallet || null,
+      fee_bps_applied: feeBps,
+      fee_tier_reason: reason,
+      platform_fee_amount: platformFee,
+      creator_payout_amount: creatorPayout,
+      settled_at: now,
     })
     .eq('id', raffleId)
 

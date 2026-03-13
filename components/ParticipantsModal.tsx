@@ -9,8 +9,13 @@ import {
 } from '@/components/ui/dialog'
 import type { Entry, ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { ExternalLink } from 'lucide-react'
+
+function truncateAddress(wallet: string): string {
+  if (wallet.length <= 12) return wallet
+  return `${wallet.slice(0, 4)}…${wallet.slice(-4)}`
+}
 
 interface ParticipantsModalProps {
   open: boolean
@@ -45,7 +50,18 @@ export function ParticipantsModal({
       .map(([wallet, data]) => ({ wallet, tickets: data.tickets, transactions: data.transactions }))
       .sort((a, b) => b.tickets - a.tickets)
   }, [entries])
-  
+
+  const [displayNames, setDisplayNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!open || participants.length === 0) return
+    const wallets = participants.map((p) => p.wallet)
+    const q = wallets.slice(0, 200).join(',')
+    fetch(`/api/profiles?wallets=${encodeURIComponent(q)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => setDisplayNames(map))
+      .catch(() => setDisplayNames({}))
+  }, [open, participants])
+
   // Solana explorer URL helper
   const getSolanaExplorerUrl = (signature: string) => {
     return `https://solscan.io/tx/${signature}`
@@ -62,7 +78,7 @@ export function ParticipantsModal({
         <DialogHeader className="pr-8 sm:pr-0">
           <DialogTitle>Participants ({participants.length})</DialogTitle>
           <DialogDescription className="break-words">
-            Wallet addresses and ticket counts (confirmed entries only)
+            Participants and ticket counts (confirmed entries only). Display names are set in My Dashboard.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-96 overflow-y-auto space-y-2 -mx-1 px-1">
@@ -78,7 +94,16 @@ export function ParticipantsModal({
               >
                 <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                   <span className="text-muted-foreground flex-shrink-0">#{index + 1}</span>
-                  <code className="text-xs sm:text-sm font-mono truncate flex-1 min-w-0">{participant.wallet}</code>
+                  <span
+                    className="text-xs sm:text-sm truncate flex-1 min-w-0"
+                    title={participant.wallet}
+                  >
+                    {displayNames[participant.wallet] ? (
+                      <span className="font-medium">{displayNames[participant.wallet]}</span>
+                    ) : (
+                      <code className="font-mono">{truncateAddress(participant.wallet)}</code>
+                    )}
+                  </span>
                   {participant.transactions.length > 0 && (
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {participant.transactions.map((tx, txIndex) => (

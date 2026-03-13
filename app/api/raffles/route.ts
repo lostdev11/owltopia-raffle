@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createRaffle, generateUniqueSlug, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireSession } from '@/lib/auth-server'
+import { isAdmin } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
+import { getCreationFeeConfig } from '@/lib/creation-fee'
+import { verifyCreationFeeTransaction } from '@/lib/verify-creation-fee'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -79,7 +82,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)
@@ -105,6 +108,37 @@ export async function POST(request: NextRequest) {
     }
     
     const walletAddress = session.wallet
+
+    // Non-admins must pay creation fee (SOL transfer); admins are exempt
+    const admin = await isAdmin(walletAddress)
+    const { creationFeeLamports, creationFeeRecipient, creationFeeRequired } = getCreationFeeConfig()
+    if (!admin && creationFeeRequired) {
+      const sig = body.creation_fee_transaction_signature?.trim()
+      if (!sig) {
+        return NextResponse.json(
+          { error: 'Raffle creation fee required. Pay the creation fee first, then submit again.' },
+          { status: 400 }
+        )
+      }
+      if (!creationFeeRecipient) {
+        return NextResponse.json(
+          { error: 'Creation fee is not configured. Please try again later.' },
+          { status: 503 }
+        )
+      }
+      const { valid, error: verifyError } = await verifyCreationFeeTransaction(
+        sig,
+        walletAddress,
+        creationFeeRecipient,
+        creationFeeLamports
+      )
+      if (!valid) {
+        return NextResponse.json(
+          { error: verifyError ?? 'Creation fee transaction could not be verified.' },
+          { status: 400 }
+        )
+      }
+    }
 
     // Generate slug from title if not provided, or use provided slug
     let slug = body.slug
@@ -247,13 +281,21 @@ export async function POST(request: NextRequest) {
       theme_accent: body.theme_accent || 'prime',
       edited_after_entries: false,
       created_by: walletAddress,
-      is_active: true,
+      creator_wallet: walletAddress,
+      // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active)
+      is_active: prizeType !== 'nft',
       winner_wallet: null,
       winner_selected_at: null,
       status: ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status) ? body.status : 'draft',
       nft_transfer_transaction: null,
+      fee_bps_applied: null,
+      fee_tier_reason: null,
+      platform_fee_amount: null,
+      creator_payout_amount: null,
+      settled_at: null,
       rank: rank,
       floor_price: floorPrice,
+      prize_deposited_at: null,
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')

@@ -23,6 +23,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
 import { MarkdownContent } from '@/components/MarkdownContent'
+import { LiveActivityPopups } from '@/components/LiveActivityPopups'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -339,6 +340,11 @@ export function RafflesPageClient({
   const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
   const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])
   const past = serverPast.length > 0 ? serverPast : (clientBuckets?.past ?? [])
+  const allRafflesFlat: Raffle[] = [
+    ...active.map((item) => item.raffle),
+    ...future.map((item) => item.raffle),
+    ...past.map((item) => item.raffle),
+  ]
 
   // Client-only logging: only when ?debug=1. No secrets (no env, no full keys).
   useEffect(() => {
@@ -368,9 +374,23 @@ export function RafflesPageClient({
   // Refresh when user returns to the tab so threshold/raffle edits are visible
   useEffect(() => {
     if (tab !== 'all') return
-    const onFocus = () => router.refresh()
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const handler = () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+      timeoutId = setTimeout(() => {
+        timeoutId = null
+        try {
+          router.refresh()
+        } catch {
+          // Ignore sync errors; Next.js internal fetch errors still log but won't crash
+        }
+      }, 150)
+    }
+    window.addEventListener('focus', handler)
+    return () => {
+      window.removeEventListener('focus', handler)
+      if (timeoutId !== null) clearTimeout(timeoutId)
+    }
   }, [tab, router])
 
   const isEmpty = active.length === 0 && future.length === 0 && past.length === 0
@@ -382,7 +402,8 @@ export function RafflesPageClient({
   const showPausedMessage = hasError && isSupabasePausedError(rawErrorMessage)
 
   return (
-    <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
+  <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
+      <LiveActivityPopups raffles={allRafflesFlat} />
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">

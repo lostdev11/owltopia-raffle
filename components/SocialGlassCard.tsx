@@ -7,6 +7,7 @@ export interface GlassIconItem {
   label: string
   href: string
   icon: React.ReactNode
+  external?: boolean
 }
 
 interface SocialGlassCardProps {
@@ -29,8 +30,8 @@ export function SocialGlassCard({ items, className = '' }: SocialGlassCardProps)
             <span className="glass-icon-layer" aria-hidden />
             <Link
               href={item.href}
-              target="_blank"
-              rel="noopener noreferrer"
+              target={item.external ? '_blank' : undefined}
+              rel={item.external ? 'noopener noreferrer' : undefined}
               className="flex flex-col items-center justify-center gap-0 min-h-[44px] min-w-[44px] touch-manipulation"
               aria-label={item.label}
             >

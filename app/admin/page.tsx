@@ -922,6 +922,22 @@ export default function AdminDashboardPage() {
             </Link>
           </Card>
 
+          {adminRole === 'full' && (
+            <Card className="hover:border-primary transition-colors cursor-pointer">
+              <Link href="/admin/users">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Users
+                  </CardTitle>
+                  <CardDescription>
+                    Track creators and entrants: raffles created, creator revenue, entries, and total spent per wallet.
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

@@ -13,7 +13,9 @@ import {
   isRaffleEligibleToDraw,
   selectWinner,
   updateRaffle,
+  getRaffleById,
 } from '@/lib/db/raffles'
+import { transferNftPrizeToWinner } from '@/lib/raffles/prize-escrow'
 
 export type DrawResult = {
   raffleId: string
@@ -22,6 +24,10 @@ export type DrawResult = {
   winnerWallet: string | null
   error: string | null
   extended?: boolean
+  /** NFT prize transfer tx signature (if prize escrow is used and transfer succeeded). */
+  nftTransferSignature?: string | null
+  /** Error from automatic NFT transfer to winner (if any). */
+  nftTransferError?: string | null
 }
 
 export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]> {
@@ -77,12 +83,28 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
       }
 
       const winnerWallet = await selectWinner(raffle.id)
+      let nftTransferSignature: string | null = null
+      let nftTransferError: string | null = null
+      if (winnerWallet) {
+        const updated = await getRaffleById(raffle.id)
+        if (updated?.prize_type === 'nft' && updated.nft_mint_address && !updated.nft_transfer_transaction) {
+          const transferResult = await transferNftPrizeToWinner(raffle.id)
+          if (transferResult.ok && transferResult.signature) {
+            nftTransferSignature = transferResult.signature
+          } else if (!transferResult.ok && transferResult.error) {
+            nftTransferError = transferResult.error
+            console.error(`[draw-ended-raffles] NFT transfer failed for raffle ${raffle.id}:`, transferResult.error)
+          }
+        }
+      }
       results.push({
         raffleId: raffle.id,
         raffleTitle: raffle.title,
         success: !!winnerWallet,
         winnerWallet: winnerWallet ?? null,
         error: winnerWallet ? null : 'No confirmed entries found',
+        nftTransferSignature: nftTransferSignature ?? undefined,
+        nftTransferError: nftTransferError ?? undefined,
       })
     } catch (error) {
       results.push({

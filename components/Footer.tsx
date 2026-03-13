@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Globe, Coins } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Coins, Info } from 'lucide-react'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
 
 const externalLinks = [
@@ -11,7 +11,6 @@ const externalLinks = [
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Atlas3', url: 'https://atlas3.io/project/owltopia' },
   { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
 ]
 
@@ -21,15 +20,22 @@ const iconByLink: Record<string, React.ReactNode> = {
   Whitepaper: <FileText className="h-6 w-6" />,
   ME: <Store className="h-6 w-6" />,
   Tensor: <LayoutGrid className="h-6 w-6" />,
-  Atlas3: <Globe className="h-6 w-6" />,
   Discord: <MessageCircle className="h-6 w-6" />,
 }
 
-const glassCardItems = externalLinks.map((link) => ({
-  label: link.name,
-  href: link.url,
-  icon: iconByLink[link.name] ?? <ExternalLink className="h-6 w-6" />,
-}))
+const glassCardItems = [
+  {
+    label: 'How It Works',
+    href: '/how-it-works',
+    icon: <Info className="h-6 w-6" />,
+  },
+  ...externalLinks.map((link) => ({
+    label: link.name,
+    href: link.url,
+    icon: iconByLink[link.name] ?? <ExternalLink className="h-6 w-6" />,
+    external: true,
+  })),
+]
 
 export function Footer() {
   return (
@@ -43,37 +49,6 @@ export function Footer() {
           {/* Primary links: glass icon card (mobile-first, always visible) */}
           <div className="w-full flex justify-center px-1">
             <SocialGlassCard items={glassCardItems} className="w-full max-w-2xl mx-auto glass-icon-card-row glass-icon-card-mobile" />
-          </div>
-          {/* How it works + pill links (How it works always visible for mobile) */}
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm">
-            <Link
-              href="/how-it-works"
-              className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground
-                bg-white/5 border border-white/10 hover:border-green-500/50
-                transition-all duration-300 ease-out
-                hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)]
-                hover:bg-green-500/10
-                touch-manipulation min-h-[44px] text-center"
-            >
-              <span>How It Works</span>
-            </Link>
-            {externalLinks.map((link) => (
-              <a
-                key={link.name}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground
-                  bg-white/5 border border-white/10 hover:border-green-500/50
-                  transition-all duration-300 ease-out
-                  hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)]
-                  hover:bg-green-500/10
-                  touch-manipulation min-h-[44px] text-center"
-              >
-                <span>{link.name}</span>
-                <ExternalLink className="h-3 w-3 sm:h-3.5 sm:w-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-              </a>
-            ))}
           </div>
           
           {/* Copyright and Terms Section */}

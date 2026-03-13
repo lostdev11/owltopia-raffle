@@ -39,6 +39,10 @@ export const authVerifyBody = z.object({
   signature: z.string().min(1),
 })
 
+export const profileUpdateBody = z.object({
+  displayName: z.string().min(1).max(32).trim(),
+})
+
 export function parseOr400<T>(schema: z.ZodSchema<T>, data: unknown): { ok: true; data: T } | { ok: false; status: 400; error: string } {
   const result = schema.safeParse(data)
   if (result.success) return { ok: true, data: result.data }

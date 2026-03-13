@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { consumeNonce, verifySignIn, setSessionCookieInResponse } from '@/lib/auth-server'
-import { isAdmin } from '@/lib/db/admins'
 import { authVerifyBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
@@ -35,14 +34,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: result.error || 'Invalid signature' },
         { status: 400 }
-      )
-    }
-
-    const admin = await isAdmin(walletStr)
-    if (!admin) {
-      return NextResponse.json(
-        { error: 'Wallet is not an admin' },
-        { status: 403 }
       )
     }
 

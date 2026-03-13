@@ -44,6 +44,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [restoreExtension, setRestoreExtension] = useState<24 | 72 | 168>(24) // 24h, 3 days, 7 days
+  const hasSettlement =
+    !!raffle.settled_at &&
+    raffle.platform_fee_amount != null &&
+    raffle.creator_payout_amount != null &&
+    raffle.fee_bps_applied != null &&
+    typeof raffle.fee_tier_reason === 'string'
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -360,6 +366,38 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           <h1 className="text-4xl font-bold mb-2">Edit Raffle</h1>
           <p className="text-muted-foreground">Update raffle details</p>
         </div>
+
+        {hasSettlement && (
+          <Card className="border border-emerald-500/30 bg-emerald-500/5">
+            <CardHeader>
+              <CardTitle>Settlement (platform fee V1)</CardTitle>
+              <CardDescription>Snapshot of the applied platform fee at settlement time.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              <p>
+                <span className="font-medium">Gross revenue:</span>{' '}
+                {((raffle.platform_fee_amount ?? 0) + (raffle.creator_payout_amount ?? 0)).toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Applied fee:</span>{' '}
+                {(raffle.fee_bps_applied! / 100).toFixed(2)}% ({raffle.fee_bps_applied} bps, reason:{' '}
+                {raffle.fee_tier_reason})
+              </p>
+              <p>
+                <span className="font-medium">Platform fee:</span> {raffle.platform_fee_amount?.toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Creator payout:</span> {raffle.creator_payout_amount?.toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Settled at:</span> {raffle.settled_at}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Logo } from '@/components/Logo'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
-import { Settings, Plus } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 
 export function Header() {
@@ -53,9 +53,9 @@ export function Header() {
     return () => { cancelled = true }
   }, [connected, publicKey])
 
-  // Full admins see Owl Vision; raffle_creator only sees Create Raffle. Null role (e.g. stale cache) treated as full.
+  // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
   const showOwlVision = isAdmin && (adminRole === 'full' || adminRole === null)
-  const showCreateRaffle = isAdmin && adminRole === 'raffle_creator'
+  const showCreateRaffle = connected
 
   return (
     <header className="w-full bg-black border-b border-green-500/20">
@@ -65,6 +65,14 @@ export function Header() {
             <Logo className="flex-1 max-w-full h-auto" width={600} height={150} priority />
           </Link>
           <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+            {connected && (
+              <Link href="/dashboard">
+                <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                  <LayoutDashboard className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Dashboard</span>
+                </Button>
+              </Link>
+            )}
             {showOwlVision && (
               <Link href="/admin">
                 <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">

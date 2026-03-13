@@ -119,19 +119,31 @@ export function parseSessionCookieValue(value: string | undefined): { wallet: st
 }
 
 /**
+ * Use when any signed-in wallet is required (e.g. user dashboard).
+ * Returns 401 if not signed in, otherwise the session wallet.
+ */
+export async function requireSession(
+  request: NextRequest
+): Promise<{ wallet: string } | NextResponse> {
+  const session = getSessionFromRequest(request)
+  if (!session) {
+    return NextResponse.json(
+      { error: 'Sign in required. Connect your wallet and sign in.' },
+      { status: 401 }
+    )
+  }
+  return session
+}
+
+/**
  * Use in admin routes: returns 401/403 response or the admin wallet.
  * Allows any admin role (full or raffle_creator).
  */
 export async function requireAdminSession(
   request: NextRequest
 ): Promise<{ wallet: string } | NextResponse> {
-  const session = getSessionFromRequest(request)
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Sign in required. Use SIWS (Sign-In with Solana) and session cookie.' },
-      { status: 401 }
-    )
-  }
+  const session = await requireSession(request)
+  if (session instanceof NextResponse) return session
   const admin = await isAdmin(session.wallet)
   if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

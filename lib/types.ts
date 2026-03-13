@@ -39,8 +39,17 @@ export interface Raffle {
   winner_selected_at: string | null
   status: RaffleStatus
   nft_transfer_transaction: string | null
+  // V1 fee settlement fields (creator-based platform fee)
+  creator_wallet: string | null
+  fee_bps_applied: number | null
+  fee_tier_reason: string | null
+  platform_fee_amount: number | null
+  creator_payout_amount: number | null
+  settled_at: string | null
   rank: string | null
   floor_price: string | null
+  /** Set when NFT prize was verified in platform escrow (prize escrow flow). */
+  prize_deposited_at: string | null
 }
 
 export interface Entry {

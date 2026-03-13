@@ -406,60 +406,44 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       }
       transaction.feePayer = publicKey
       
-      // Same treasury recipient for SOL, USDC, and OWL (from RAFFLE_RECIPIENT_WALLET)
-      const recipientPubkey = new PublicKey(paymentDetails.recipient)
+      const payments: { recipient: string; amount: number }[] =
+        paymentDetails.split?.length === 2
+          ? paymentDetails.split
+          : [{ recipient: paymentDetails.recipient, amount: paymentDetails.amount }]
 
       if (raffle.currency === 'SOL') {
-        const lamports = Math.round(paymentDetails.amount * LAMPORTS_PER_SOL)
-        transaction.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: recipientPubkey,
-            lamports,
-          })
-        )
-      } else if (raffle.currency === 'OWL') {
-        // OWL checkout not implemented yet when mint is set (handled above when !isOwlEnabled)
+        for (const p of payments) {
+          transaction.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: new PublicKey(p.recipient),
+              lamports: Math.round(p.amount * LAMPORTS_PER_SOL),
+            })
+          )
+        }
+      } else if (raffle.currency === 'OWL' && !paymentDetails.owlMint) {
         throw new Error('OWL entry is not enabled yet — mint address pending.')
       } else if (raffle.currency === 'USDC') {
         const usdcMint = new PublicKey(paymentDetails.usdcMint)
         const mintInfo = await getMint(connection, usdcMint)
         const decimals = mintInfo.decimals
-        const amount = BigInt(Math.round(paymentDetails.amount * Math.pow(10, decimals)))
-
         const senderTokenAddress = await getAssociatedTokenAddress(usdcMint, publicKey)
-        const recipientTokenAddress = await getAssociatedTokenAddress(usdcMint, recipientPubkey)
-
-        let accountExists = false
-        try {
-          await getAccount(connection, recipientTokenAddress)
-          accountExists = true
-        } catch (error: any) {
-          if (!error?.message?.includes('TokenAccountNotFoundError') && !error?.message?.includes('could not find account')) {
-            throw error
+        for (const p of payments) {
+          const recipientPubkey = new PublicKey(p.recipient)
+          const amount = BigInt(Math.round(p.amount * Math.pow(10, decimals)))
+          const recipientTokenAddress = await getAssociatedTokenAddress(usdcMint, recipientPubkey)
+          let accountExists = false
+          try {
+            await getAccount(connection, recipientTokenAddress)
+            accountExists = true
+          } catch (error: any) {
+            if (!error?.message?.includes('TokenAccountNotFoundError') && !error?.message?.includes('could not find account')) throw error
           }
+          if (!accountExists) {
+            transaction.add(createAssociatedTokenAccountInstruction(publicKey, recipientTokenAddress, recipientPubkey, usdcMint))
+          }
+          transaction.add(createTransferInstruction(senderTokenAddress, recipientTokenAddress, publicKey, amount, []))
         }
-        
-        if (!accountExists) {
-          transaction.add(
-            createAssociatedTokenAccountInstruction(
-              publicKey,
-              recipientTokenAddress,
-              recipientPubkey,
-              usdcMint
-            )
-          )
-        }
-
-        transaction.add(
-          createTransferInstruction(
-            senderTokenAddress,
-            recipientTokenAddress,
-            publicKey,
-            amount,
-            []
-          )
-        )
       } else if (raffle.currency === 'OWL') {
         // OWL (SPL Token) transfer
         if (!paymentDetails.owlMint) {
@@ -525,78 +509,38 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         }
         
         const decimals = mintInfo.decimals
-        const amount = BigInt(Math.round(paymentDetails.amount * Math.pow(10, decimals)))
-
         const senderTokenAddress = await getAssociatedTokenAddress(owlMint, publicKey)
-        const recipientTokenAddress = await getAssociatedTokenAddress(owlMint, recipientPubkey)
-
-        let accountExists = false
-        let accountRetries = 3
-        while (accountRetries > 0 && !accountExists) {
-          try {
-            await getAccount(connection, recipientTokenAddress)
-            accountExists = true
-          } catch (error: any) {
-            const errorMessage = error?.message || ''
-            const errorCode = error?.code || error?.error?.code
-            const errorName = error?.name || ''
-            
-            if (errorMessage.includes('TokenAccountNotFoundError') || 
-                errorMessage.includes('could not find account')) {
-              accountExists = false
-              break
-            }
-            
-            const isFetchError = 
-              errorMessage.includes('failed to fetch') ||
-              errorMessage.includes('Failed to fetch') ||
-              errorMessage.includes('NetworkError') ||
-              errorMessage.includes('Network request failed') ||
-              errorName === 'TypeError' ||
-              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
-              errorMessage.includes('CORS') ||
-              errorMessage.includes('network')
-            
-            if (isFetchError ||
-                errorCode === 19 || 
-                errorMessage.includes('Temporary internal error') ||
-                errorMessage.includes('500') ||
-                errorMessage.includes('Network') ||
-                errorMessage.includes('timeout')) {
-              accountRetries--
-              if (accountRetries === 0) {
+        for (const p of payments) {
+          const recipientPubkey = new PublicKey(p.recipient)
+          const amount = BigInt(Math.round(p.amount * Math.pow(10, decimals)))
+          const recipientTokenAddress = await getAssociatedTokenAddress(owlMint, recipientPubkey)
+          let accountExists = false
+          let accountRetries = 3
+          while (accountRetries > 0 && !accountExists) {
+            try {
+              await getAccount(connection, recipientTokenAddress)
+              accountExists = true
+            } catch (error: any) {
+              const errorMessage = error?.message || ''
+              const errorCode = error?.code || error?.error?.code
+              const errorName = error?.name || ''
+              if (errorMessage.includes('TokenAccountNotFoundError') || errorMessage.includes('could not find account')) {
                 accountExists = false
                 break
               }
-              const backoffDelay = isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)
-              await new Promise(resolve => setTimeout(resolve, backoffDelay))
-            } else {
-              accountExists = false
-              break
+              const isFetchError = errorMessage.includes('failed to fetch') || errorMessage.includes('Failed to fetch') || errorName === 'TypeError' || errorMessage.includes('network')
+              if (isFetchError || errorCode === 19 || errorMessage.includes('Temporary internal error') || errorMessage.includes('500') || errorMessage.includes('timeout')) {
+                accountRetries--
+                if (accountRetries === 0) { accountExists = false; break }
+                await new Promise(resolve => setTimeout(resolve, isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)))
+              } else { accountExists = false; break }
             }
           }
+          if (!accountExists) {
+            transaction.add(createAssociatedTokenAccountInstruction(publicKey, recipientTokenAddress, recipientPubkey, owlMint))
+          }
+          transaction.add(createTransferInstruction(senderTokenAddress, recipientTokenAddress, publicKey, amount, []))
         }
-        
-        if (!accountExists) {
-          transaction.add(
-            createAssociatedTokenAccountInstruction(
-              publicKey,
-              recipientTokenAddress,
-              recipientPubkey,
-              owlMint
-            )
-          )
-        }
-
-        transaction.add(
-          createTransferInstruction(
-            senderTokenAddress,
-            recipientTokenAddress,
-            publicKey,
-            amount,
-            []
-          )
-        )
       } else {
         throw new Error(`Unsupported currency: ${raffle.currency}`)
       }
@@ -1343,10 +1287,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         const maxTitleLen = 280 - prefix.length - 1
                         const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
                         const text = `${prefix}${title}`
-                        const shareUrl = `https://twitter.com/intent/tweet?${new URLSearchParams({ text }).toString()}`
+                        const shareUrl = `https://x.com/intent/post?${new URLSearchParams({ text, url }).toString()}`
                         window.open(shareUrl, '_blank', 'noopener,noreferrer')
                       }}
-                      title="Share this raffle on X. Link is copied — paste it into the post."
+                      title="Share this raffle on X. Link is copied and included in the post."
                     >
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
