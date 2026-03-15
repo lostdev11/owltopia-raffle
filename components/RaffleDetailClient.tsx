@@ -867,13 +867,15 @@ export function RaffleDetailClient({
       }, 1500)
     } catch (err) {
       console.error('Purchase error:', err)
-      
+      setSuccess(false)
+
       // Provide helpful error messages for common RPC errors
       let errorMessage = 'Failed to purchase tickets'
+      let isUnconfirmedPayment = false
       if (err instanceof Error) {
         const errMsg = err.message || ''
         const errorStr = err.toString()
-        
+
         if (errMsg.includes('403') || errMsg.includes('Access forbidden')) {
           errorMessage = errMsg
         } else if (errMsg.includes('RPC endpoint') || errMsg.includes('RPC')) {
@@ -886,12 +888,22 @@ export function RaffleDetailClient({
           errorMessage = 'Network error. Please check your connection and try again.'
         } else if (errMsg === 'server error' || errMsg.includes('Failed to verify')) {
           errorMessage = 'Your payment was sent, but we couldn\'t confirm it right away. Refresh the page in a moment — your ticket should appear. If it doesn\'t, try again or contact support with your transaction signature.'
+          isUnconfirmedPayment = true
         } else {
           errorMessage = errMsg
         }
       }
 
       setError(errorMessage)
+
+      // Payment was sent but verification failed (e.g. mobile/RPC delay): refresh and poll so ticket can appear without manual refresh
+      if (isUnconfirmedPayment) {
+        router.refresh()
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+        delay(1500).then(() => fetchEntries())
+        delay(4000).then(() => fetchEntries())
+        delay(8000).then(() => fetchEntries())
+      }
     } finally {
       setIsProcessing(false)
     }
