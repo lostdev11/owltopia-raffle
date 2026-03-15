@@ -21,7 +21,7 @@ import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor }
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
 import { Trash2, Edit, Trophy, Share2 } from 'lucide-react'
 import Image from 'next/image'
@@ -53,9 +53,11 @@ interface RaffleCardProps {
   profitInfo?: RaffleProfitInfo
   onDeleted?: (raffleId: string) => void
   priority?: boolean
+  /** Server time for consistent "Starts in X" / "Starts X ago" (avoids wrong PC clock) */
+  serverNow?: Date
 }
 
-export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false }: RaffleCardProps) {
+export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false, serverNow }: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
   const { publicKey, sendTransaction, connected } = useWallet()
@@ -111,13 +113,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const startTime = new Date(raffle.start_time)
   const endTime = new Date(raffle.end_time)
-  // Use section when provided (list view) so server/client match; otherwise use now after mount
+  const refNow = serverNow ?? now
+  // Use section when provided (list view) so server/client match; otherwise use server time or now after mount
   const isFuture = section !== undefined
     ? section === 'future'
-    : now !== null && startTime > now
+    : refNow !== null && startTime > refNow
   const isActive = section !== undefined
     ? section === 'active'
-    : now !== null && endTime > now && raffle.is_active && !(now !== null && startTime > now)
+    : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
@@ -915,11 +918,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               <span className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                    Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                    Starts {serverNow
+                      ? (new Date(raffle.start_time) <= serverNow
+                          ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
+                          : formatDistance(serverNow, new Date(raffle.start_time), { addSuffix: true }))
+                      : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
                   </span>
                 ) : isActive ? (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                    Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
+                    Ends {serverNow
+                      ? (new Date(raffle.end_time) <= serverNow
+                          ? formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })
+                          : formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true }))
+                      : formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
                   </span>
                 ) : (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
@@ -1309,11 +1320,19 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <span>
                     {isFuture ? (
                       <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                        Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                        Starts {serverNow
+                          ? (new Date(raffle.start_time) <= serverNow
+                              ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
+                              : formatDistance(serverNow, new Date(raffle.start_time), { addSuffix: true }))
+                          : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
                       </span>
                     ) : isActive ? (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                        Ends {formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
+                        Ends {serverNow
+                          ? (new Date(raffle.end_time) <= serverNow
+                              ? formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })
+                              : formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true }))
+                          : formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
                       </span>
                     ) : (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>

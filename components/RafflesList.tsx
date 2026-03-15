@@ -26,13 +26,14 @@ interface RafflesListProps {
   section?: SectionType
   /** Optional callback when a raffle is deleted (for parent state management) */
   onRaffleDeleted?: (raffleId: string) => void
+  /** Server time for consistent bucketing and relative strings (avoids wrong PC clock) */
+  serverNow?: Date
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
 
-// Calculate days left for sorting (same logic as display)
-function calculateDaysLeft(raffle: Raffle): number {
-  const now = new Date()
+// Calculate days left for sorting (same logic as display). Uses serverNow when provided for consistency.
+function calculateDaysLeft(raffle: Raffle, now: Date): number {
   const startTime = new Date(raffle.start_time)
   const endTime = new Date(raffle.end_time)
 
@@ -49,6 +50,7 @@ export function RafflesList({
   onSizeChange,
   section,
   onRaffleDeleted,
+  serverNow,
 }: RafflesListProps) {
   // Defensive: coerce null/undefined to [] so we never read properties on null
   const list = rafflesWithEntries ?? []
@@ -62,6 +64,10 @@ export function RafflesList({
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  const now = serverNow ?? new Date()
+  const nowRef = useRef(now)
+  nowRef.current = now
+
   // Sort raffles based on selected option. Use slice() + sort to avoid mutating.
   const sortedRaffles = useMemo(() => {
     const raffles = filteredRaffles.slice()
@@ -70,8 +76,8 @@ export function RafflesList({
       case 'days-left': {
         const mult = section === 'past' ? -1 : 1 // past: most recent first (desc)
         return raffles.sort((a, b) => {
-          const daysLeftA = calculateDaysLeft(a.raffle)
-          const daysLeftB = calculateDaysLeft(b.raffle)
+          const daysLeftA = calculateDaysLeft(a.raffle, now)
+          const daysLeftB = calculateDaysLeft(b.raffle, now)
           const cmp = mult * (daysLeftA - daysLeftB)
           if (cmp !== 0) return cmp
           // Tie-breaker: end_time, then start_time, then id
@@ -95,7 +101,7 @@ export function RafflesList({
       default:
         return raffles
     }
-  }, [filteredRaffles, sortBy, section])
+  }, [filteredRaffles, sortBy, section, now])
 
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
@@ -109,10 +115,8 @@ export function RafflesList({
     rafflesRef.current = filteredRaffles
   }, [filteredRaffles])
 
-  // Function to fetch updated entries for all active raffles
+  // Function to fetch updated entries for all active raffles (uses server time when available)
   const fetchEntriesForActiveRaffles = useCallback(async () => {
-    const now = new Date()
-    
     // Get current raffles from ref (doesn't trigger re-renders)
     const currentRaffles = rafflesRef.current
     
@@ -224,13 +228,12 @@ export function RafflesList({
     
     const checkAndPoll = () => {
       if (!isMounted) return
-      
-      const now = new Date()
-      
+      const currentNow = nowRef.current
+
       // Check if there are any active raffles using ref (doesn't trigger re-renders)
       const hasActiveRaffles = rafflesRef.current.some(({ raffle }) => {
         const endTime = new Date(raffle.end_time)
-        return endTime > now && raffle.is_active
+        return endTime > currentNow && raffle.is_active
       })
 
       // Stop polling if no active raffles
@@ -342,6 +345,7 @@ export function RafflesList({
             profitInfo={profitInfo}
             onDeleted={handleRaffleDeleted}
             priority={index < 6} // Prioritize first 6 images (above the fold)
+            serverNow={serverNow}
           />
         ))}
       </div>

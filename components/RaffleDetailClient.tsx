@@ -28,7 +28,7 @@ import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
 import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2 } from 'lucide-react'
@@ -46,6 +46,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
+import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 
@@ -86,59 +87,18 @@ export function RaffleDetailClient({
   )
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
-  // Make isActive reactive to time passing - critical for mobile connections
-  // Also check if raffle has started (not future)
-  const [isActive, setIsActive] = useState(() => {
-    const startTime = new Date(raffle.start_time)
-    const endTime = new Date(raffle.end_time)
-    const now = new Date()
-    return startTime <= now && endTime > now && raffle.is_active
-  })
-  const [isFuture, setIsFuture] = useState(() => {
-    const startTime = new Date(raffle.start_time)
-    const now = new Date()
-    return startTime > now
-  })
+  const { serverNow: serverTime } = useServerTime()
+  const startTimeMs = new Date(raffle.start_time).getTime()
+  const endTimeMs = new Date(raffle.end_time).getTime()
+  const nowMs = serverTime.getTime()
+  const isFuture = startTimeMs > nowMs
+  const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
   // Delay "entered" card styling to avoid flash when wallet/entries resolve on open (mobile)
   const [showEnteredStyle, setShowEnteredStyle] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setShowEnteredStyle(true), 200)
     return () => clearTimeout(t)
   }, [])
-
-  // Update isActive and isFuture when time passes (e.g., raffle ends or starts while page is open)
-  useEffect(() => {
-    const startTime = new Date(raffle.start_time).getTime()
-    const endTime = new Date(raffle.end_time).getTime()
-    const now = Date.now()
-    const isFutureRaffle = startTime > now
-    const shouldBeActive = startTime <= now && endTime > now && raffle.is_active
-    
-    setIsFuture(isFutureRaffle)
-    setIsActive(shouldBeActive)
-
-    // If raffle is still active, set up interval to check when it ends
-    if (shouldBeActive) {
-      const timeUntilEnd = endTime - now
-      // Check every second if raffle will end soon (< 5 minutes), otherwise check every 30 seconds
-      const checkInterval = timeUntilEnd < 5 * 60 * 1000 ? 1000 : 30000
-      
-      const intervalId = setInterval(() => {
-        const now = Date.now()
-        const shouldBeActive = endTime > now && raffle.is_active
-        setIsActive(prev => {
-          return shouldBeActive
-        })
-        
-        // Clear interval if raffle has ended
-        if (!shouldBeActive) {
-          clearInterval(intervalId)
-        }
-      }, checkInterval)
-      
-      return () => clearInterval(intervalId)
-    }
-  }, [raffle.start_time, raffle.end_time, raffle.is_active])
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const borderStyle = isFuture
     ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
@@ -1296,9 +1256,9 @@ export function RaffleDetailClient({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}>
                       {isFuture
-                        ? `Starts ${formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                        ? `Starts ${new Date(raffle.start_time) <= serverTime ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
                         : isActive
-                        ? `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`
+                        ? `Ends ${new Date(raffle.end_time) <= serverTime ? formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
                         : 'Ended'}
                     </Badge>
                     {minTickets && (
@@ -1386,7 +1346,7 @@ export function RaffleDetailClient({
             {isFuture && (
               <div className="flex justify-center">
                 <Badge variant="default" className="bg-red-500 hover:bg-red-600 text-white px-4 py-2">
-                  Starts {formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                  Starts {new Date(raffle.start_time) <= serverTime ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}
                 </Badge>
               </div>
             )}

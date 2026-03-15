@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
+import { useServerTime } from '@/lib/hooks/useServerTime'
 import { RafflesList } from '@/components/RafflesList'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
@@ -36,9 +37,8 @@ interface RafflesPageClientProps {
   rafflesTotalCount?: number
 }
 
-function bucketRaffles(raffles: Raffle[]): { active: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
+function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
   const withEntries = (r: Raffle): RaffleWithEntries => ({ raffle: r, entries: [] })
-  const now = new Date()
   const nowTime = now.getTime()
   const active: RaffleWithEntries[] = []
   const future: RaffleWithEntries[] = []
@@ -135,6 +135,7 @@ export function RafflesPageClient({
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const debug = searchParams.get('debug') === '1'
+  const { serverNow: serverTime, isSynced: serverTimeSynced } = useServerTime()
 
   type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements'
   const [tab, setTab] = useState<Tab>('all')
@@ -163,8 +164,9 @@ export function RafflesPageClient({
   // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel
   useEffect(() => {
     if (typeof window === 'undefined') return
-    // Skip only when we already have server data (no need to fallback)
     if (!isEmptyFromServer && !initialError) return
+    // Wait for server time so client-side bucketing uses universal time (not wrong PC clock)
+    if (!serverTimeSynced) return
     let cancelled = false
     setClientFetchError(null)
     setClientFetchStarted(true)
@@ -195,7 +197,7 @@ export function RafflesPageClient({
             nft_token_id: r.nft_token_id ?? null,
             nft_metadata_uri: r.nft_metadata_uri ?? null,
           })) as Raffle[]
-          setClientBuckets(bucketRaffles(normalized))
+          setClientBuckets(bucketRaffles(normalized, serverTime))
           setClientFetchError(null)
         }
       } catch {
@@ -240,7 +242,7 @@ export function RafflesPageClient({
         // Handle both raw array and wrapped { data: [...] } responses
         const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
         if (list.length > 0) {
-          setClientBuckets(bucketRaffles(list as Raffle[]))
+          setClientBuckets(bucketRaffles(list as Raffle[], serverTime))
         } else {
           tryDirectSupabase()
         }
@@ -254,7 +256,7 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer])
+  }, [initialError, isEmptyFromServer, serverTimeSynced])
 
   const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
   const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])
@@ -538,6 +540,7 @@ export function RafflesPageClient({
                 rafflesWithEntries={active}
                 title={undefined}
                 section="active"
+                serverNow={serverTime}
               />
             ) : (
               <div className="text-center py-8">
@@ -553,6 +556,7 @@ export function RafflesPageClient({
                 rafflesWithEntries={future}
                 title={undefined}
                 section="future"
+                serverNow={serverTime}
               />
             ) : (
               <div className="text-center py-8">
@@ -568,6 +572,7 @@ export function RafflesPageClient({
                 rafflesWithEntries={past}
                 title={undefined}
                 section="past"
+                serverNow={serverTime}
               />
             </div>
           )}
