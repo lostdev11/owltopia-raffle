@@ -1,15 +1,17 @@
 'use client'
 
+import type React from 'react'
+
 /**
  * Minimal global error boundary. Must provide its own <html> and <body>.
  * Prerender of /_global-error is skipped via scripts/postinstall-next-global-error.js
  * to avoid "Cannot read properties of null (reading 'useContext')" during build.
  */
-const bodyStyle = {
+const bodyStyle: React.CSSProperties = {
   margin: 0,
   fontFamily: 'system-ui, sans-serif',
   padding: '2rem',
-  textAlign: 'center' as const,
+  textAlign: 'center',
   minHeight: '100dvh',
   display: 'flex',
   flexDirection: 'column',
@@ -17,10 +19,10 @@ const bodyStyle = {
   justifyContent: 'center',
   boxSizing: 'border-box',
 }
-const titleStyle = { fontSize: '1.5rem', marginBottom: '1rem' }
-const textStyle = { color: '#64748b', marginBottom: '1.5rem', maxWidth: '20rem' }
+const titleStyle: React.CSSProperties = { fontSize: '1.5rem', marginBottom: '1rem' }
+const textStyle: React.CSSProperties = { color: '#64748b', marginBottom: '1.5rem', maxWidth: '20rem' }
 // 44px min height for touch targets (mobile-first)
-const linkStyle = {
+const linkStyle: React.CSSProperties = {
   display: 'inline-block',
   padding: '0.75rem 1.25rem',
   minHeight: '44px',
@@ -30,7 +32,7 @@ const linkStyle = {
   color: 'white',
   border: 'none',
   borderRadius: '6px',
-  textDecoration: 'none' as const,
+  textDecoration: 'none',
   boxSizing: 'border-box',
 }
 

@@ -856,10 +856,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
-            <CardDescription className="text-xs text-muted-foreground line-clamp-1 mb-2 min-w-0">
-              <LinkifiedText text={raffle.description} nestedInLink />
-            </CardDescription>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2 mt-0.5">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>

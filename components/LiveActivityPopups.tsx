@@ -72,12 +72,13 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
     if (!isSupabaseConfigured()) return
 
     let cancelled = false
-    supabase
+    const query = supabase
       .from('entries')
       .select('id,raffle_id,wallet_address,ticket_quantity,currency,verified_at,created_at')
       .eq('status', 'confirmed')
       .order('verified_at', { ascending: false })
       .limit(5)
+    Promise.resolve(query)
       .then(({ data }) => {
         if (cancelled || !data?.length) return
         const initial: ActivityEvent[] = data.map((row: Record<string, unknown>) => ({
