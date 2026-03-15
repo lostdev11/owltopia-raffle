@@ -37,10 +37,10 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
 /**
  * Get the profit threshold for a raffle (cost to cover).
  *
- * Default: floor_price in raffle.currency (prize value = floor price set on the raffle).
- *
- * Override: when prize_amount is set and > 0, use prize_amount in prize_currency instead
- * (e.g. 80 USDC for a 1 SOL floor NFT when SOL ≈ $80).
+ * 1) Explicit prize_amount / prize_currency when set and positive.
+ * 2) When min_tickets is set: min_tickets * ticket_price in raffle.currency (so "Draw Threshold: 80"
+ *    tickets at 1 USDC each = 80 USDC revenue threshold).
+ * 3) Else: floor_price in raffle.currency (e.g. NFT prize value).
  */
 export function getRaffleThreshold(raffle: Raffle): { value: number; currency: RaffleCurrency } | null {
   // 1) Explicit prize_amount / prize_currency when set and positive
@@ -50,14 +50,23 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
     return { value: amount, currency: currency as RaffleCurrency }
   }
 
-  // 2) Default: floor_price in raffle.currency (prize value = floor price)
+  // 2) For crypto raffles: draw threshold in revenue = min_tickets * ticket_price
+  const minTickets = raffle.min_tickets != null ? Number(raffle.min_tickets) : NaN
+  const ticketPrice = raffle.ticket_price != null ? Number(raffle.ticket_price) : NaN
+  const cur = (raffle.currency || 'SOL').toUpperCase()
+  const isCrypto = raffle.prize_type === 'crypto'
+  if (isCrypto && Number.isFinite(minTickets) && minTickets > 0 && Number.isFinite(ticketPrice) && ticketPrice > 0 && (cur === 'SOL' || cur === 'USDC' || cur === 'OWL')) {
+    return { value: minTickets * ticketPrice, currency: cur as RaffleCurrency }
+  }
+
+  // 3) Default: floor_price in raffle.currency (prize value = floor price, e.g. NFT)
   const rawFloor = raffle.floor_price
   if (rawFloor != null && String(rawFloor).trim() !== '') {
     const fp = parseFloat(String(rawFloor).trim())
     if (Number.isFinite(fp) && fp >= 0) {
-      const cur = (raffle.currency || 'SOL').toUpperCase()
-      if (cur === 'SOL' || cur === 'USDC' || cur === 'OWL') {
-        return { value: fp, currency: cur as RaffleCurrency }
+      const fc = (raffle.currency || 'SOL').toUpperCase()
+      if (fc === 'SOL' || fc === 'USDC' || fc === 'OWL') {
+        return { value: fp, currency: fc as RaffleCurrency }
       }
     }
   }

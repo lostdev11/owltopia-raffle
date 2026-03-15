@@ -76,8 +76,12 @@ export default function DashboardPage() {
         setData(null)
         return
       }
-      if (!res.ok) throw new Error('Failed to load dashboard')
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = typeof json?.error === 'string' ? json.error : 'Failed to load dashboard'
+        setError(msg)
+        return
+      }
       if (json.wallet && json.wallet !== walletAddr) {
         setNeedsSignIn(true)
         setData(null)

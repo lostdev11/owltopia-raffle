@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Entry } from '@/lib/types'
 import { withRetry } from '@/lib/db-retry'
 import { RAFFLE_CURRENCIES } from '@/lib/tokens'
@@ -524,10 +524,12 @@ export interface EntryWithRaffle {
 
 /**
  * Get all entries for a wallet with raffle info.
- * Used so users can see only their own raffles entered, with date and blockchain validation.
+ * Used so users can see only their own raffles entered (e.g. dashboard).
+ * Uses server read client when available so dashboard API can load data (bypasses RLS).
  */
 export async function getEntriesByWallet(walletAddress: string): Promise<EntryWithRaffle[]> {
-  const { data, error } = await supabase
+  const db = getSupabaseForServerRead(supabase)
+  const { data, error } = await db
     .from('entries')
     .select(`
       *,

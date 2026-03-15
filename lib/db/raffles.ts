@@ -69,11 +69,14 @@ async function checkNftMigrationApplied(): Promise<boolean> {
   }
 }
 
-/**
- * Get the base columns that exist before NFT migration
- */
+/** Base columns including prize return and cancellation (migrations 036, 038). Use when DB has them. */
 function getBaseRaffleColumns(): string {
   return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy'
+}
+
+/** Minimal columns when prize return / cancellation migrations (036, 038) are not yet applied. */
+function getMinimalBaseRaffleColumns(): string {
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
@@ -408,91 +411,97 @@ export async function getRaffles(
 
 export async function getRaffleBySlug(slug: string) {
   return withRetry(async () => {
+    const client = getSupabaseForRead()
     const columns = await getRaffleColumns()
-    const { data, error } = await getSupabaseForRead()
+    const { data, error } = await client
       .from('raffles')
       .select(columns)
       .eq('slug', slug)
       .single()
 
     if (error) {
-      console.error('Error fetching raffle:', error)
-      
-      // Check if error is related to missing NFT columns
-      const errorMsg = error.message?.toLowerCase() || ''
-      if (errorMsg.includes('column') && 
-          (errorMsg.includes('prize_type') || 
-           errorMsg.includes('nft') || 
-           errorMsg.includes('does not exist'))) {
-        console.error(
-          'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
-          'Please run the migration in your Supabase SQL Editor.'
-        )
+      if (isColumnError(error.message, error.code)) {
+        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        const hasNftSupport = await checkNftMigrationApplied()
+        const minimalColumns = hasNftSupport
+          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+          : getMinimalBaseRaffleColumns()
+        const retry = await client
+          .from('raffles')
+          .select(minimalColumns)
+          .eq('slug', slug)
+          .single()
+        if (retry.error || !retry.data) {
+          console.error('Error fetching raffle by slug (retry with minimal columns):', retry.error)
+          return null
+        }
+        return normalizeRaffleRow(retry.data as unknown as Record<string, unknown>)
       }
-      
+      console.error('Error fetching raffle:', error)
       return null
     }
 
-    // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
     const hasNftSupport = await checkNftMigrationApplied()
-    if (!hasNftSupport && data) {
-      const row = data as unknown as Record<string, unknown>
-      return {
+    let row = data as unknown as Record<string, unknown>
+    if (!hasNftSupport && row) {
+      row = {
         ...row,
-        prize_type: 'crypto' as const,
+        prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
         nft_token_id: null,
         nft_metadata_uri: null,
-      } as Raffle
+      }
     }
-
-    return data as unknown as Raffle
+    return normalizeRaffleRow(row)
   }, { maxRetries: 2 })
 }
 
 export async function getRaffleById(id: string) {
   return withRetry(async () => {
+    const client = getSupabaseForRead()
     const columns = await getRaffleColumns()
-    const { data, error } = await getSupabaseForRead()
+    const { data, error } = await client
       .from('raffles')
       .select(columns)
       .eq('id', id)
       .single()
 
     if (error) {
-      console.error('Error fetching raffle:', error)
-      
-      // Check if error is related to missing NFT columns
-      const errorMsg = error.message?.toLowerCase() || ''
-      if (errorMsg.includes('column') && 
-          (errorMsg.includes('prize_type') || 
-           errorMsg.includes('nft') || 
-           errorMsg.includes('does not exist'))) {
-        console.error(
-          'Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied. ' +
-          'Please run the migration in your Supabase SQL Editor.'
-        )
+      if (isColumnError(error.message, error.code)) {
+        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        const hasNftSupport = await checkNftMigrationApplied()
+        const minimalColumns = hasNftSupport
+          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+          : getMinimalBaseRaffleColumns()
+        const retry = await client
+          .from('raffles')
+          .select(minimalColumns)
+          .eq('id', id)
+          .single()
+        if (retry.error || !retry.data) {
+          console.error('Error fetching raffle by id (retry with minimal columns):', retry.error)
+          return null
+        }
+        return normalizeRaffleRow(retry.data as unknown as Record<string, unknown>)
       }
-      
+      console.error('Error fetching raffle:', error)
       return null
     }
 
-    // Ensure raffle has prize_type defaulted to 'crypto' if migration not applied
     const hasNftSupport = await checkNftMigrationApplied()
-    if (!hasNftSupport && data) {
-      const row = data as unknown as Record<string, unknown>
-      return {
+    let row = data as unknown as Record<string, unknown>
+    if (!hasNftSupport && row) {
+      row = {
         ...row,
-        prize_type: 'crypto' as const,
+        prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
         nft_token_id: null,
         nft_metadata_uri: null,
-      } as Raffle
+      }
     }
-
-    return data as unknown as Raffle
+    return normalizeRaffleRow(row)
   }, { maxRetries: 2 })
 }
 
@@ -500,36 +509,75 @@ export async function getRaffleById(id: string) {
  * Fetch raffles created by a given wallet (for "My raffles" list).
  * Returns only raffles where this wallet is the creator (created_by or creator_wallet).
  */
+/** Ensure raffle row has prize return / cancellation fields (for minimal column select). */
+function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
+  return {
+    ...row,
+    prize_returned_at: (row.prize_returned_at as string | null) ?? null,
+    prize_return_reason: (row.prize_return_reason as string | null) ?? null,
+    prize_return_tx: (row.prize_return_tx as string | null) ?? null,
+    cancellation_requested_at: (row.cancellation_requested_at as string | null) ?? null,
+    cancelled_at: (row.cancelled_at as string | null) ?? null,
+    cancellation_fee_amount: (row.cancellation_fee_amount as number | null) ?? null,
+    cancellation_fee_currency: (row.cancellation_fee_currency as string | null) ?? null,
+    cancellation_refund_policy: (row.cancellation_refund_policy as string | null) ?? null,
+    prize_type: (row.prize_type as 'crypto' | 'nft') ?? 'crypto',
+    nft_mint_address: (row.nft_mint_address as string | null) ?? null,
+    nft_collection_name: (row.nft_collection_name as string | null) ?? null,
+    nft_token_id: (row.nft_token_id as string | null) ?? null,
+    nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
+  } as Raffle
+}
+
 export async function getRafflesByCreator(walletAddress: string): Promise<Raffle[]> {
   const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
   if (!normalized) return []
 
   return withRetry(async () => {
     const columns = await getRaffleColumns()
-    const { data, error } = await getSupabaseForRead()
+    const client = getSupabaseForRead()
+    const { data, error } = await client
       .from('raffles')
       .select(columns)
       .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
       .order('created_at', { ascending: false })
 
     if (error) {
+      if (isColumnError(error.message, error.code)) {
+        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        const hasNftSupport = await checkNftMigrationApplied()
+        const minimalColumns = hasNftSupport
+          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+          : getMinimalBaseRaffleColumns()
+        const retry = await client
+          .from('raffles')
+          .select(minimalColumns)
+          .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
+          .order('created_at', { ascending: false })
+        if (retry.error) {
+          console.error('Error fetching raffles by creator (retry with minimal columns):', retry.error)
+          return []
+        }
+        const rows = (retry.data || []) as unknown as Record<string, unknown>[]
+        return rows.map(normalizeRaffleRow)
+      }
       console.error('Error fetching raffles by creator:', error)
       return []
     }
 
     const hasNftSupport = await checkNftMigrationApplied()
-    let raffles = (data || []) as unknown as Raffle[]
-    if (!hasNftSupport && raffles.length) {
-      raffles = raffles.map((r: any) => ({
+    let rows = (data || []) as unknown as Record<string, unknown>[]
+    if (!hasNftSupport && rows.length) {
+      rows = rows.map((r) => ({
         ...r,
-        prize_type: 'crypto' as const,
+        prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
         nft_token_id: null,
         nft_metadata_uri: null,
-      })) as Raffle[]
+      }))
     }
-    return raffles
+    return rows.map(normalizeRaffleRow)
   }, { maxRetries: 2 })
 }
 

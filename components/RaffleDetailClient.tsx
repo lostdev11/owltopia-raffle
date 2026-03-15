@@ -884,11 +884,13 @@ export function RaffleDetailClient({
           errorMessage = 'RPC server error. Please try again in a few moments.'
         } else if (errMsg.includes('Network') || errMsg.includes('timeout')) {
           errorMessage = 'Network error. Please check your connection and try again.'
+        } else if (errMsg === 'server error' || errMsg.includes('Failed to verify')) {
+          errorMessage = 'Your payment was sent, but we couldn\'t confirm it right away. Refresh the page in a moment — your ticket should appear. If it doesn\'t, try again or contact support with your transaction signature.'
         } else {
           errorMessage = errMsg
         }
       }
-      
+
       setError(errorMessage)
     } finally {
       setIsProcessing(false)
@@ -1359,14 +1361,45 @@ export function RaffleDetailClient({
             <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
           )}
           <CardHeader className={classes.headerPadding}>
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
               <div className="flex-1 min-w-0">
                 <CardTitle className={classes.title}>{raffle.title}</CardTitle>
                 <CardDescription className={`${classes.description} break-words`}>
                   <LinkifiedText text={raffle.description} />
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              {/* At-a-glance stats: use the space to the right of title/description (above image) */}
+              <div
+                className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap sm:flex-col sm:items-end sm:gap-1.5 shrink-0 rounded-lg bg-muted/40 border border-border/60 px-3 py-2 sm:py-2.5 sm:min-w-[140px] touch-manipulation"
+                style={{ touchAction: 'manipulation' }}
+              >
+                {raffle.ticket_price > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">Price</span>
+                    <span className={`${classes.description} font-semibold flex items-center gap-1`}>
+                      {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
+                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={14} className="inline-block" />
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Tickets</span>
+                  <span className={`${classes.description} font-semibold`}>{totalTicketsSold}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs font-medium border-0 px-0 py-0 h-auto ${isFuture ? 'text-red-400' : isActive ? 'text-green-400' : 'text-blue-400'}`}
+                  >
+                    {isFuture
+                      ? `Starts ${formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
+                      : isActive
+                        ? `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
+                        : 'Ended'}
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 sm:flex-shrink-0">
                 {isOwlEnabled() && raffle.creator_is_holder === true && (
                   <Badge
                     variant="outline"

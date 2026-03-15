@@ -494,12 +494,12 @@ export function RafflesPageClient({
             })}
           </div>
         )}
-        {/* Tabs: All raffles | Raffles entered | Owl Vision */}
-        <div className="mt-6 flex flex-wrap gap-2 border-b border-border">
+        {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
+        <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto">
           <button
             type="button"
             onClick={() => setTab('all')}
-            className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+            className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'all'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
                 : 'text-muted-foreground hover:text-foreground'
@@ -510,7 +510,7 @@ export function RafflesPageClient({
           <button
             type="button"
             onClick={() => setTab('my-entries')}
-            className={`px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+            className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'my-entries'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
                 : 'text-muted-foreground hover:text-foreground'
@@ -521,25 +521,25 @@ export function RafflesPageClient({
           <button
             type="button"
             onClick={() => setTab('owl-vision')}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'owl-vision'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            <Eye className="h-4 w-4" />
+            <Eye className="h-4 w-4 shrink-0" />
             Owl Vision
           </button>
           <button
             type="button"
             onClick={() => setTab('announcements')}
-            className={`relative flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+            className={`relative flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'announcements'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            <Megaphone className="h-4 w-4" />
+            <Megaphone className="h-4 w-4 shrink-0" />
             Announcements
             {hasNewAnnouncements && (
               <span
@@ -551,13 +551,13 @@ export function RafflesPageClient({
           <button
             type="button"
             onClick={() => setTab('leaderboard')}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'leaderboard'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            <Trophy className="h-4 w-4" />
+            <Trophy className="h-4 w-4 shrink-0" />
             Leaderboard
           </button>
         </div>
@@ -598,17 +598,10 @@ export function RafflesPageClient({
           <button
             type="button"
             onClick={handleRefresh}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
           >
             Try again
           </button>
-        </div>
-      )}
-
-      {/* Recovery notice when we loaded from API after server error */}
-      {recoveredFromError && (
-        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
-          Raffles loaded. If something looks wrong, try refreshing.
         </div>
       )}
 
@@ -713,7 +706,7 @@ export function RafflesPageClient({
           ) : tab === 'leaderboard' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-4xl">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 flex items-center gap-2">
-                <Trophy className="h-6 w-6 text-primary" />
+                <Trophy className="h-6 w-6 text-primary shrink-0" />
                 Leaderboard
               </h2>
               <p className="text-muted-foreground text-sm mb-6">
@@ -721,11 +714,11 @@ export function RafflesPageClient({
               </p>
               {leaderboardLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8">
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin shrink-0" />
                   Loading…
                 </div>
               ) : leaderboardData ? (
-                <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-3">
+                <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3">
                   {[
                     {
                       title: 'Most raffles entered',
@@ -749,7 +742,7 @@ export function RafflesPageClient({
                     <Card key={title} className="border-green-500/20 bg-black/40">
                       <CardHeader className="py-3">
                         <CardTitle className="flex items-center gap-2 text-base">
-                          <Icon className="h-4 w-4 text-green-500" />
+                          <Icon className="h-4 w-4 text-green-500 shrink-0" />
                           {title}
                         </CardTitle>
                       </CardHeader>
@@ -757,44 +750,50 @@ export function RafflesPageClient({
                         {entries.length === 0 ? (
                           <p className="text-muted-foreground text-sm py-2">No data yet.</p>
                         ) : (
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-green-500/20">
-                                <th className="text-left py-1.5 font-medium w-10">#</th>
-                                <th className="text-left py-1.5 font-medium">Wallet</th>
-                                <th className="text-right py-1.5 font-medium">{valueLabel}</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {entries.map((e) => (
-                                <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
-                                  <td className="py-1.5">
-                                    {e.rank <= 3 ? (
-                                      <Medal
-                                        className={`h-4 w-4 inline ${
-                                          e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
-                                        }`}
-                                        aria-label={`Rank ${e.rank}`}
-                                      />
-                                    ) : (
-                                      <span className="text-muted-foreground">{e.rank}</span>
-                                    )}
-                                  </td>
-                                  <td className="py-1.5 font-mono text-xs" title={e.wallet}>
-                                    {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
-                                  </td>
-                                  <td className="py-1.5 text-right font-medium">{e.value.toLocaleString()}</td>
+                          <div className="overflow-x-auto -mx-1 px-1">
+                            <table className="w-full text-sm min-w-[200px]">
+                              <thead>
+                                <tr className="border-b border-green-500/20">
+                                  <th className="text-left py-2 sm:py-1.5 font-medium w-10">#</th>
+                                  <th className="text-left py-2 sm:py-1.5 font-medium">Wallet</th>
+                                  <th className="text-right py-2 sm:py-1.5 font-medium">{valueLabel}</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {entries.map((e) => (
+                                  <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
+                                    <td className="py-2.5 sm:py-1.5 align-middle">
+                                      {e.rank <= 3 ? (
+                                        <Medal
+                                          className={`h-4 w-4 inline ${
+                                            e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
+                                          }`}
+                                          aria-label={`Rank ${e.rank}`}
+                                        />
+                                      ) : (
+                                        <span className="text-muted-foreground">{e.rank}</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 sm:py-1.5 font-mono text-xs sm:text-sm align-middle" title={e.wallet}>
+                                      {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
+                                    </td>
+                                    <td className="py-2.5 sm:py-1.5 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         )}
                       </CardContent>
                     </Card>
                   ))}
                 </div>
               ) : (
-                <p className="text-muted-foreground">Could not load leaderboard. <Link href="/leaderboard" className="text-green-500 hover:underline">Open leaderboard page</Link>.</p>
+                <p className="text-muted-foreground">Could not load leaderboard.{' '}
+                  <Link href="/leaderboard" className="text-green-500 hover:underline touch-manipulation inline-flex items-center min-h-[44px]">
+                    Open leaderboard page
+                  </Link>
+                </p>
               )}
             </div>
           ) : tab === 'my-entries' ? (
@@ -871,7 +870,7 @@ export function RafflesPageClient({
                   <button
                     type="button"
                     onClick={handleRefresh}
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                    className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
                   >
                     Refresh
                   </button>

@@ -159,18 +159,18 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }
 
   return (
-    <div className="container mx-auto py-8 px-4">
+    <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4">
       <div className="max-w-2xl mx-auto space-y-6">
-        <div className="flex items-center gap-4">
-          <Link href="/admin/raffles">
-            <Button variant="outline" size="sm">
-              <ArrowLeftCircle className="h-4 w-4 mr-2" />
+        <div className="flex items-center gap-3 sm:gap-4">
+          <Link href="/admin/raffles" className="inline-flex">
+            <Button variant="outline" size="sm" className="touch-manipulation min-h-[44px] px-3 sm:px-4">
+              <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
               Back to raffles
             </Button>
           </Link>
         </div>
-        <div>
-          <h1 className="text-4xl font-bold mb-2">Admin: {raffle.title}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-4xl font-bold mb-2 break-words">Admin: {raffle.title}</h1>
           <p className="text-muted-foreground">
             Status: <span className="font-medium">{raffle.status ?? '—'}</span>
             {creatorWallet && (
@@ -227,14 +227,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                    className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => setAcceptCancelDialogOpen(true)}
                     disabled={acceptingCancel}
                   >
-                    <XCircle className="h-4 w-4 mr-2" />
+                    <XCircle className="h-4 w-4 mr-2 shrink-0" />
                     Accept cancellation
                   </Button>
-                  <DialogContent>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Accept cancellation</DialogTitle>
                       <DialogDescription>
@@ -246,18 +246,19 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                         )}
                       </DialogDescription>
                     </DialogHeader>
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                       <Button
                         variant="outline"
                         onClick={() => setAcceptCancelDialogOpen(false)}
                         disabled={acceptingCancel}
+                        className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         Cancel
                       </Button>
                       <Button
                         onClick={handleAcceptCancellation}
                         disabled={acceptingCancel}
-                        className="bg-amber-600 hover:bg-amber-700"
+                        className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}
                       </Button>
@@ -309,11 +310,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="flex justify-end">
-                      <Button variant="outline" size="sm" onClick={copyCsv}>
+                      <Button variant="outline" size="sm" onClick={copyCsv} className="touch-manipulation min-h-[44px]">
                         Copy as CSV
                       </Button>
                     </div>
-                    <div className="max-h-64 overflow-auto rounded border border-border bg-muted/30 p-2 text-sm">
+                    <div className="max-h-64 overflow-auto rounded border border-border bg-muted/30 p-2 text-sm -mx-1">
                       <table className="w-full table-fixed">
                         <thead>
                           <tr className="text-left text-muted-foreground">
@@ -348,11 +349,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                    className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => canReturnNft && setReturnDialogOpen(true)}
                     disabled={returning || !canReturnNft}
                   >
-                    <ArrowLeftCircle className="h-4 w-4 mr-2" />
+                    <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
                     Return NFT to creator
                   </Button>
                   {!canReturnNft && (
@@ -383,7 +384,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     <select
                       value={returnReason}
                       onChange={(e) => setReturnReason(e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      className="flex h-11 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm touch-manipulation"
                     >
                       {PRIZE_RETURN_REASONS.map(({ value, label }) => (
                         <option key={value} value={value}>
@@ -392,18 +393,19 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       ))}
                     </select>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="gap-2">
                     <Button
                       variant="outline"
                       onClick={() => setReturnDialogOpen(false)}
                       disabled={returning}
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                     >
                       Cancel
                     </Button>
                     <Button
                       onClick={handleReturnNft}
                       disabled={returning}
-                      className="bg-amber-600 hover:bg-amber-700"
+                      className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                     >
                       {returning ? 'Returning...' : 'Return NFT'}
                     </Button>
@@ -421,11 +423,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   variant="destructive"
                   onClick={() => setDeleteDialogOpen(true)}
                   disabled={deleting}
+                  className="touch-manipulation min-h-[44px]"
                 >
-                  <Trash2 className="h-4 w-4 mr-2" />
+                  <Trash2 className="h-4 w-4 mr-2 shrink-0" />
                   Delete raffle
                 </Button>
-                <DialogContent>
+                <DialogContent className="max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>Delete raffle</DialogTitle>
                     <DialogDescription>
@@ -439,15 +442,16 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       )}
                     </DialogDescription>
                   </DialogHeader>
-                  <DialogFooter>
+                  <DialogFooter className="gap-2">
                     <Button
                       variant="outline"
                       onClick={() => setDeleteDialogOpen(false)}
                       disabled={deleting}
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                     >
                       Cancel
                     </Button>
-                    <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+                    <Button variant="destructive" onClick={handleDelete} disabled={deleting} className="touch-manipulation min-h-[44px] w-full sm:w-auto">
                       {deleting ? 'Deleting...' : 'Delete raffle'}
                     </Button>
                   </DialogFooter>
@@ -465,7 +469,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           <CardContent>
             <Link
               href={`/raffles/${raffle.slug}`}
-              className="text-primary hover:underline"
+              className="text-primary hover:underline touch-manipulation inline-flex items-center min-h-[44px] break-all"
               target="_blank"
               rel="noopener noreferrer"
             >

@@ -40,30 +40,30 @@ function LeaderboardTable({
 }) {
   return (
     <Card className="border-green-500/20 bg-black/40">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Icon className="h-5 w-5 text-green-500" />
+      <CardHeader className="pb-2 sm:pb-6">
+        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+          <Icon className="h-5 w-5 text-green-500 shrink-0" />
           {title}
         </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription className="text-xs sm:text-sm">{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {entries.length === 0 ? (
           <p className="text-muted-foreground text-sm py-4">No data yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-1 px-1">
+            <table className="w-full text-sm min-w-[240px]">
               <thead>
                 <tr className="border-b border-green-500/20">
-                  <th className="text-left py-2 font-medium w-12">#</th>
-                  <th className="text-left py-2 font-medium">Name</th>
-                  <th className="text-right py-2 font-medium">{valueLabel}</th>
+                  <th className="text-left py-2.5 sm:py-2 font-medium w-10 sm:w-12">#</th>
+                  <th className="text-left py-2.5 sm:py-2 font-medium">Name</th>
+                  <th className="text-right py-2.5 sm:py-2 font-medium">{valueLabel}</th>
                 </tr>
               </thead>
               <tbody>
                 {entries.map((e) => (
                   <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
-                    <td className="py-2">
+                    <td className="py-3 sm:py-2 align-middle">
                       {e.rank <= 3 ? (
                         <Medal
                           className={`h-5 w-5 inline ${
@@ -79,14 +79,14 @@ function LeaderboardTable({
                         <span className="text-muted-foreground">{e.rank}</span>
                       )}
                     </td>
-                    <td className="py-2 text-xs" title={e.wallet}>
+                    <td className="py-3 sm:py-2 text-xs sm:text-sm align-middle" title={e.wallet}>
                       {displayNames[e.wallet] ? (
                         <span className="font-medium">{displayNames[e.wallet]}</span>
                       ) : (
                         <span className="font-mono">{formatWallet(e.wallet)}</span>
                       )}
                     </td>
-                    <td className="py-2 text-right font-medium">{e.value.toLocaleString()}</td>
+                    <td className="py-3 sm:py-2 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -132,22 +132,22 @@ export default function LeaderboardPage() {
   }, [data])
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-5xl">
-      <div className="flex items-center gap-4 mb-6">
-        <Link href="/raffles">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="mr-2 h-4 w-4" />
+    <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4 max-w-5xl min-h-0">
+      <div className="flex items-center gap-3 sm:gap-4 mb-6">
+        <Link href="/raffles" className="inline-flex">
+          <Button variant="ghost" size="sm" className="touch-manipulation min-h-[44px] min-w-[44px] sm:min-w-0 px-3 sm:px-4 text-sm sm:text-base">
+            <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
             Back to Raffles
           </Button>
         </Link>
       </div>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Trophy className="h-8 w-8 text-green-500" />
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+          <Trophy className="h-6 w-6 sm:h-8 sm:w-8 text-green-500 shrink-0" />
           Leaderboard
         </h1>
-        <p className="text-muted-foreground mt-1">
+        <p className="text-muted-foreground mt-1 text-sm sm:text-base">
           Top 10 platform users by raffles entered, raffles created, and tickets sold.
         </p>
       </div>
@@ -164,7 +164,7 @@ export default function LeaderboardPage() {
       )}
 
       {!loading && !error && data && (
-        <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3">
           <LeaderboardTable
             title="Most raffles entered"
             description="Users with the most distinct raffles participated in (confirmed entries). Display names are set in My Dashboard."

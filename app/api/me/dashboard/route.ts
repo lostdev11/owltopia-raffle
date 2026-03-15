@@ -46,9 +46,10 @@ export async function GET(request: NextRequest) {
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
     })
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load dashboard'
     console.error('Dashboard API error:', error)
     return NextResponse.json(
-      { error: 'Failed to load dashboard' },
+      { error: message },
       { status: 500 }
     )
   }
