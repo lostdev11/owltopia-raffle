@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -813,7 +813,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             />
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-32 sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem]"
+                className="!relative w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1rem] sm:rounded-l-[1.25rem]"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -824,7 +824,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   src={raffle.image_url}
                   alt={raffle.title}
                   fill
-                  sizes="(max-width: 768px) 160px, 192px"
+                  sizes="(max-width: 640px) 96px, (max-width: 768px) 160px, 192px"
                   className="object-cover !w-full !h-full"
                   priority={priority}
                   onError={() => setImageError(true)}
@@ -833,16 +833,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
             {imageError && (
-              <div className="w-32 sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
-                <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
+              <div className="w-24 min-w-[96px] sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1rem] sm:rounded-l-[1.25rem] z-10 relative">
+                <span className="text-[10px] sm:text-xs text-muted-foreground text-center px-1.5">Image unavailable</span>
               </div>
             )}
-            <div className={`flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative ${isAdmin ? 'pr-24 sm:pr-20' : ''}`}>
-              <div className="flex items-start justify-between gap-3 sm:gap-4 mb-1">
-                <CardTitle className="raffle-card-title !text-[0.95rem] sm:!text-sm !leading-tight line-clamp-1 flex-1 min-w-0 overflow-hidden">
+            <div className={`flex-1 flex flex-col p-1.5 sm:p-2.5 min-w-0 z-10 relative overflow-hidden ${isAdmin ? 'pr-20 sm:pr-20' : ''}`}>
+              <div className="flex items-start justify-between gap-2 mb-0.5 sm:mb-1 min-w-0">
+                <CardTitle className="raffle-card-title !text-[0.875rem] sm:!text-sm !leading-tight line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground">
                   {raffle.title}
                 </CardTitle>
-                <div className="flex items-center gap-2 group/owlvision flex-shrink-0">
+                <div className="flex items-center gap-1 sm:gap-1.5 group/owlvision flex-shrink-0">
                   {showHolderBadge && (
                     <Badge
                       variant="outline"
@@ -856,7 +856,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-1 mt-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 sm:gap-4 text-[11px] sm:text-xs mb-0.5 sm:mb-1 mt-0">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>
@@ -877,12 +877,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </span>
               )}
             </div>
-            {/* Raffle name in the empty space between Price/Entries and Threshold/Active/Buy */}
-            <p className="text-xs sm:text-sm font-medium text-foreground line-clamp-2 mb-1.5 mt-0.5 break-words" title={raffle.title}>
+            {/* Raffle/item name — always visible between Price/Entries and actions */}
+            <p className="text-xs sm:text-sm font-semibold text-foreground line-clamp-2 mb-1 sm:mb-1.5 mt-0 break-words min-w-0" title={raffle.title}>
               {raffle.title}
             </p>
-            <div className="flex items-center justify-between mt-auto gap-2">
-              <span className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
+            <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
+              <span className="text-[11px] sm:text-xs text-muted-foreground flex-1 min-w-0 truncate basis-0 sm:basis-auto">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                     Starts {serverNow
@@ -903,11 +903,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                 )}
               </span>
-              <div className="flex items-center gap-1 sm:gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0" style={{ zIndex: 1 }}>
+              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
                 {minTickets && (
                   <Badge 
                     variant="outline" 
-                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1 sm:px-2 min-h-[44px] sm:min-h-[28px] inline-flex items-center"
+                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 min-h-[28px] sm:min-h-[22px] inline-flex items-center"
                     title={`Minimum ${minTickets} tickets required to draw winner`}
                   >
                     <span className="sm:hidden">Threshold: </span><span className="hidden sm:inline">Draw Threshold: </span>{minTickets}
@@ -915,7 +915,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 )}
                 <Badge 
                   variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                  className={`text-xs min-h-[44px] sm:min-h-[28px] inline-flex items-center px-3 sm:px-2 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
+                  className={`text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-2 sm:px-1.5 py-0.5 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
                 >
                   {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                 </Badge>
@@ -923,7 +923,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <Button 
                     type="button"
                     size="sm" 
-                    className="h-[44px] sm:h-7 text-xs touch-manipulation min-h-[44px] sm:min-h-[28px] px-3 sm:px-2 w-[72px] sm:w-auto flex-shrink-0"
+                    className="h-7 sm:h-6 text-xs min-h-[28px] sm:min-h-[22px] px-2 sm:px-1.5 w-12 sm:w-auto flex-shrink-0"
                     onClick={handleToggleQuickBuy}
                   >
                     {showQuickBuy ? 'Cancel' : 'Buy'}
@@ -932,24 +932,24 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
-              <div className="mt-2 pt-2 border-t flex items-center gap-2">
+              <div className="mt-1.5 pt-1.5 sm:mt-2 sm:pt-2 border-t flex items-center gap-1.5 min-w-0">
                 <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[11px] sm:text-xs text-muted-foreground truncate min-w-0">
                   Winner: <span className="font-mono font-semibold text-foreground">
-                    {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                    {raffle.winner_wallet.slice(0, 6)}…{raffle.winner_wallet.slice(-4)}
                   </span>
                 </span>
               </div>
             )}
             {showQuickBuy && isActive && !isFuture && (
-              <div className="mt-3 pt-3 border-t space-y-3">
+              <div className="mt-2 pt-2 sm:mt-3 sm:pt-3 border-t space-y-2 sm:space-y-3">
                 {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[11px] sm:text-xs text-muted-foreground">
                     {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
                   </p>
                 )}
-                <div className="space-y-2">
-                  <Label htmlFor="small-quantity" className="text-xs">Quantity</Label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label htmlFor="small-quantity" className="text-[11px] sm:text-xs">Quantity</Label>
                   <Input
                     id="small-quantity"
                     type="number"
@@ -959,23 +959,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     onChange={(e) => handleQuantityChange(e.target.value)}
                     onBlur={handleQuantityBlur}
                     disabled={availableTickets !== null && availableTickets <= 0}
-                    className="h-10 sm:h-7 text-base sm:text-xs"
+                    className="h-9 sm:h-7 text-sm sm:text-xs min-w-0"
                   />
                 </div>
-                <div className="flex items-center justify-between pt-1 border-t">
-                  <span className="text-xs text-muted-foreground">Total</span>
-                  <div className="text-sm font-bold flex items-center gap-1">
+                <div className="flex items-center justify-between pt-1 border-t min-w-0">
+                  <span className="text-[11px] sm:text-xs text-muted-foreground">Total</span>
+                  <div className="text-xs sm:text-sm font-bold flex items-center gap-1 min-w-0 truncate">
                     {purchaseAmount.toFixed(6)} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block" />
+                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block flex-shrink-0" />
                   </div>
                 </div>
                 {error && (
-                  <div className="p-2 rounded bg-destructive/10 border border-destructive text-destructive text-xs">
+                  <div className="p-1.5 sm:p-2 rounded bg-destructive/10 border border-destructive text-destructive text-[11px] sm:text-xs">
                     {error}
                   </div>
                 )}
                 {success && (
-                  <div className="p-2 rounded bg-green-500/10 border border-green-500 text-green-500 text-xs">
+                  <div className="p-1.5 sm:p-2 rounded bg-green-500/10 border border-green-500 text-green-500 text-[11px] sm:text-xs">
                     Tickets purchased successfully!
                   </div>
                 )}
@@ -983,7 +983,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   onClick={handlePurchase}
                   disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
                   size="sm"
-                  className="w-full h-11 sm:h-7 text-base sm:text-xs touch-manipulation min-h-[44px] sm:min-h-[28px]"
+                  className="w-full h-10 sm:h-7 text-sm sm:text-xs touch-manipulation min-h-[40px] sm:min-h-[28px]"
                   style={{
                     backgroundColor: themeColor,
                     color: '#000',
@@ -1201,9 +1201,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <OwlVisionBadge score={owlVisionScore} />
                     </div>
                   </div>
-                  <CardDescription className={`${classes.description} text-white/90`}>
-                    <LinkifiedText text={raffle.description} nestedInLink />
-                  </CardDescription>
                 </div>
               </div>
               {/* Always visible overlay at bottom for key info */}
@@ -1276,9 +1273,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     <OwlVisionBadge score={owlVisionScore} />
                   </div>
                 </div>
-                <CardDescription className={classes.description}>
-                  <LinkifiedText text={raffle.description} nestedInLink />
-                </CardDescription>
               </CardHeader>
               <CardContent className="p-4 pt-0">
                 <div className={classes.content}>

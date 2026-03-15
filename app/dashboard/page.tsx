@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User, XCircle } from 'lucide-react'
+import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User, XCircle, Check } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
 
@@ -56,6 +56,7 @@ export default function DashboardPage() {
   const [displayNameInput, setDisplayNameInput] = useState('')
   const [displayNameSaving, setDisplayNameSaving] = useState(false)
   const [displayNameError, setDisplayNameError] = useState<string | null>(null)
+  const [displayNameSaved, setDisplayNameSaved] = useState(false)
   const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
@@ -356,6 +357,8 @@ export default function DashboardPage() {
         return
       }
       setData((prev) => (prev ? { ...prev, displayName: name } : null))
+      setDisplayNameSaved(true)
+      setTimeout(() => setDisplayNameSaved(false), 3000)
     } finally {
       setDisplayNameSaving(false)
     }
@@ -378,7 +381,7 @@ export default function DashboardPage() {
             Each wallet has its own display name. This name will appear in raffle participant lists for this wallet. Leave blank to show the wallet address.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col sm:flex-row gap-2">
+        <CardContent className="flex flex-col sm:flex-row sm:items-center gap-2">
           <Input
             placeholder="e.g. Crazyfox"
             value={displayNameInput}
@@ -386,16 +389,24 @@ export default function DashboardPage() {
             maxLength={32}
             className="max-w-xs"
           />
-          <Button onClick={handleSaveDisplayName} disabled={displayNameSaving}>
-            {displayNameSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Saving…
-              </>
-            ) : (
-              'Save'
+          <div className="flex items-center gap-2">
+            <Button onClick={handleSaveDisplayName} disabled={displayNameSaving}>
+              {displayNameSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving…
+                </>
+              ) : (
+                'Save'
+              )}
+            </Button>
+            {displayNameSaved && (
+              <span className="inline-flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400" aria-live="polite">
+                <Check className="h-4 w-4 shrink-0" />
+                Saved
+              </span>
             )}
-          </Button>
+          </div>
         </CardContent>
         {displayNameError && (
           <p className="text-sm text-destructive px-6 pb-4">{displayNameError}</p>

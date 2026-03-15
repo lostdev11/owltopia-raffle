@@ -67,37 +67,7 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
     })
   }, [events, raffleById, fetchRaffle])
 
-  // Load initial recent confirmed entries across ALL raffles (recent tickets, not just one raffle)
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return
-
-    let cancelled = false
-    const query = supabase
-      .from('entries')
-      .select('id,raffle_id,wallet_address,ticket_quantity,currency,verified_at,created_at')
-      .eq('status', 'confirmed')
-      .order('verified_at', { ascending: false })
-      .limit(5)
-    Promise.resolve(query)
-      .then(({ data }) => {
-        if (cancelled || !data?.length) return
-        const initial: ActivityEvent[] = data.map((row: Record<string, unknown>) => ({
-          id: `${row.id}-${row.verified_at ?? row.created_at}`,
-          raffleId: row.raffle_id as string,
-          walletAddress: (row.wallet_address as string) ?? '',
-          ticketQuantity: (row.ticket_quantity as number) ?? 1,
-          currency: (row.currency as Entry['currency']) ?? 'sol',
-          createdAt: (row.verified_at as string) ?? (row.created_at as string) ?? '',
-        }))
-        setEvents(initial)
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
+  // Only show activity as it happens in real time (no initial batch — each new purchase appears one by one)
   useEffect(() => {
     if (!isSupabaseConfigured()) return
 
