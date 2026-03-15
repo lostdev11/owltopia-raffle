@@ -6,7 +6,13 @@ import Link from 'next/link'
 import { Logo } from '@/components/Logo'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
-import { Settings, Plus, LayoutDashboard, Trophy } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 
 export function Header() {
@@ -57,14 +63,24 @@ export function Header() {
   const showOwlVision = isAdmin && (adminRole === 'full' || adminRole === null)
   const showCreateRaffle = connected
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const navLinks = [
+    { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+    ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
+    ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
+    ...(showCreateRaffle ? [{ href: '/admin/raffles/new', label: 'Create Raffle', icon: Plus }] : []),
+  ]
+
   return (
     <header className="w-full bg-black border-b border-green-500/20">
-      <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+      <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4 header-safe-area-inner">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           <Link href="/" className="flex-1 min-w-0">
             <Logo className="flex-1 max-w-full h-auto" width={600} height={150} priority />
           </Link>
-          <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+          {/* Desktop: full nav + wallet */}
+          <div className="hidden md:flex items-center gap-2 lg:gap-4 flex-shrink-0">
             <Link href="/leaderboard">
               <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
                 <Trophy className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
@@ -99,8 +115,46 @@ export function Header() {
             )}
             <WalletConnectButton />
           </div>
+          {/* Mobile: hamburger + wallet only (wallet is primary CTA for mobile crypto users) */}
+          <div className="flex md:hidden items-center gap-2 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-10 w-10 p-0 min-h-[44px] min-w-[44px] touch-manipulation"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <WalletConnectButton />
+          </div>
         </div>
       </div>
+
+      {/* Mobile nav sheet */}
+      <Dialog open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <DialogContent className="max-w-[min(90vw,320px)] rounded-xl p-0 gap-0 border-green-500/20 data-[state=open]:slide-in-from-top-4">
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="text-left text-base">Menu</DialogTitle>
+          </DialogHeader>
+          <nav className="flex flex-col p-2 pb-6">
+            {navLinks.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium hover:bg-white/10 active:bg-white/15 min-h-[48px] touch-manipulation"
+              >
+                <Icon className="h-5 w-5 flex-shrink-0" />
+                {label}
+              </Link>
+            ))}
+            {navLinks.length === 0 && (
+              <p className="px-4 py-3 text-muted-foreground text-sm">Connect your wallet for more options.</p>
+            )}
+          </nav>
+        </DialogContent>
+      </Dialog>
     </header>
   )
 }
