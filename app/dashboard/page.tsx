@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User, XCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { isMobileDevice } from '@/lib/utils'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -36,6 +37,11 @@ type DashboardData = {
   feeTier: FeeTier
 }
 
+// On mobile, wait for wallet to stabilize after nav (e.g. redirect return) before calling dashboard API.
+const MOBILE_WALLET_STABILIZE_MS = 450
+// On mobile, retry once after 401 (session not ready yet after wallet connect).
+const MOBILE_401_RETRY_DELAY_MS = 800
+
 export default function DashboardPage() {
   const { publicKey, connected, signMessage } = useWallet()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -53,6 +59,11 @@ export default function DashboardPage() {
   const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
+  const [walletReady, setWalletReady] = useState(false)
+  const hasRetried401OnMobile = useRef(false)
+
+  // Use wallet address string in deps so callback identity is stable (publicKey object ref can change every render and cause infinite loop).
+  const walletAddr = publicKey?.toBase58() ?? ''
 
   const loadDashboard = useCallback(async () => {
     if (!connected || !publicKey) {
@@ -65,13 +76,20 @@ export default function DashboardPage() {
     setLoading(true)
     setError(null)
     setNeedsSignIn(false)
-    const walletAddr = publicKey.toBase58()
+    const addr = publicKey.toBase58()
+    let skipLoadingFalse = false
     try {
       const res = await fetch('/api/me/dashboard', {
         credentials: 'include',
-        headers: { 'X-Connected-Wallet': walletAddr },
+        headers: { 'X-Connected-Wallet': addr },
       })
       if (res.status === 401) {
+        if (typeof window !== 'undefined' && isMobileDevice() && !hasRetried401OnMobile.current) {
+          hasRetried401OnMobile.current = true
+          skipLoadingFalse = true
+          setTimeout(() => loadDashboard(), MOBILE_401_RETRY_DELAY_MS)
+          return
+        }
         setNeedsSignIn(true)
         setData(null)
         return
@@ -82,7 +100,7 @@ export default function DashboardPage() {
         setError(msg)
         return
       }
-      if (json.wallet && json.wallet !== walletAddr) {
+      if (json.wallet && json.wallet !== addr) {
         setNeedsSignIn(true)
         setData(null)
         return
@@ -91,13 +109,30 @@ export default function DashboardPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
-      setLoading(false)
+      if (!skipLoadingFalse) setLoading(false)
     }
-  }, [connected, publicKey])
+  }, [connected, walletAddr])
+
+  // Reset 401 retry flag when wallet changes so a new connection gets one retry on mobile.
+  useEffect(() => {
+    hasRetried401OnMobile.current = false
+  }, [walletAddr, connected])
+
+  // On mobile, delay first dashboard load so wallet has time to stabilize after nav/redirect.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!isMobileDevice()) {
+      setWalletReady(true)
+      return
+    }
+    const t = setTimeout(() => setWalletReady(true), MOBILE_WALLET_STABILIZE_MS)
+    return () => clearTimeout(t)
+  }, [])
 
   useEffect(() => {
+    if (!walletReady && isMobileDevice()) return
     loadDashboard()
-  }, [loadDashboard])
+  }, [loadDashboard, walletReady])
 
   // Sync display name input when dashboard data loads (must be unconditional for Rules of Hooks)
   useEffect(() => {
@@ -170,6 +205,28 @@ export default function DashboardPage() {
     }
   }, [])
 
+  const handleRequestCancellation = useCallback(
+    async (raffleId: string) => {
+      setRequestCancelError(null)
+      setRequestCancelId(raffleId)
+      try {
+        const res = await fetch(`/api/raffles/${raffleId}/request-cancellation`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setRequestCancelError((json as { error?: string }).error ?? 'Failed to request cancellation')
+          return
+        }
+        loadDashboard()
+      } finally {
+        setRequestCancelId(null)
+      }
+    },
+    [loadDashboard]
+  )
+
   if (!connected) {
     return (
       <main className="container mx-auto px-4 py-8 max-w-2xl">
@@ -178,6 +235,23 @@ export default function DashboardPage() {
           Connect your wallet to see your raffles, entries, and creator revenue.
         </p>
         <WalletConnectButton />
+      </main>
+    )
+  }
+
+  // Connected but publicKey not ready yet (common on mobile after redirect). Show preparing state.
+  if (!publicKey) {
+    return (
+      <main className="container mx-auto px-4 py-8 max-w-4xl">
+        <div className="flex flex-col items-center gap-3 text-center min-h-[120px] justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="text-muted-foreground">
+            Preparing your dashboard…
+          </p>
+          <p className="text-xs text-muted-foreground max-w-xs">
+            Wallet is connecting. If this takes more than a few seconds, try going home and opening Dashboard again.
+          </p>
+        </div>
       </main>
     )
   }
@@ -260,28 +334,6 @@ export default function DashboardPage() {
   const toggleRaffle = (id: string) => {
     setOpenRaffleId((prev) => (prev === id ? null : id))
   }
-
-  const handleRequestCancellation = useCallback(
-    async (raffleId: string) => {
-      setRequestCancelError(null)
-      setRequestCancelId(raffleId)
-      try {
-        const res = await fetch(`/api/raffles/${raffleId}/request-cancellation`, {
-          method: 'POST',
-          credentials: 'include',
-        })
-        const json = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setRequestCancelError((json as { error?: string }).error ?? 'Failed to request cancellation')
-          return
-        }
-        loadDashboard()
-      } finally {
-        setRequestCancelId(null)
-      }
-    },
-    [loadDashboard]
-  )
 
   const handleSaveDisplayName = async () => {
     setDisplayNameError(null)

@@ -856,7 +856,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-2 mt-0.5">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs mb-1 mt-0.5">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>
@@ -877,6 +877,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </span>
               )}
             </div>
+            {/* Raffle name in the empty space between Price/Entries and Threshold/Active/Buy */}
+            <p className="text-xs sm:text-sm font-medium text-foreground line-clamp-2 mb-1.5 mt-0.5 break-words" title={raffle.title}>
+              {raffle.title}
+            </p>
             <div className="flex items-center justify-between mt-auto gap-2">
               <span className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
                 {isFuture ? (
@@ -903,7 +907,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 {minTickets && (
                   <Badge 
                     variant="outline" 
-                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1 sm:px-2"
+                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1 sm:px-2 min-h-[44px] sm:min-h-[28px] inline-flex items-center"
                     title={`Minimum ${minTickets} tickets required to draw winner`}
                   >
                     <span className="sm:hidden">Threshold: </span><span className="hidden sm:inline">Draw Threshold: </span>{minTickets}
@@ -911,7 +915,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 )}
                 <Badge 
                   variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                  className={`text-xs ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
+                  className={`text-xs min-h-[44px] sm:min-h-[28px] inline-flex items-center px-3 sm:px-2 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
                 >
                   {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                 </Badge>
@@ -919,7 +923,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <Button 
                     type="button"
                     size="sm" 
-                    className="h-8 sm:h-7 text-xs sm:text-xs touch-manipulation min-h-[32px] sm:min-h-[28px] px-3 sm:px-2"
+                    className="h-[44px] sm:h-7 text-xs touch-manipulation min-h-[44px] sm:min-h-[28px] px-3 sm:px-2 w-[72px] sm:w-auto flex-shrink-0"
                     onClick={handleToggleQuickBuy}
                   >
                     {showQuickBuy ? 'Cancel' : 'Buy'}

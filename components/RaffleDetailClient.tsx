@@ -1218,9 +1218,10 @@ export function RaffleDetailClient({
     <>
       <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-3' : imageSize === 'medium' ? 'py-6 px-3 sm:px-4' : 'py-8 px-3 sm:px-4'}`}>
       <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
+            size="default"
             onClick={() => router.push('/raffles')}
             className="touch-manipulation min-h-[44px] text-sm sm:text-base"
           >
@@ -1229,6 +1230,7 @@ export function RaffleDetailClient({
           </Button>
           <Button
             variant="outline"
+            size="default"
             onClick={() => {
               const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
               if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -1250,6 +1252,7 @@ export function RaffleDetailClient({
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
               variant="outline"
+              size="default"
               onClick={handleRequestCancellation}
               disabled={requestCancelLoading}
               className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
@@ -1268,6 +1271,12 @@ export function RaffleDetailClient({
               Cancellation requested — waiting for admin
             </span>
           )}
+        </div>
+        {/* Mobile: raffle name in the empty space below nav buttons */}
+        <div className="md:hidden mb-3">
+          <h1 className="text-lg font-semibold truncate text-foreground" title={raffle.title}>
+            {raffle.title}
+          </h1>
         </div>
         {showDepositEscrow && (
           <>
@@ -1665,7 +1674,7 @@ export function RaffleDetailClient({
             )}
 
             {isActive && !isFuture && (
-              <div className="flex flex-col gap-3 items-center">
+              <div className="flex flex-col gap-3 items-stretch">
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
                   disabled={availableTickets !== null && availableTickets <= 0}
@@ -1674,7 +1683,7 @@ export function RaffleDetailClient({
                     backgroundColor: themeColor,
                     color: '#000',
                   }}
-                  className={`w-full md:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm ${imageSize === 'small' ? 'px-4' : 'px-6 sm:px-8'}`}
+                  className="w-full touch-manipulation min-h-[44px] text-sm sm:text-base px-4 sm:px-6"
                 >
                   {availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
@@ -1694,31 +1703,34 @@ export function RaffleDetailClient({
               {connected && (
                 <Button
                   variant="outline"
+                  size="default"
                   onClick={() => setShowParticipants(true)}
-                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
-                  <Users className="mr-2 h-4 w-4" />
+                  <Users className="mr-2 h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">View Participants ({currentOwlVisionScore.uniqueWallets})</span>
                   <span className="sm:hidden">Participants ({currentOwlVisionScore.uniqueWallets})</span>
                 </Button>
               )}
               {raffle.winner_wallet && (
-                <Button 
-                  variant="outline" 
-                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                <Button
+                  variant="outline"
+                  size="default"
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                   onClick={() => setShowWinner(true)}
                 >
-                  <Trophy className="mr-2 h-4 w-4" />
+                  <Trophy className="mr-2 h-4 w-4 shrink-0" />
                   View Winner
                 </Button>
               )}
               {showNftTransferButton && (
                 <Button
                   variant="outline"
+                  size="default"
                   onClick={handleOpenNftTransferDialog}
-                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
-                  <Send className="mr-2 h-4 w-4" />
+                  <Send className="mr-2 h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">Record NFT Transfer</span>
                   <span className="sm:hidden">Record Transfer</span>
                 </Button>
@@ -1726,14 +1738,15 @@ export function RaffleDetailClient({
               {showReturnPrizeButton && (
                 <Button
                   variant="outline"
+                  size="default"
                   onClick={() => {
                     setReturnPrizeError(null)
                     setReturnPrizeSuccess(false)
                     setShowReturnPrizeDialog(true)
                   }}
-                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
-                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">Return Prize to Creator</span>
                   <span className="sm:hidden">Return Prize</span>
                 </Button>
@@ -1741,10 +1754,11 @@ export function RaffleDetailClient({
               {isAdmin && (
                 <Button
                   variant="outline"
+                  size="default"
                   onClick={() => router.push(`/admin/raffles/${raffle.id}`)}
-                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
-                  <Edit className="mr-2 h-4 w-4" />
+                  <Edit className="mr-2 h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">Edit Raffle</span>
                   <span className="sm:hidden">Edit</span>
                 </Button>

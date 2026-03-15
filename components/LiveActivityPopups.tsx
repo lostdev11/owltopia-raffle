@@ -168,30 +168,35 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
   if (!events.length) return null
 
   return (
-    <div className="pointer-events-none fixed left-1/2 top-4 z-50 flex w-full max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-col items-center space-y-2 px-3">
+    <div className="pointer-events-none fixed left-1/2 top-4 z-50 flex w-full max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-col items-center gap-2 px-3">
+      <p className="w-full max-w-xs text-left text-[11px] font-medium uppercase tracking-wider text-emerald-400/80">
+        Live activity
+      </p>
       {events.map((event) => {
         const raffle = raffleById.get(event.raffleId)
         const title = raffle?.title ?? 'a raffle'
         const walletLabel = formatWallet(event.walletAddress)
         const plural = event.ticketQuantity === 1 ? 'ticket' : 'tickets'
+        const showCurrency = event.currency && String(event.currency).toLowerCase() !== 'sol'
 
         return (
           <div
             key={event.id}
-            className="pointer-events-auto w-full max-w-xs rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/20 via-background/95 to-background/95 px-4 py-3 shadow-lg shadow-emerald-500/40 backdrop-blur-sm animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-200"
+            className="pointer-events-auto w-full max-w-xs rounded-lg border border-emerald-500/25 bg-background/95 px-3 py-2.5 shadow-sm backdrop-blur-sm animate-in fade-in-0 zoom-in-98 slide-in-from-top-1 duration-200"
           >
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300/90">
-              Live activity
-            </p>
-            <p className="mt-1 text-sm text-emerald-50">
-              <span className="font-semibold">{walletLabel}</span> just bought{' '}
-              <span className="font-semibold">
+            <p className="text-sm text-foreground leading-snug">
+              <span className="font-semibold text-emerald-400">{walletLabel}</span>
+              {' '}bought{' '}
+              <span className="font-medium">
                 {event.ticketQuantity} {plural}
-              </span>{' '}
-              for <span className="font-semibold">{title}</span>.
-            </p>
-            <p className="mt-1 text-[11px] text-emerald-200/80">
-              Currency: {event.currency}
+              </span>
+              {' '}for{' '}
+              <span className="font-medium">{title}</span>
+              {showCurrency && (
+                <span className="ml-1 text-[11px] text-muted-foreground">
+                  · {String(event.currency).toUpperCase()}
+                </span>
+              )}
             </p>
           </div>
         )

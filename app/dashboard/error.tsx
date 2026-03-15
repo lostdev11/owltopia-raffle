@@ -6,6 +6,7 @@
  */
 import { useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { LayoutDashboard, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -16,9 +17,17 @@ export default function DashboardError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  const router = useRouter()
+
   useEffect(() => {
     console.error('[dashboard error boundary]', error?.message ?? error)
   }, [error])
+
+  const handleTryAgain = () => {
+    reset()
+    // Re-navigate to dashboard so the page remounts and wallet has a fresh chance to stabilize (helps on mobile).
+    router.replace('/dashboard')
+  }
 
   return (
     <main className="container mx-auto px-4 py-8 max-w-2xl min-h-[50vh] flex flex-col justify-center">
@@ -28,9 +37,12 @@ export default function DashboardError({
         <p className="text-muted-foreground text-sm">
           Something went wrong loading your dashboard. This can happen on mobile when the wallet is still connecting. Try again or go home.
         </p>
+        <p className="text-xs text-muted-foreground max-w-sm">
+          On mobile: if it keeps failing, go home first, wait a moment, then open Dashboard again—or reconnect your wallet from the header.
+        </p>
         <div className="flex flex-wrap gap-3 justify-center">
           <Button
-            onClick={reset}
+            onClick={handleTryAgain}
             className="min-h-[44px] min-w-[44px] touch-manipulation"
             type="button"
           >

@@ -85,13 +85,23 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
   const [index, setIndex] = useState(0)
   const total = list.length
 
-  if (total === 0) return null
-
   const clampIndex = (value: number) => {
+    if (total === 0) return 0
     if (value < 0) return total - 1
     if (value >= total) return 0
     return value
   }
+
+  // Auto-advance through past raffles when there is more than one. Must run unconditionally (Rules of Hooks).
+  useEffect(() => {
+    if (total <= 1) return
+    const id = setInterval(() => {
+      setIndex((prev) => clampIndex(prev + 1))
+    }, 6000)
+    return () => clearInterval(id)
+  }, [total])
+
+  if (total === 0) return null
 
   const goPrev = () => {
     setIndex((prev) => clampIndex(prev - 1))
@@ -102,16 +112,6 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
   }
 
   const current = list[clampIndex(index)]
-
-  // Auto-advance through past raffles when there is more than one.
-  // Keep interval modest so users have time to read each card.
-  useEffect(() => {
-    if (total <= 1) return
-    const id = setInterval(() => {
-      setIndex((prev) => clampIndex(prev + 1))
-    }, 6000)
-    return () => clearInterval(id)
-  }, [total])
 
   return (
     <div className="w-full min-w-0">

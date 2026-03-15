@@ -14,6 +14,15 @@ export interface ServerTimeResult {
  * and "Starts in X" / "Starts X ago" are not affected by incorrect PC clock.
  * Advances every second client-side; re-fetches every 60s to correct drift.
  */
+// Stable fallback so consumers don't get a new Date() reference every render before sync (avoids infinite update loops).
+const getStableFallback = (() => {
+  let fallback: Date | null = null
+  return () => {
+    if (fallback === null) fallback = new Date()
+    return fallback
+  }
+})()
+
 export function useServerTime(): ServerTimeResult {
   const [serverNow, setServerNow] = useState<Date | null>(null)
   const [isSynced, setIsSynced] = useState(false)
@@ -54,7 +63,7 @@ export function useServerTime(): ServerTimeResult {
   }, [])
 
   return {
-    serverNow: serverNow ?? new Date(),
+    serverNow: serverNow ?? getStableFallback(),
     isSynced,
   }
 }

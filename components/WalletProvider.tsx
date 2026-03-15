@@ -179,10 +179,8 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           if (!errorMessage.includes('user rejected') && 
               !errorMessage.includes('user cancelled') &&
               !errorMessage.includes('user declined')) {
-            // On mobile, log connection errors more verbosely for debugging
-            const isMobile = typeof window !== 'undefined' && /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-              navigator.userAgent || navigator.vendor || (window as any).opera || ''
-            )
+            // On mobile, log connection errors more verbosely for debugging (use isMobileDevice for consistency)
+            const isMobile = typeof window !== 'undefined' && isMobileDevice()
             if (isMobile && isConnectionError) {
               console.warn('Mobile wallet connection error:', {
                 error,

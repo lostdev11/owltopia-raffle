@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { isMobileDevice } from '@/lib/utils'
 
 const INTERACTIVE_SELECTOR =
   'button, [role="button"], a[href], .wallet-adapter-button, .wallet-connect-wrapper, [class*="wallet-adapter"] button, .wallet-adapter-modal-list li, .wallet-adapter-modal-list .wallet-adapter-button, input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[role="switch"], select'
@@ -9,13 +10,13 @@ const INTERACTIVE_SELECTOR =
  * On mobile (including Solflare in-app browser), many WebViews don't reliably
  * translate touch to click. We add a touchend->click fallback for interactive
  * elements so the connect button and wallet modal options (e.g. Solflare) work.
- * Applies to all mobile so we don't depend on Solflare-specific UA.
+ * Uses isMobileDevice() so mobile behavior is consistent across the app.
  */
 export function SolflareTouchFix() {
   useEffect(() => {
     if (typeof navigator === 'undefined' || typeof document === 'undefined') return
     const ua = (navigator.userAgent || navigator.vendor || '').toLowerCase()
-    const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua)
+    const isMobile = isMobileDevice()
     const isSolflare = ua.includes('solflare')
 
     if (isSolflare) {
