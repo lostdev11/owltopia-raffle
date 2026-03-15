@@ -84,13 +84,6 @@ export function RafflesList({
   const rafflesRef = useRef(list)
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
-  const [lastPurchaseNotice, setLastPurchaseNotice] = useState<{
-    id: string
-    title: string
-    count: number
-    at: number
-  } | null>(null)
-
   const now = serverNow ?? new Date()
   const nowRef = useRef(now)
   nowRef.current = now
@@ -246,23 +239,12 @@ export function RafflesList({
       
       if (updates.length > 0 && !abortController.signal.aborted) {
         // Update state with all fetched entries at once
-        const purchaseEvents: { id: string; title: string; count: number }[] = []
         setFilteredRaffles(current => {
           // Create a map for efficient lookup
           const updatedMap = new Map(current.map(r => [r.raffle.id, r]))
           
           // Apply all updates (recompute profit info from fresh entries)
           updates.forEach(({ raffleId, entries, raffle }) => {
-            const existing = updatedMap.get(raffleId)
-            const prevCount = existing?.entries?.length ?? 0
-            const newCount = entries.length
-            if (newCount > prevCount) {
-              purchaseEvents.push({
-                id: raffle.id,
-                title: raffle.title,
-                count: newCount - prevCount,
-              })
-            }
             const profitInfo = getRaffleProfitInfo(raffle, entries)
             updatedMap.set(raffleId, { raffle, entries, profitInfo })
           })
@@ -272,15 +254,6 @@ export function RafflesList({
           rafflesRef.current = updated
           return updated
         })
-        if (purchaseEvents.length > 0 && section === 'active') {
-          const latest = purchaseEvents[purchaseEvents.length - 1]
-          setLastPurchaseNotice({
-            id: latest.id,
-            title: latest.title,
-            count: latest.count,
-            at: Date.now(),
-          })
-        }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -375,13 +348,6 @@ export function RafflesList({
     large: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5 md:gap-6 lg:gap-10',
   }
 
-  // Auto-hide purchase notification after a short delay
-  useEffect(() => {
-    if (!lastPurchaseNotice) return
-    const timeout = setTimeout(() => setLastPurchaseNotice(null), 5000)
-    return () => clearTimeout(timeout)
-  }, [lastPurchaseNotice])
-
   const anyRaffles = otherRaffles.length > 0
 
   if (!anyRaffles) {
@@ -412,26 +378,6 @@ export function RafflesList({
           </div>
         )}
       </div>
-      {section === 'active' && lastPurchaseNotice && (
-        <div className="mb-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs sm:text-sm flex items-center gap-2">
-          <span className="inline-flex items-center justify-center rounded-full bg-emerald-500/30 text-emerald-900 dark:text-emerald-50 h-5 w-5 text-[10px] font-bold">
-            +
-          </span>
-          <span className="text-muted-foreground">
-            Someone just bought{' '}
-            <span className="font-semibold text-foreground">
-              {lastPurchaseNotice.count > 1
-                ? `${lastPurchaseNotice.count} tickets`
-                : 'a ticket'}
-            </span>{' '}
-            in{' '}
-            <span className="font-medium text-foreground">
-              {lastPurchaseNotice.title}
-            </span>
-            .
-          </span>
-        </div>
-      )}
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
         {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
           <RaffleCard

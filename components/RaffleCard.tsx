@@ -23,7 +23,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit, Trophy, Share2, BadgeCheck } from 'lucide-react'
+import { Trophy, Share2, BadgeCheck } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -68,8 +68,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const [isAdmin, setIsAdmin] = useState(() =>
     typeof window !== 'undefined' && wallet ? (getCachedAdmin(wallet) ?? false) : false
   )
-  const [deleting, setDeleting] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [imageModalOpen, setImageModalOpen] = useState(false)
   const [showQuickBuy, setShowQuickBuy] = useState(false)
   const [ticketQuantity, setTicketQuantity] = useState(1)
@@ -174,73 +172,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       })
     return () => { cancelled = true }
   }, [connected, publicKey])
-
-  const handleDelete = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-
-    if (!connected || !publicKey) {
-      alert('Please connect your wallet to delete a raffle')
-      setDeleteDialogOpen(false)
-      return
-    }
-
-    if (!isAdmin) {
-      alert('Only admins can delete raffles')
-      setDeleteDialogOpen(false)
-      return
-    }
-
-    setDeleting(true)
-
-    try {
-      const walletAddress = publicKey.toBase58()
-      
-      const response = await fetch(`/api/raffles/${raffle.id}`, {
-        method: 'DELETE',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-wallet-address': walletAddress
-        },
-        body: JSON.stringify({ wallet_address: walletAddress }),
-      })
-
-      console.log('Delete response status:', response.status)
-
-      if (response.ok) {
-        const result = await response.json().catch(() => ({ success: true }))
-        console.log('Delete successful:', result)
-        // Close dialog
-        setDeleteDialogOpen(false)
-        // Immediately remove from UI if callback provided (client-side update)
-        if (onDeleted) {
-          console.log('Removing raffle from UI:', raffle.id)
-          onDeleted(raffle.id)
-          // Don't refresh if we're on the raffles page - client-side update is sufficient
-          // The server will have the correct data on next navigation/refresh
-        } else {
-          console.log('No onDeleted callback provided, using router refresh only')
-          // If no callback, refresh immediately (fallback)
-          router.refresh()
-        }
-        // If on a detail page, navigate to raffles list
-        if (pathname?.startsWith('/raffles/')) {
-          router.push('/raffles')
-        }
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        console.error('Delete failed:', errorData)
-        alert(errorData.error || 'Error deleting raffle')
-      }
-    } catch (error) {
-      console.error('Error deleting raffle:', error)
-      alert('Error deleting raffle. Please check the console for details.')
-    } finally {
-      setDeleting(false)
-    }
-  }
 
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
@@ -837,21 +768,21 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 <span className="text-[10px] sm:text-xs text-muted-foreground text-center px-1.5">Image unavailable</span>
               </div>
             )}
-            <div className={`flex-1 flex flex-col p-1.5 sm:p-2.5 min-w-0 z-10 relative overflow-hidden ${isAdmin ? 'pr-20 sm:pr-20' : ''}`}>
+            <div className="flex-1 flex flex-col p-1.5 sm:p-2.5 min-w-0 z-10 relative overflow-hidden">
               <div className="flex items-start justify-between gap-2 mb-0.5 sm:mb-1 min-w-0">
                 <CardTitle className="raffle-card-title !text-[0.875rem] sm:!text-sm !leading-tight line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground">
                   {raffle.title}
                 </CardTitle>
                 <div className="flex items-center gap-1 sm:gap-1.5 group/owlvision flex-shrink-0">
                   {showHolderBadge && (
-                    <Badge
-                      variant="outline"
-                      className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-[10px] sm:text-xs px-1.5 sm:px-2 flex items-center gap-1"
+                    <span
+                      className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
                       title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                      role="img"
+                      aria-label="Owl holder"
                     >
-                      <BadgeCheck className="h-3 w-3 flex-shrink-0" aria-hidden />
-                      Owl holder
-                    </Badge>
+                      <BadgeCheck className="h-3 w-3 flex-shrink-0" />
+                    </span>
                   )}
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
@@ -881,7 +812,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             <p className="text-xs sm:text-sm font-semibold text-foreground line-clamp-2 mb-1 sm:mb-1.5 mt-0 break-words min-w-0" title={raffle.title}>
               {raffle.title}
             </p>
-            <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
+              <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
               <span className="text-[11px] sm:text-xs text-muted-foreground flex-1 min-w-0 truncate basis-0 sm:basis-auto">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
@@ -903,33 +834,17 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                 )}
               </span>
-              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
-                {minTickets && (
+              {/* Status badge only when not in active section (redundant under "Active raffles") */}
+              {section !== 'active' && (
+                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
                   <Badge 
-                    variant="outline" 
-                    className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 min-h-[28px] sm:min-h-[22px] inline-flex items-center"
-                    title={`Minimum ${minTickets} tickets required to draw winner`}
+                    variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
+                    className={`rounded-full text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
                   >
-                    <span className="sm:hidden">Threshold: </span><span className="hidden sm:inline">Draw Threshold: </span>{minTickets}
+                    {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
                   </Badge>
-                )}
-                <Badge 
-                  variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                  className={`text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-2 sm:px-1.5 py-0.5 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
-                >
-                  {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
-                </Badge>
-                {isActive && (
-                  <Button 
-                    type="button"
-                    size="sm" 
-                    className="h-7 sm:h-6 text-xs min-h-[28px] sm:min-h-[22px] px-2 sm:px-1.5 w-12 sm:w-auto flex-shrink-0"
-                    onClick={handleToggleQuickBuy}
-                  >
-                    {showQuickBuy ? 'Cancel' : 'Buy'}
-                  </Button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
               <div className="mt-1.5 pt-1.5 sm:mt-2 sm:pt-2 border-t flex items-center gap-1.5 min-w-0">
@@ -939,58 +854,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     {raffle.winner_wallet.slice(0, 6)}…{raffle.winner_wallet.slice(-4)}
                   </span>
                 </span>
-              </div>
-            )}
-            {showQuickBuy && isActive && !isFuture && (
-              <div className="mt-2 pt-2 sm:mt-3 sm:pt-3 border-t space-y-2 sm:space-y-3">
-                {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
-                  <p className="text-[11px] sm:text-xs text-muted-foreground">
-                    {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
-                  </p>
-                )}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <Label htmlFor="small-quantity" className="text-[11px] sm:text-xs">Quantity</Label>
-                  <Input
-                    id="small-quantity"
-                    type="number"
-                    min="1"
-                    max={maxPurchaseQuantity}
-                    value={ticketQuantityDisplay}
-                    onChange={(e) => handleQuantityChange(e.target.value)}
-                    onBlur={handleQuantityBlur}
-                    disabled={availableTickets !== null && availableTickets <= 0}
-                    className="h-9 sm:h-7 text-sm sm:text-xs min-w-0"
-                  />
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t min-w-0">
-                  <span className="text-[11px] sm:text-xs text-muted-foreground">Total</span>
-                  <div className="text-xs sm:text-sm font-bold flex items-center gap-1 min-w-0 truncate">
-                    {purchaseAmount.toFixed(6)} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block flex-shrink-0" />
-                  </div>
-                </div>
-                {error && (
-                  <div className="p-1.5 sm:p-2 rounded bg-destructive/10 border border-destructive text-destructive text-[11px] sm:text-xs">
-                    {error}
-                  </div>
-                )}
-                {success && (
-                  <div className="p-1.5 sm:p-2 rounded bg-green-500/10 border border-green-500 text-green-500 text-[11px] sm:text-xs">
-                    Tickets purchased successfully!
-                  </div>
-                )}
-                <Button
-                  onClick={handlePurchase}
-                  disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}
-                  size="sm"
-                  className="w-full h-10 sm:h-7 text-sm sm:text-xs touch-manipulation min-h-[40px] sm:min-h-[28px]"
-                  style={{
-                    backgroundColor: themeColor,
-                    color: '#000',
-                  }}
-                >
-                  {!connected ? 'Connect Wallet' : isProcessing ? 'Processing...' : 'Buy Tickets'}
-                </Button>
               </div>
             )}
           </div>
@@ -1006,70 +869,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       </Link>
       {isAdmin && (
         <>
-          <div className="absolute top-2 right-2 z-10 flex gap-2 sm:gap-3 touch-manipulation" style={{ touchAction: 'manipulation' }}>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-11 w-11 sm:h-9 sm:w-9 p-0 bg-background touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                router.push(`/admin/raffles/${raffle.id}`)
-              }}
-              aria-label="Edit raffle"
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="h-11 w-11 sm:h-9 sm:w-9 p-0 touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setDeleteDialogOpen(true)
-              }}
-              aria-label="Delete raffle"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-          <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Delete Raffle</DialogTitle>
-                <DialogDescription>
-                  Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setDeleteDialogOpen(false)}
-                  disabled={deleting}
-                  className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    handleDelete(e)
-                  }}
-                  disabled={deleting}
-                  className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
-                >
-                  {deleting ? 'Deleting...' : 'Delete Raffle'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
             <DialogContent className="max-w-5xl w-full p-0">
               {raffle.image_url && !imageError && (
@@ -1179,24 +978,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
                     <div className="group/owlvision flex items-center gap-2">
-                      {minTickets && (
-                        <Badge 
-                          variant="outline" 
-                          className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-xs"
-                          title={`Minimum ${minTickets} tickets required to draw winner`}
-                        >
-                          Draw Threshold: {minTickets}
-                        </Badge>
-                      )}
                       {showHolderBadge && (
-                        <Badge
-                          variant="outline"
-                          className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-xs flex items-center gap-1"
+                        <span
+                          className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
                           title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                          role="img"
+                          aria-label="Owl holder"
                         >
-                          <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                          Owl holder
-                        </Badge>
+                          <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                        </span>
                       )}
                       <OwlVisionBadge score={owlVisionScore} />
                     </div>
@@ -1220,14 +1010,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       {totalTicketsSold} entries
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                    <Badge 
-                      variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                      className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
-                    >
-                      {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
-                    </Badge>
-                  </div>
+                  {section !== 'active' && (
+                    <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
+                      <Badge 
+                        variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
+                        className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
+                      >
+                        {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
                 {!isActive && raffle.winner_wallet && (
                   <div className={`${classes.footer} text-white/90 flex items-center gap-1.5 mt-1 pt-1 border-t border-white/20`}>
@@ -1251,24 +1043,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     {raffle.title}
                   </CardTitle>
                   <div className="group/owlvision flex items-center gap-1 sm:gap-2 flex-shrink-0">
-                    {minTickets && (
-                      <Badge 
-                        variant="outline" 
-                        className="bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30 text-[10px] sm:text-xs px-1.5 sm:px-2"
-                        title={`Minimum ${minTickets} tickets required to draw winner`}
-                      >
-                        <span className="sm:hidden">Threshold: </span><span className="hidden sm:inline">Draw Threshold: </span>{minTickets}
-                      </Badge>
-                    )}
                     {showHolderBadge && (
-                      <Badge
-                        variant="outline"
-                        className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-[10px] sm:text-xs px-1.5 sm:px-2 flex items-center gap-1"
+                      <span
+                        className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
                         title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                        role="img"
+                        aria-label="Owl holder"
                       >
-                        <BadgeCheck className="h-3 w-3 flex-shrink-0" aria-hidden />
-                        Owl holder
-                      </Badge>
+                        <BadgeCheck className="h-3 w-3 flex-shrink-0" />
+                      </span>
                     )}
                     <OwlVisionBadge score={owlVisionScore} />
                   </div>
@@ -1324,14 +1107,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
                     )}
                   </span>
-                  <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                    <Badge 
-                      variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')}
-                      className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}
-                    >
-                      {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
-                    </Badge>
-                  </div>
+                  {section !== 'active' && (
+                    <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
+                      <Badge 
+                        variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')}
+                        className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}
+                      >
+                        {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
                 {!isActive && !isFuture && raffle.winner_wallet && (
                   <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
@@ -1468,70 +1253,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       </Link>
     {isAdmin && (
       <>
-        <div className="absolute top-2 right-2 z-10 flex gap-2 sm:gap-3 touch-manipulation" style={{ touchAction: 'manipulation' }}>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-11 w-11 sm:h-9 sm:w-9 p-0 bg-background touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              router.push(`/admin/raffles/${raffle.id}`)
-            }}
-              aria-label="Edit raffle"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            className="h-11 w-11 sm:h-9 sm:w-9 p-0 touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setDeleteDialogOpen(true)
-            }}
-            aria-label="Delete raffle"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete Raffle</DialogTitle>
-              <DialogDescription>
-                Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDeleteDialogOpen(false)}
-                disabled={deleting}
-                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  handleDelete(e)
-                }}
-                disabled={deleting}
-                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
-              >
-                {deleting ? 'Deleting...' : 'Delete Raffle'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
         <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
           <DialogContent className="max-w-5xl w-full p-0">
             {raffle.image_url && !imageError && (

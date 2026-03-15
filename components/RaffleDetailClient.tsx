@@ -1422,14 +1422,14 @@ export function RaffleDetailClient({
               </div>
               <div className="flex items-center gap-2 sm:flex-shrink-0">
                 {isOwlEnabled() && raffle.creator_is_holder === true && (
-                  <Badge
-                    variant="outline"
-                    className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-sm px-2 flex items-center gap-1.5"
+                  <span
+                    className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-1"
                     title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                    role="img"
+                    aria-label="Owl holder"
                   >
-                    <BadgeCheck className="h-4 w-4 flex-shrink-0" aria-hidden />
-                    Owl holder
-                  </Badge>
+                    <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+                  </span>
                 )}
                 <OwlVisionBadge score={currentOwlVisionScore} onOpenInTab={() => setActiveTab('owl-vision')} />
               </div>
