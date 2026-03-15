@@ -12,9 +12,11 @@ interface ImageUploadProps {
   onChange: (url: string | null) => void
   label?: string
   disabled?: boolean
+  /** When the image fails to load (e.g. proxy 404/502), call onChange(fallbackUrl) so the form can switch to this URL. */
+  fallbackUrl?: string | null
 }
 
-export function ImageUpload({ value, onChange, label = 'Image', disabled = false }: ImageUploadProps) {
+export function ImageUpload({ value, onChange, label = 'Image', disabled = false, fallbackUrl = null }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(value || null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,6 +116,12 @@ export function ImageUpload({ value, onChange, label = 'Image', disabled = false
               fill
               className="object-cover"
               unoptimized
+              onError={() => {
+                if (fallbackUrl && preview !== fallbackUrl) {
+                  setPreview(fallbackUrl)
+                  onChange(fallbackUrl)
+                }
+              }}
             />
           </div>
           {!disabled && (
@@ -165,17 +173,17 @@ export function ImageUpload({ value, onChange, label = 'Image', disabled = false
         </div>
       )}
 
-      {/* URL input as fallback */}
+      {/* URL input as fallback (type="text" so browser doesn't require a URL when empty) */}
       <div className="mt-2">
         <div className="text-sm text-muted-foreground mb-2">
-          Or paste an image URL:
+          Or paste an image URL (optional):
         </div>
         <Input
-          type="url"
+          type="text"
           placeholder="https://example.com/image.jpg"
           value={value || ''}
           onChange={(e) => {
-            const url = e.target.value || null
+            const url = e.target.value?.trim() || null
             onChange(url)
           }}
           disabled={disabled || uploading}

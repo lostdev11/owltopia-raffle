@@ -78,21 +78,24 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error('Error uploading file to Supabase:', uploadError)
-      
-      // Provide more specific error messages
+
+      // User-facing message: avoid leaking internal details in production
       let errorMessage = 'Failed to upload image'
-      if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
-        errorMessage = 'Storage bucket "raffle-images" does not exist. Please create it in your Supabase dashboard.'
-      } else if (uploadError.message?.includes('new row violates row-level security')) {
-        errorMessage = 'Permission denied. Please check your Supabase storage policies.'
-      } else if (uploadError.message) {
-        errorMessage = `Upload failed: ${uploadError.message}`
+      if (process.env.NODE_ENV === 'development') {
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
+          errorMessage = 'Storage bucket "raffle-images" does not exist. Please create it in your Supabase dashboard.'
+        } else if (uploadError.message?.includes('new row violates row-level security')) {
+          errorMessage = 'Permission denied. Please check your Supabase storage policies.'
+        } else if (uploadError.message) {
+          errorMessage = `Upload failed: ${uploadError.message}`
+        }
       }
-      
-      return NextResponse.json(
-        { error: errorMessage, details: uploadError.message },
-        { status: 500 }
-      )
+
+      const response: { error: string; details?: string } = { error: errorMessage }
+      if (process.env.NODE_ENV === 'development' && uploadError.message) {
+        response.details = uploadError.message
+      }
+      return NextResponse.json(response, { status: 500 })
     }
 
     // Get public URL

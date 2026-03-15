@@ -26,7 +26,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const entries = await getEntriesByRaffleId(raffleId)
+    // Validate UUID format to avoid unnecessary DB load and consistent error handling
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(raffleId.trim())) {
+      return NextResponse.json(
+        { error: 'Invalid raffleId format' },
+        { status: 400 }
+      )
+    }
+
+    const entries = await getEntriesByRaffleId(raffleId.trim())
 
     // Automatically verify pending entries with transaction signatures in the background
     // This runs asynchronously so it doesn't block the response

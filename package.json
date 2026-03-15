@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
     "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
-    "dev:turbopack": "next dev",
+    "generate:escrow-key": "node scripts/generate-escrow-keypair.mjs",
     "build": "next build --webpack",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",

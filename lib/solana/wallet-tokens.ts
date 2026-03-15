@@ -93,10 +93,18 @@ export async function getWalletNfts(
   for (const { pubkey, account } of response.value) {
     const info = account.data?.parsed?.info
     if (!info) continue
-    const decimals = Number(info.tokenAmount?.decimals ?? 9)
+    // Skip delegated (e.g. staked) NFTs – user can't transfer them until unstaked
+    const delegate = info.delegate
+    if (delegate && typeof delegate === 'string' && delegate !== '') continue
+    const rawDecimals = info.tokenAmount?.decimals
+    const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
     const amount = String(info.tokenAmount?.amount ?? '0')
-    // Treat as NFT: decimals 0 and non-zero amount
-    if (decimals !== 0 || amount === '0') continue
+    // Treat as NFT: decimals 0 and non-zero amount (some RPCs omit decimals for NFTs, so also accept amount 1 when decimals is missing/NaN)
+    const amountNum = parseFloat(amount)
+    const isNft =
+      amount !== '0' &&
+      (decimals === 0 || (Number.isNaN(decimals) && amountNum === 1))
+    if (!isNft) continue
     const mint = info.mint as string
     const tokenAccount = pubkey.toBase58()
     let metadataUri: string | null = null
