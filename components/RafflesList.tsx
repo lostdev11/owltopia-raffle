@@ -1,10 +1,13 @@
-'use client'
-
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { RaffleCard } from '@/components/RaffleCard'
-import { WalletConnectButton } from '@/components/WalletConnectButton'
-import type { Raffle, Entry } from '@/lib/types'
-import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+ 'use client'
+ 
+ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+ import { RaffleCard } from '@/components/RaffleCard'
+ import { WalletConnectButton } from '@/components/WalletConnectButton'
+ import type { Raffle, Entry } from '@/lib/types'
+ import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+import { getRaffleProfitInfo } from '@/lib/raffle-profit'
+import { Flame } from 'lucide-react'
+import Link from 'next/link'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
@@ -28,6 +31,8 @@ interface RafflesListProps {
   onRaffleDeleted?: (raffleId: string) => void
   /** Server time for consistent bucketing and relative strings (avoids wrong PC clock) */
   serverNow?: Date
+  /** Optional callback with active raffles that are over the profit threshold */
+  onTopProfitableChange?: (items: RaffleWithEntriesItem[]) => void
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
@@ -42,6 +47,21 @@ function calculateDaysLeft(raffle: Raffle, now: Date): number {
   return Math.ceil((endTime.getTime() - now.getTime()) / MS_PER_DAY)
 }
 
+function getThresholdProgress(profitInfo?: RaffleProfitInfo): number | null {
+  if (!profitInfo || profitInfo.threshold == null || !profitInfo.thresholdCurrency) {
+    return null
+  }
+  const { revenue, threshold, thresholdCurrency } = profitInfo
+  if (!threshold || threshold <= 0) return null
+  let revenueInThreshold = 0
+  if (thresholdCurrency === 'USDC') revenueInThreshold = revenue.usdc
+  else if (thresholdCurrency === 'SOL') revenueInThreshold = revenue.sol
+  else if (thresholdCurrency === 'OWL') revenueInThreshold = revenue.owl
+  const progress = revenueInThreshold / threshold
+  if (!Number.isFinite(progress) || progress < 0) return null
+  return progress
+}
+
 export function RafflesList({
   rafflesWithEntries,
   title,
@@ -51,6 +71,7 @@ export function RafflesList({
   section,
   onRaffleDeleted,
   serverNow,
+  onTopProfitableChange,
 }: RafflesListProps) {
   // Defensive: coerce null/undefined to [] so we never read properties on null
   const list = rafflesWithEntries ?? []
@@ -63,6 +84,12 @@ export function RafflesList({
   const rafflesRef = useRef(list)
   const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [lastPurchaseNotice, setLastPurchaseNotice] = useState<{
+    id: string
+    title: string
+    count: number
+    at: number
+  } | null>(null)
 
   const now = serverNow ?? new Date()
   const nowRef = useRef(now)
@@ -102,6 +129,28 @@ export function RafflesList({
         return raffles
     }
   }, [filteredRaffles, sortBy, section, now])
+
+  // For the active raffles list, we no longer visually differentiate
+  // \"Profit & Rev Share\" vs \"Heating Up\". All active raffles simply
+  // render together in one list; grouping is only used for the top banner.
+  const { profitableRaffles, heatingUpRaffles, otherRaffles } = useMemo(
+    () => ({
+      profitableRaffles: [] as RaffleWithEntriesItem[],
+      heatingUpRaffles: [] as RaffleWithEntriesItem[],
+      otherRaffles: sortedRaffles,
+    }),
+    [sortedRaffles]
+  )
+
+  // Notify parent when profitable raffles change for the active section (based on isProfitable flag)
+  useEffect(() => {
+    if (section === 'active' && typeof onTopProfitableChange === 'function') {
+      const profitableByFlag = sortedRaffles.filter(
+        (item) => item.profitInfo && item.profitInfo.isProfitable
+      )
+      onTopProfitableChange(profitableByFlag)
+    }
+  }, [section, onTopProfitableChange, sortedRaffles])
 
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
@@ -197,14 +246,25 @@ export function RafflesList({
       
       if (updates.length > 0 && !abortController.signal.aborted) {
         // Update state with all fetched entries at once
+        const purchaseEvents: { id: string; title: string; count: number }[] = []
         setFilteredRaffles(current => {
           // Create a map for efficient lookup
           const updatedMap = new Map(current.map(r => [r.raffle.id, r]))
           
-          // Apply all updates (preserve profitInfo from current item when polling)
+          // Apply all updates (recompute profit info from fresh entries)
           updates.forEach(({ raffleId, entries, raffle }) => {
-            const current = updatedMap.get(raffleId)
-            updatedMap.set(raffleId, { raffle, entries, profitInfo: current?.profitInfo })
+            const existing = updatedMap.get(raffleId)
+            const prevCount = existing?.entries?.length ?? 0
+            const newCount = entries.length
+            if (newCount > prevCount) {
+              purchaseEvents.push({
+                id: raffle.id,
+                title: raffle.title,
+                count: newCount - prevCount,
+              })
+            }
+            const profitInfo = getRaffleProfitInfo(raffle, entries)
+            updatedMap.set(raffleId, { raffle, entries, profitInfo })
           })
           
           const updated = Array.from(updatedMap.values())
@@ -212,6 +272,15 @@ export function RafflesList({
           rafflesRef.current = updated
           return updated
         })
+        if (purchaseEvents.length > 0 && section === 'active') {
+          const latest = purchaseEvents[purchaseEvents.length - 1]
+          setLastPurchaseNotice({
+            id: latest.id,
+            title: latest.title,
+            count: latest.count,
+            at: Date.now(),
+          })
+        }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -306,7 +375,16 @@ export function RafflesList({
     large: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5 md:gap-6 lg:gap-10',
   }
 
-  if (filteredRaffles.length === 0) {
+  // Auto-hide purchase notification after a short delay
+  useEffect(() => {
+    if (!lastPurchaseNotice) return
+    const timeout = setTimeout(() => setLastPurchaseNotice(null), 5000)
+    return () => clearTimeout(timeout)
+  }, [lastPurchaseNotice])
+
+  const anyRaffles = otherRaffles.length > 0
+
+  if (!anyRaffles) {
     return null
   }
 
@@ -316,7 +394,7 @@ export function RafflesList({
         {title && (
           <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
         )}
-        {filteredRaffles.length > 1 && (
+        {otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1 && (
           <div className="flex items-center gap-2 ml-auto">
             <label htmlFor="sort-select" className="text-sm text-muted-foreground whitespace-nowrap">
               Sort by:
@@ -334,17 +412,37 @@ export function RafflesList({
           </div>
         )}
       </div>
+      {section === 'active' && lastPurchaseNotice && (
+        <div className="mb-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs sm:text-sm flex items-center gap-2">
+          <span className="inline-flex items-center justify-center rounded-full bg-emerald-500/30 text-emerald-900 dark:text-emerald-50 h-5 w-5 text-[10px] font-bold">
+            +
+          </span>
+          <span className="text-muted-foreground">
+            Someone just bought{' '}
+            <span className="font-semibold text-foreground">
+              {lastPurchaseNotice.count > 1
+                ? `${lastPurchaseNotice.count} tickets`
+                : 'a ticket'}
+            </span>{' '}
+            in{' '}
+            <span className="font-medium text-foreground">
+              {lastPurchaseNotice.title}
+            </span>
+            .
+          </span>
+        </div>
+      )}
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
-        {sortedRaffles.map(({ raffle, entries, profitInfo }, index) => (
-          <RaffleCard 
-            key={raffle.id} 
-            raffle={raffle} 
-            entries={entries} 
+        {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
+          <RaffleCard
+            key={raffle.id}
+            raffle={raffle}
+            entries={entries}
             size={size}
             section={section}
             profitInfo={profitInfo}
             onDeleted={handleRaffleDeleted}
-            priority={index < 6} // Prioritize first 6 images (above the fold)
+            priority={index < 6}
             serverNow={serverNow}
           />
         ))}

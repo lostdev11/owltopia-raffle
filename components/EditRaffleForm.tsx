@@ -6,13 +6,14 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { ImageUpload } from '@/components/ImageUpload'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
-import { AlertCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
+import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import { canSelectWinner, isRaffleEligibleToDraw, calculateTicketsSold } from '@/lib/db/raffles'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
@@ -43,6 +44,15 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [restoreExtension, setRestoreExtension] = useState<24 | 72 | 168>(24) // 24h, 3 days, 7 days
+  const [returnNftDialogOpen, setReturnNftDialogOpen] = useState(false)
+  const [returningNft, setReturningNft] = useState(false)
+  const [returnNftReason, setReturnNftReason] = useState<string>('cancelled')
+  const hasSettlement =
+    !!raffle.settled_at &&
+    raffle.platform_fee_amount != null &&
+    raffle.creator_payout_amount != null &&
+    raffle.fee_bps_applied != null &&
+    typeof raffle.fee_tier_reason === 'string'
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -315,6 +325,39 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const creatorWalletRaffle = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
+  const canReturnNftDraft =
+    isNftRaffle &&
+    !!creatorWalletRaffle &&
+    !!raffle.prize_deposited_at &&
+    !raffle.nft_transfer_transaction &&
+    !raffle.prize_returned_at
+
+  const handleReturnNft = async () => {
+    // No wallet signature needed — server signs with escrow keypair; only admin session required
+    setReturningNft(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/return-prize-to-creator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: returnNftReason }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setReturnNftDialogOpen(false)
+        router.refresh()
+      } else {
+        alert(data.error || 'Failed to return NFT to creator')
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to return NFT to creator')
+    } finally {
+      setReturningNft(false)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -359,6 +402,38 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           <h1 className="text-4xl font-bold mb-2">Edit Raffle</h1>
           <p className="text-muted-foreground">Update raffle details</p>
         </div>
+
+        {hasSettlement && (
+          <Card className="border border-emerald-500/30 bg-emerald-500/5">
+            <CardHeader>
+              <CardTitle>Settlement (platform fee V1)</CardTitle>
+              <CardDescription>Snapshot of the applied platform fee at settlement time.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              <p>
+                <span className="font-medium">Gross revenue:</span>{' '}
+                {((raffle.platform_fee_amount ?? 0) + (raffle.creator_payout_amount ?? 0)).toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Applied fee:</span>{' '}
+                {(raffle.fee_bps_applied! / 100).toFixed(2)}% ({raffle.fee_bps_applied} bps, reason:{' '}
+                {raffle.fee_tier_reason})
+              </p>
+              <p>
+                <span className="font-medium">Platform fee:</span> {raffle.platform_fee_amount?.toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Creator payout:</span> {raffle.creator_payout_amount?.toFixed(6)}{' '}
+                {raffle.currency}
+              </p>
+              <p>
+                <span className="font-medium">Settled at:</span> {raffle.settled_at}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -413,6 +488,90 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
             )}
           </CardContent>
         </Card>
+
+        {/* Admin: Return NFT to creator (draft NFT raffles with prize in escrow) */}
+        {isNftRaffle && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ArrowLeftCircle className="h-5 w-5" />
+                Return NFT to creator
+              </CardTitle>
+              <CardDescription>
+                Send the prize NFT from escrow back to the creator&apos;s wallet. Use if the raffle
+                is cancelled or the wrong NFT was deposited.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Dialog open={returnNftDialogOpen} onOpenChange={setReturnNftDialogOpen}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                    onClick={() => canReturnNftDraft && setReturnNftDialogOpen(true)}
+                    disabled={returningNft || !canReturnNftDraft}
+                  >
+                    <ArrowLeftCircle className="h-4 w-4 mr-2" />
+                    Return NFT to creator
+                  </Button>
+                  {!canReturnNftDraft && (
+                    <span className="text-sm text-muted-foreground">
+                      {raffle.prize_returned_at
+                        ? '(Already returned)'
+                        : raffle.nft_transfer_transaction
+                          ? '(Prize sent to winner)'
+                          : !raffle.prize_deposited_at
+                            ? '(Prize not in escrow yet)'
+                            : !creatorWalletRaffle
+                              ? '(No creator wallet)'
+                              : '(Not available)'}
+                    </span>
+                  )}
+                </div>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Return NFT to creator</DialogTitle>
+                    <DialogDescription>
+                      Send the prize NFT to the creator&apos;s wallet (
+                      <code className="text-xs">{creatorWalletRaffle}</code>). Choose a reason.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 py-4">
+                    <Label>Reason</Label>
+                    <select
+                      value={returnNftReason}
+                      onChange={(e) => setReturnNftReason(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="cancelled">Raffle cancelled</option>
+                      <option value="wrong_nft">Wrong NFT deposited</option>
+                      <option value="dispute">Dispute resolution</option>
+                      <option value="platform_error">Platform error</option>
+                      <option value="testing">Testing</option>
+                    </select>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setReturnNftDialogOpen(false)}
+                      disabled={returningNft}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleReturnNft}
+                      disabled={returningNft}
+                      className="bg-amber-600 hover:bg-amber-700"
+                    >
+                      {returningNft ? 'Returning...' : 'Return NFT'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Outage Recovery: Restore Raffle - only when ended, no winner */}
         {(() => {
@@ -603,12 +762,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 <div className="space-y-3">
                   {!canDraw && (
                     <div className="flex items-start gap-2 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10">
-                      <input
-                        type="checkbox"
+                      <Switch
                         id="force-override"
+                        name="force-override"
+                        ariaLabel="Force override: bypass restrictions and select winner anyway"
                         checked={forceOverride}
-                        onChange={(e) => setForceOverride(e.target.checked)}
-                        className="mt-0.5"
+                        onCheckedChange={setForceOverride}
+                        className="mt-0.5 shrink-0"
                       />
                       <label htmlFor="force-override" className="text-sm text-muted-foreground cursor-pointer flex-1">
                         <span className="font-semibold text-yellow-600 dark:text-yellow-400">Force Override:</span> Bypass restrictions and select winner anyway
@@ -812,16 +972,16 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="floor_price">Floor Price (optional)</Label>
+                  <Label htmlFor="floor_price">Floor Price (prize value for NFT)</Label>
                   <Input
                     id="floor_price"
                     name="floor_price"
                     type="text"
                     defaultValue={raffle.floor_price || ''}
-                    placeholder="e.g., 5.5 SOL or 1000"
+                    placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Optional floor price metadata (text or numeric)
+                    Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
                   </p>
                 </div>
               </div>
@@ -854,6 +1014,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   <option value="prime">Prime Time (Electric Green)</option>
                   <option value="midnight">Midnight Drop (Cool Teal)</option>
                   <option value="dawn">Dawn Run (Soft Lime)</option>
+                  <option value="ember">Ember (Warm Orange)</option>
+                  <option value="violet">Violet (Purple)</option>
+                  <option value="coral">Coral (Rose)</option>
                 </select>
               </div>
 

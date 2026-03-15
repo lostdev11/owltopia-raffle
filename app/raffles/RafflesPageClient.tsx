@@ -14,14 +14,17 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { RafflesList } from '@/components/RafflesList'
+import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import { Eye, Shield, Megaphone } from 'lucide-react'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
 import { MarkdownContent } from '@/components/MarkdownContent'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -75,6 +78,83 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
 }
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
+type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
+
+function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
+  const list = items ?? []
+  const [index, setIndex] = useState(0)
+  const total = list.length
+
+  if (total === 0) return null
+
+  const clampIndex = (value: number) => {
+    if (value < 0) return total - 1
+    if (value >= total) return 0
+    return value
+  }
+
+  const goPrev = () => {
+    setIndex((prev) => clampIndex(prev - 1))
+  }
+
+  const goNext = () => {
+    setIndex((prev) => clampIndex(prev + 1))
+  }
+
+  const current = list[clampIndex(index)]
+
+  // Auto-advance through past raffles when there is more than one.
+  // Keep interval modest so users have time to read each card.
+  useEffect(() => {
+    if (total <= 1) return
+    const id = setInterval(() => {
+      setIndex((prev) => clampIndex(prev + 1))
+    }, 6000)
+    return () => clearInterval(id)
+  }, [total])
+
+  return (
+    <div className="w-full min-w-0">
+      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Browse past raffles</span>
+          <span className="text-xs">
+            {clampIndex(index) + 1} of {total}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={goPrev}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            disabled={total <= 1}
+            aria-label="Previous past raffle"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            disabled={total <= 1}
+            aria-label="Next past raffle"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div className="w-full min-w-0">
+        <RaffleCard
+          raffle={current.raffle}
+          entries={current.entries}
+          size="small"
+          section="past"
+          priority
+        />
+      </div>
+    </div>
+  )
+}
 
 /** Detect DB/connection or timeout errors for user-friendly messaging */
 function isConnectivityError(message: string | null | undefined): boolean {
@@ -137,11 +217,19 @@ export function RafflesPageClient({
   const debug = searchParams.get('debug') === '1'
   const { serverNow: serverTime, isSynced: serverTimeSynced } = useServerTime()
 
-  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements'
+  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
+  const [topProfitableActive, setTopProfitableActive] = useState<RaffleWithEntriesAndProfit[]>([])
 
   const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
+  const [leaderboardData, setLeaderboardData] = useState<{
+    rafflesEntered: Array<{ rank: number; wallet: string; value: number }>
+    rafflesCreated: Array<{ rank: number; wallet: string; value: number }>
+    ticketsSold: Array<{ rank: number; wallet: string; value: number }>
+  } | null>(null)
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     fetch('/api/announcements?placement=raffles')
@@ -158,6 +246,16 @@ export function RafflesPageClient({
       .catch(() => { if (!cancelled) setAnnouncementsList([]) })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (tab !== 'leaderboard') return
+    setLeaderboardLoading(true)
+    fetch('/api/leaderboard', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
+      .then(setLeaderboardData)
+      .catch(() => setLeaderboardData(null))
+      .finally(() => setLeaderboardLoading(false))
+  }, [tab])
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
@@ -261,6 +359,11 @@ export function RafflesPageClient({
   const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
   const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])
   const past = serverPast.length > 0 ? serverPast : (clientBuckets?.past ?? [])
+  const allRafflesFlat: Raffle[] = [
+    ...active.map((item) => item.raffle),
+    ...future.map((item) => item.raffle),
+    ...past.map((item) => item.raffle),
+  ]
 
   // Client-only logging: only when ?debug=1. No secrets (no env, no full keys).
   useEffect(() => {
@@ -278,6 +381,37 @@ export function RafflesPageClient({
     router.refresh()
   }, [router])
 
+  // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
+  useEffect(() => {
+    if (tab !== 'all') return
+    const interval = setInterval(() => {
+      router.refresh()
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [tab, router])
+
+  // Refresh when user returns to the tab so threshold/raffle edits are visible
+  useEffect(() => {
+    if (tab !== 'all') return
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const handler = () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+      timeoutId = setTimeout(() => {
+        timeoutId = null
+        try {
+          router.refresh()
+        } catch {
+          // Ignore sync errors; Next.js internal fetch errors still log but won't crash
+        }
+      }, 150)
+    }
+    window.addEventListener('focus', handler)
+    return () => {
+      window.removeEventListener('focus', handler)
+      if (timeoutId !== null) clearTimeout(timeoutId)
+    }
+  }, [tab, router])
+
   const isEmpty = active.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
   const recoveredFromError = !!initialError && !!(clientBuckets && (clientBuckets.active.length + clientBuckets.future.length + clientBuckets.past.length > 0))
@@ -287,7 +421,7 @@ export function RafflesPageClient({
   const showPausedMessage = hasError && isSupabasePausedError(rawErrorMessage)
 
   return (
-    <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
+  <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
@@ -310,11 +444,56 @@ export function RafflesPageClient({
 
       <div className="mb-6 sm:mb-8">
         <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
-          Owl Raffles
+          {PLATFORM_NAME}
         </h1>
         <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
+        {tab === 'all' && topProfitableActive.length > 0 && (
+          <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
+              const threshold = profitInfo?.threshold ?? null
+              const cur = profitInfo?.thresholdCurrency ?? raffle.currency
+              let revenueValue: number | null = null
+              if (profitInfo) {
+                if (profitInfo.thresholdCurrency === 'USDC') revenueValue = profitInfo.revenue.usdc
+                else if (profitInfo.thresholdCurrency === 'SOL') revenueValue = profitInfo.revenue.sol
+                else if (profitInfo.thresholdCurrency === 'OWL') revenueValue = profitInfo.revenue.owl
+              }
+              return (
+                <Link
+                  key={raffle.id}
+                  href={`/raffles/${raffle.slug}`}
+                  className="relative overflow-hidden rounded-xl border border-emerald-400/70 bg-gradient-to-br from-emerald-500/15 via-emerald-400/5 to-transparent shadow-[0_0_25px_rgba(16,185,129,0.7)] px-3 py-3 sm:px-4 sm:py-4 hover:border-emerald-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.85)] transition-all cursor-pointer"
+                >
+                  <div className="pointer-events-none absolute -inset-px bg-[radial-gradient(circle_at_0_0,rgba(74,222,128,0.35),transparent_55%),radial-gradient(circle_at_100%_0,rgba(16,185,129,0.4),transparent_50%)] opacity-70" />
+                  <div className="relative flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm sm:text-base font-semibold text-emerald-50">
+                        {raffle.title}
+                      </p>
+                      <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-emerald-200">
+                        Over threshold
+                      </span>
+                    </div>
+                    {revenueValue != null && (
+                      <p className="text-[11px] sm:text-xs text-emerald-100/80">
+                        Revenue:{' '}
+                        <span className="font-semibold">
+                          {revenueValue.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                        </span>{' '}
+                        · {raffle.prize_type === 'nft' ? 'Floor' : 'Threshold'}:{' '}
+                        <span className="font-semibold">
+                          {threshold != null ? threshold.toFixed(cur === 'USDC' ? 2 : 4) : '0.0000'} {cur}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
         {/* Tabs: All raffles | Raffles entered | Owl Vision */}
         <div className="mt-6 flex flex-wrap gap-2 border-b border-border">
           <button
@@ -368,6 +547,18 @@ export function RafflesPageClient({
                 aria-label="New announcement"
               />
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('leaderboard')}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'leaderboard'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Trophy className="h-4 w-4" />
+            Leaderboard
           </button>
         </div>
       </div>
@@ -519,6 +710,93 @@ export function RafflesPageClient({
                 <p className="text-muted-foreground">No announcements at the moment. Check back later!</p>
               )}
             </div>
+          ) : tab === 'leaderboard' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-4xl">
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 flex items-center gap-2">
+                <Trophy className="h-6 w-6 text-primary" />
+                Leaderboard
+              </h2>
+              <p className="text-muted-foreground text-sm mb-6">
+                Top 10 by raffles entered, raffles created, and tickets sold.
+              </p>
+              {leaderboardLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading…
+                </div>
+              ) : leaderboardData ? (
+                <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-3">
+                  {[
+                    {
+                      title: 'Most raffles entered',
+                      entries: leaderboardData.rafflesEntered,
+                      valueLabel: 'Raffles',
+                      icon: Ticket,
+                    },
+                    {
+                      title: 'Most raffles created',
+                      entries: leaderboardData.rafflesCreated,
+                      valueLabel: 'Raffles',
+                      icon: PlusCircle,
+                    },
+                    {
+                      title: 'Most tickets sold',
+                      entries: leaderboardData.ticketsSold,
+                      valueLabel: 'Tickets',
+                      icon: Trophy,
+                    },
+                  ].map(({ title, entries, valueLabel, icon: Icon }) => (
+                    <Card key={title} className="border-green-500/20 bg-black/40">
+                      <CardHeader className="py-3">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Icon className="h-4 w-4 text-green-500" />
+                          {title}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        {entries.length === 0 ? (
+                          <p className="text-muted-foreground text-sm py-2">No data yet.</p>
+                        ) : (
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-500/20">
+                                <th className="text-left py-1.5 font-medium w-10">#</th>
+                                <th className="text-left py-1.5 font-medium">Wallet</th>
+                                <th className="text-right py-1.5 font-medium">{valueLabel}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entries.map((e) => (
+                                <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
+                                  <td className="py-1.5">
+                                    {e.rank <= 3 ? (
+                                      <Medal
+                                        className={`h-4 w-4 inline ${
+                                          e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
+                                        }`}
+                                        aria-label={`Rank ${e.rank}`}
+                                      />
+                                    ) : (
+                                      <span className="text-muted-foreground">{e.rank}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 font-mono text-xs" title={e.wallet}>
+                                    {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
+                                  </td>
+                                  <td className="py-1.5 text-right font-medium">{e.value.toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">Could not load leaderboard. <Link href="/leaderboard" className="text-green-500 hover:underline">Open leaderboard page</Link>.</p>
+              )}
+            </div>
           ) : tab === 'my-entries' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Raffles you entered</h2>
@@ -541,6 +819,7 @@ export function RafflesPageClient({
                 title={undefined}
                 section="active"
                 serverNow={serverTime}
+                onTopProfitableChange={setTopProfitableActive}
               />
             ) : (
               <div className="text-center py-8">
@@ -568,12 +847,16 @@ export function RafflesPageClient({
           {past.length > 0 && (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
-              <RafflesList
-                rafflesWithEntries={past}
-                title={undefined}
-                section="past"
-                serverNow={serverTime}
-              />
+              {past.length > 3 ? (
+                <PastRafflesCarousel items={past} />
+              ) : (
+                <RafflesList
+                  rafflesWithEntries={past}
+                  title={undefined}
+                  section="past"
+                  serverNow={serverTime}
+                />
+              )}
             </div>
           )}
 

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRaffle, generateUniqueSlug, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
-import { requireAdminSession } from '@/lib/auth-server'
+import { createRaffle, generateUniqueSlug, getRaffleCreationCountForCreatorToday, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
+import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
+import { requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
+import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
+import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -67,7 +70,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(raffles, { status: 200 })
+    const enriched = await enrichRafflesWithCreatorHolder(raffles ?? [])
+    return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)
     return NextResponse.json(
@@ -79,7 +83,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)
@@ -198,6 +202,21 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
+      // Moderation: block scam / spam NFTs (mint or collection if provided)
+      const blocklist = await getScamBlocklist()
+      if (nftMintAddress && isBlocked(blocklist, nftMintAddress)) {
+        return NextResponse.json(
+          { error: 'This NFT cannot be used as a prize. It may be on the platform blocklist.' },
+          { status: 400 }
+        )
+      }
+      const collectionAddress = body.nft_collection_address ?? body.collection_address
+      if (typeof collectionAddress === 'string' && collectionAddress.trim() && isBlocked(blocklist, collectionAddress.trim())) {
+        return NextResponse.json(
+          { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
+          { status: 400 }
+        )
+      }
     }
 
     // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
@@ -217,6 +236,25 @@ export async function POST(request: NextRequest) {
       if (!isNaN(parsed) && parsed > 0) {
         minTickets = parsed
       }
+    }
+
+    // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day)
+    const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
+    const isHolder = isOwlEnabled() && feeTier.reason === 'holder'
+    const maxRafflesPerDay = isHolder ? 3 : 1
+    const createdToday = await withTimeout(
+      getRaffleCreationCountForCreatorToday(walletAddress),
+      SUPABASE_TIMEOUT_MS,
+      'supabase error'
+    )
+    if (createdToday >= maxRafflesPerDay) {
+      const message = isHolder
+        ? 'Owltopia holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
+        : 'You can host 1 raffle per day. Owltopia (Owl NFT) holders can host up to 3. Try again tomorrow (UTC).'
+      return NextResponse.json(
+        { error: message },
+        { status: 429 }
+      )
     }
 
     // Parse optional metadata fields
@@ -247,13 +285,29 @@ export async function POST(request: NextRequest) {
       theme_accent: body.theme_accent || 'prime',
       edited_after_entries: false,
       created_by: walletAddress,
-      is_active: true,
+      creator_wallet: walletAddress,
+      // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active)
+      is_active: prizeType !== 'nft',
       winner_wallet: null,
       winner_selected_at: null,
       status: ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status) ? body.status : 'draft',
       nft_transfer_transaction: null,
+      fee_bps_applied: null,
+      fee_tier_reason: null,
+      platform_fee_amount: null,
+      creator_payout_amount: null,
+      settled_at: null,
       rank: rank,
       floor_price: floorPrice,
+      prize_deposited_at: null,
+      cancellation_requested_at: null,
+      cancelled_at: null,
+      cancellation_fee_amount: null,
+      cancellation_fee_currency: null,
+      cancellation_refund_policy: null,
+      prize_returned_at: null,
+      prize_return_reason: null,
+      prize_return_tx: null,
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')

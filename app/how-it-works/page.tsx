@@ -2,27 +2,27 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield, Percent } from 'lucide-react'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
 const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
-const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {
-  title: 'How It Works | Owl Raffle',
+  title: `How It Works | ${PLATFORM_NAME}`,
   description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
   alternates: { canonical: `${SITE_URL}/how-it-works` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/how-it-works`,
-    siteName: 'Owl Raffle',
-    title: 'How It Works | Owl Raffle',
+    siteName: PLATFORM_NAME,
+    title: `How It Works | ${PLATFORM_NAME}`,
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
     images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'How It Works | Owl Raffle',
+    title: `How It Works | ${PLATFORM_NAME}`,
     description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
     images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
@@ -51,7 +51,7 @@ export default function HowItWorksPage() {
             How Raffles Work
           </h2>
           <p className="mb-4">
-            Every raffle on Owl Raffle follows the same flow so you know exactly what to expect.
+            Every raffle on {PLATFORM_NAME} follows the same flow so you know exactly what to expect.
           </p>
           <ol className="list-decimal pl-6 mb-4 space-y-3">
             <li>
@@ -141,7 +141,7 @@ export default function HowItWorksPage() {
             Who Can Participate
           </h2>
           <p className="mb-4">
-            Anyone with a Solana wallet can buy tickets. Raffles are created and managed by approved admins. Winner selection runs automatically when a raffle ends and minimum requirements are met, or can be triggered by an admin. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
+            Anyone with a Solana wallet can buy tickets and create raffles. Raffles are created by holders and non-holders alike; winner selection runs automatically when a raffle ends and minimum requirements are met, or can be triggered by an admin. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
           </p>
         </section>
       </div>

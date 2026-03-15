@@ -30,13 +30,17 @@ export const rafflesPostBody = z.object({
   prize_currency: z.string().optional(),
   nft_mint_address: z.string().optional().nullable(),
   nft_token_id: z.string().optional().nullable(),
-  theme_accent: z.enum(['prime', 'midnight', 'dawn']).optional(),
+  theme_accent: z.enum(['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']).optional(),
 })
 
 export const authVerifyBody = z.object({
   wallet: solanaAddress,
   message: z.string().min(1),
   signature: z.string().min(1),
+})
+
+export const profileUpdateBody = z.object({
+  displayName: z.string().min(1).max(32).trim(),
 })
 
 export function parseOr400<T>(schema: z.ZodSchema<T>, data: unknown): { ok: true; data: T } | { ok: false; status: 400; error: string } {

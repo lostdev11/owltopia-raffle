@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 import { getAdminRole, isAdmin } from '@/lib/db/admins'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
@@ -40,7 +41,7 @@ export function consumeNonce(nonce: string): boolean {
   return true
 }
 
-const MESSAGE_PREFIX = 'Sign in to Owl Raffle.\nNonce: '
+const MESSAGE_PREFIX = `Sign in to ${PLATFORM_NAME}.\nNonce: `
 const MESSAGE_SUFFIX = '\nExpires: '
 
 export function buildSignInMessage(nonce: string, expiresAt: Date): string {
@@ -119,19 +120,31 @@ export function parseSessionCookieValue(value: string | undefined): { wallet: st
 }
 
 /**
+ * Use when any signed-in wallet is required (e.g. user dashboard).
+ * Returns 401 if not signed in, otherwise the session wallet.
+ */
+export async function requireSession(
+  request: NextRequest
+): Promise<{ wallet: string } | NextResponse> {
+  const session = getSessionFromRequest(request)
+  if (!session) {
+    return NextResponse.json(
+      { error: 'Sign in required. Connect your wallet and sign in.' },
+      { status: 401 }
+    )
+  }
+  return session
+}
+
+/**
  * Use in admin routes: returns 401/403 response or the admin wallet.
  * Allows any admin role (full or raffle_creator).
  */
 export async function requireAdminSession(
   request: NextRequest
 ): Promise<{ wallet: string } | NextResponse> {
-  const session = getSessionFromRequest(request)
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Sign in required. Use SIWS (Sign-In with Solana) and session cookie.' },
-      { status: 401 }
-    )
-  }
+  const session = await requireSession(request)
+  if (session instanceof NextResponse) return session
   const admin = await isAdmin(session.wallet)
   if (!admin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

@@ -1,7 +1,10 @@
 'use client'
 
+import React from 'react'
 import Link from 'next/link'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Coins, Info, Trophy } from 'lucide-react'
+import { SocialGlassCard } from '@/components/SocialGlassCard'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 const externalLinks = [
   { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
@@ -9,8 +12,35 @@ const externalLinks = [
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Atlas3', url: 'https://atlas3.io/project/owltopia' },
   { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
+]
+
+const iconByLink: Record<string, React.ReactNode> = {
+  Staking: <Coins className="h-6 w-6" />,
+  X: <Twitter className="h-6 w-6" />,
+  Whitepaper: <FileText className="h-6 w-6" />,
+  ME: <Store className="h-6 w-6" />,
+  Tensor: <LayoutGrid className="h-6 w-6" />,
+  Discord: <MessageCircle className="h-6 w-6" />,
+}
+
+const glassCardItems = [
+  {
+    label: 'How It Works',
+    href: '/how-it-works',
+    icon: <Info className="h-6 w-6" />,
+  },
+  {
+    label: 'Leaderboard',
+    href: '/leaderboard',
+    icon: <Trophy className="h-6 w-6" />,
+  },
+  ...externalLinks.map((link) => ({
+    label: link.name,
+    href: link.url,
+    icon: iconByLink[link.name] ?? <ExternalLink className="h-6 w-6" />,
+    external: true,
+  })),
 ]
 
 export function Footer() {
@@ -22,42 +52,15 @@ export function Footer() {
           <p className="owltopia-neon text-lg sm:text-xl md:text-2xl font-semibold tracking-wider text-center">
             owltopia
           </p>
-          {/* Links Section - pill tabs with flair */}
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm">
-            <Link
-              href="/how-it-works"
-              className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground
-                bg-white/5 border border-white/10 hover:border-green-500/50
-                transition-all duration-300 ease-out
-                hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)]
-                hover:bg-green-500/10
-                touch-manipulation min-h-[44px] text-center"
-            >
-              <span>How It Works</span>
-            </Link>
-            {externalLinks.map((link) => (
-              <a
-                key={link.name}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="footer-link-tab group relative flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full text-muted-foreground hover:text-foreground
-                  bg-white/5 border border-white/10 hover:border-green-500/50
-                  transition-all duration-300 ease-out
-                  hover:scale-105 hover:shadow-[0_0_20px_rgba(34,197,94,0.25)]
-                  hover:bg-green-500/10
-                  touch-manipulation min-h-[44px] text-center"
-              >
-                <span>{link.name}</span>
-                <ExternalLink className="h-3 w-3 sm:h-3.5 sm:w-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-              </a>
-            ))}
+          {/* Primary links: glass icon card (mobile-first, always visible) */}
+          <div className="w-full flex justify-center px-1">
+            <SocialGlassCard items={glassCardItems} className="w-full max-w-2xl mx-auto glass-icon-card-row glass-icon-card-mobile" />
           </div>
           
           {/* Copyright and Terms Section */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/40 pt-3 sm:pt-4">
             <div className="flex items-center gap-3 sm:gap-4">
-              <span>© {new Date().getFullYear()} Owl Raffle</span>
+              <span>© {new Date().getFullYear()} {PLATFORM_NAME}</span>
             </div>
             <div className="flex items-center gap-4 sm:gap-6">
               <Link 

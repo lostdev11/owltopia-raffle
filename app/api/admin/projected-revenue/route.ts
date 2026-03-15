@@ -36,6 +36,12 @@ export interface ProjectedRevenueResponse {
     sol?: CurrencyThresholdBreakdown
     owl?: CurrencyThresholdBreakdown
   }
+  /** Aggregated settled platform fees by currency (from raffles.platform_fee_*). */
+  platformFees?: {
+    usdc: number
+    sol: number
+    owl: number
+  }
 }
 
 function parseThreshold(envKey: string): number | undefined {
@@ -190,7 +196,8 @@ export async function GET(request: NextRequest) {
       ticketsSold: last30Days.ticketsSold / 30,
     }
 
-    const fromRaffles = await getThresholdsFromRaffles(getSupabaseAdmin())
+    const adminClient = getSupabaseAdmin()
+    const fromRaffles = await getThresholdsFromRaffles(adminClient)
     const thresholdUsdc = parseThreshold('REVENUE_THRESHOLD_USDC') ?? (fromRaffles.usdc > 0 ? fromRaffles.usdc : undefined)
     const thresholdSol = parseThreshold('REVENUE_THRESHOLD_SOL') ?? (fromRaffles.sol > 0 ? fromRaffles.sol : undefined)
     const thresholdOwl = parseThreshold('REVENUE_THRESHOLD_OWL') ?? (fromRaffles.owl > 0 ? fromRaffles.owl : undefined)
@@ -242,6 +249,37 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    let platformFees: ProjectedRevenueResponse['platformFees'] | undefined
+    try {
+      const { data: feeRows, error: feeError } = await adminClient
+        .from('raffles')
+        .select('platform_fee_amount, platform_fee_currency')
+        .not('platform_fee_amount', 'is', null)
+
+      if (!feeError && feeRows && Array.isArray(feeRows)) {
+        let feeUsdc = 0
+        let feeSol = 0
+        let feeOwl = 0
+        for (const row of feeRows as Array<{ platform_fee_amount: unknown; platform_fee_currency: unknown }>) {
+          const amount = Number(row.platform_fee_amount) || 0
+          const c = String(row.platform_fee_currency || '').toUpperCase()
+          if (c === 'USDC') feeUsdc += amount
+          else if (c === 'SOL') feeSol += amount
+          else if (c === 'OWL') feeOwl += amount
+        }
+        platformFees = {
+          usdc: feeUsdc,
+          sol: feeSol,
+          owl: feeOwl,
+        }
+      }
+    } catch (feeErr) {
+      const msg = (feeErr as Error)?.message || ''
+      if (!/platform_fee_/i.test(msg)) {
+        console.warn('Error aggregating platform fees for projected-revenue:', feeErr)
+      }
+    }
+
     const response: ProjectedRevenueResponse = {
       allTime,
       last7Days,
@@ -249,6 +287,7 @@ export async function GET(request: NextRequest) {
       avgPerDay7,
       avgPerDay30,
       ...(hasThresholds && { thresholds, byCurrency }),
+      ...(platformFees && { platformFees }),
     }
 
     return NextResponse.json(response)

@@ -1,4 +1,5 @@
 import { ImageResponse } from 'next/og'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 export const runtime = 'nodejs'
 
@@ -29,7 +30,7 @@ export async function GET() {
             marginBottom: 16,
           }}
         >
-          Owl Raffle
+          {PLATFORM_NAME}
         </div>
         <div
           style={{

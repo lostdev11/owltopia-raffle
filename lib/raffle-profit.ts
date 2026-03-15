@@ -36,21 +36,33 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
 
 /**
  * Get the profit threshold for a raffle (cost to cover).
- * - Crypto: prize_amount in prize_currency.
- * - NFT: floor_price parsed as number, in raffle.currency.
- * Anything above this threshold = profitable.
+ *
+ * Default: floor_price in raffle.currency (prize value = floor price set on the raffle).
+ *
+ * Override: when prize_amount is set and > 0, use prize_amount in prize_currency instead
+ * (e.g. 80 USDC for a 1 SOL floor NFT when SOL ≈ $80).
  */
 export function getRaffleThreshold(raffle: Raffle): { value: number; currency: RaffleCurrency } | null {
-  if (raffle.prize_type === 'nft') {
-    const fp = raffle.floor_price != null ? parseFloat(String(raffle.floor_price)) : NaN
-    if (!Number.isFinite(fp) || fp < 0) return null
-    return { value: fp, currency: raffle.currency }
-  }
+  // 1) Explicit prize_amount / prize_currency when set and positive
   const amount = raffle.prize_amount != null ? Number(raffle.prize_amount) : NaN
   const currency = (raffle.prize_currency || raffle.currency || '').toUpperCase()
-  if (!Number.isFinite(amount) || amount < 0) return null
-  if (currency !== 'SOL' && currency !== 'USDC' && currency !== 'OWL') return null
-  return { value: amount, currency: currency as RaffleCurrency }
+  if (Number.isFinite(amount) && amount > 0 && (currency === 'SOL' || currency === 'USDC' || currency === 'OWL')) {
+    return { value: amount, currency: currency as RaffleCurrency }
+  }
+
+  // 2) Default: floor_price in raffle.currency (prize value = floor price)
+  const rawFloor = raffle.floor_price
+  if (rawFloor != null && String(rawFloor).trim() !== '') {
+    const fp = parseFloat(String(rawFloor).trim())
+    if (Number.isFinite(fp) && fp >= 0) {
+      const cur = (raffle.currency || 'SOL').toUpperCase()
+      if (cur === 'SOL' || cur === 'USDC' || cur === 'OWL') {
+        return { value: fp, currency: cur as RaffleCurrency }
+      }
+    }
+  }
+
+  return null
 }
 
 /**

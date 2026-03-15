@@ -11,6 +11,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 interface DeletedEntry {
   id: string
@@ -621,7 +622,7 @@ export default function AdminDashboardPage() {
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Owl Vision</h1>
           <p className="text-muted-foreground">
-            Manage raffles and oversee the Owl Raffle platform
+            Manage raffles and oversee the {PLATFORM_NAME} platform
           </p>
         </div>
 
@@ -921,6 +922,22 @@ export default function AdminDashboardPage() {
               </CardHeader>
             </Link>
           </Card>
+
+          {adminRole === 'full' && (
+            <Card className="hover:border-primary transition-colors cursor-pointer">
+              <Link href="/admin/users">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Users
+                  </CardTitle>
+                  <CardDescription>
+                    Track creators and entrants: raffles created, creator revenue, entries, and total spent per wallet.
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

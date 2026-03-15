@@ -8,6 +8,28 @@ import { safeErrorMessage } from '@/lib/safe-error'
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
 
+/** Public GET: fetch a single raffle by id (e.g. for live activity popup title). */
+export async function GET(
+  _request: NextRequest,
+  context: { params: Promise<Record<string, string | string[] | undefined>> }
+) {
+  try {
+    const params = await context.params
+    const id = params.id
+    if (typeof id !== 'string') {
+      return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
+    }
+    const raffle = await getRaffleById(id)
+    if (!raffle) {
+      return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
+    }
+    return NextResponse.json(raffle, { status: 200 })
+  } catch (err) {
+    console.error('[GET /api/raffles/[id]]', err)
+    return NextResponse.json({ error: 'Failed to load raffle' }, { status: 500 })
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<Record<string, string | string[] | undefined>> }
@@ -29,6 +51,14 @@ export async function PATCH(
       return NextResponse.json(
         { error: 'Raffle not found' },
         { status: 404 }
+      )
+    }
+
+    // Only draft raffles can be edited
+    if ((existingRaffle.status ?? '').toLowerCase() !== 'draft') {
+      return NextResponse.json(
+        { error: 'Only draft raffles can be edited' },
+        { status: 403 }
       )
     }
 
@@ -228,11 +258,24 @@ export async function DELETE(
 
     const role = await getAdminRole(session.wallet)
     if (role === 'raffle_creator') {
-      const creator = (existingRaffle.created_by ?? '').trim()
       const wallet = session.wallet.trim()
-      if (creator !== wallet) {
+      const createdBy = (existingRaffle.created_by ?? '').trim()
+      const creatorWallet = (existingRaffle.creator_wallet ?? '').trim()
+      const isCreator = createdBy === wallet || creatorWallet === wallet
+      if (!isCreator) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
+      // Only draft raffles can be deleted by raffle_creator
+      if ((existingRaffle.status ?? '').toLowerCase() !== 'draft') {
+        return NextResponse.json(
+          { error: 'Only draft raffles can be deleted' },
+          { status: 403 }
+        )
+      }
+    } else if (role === 'full') {
+      // Full admin can delete any raffle (any status)
+    } else {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Delete the raffle (entries will be cascade deleted)

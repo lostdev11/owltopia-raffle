@@ -38,3 +38,6 @@ next-env.d.ts
 # local-only (solo dev; not for repo)
 .cursor/
 docs/SECURITY_MINDSET.md
+
+# devnet keypair for mint script (never commit)
+scripts/phantom-devnet-keypair.json

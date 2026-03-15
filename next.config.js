@@ -15,8 +15,7 @@ const nextConfig = {
   },
   // Use project root for file tracing (webpack) so Next doesn't use parent lockfile
   outputFileTracingRoot: path.join(__dirname),
-  // Disable dev indicators to avoid Next.js devtools (segment explorer) running during SSR,
-  // which can trigger "Cannot read properties of null (reading 'useContext')" with webpack
+  // Disable dev indicators to reduce noise (segment explorer 500 may still occur with webpack; use dev:turbopack if needed)
   devIndicators: false,
   images: {
     remotePatterns: [

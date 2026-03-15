@@ -17,12 +17,13 @@ import {
 } from '@solana-mobile/wallet-adapter-mobile'
 
 import { isMobileDevice } from '@/lib/utils'
+import { PLATFORM_NAME } from '@/lib/site-config'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
  * Phantom and Jupiter register as Standard Wallets and are discovered automatically.
- * Do NOT add PhantomWalletAdapter or JupiterWalletAdapter—they cause duplicate
- * registration warnings and Phantom extension content-script errors.
+ * Do NOT add PhantomWalletAdapter—Phantom logs: "Phantom was registered as a Standard Wallet.
+ * The Wallet Adapter for Phantom can be removed from your app."
  */
 
 interface WalletContextProviderProps {
@@ -49,7 +50,7 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           new SolanaMobileWalletAdapter({
             addressSelector: createDefaultAddressSelector(),
             appIdentity: {
-              name: 'Owl Raffle',
+              name: PLATFORM_NAME,
               uri: window.location.origin,
               icon: `${window.location.origin}/icon.png`,
             },
@@ -199,7 +200,7 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
 
 // Delay (ms) before showing wallet provider so extensions (Phantom, Standard Wallet) can inject.
 // Avoids "wallet only connects after refresh" on desktop and mobile.
-const WALLET_READY_DELAY_MS = 400
+const WALLET_READY_DELAY_MS = 700
 
 /**
  * Renders the wallet provider only after client mount and a short delay (or load event) so that:

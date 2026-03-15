@@ -6,7 +6,9 @@
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
+import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
 
@@ -18,24 +20,23 @@ export const maxDuration = 10
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
 const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
-const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 const OG_DESCRIPTION = `Browse and enter trusted raffles. Every entry verified on-chain. ${SITE_URL}/raffles`
 
 export const metadata: Metadata = {
-  title: 'Raffles | Owl Raffle',
+  title: `Raffles | ${PLATFORM_NAME}`,
   description: OG_DESCRIPTION,
   alternates: { canonical: `${SITE_URL}/raffles` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/raffles`,
-    siteName: 'Owl Raffle',
-    title: 'Owl Raffle',
+    siteName: PLATFORM_NAME,
+    title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
     images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Owl Raffle',
+    title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
     images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
@@ -101,7 +102,8 @@ export default async function RafflesPage() {
       }
     }
 
-    const { data: allRaffles, error: fetchError } = result
+    let allRaffles = result.data ?? []
+    const fetchError = result.error
     if (fetchError) {
       return (
         <Suspense fallback={<RafflesLoadingFallback />}>
@@ -115,6 +117,9 @@ export default async function RafflesPage() {
         </Suspense>
       )
     }
+
+    // Enrich with creator Owl holder status for card badges
+    allRaffles = await enrichRafflesWithCreatorHolder(allRaffles)
 
     const now = new Date()
     const nowTime = now.getTime()

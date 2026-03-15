@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 
 const INTERACTIVE_SELECTOR =
-  'button, [role="button"], a[href], .wallet-adapter-button, .wallet-connect-wrapper, [class*="wallet-adapter"] button, .wallet-adapter-modal-list li, .wallet-adapter-modal-list .wallet-adapter-button, input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], select'
+  'button, [role="button"], a[href], .wallet-adapter-button, .wallet-connect-wrapper, [class*="wallet-adapter"] button, .wallet-adapter-modal-list li, .wallet-adapter-modal-list .wallet-adapter-button, input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[role="switch"], select'
 
 /**
  * On mobile (including Solflare in-app browser), many WebViews don't reliably

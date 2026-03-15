@@ -8,6 +8,7 @@ import { hasAnyInVerification } from '@/lib/verify-in-flight'
 import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
 import { entriesCreateBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -127,25 +128,53 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }
 
-    const recipientWallet = process.env.RAFFLE_RECIPIENT_WALLET || process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
-    if (!recipientWallet) {
+    const treasuryWallet = process.env.RAFFLE_RECIPIENT_WALLET || process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
+    if (!treasuryWallet) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }
 
     const tokenInfo = getTokenInfo(raffle.currency as 'SOL' | 'USDC' | 'OWL')
+    const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
 
-    // Minimal success: entry id for verify step + only payment details needed to build tx
-    return NextResponse.json({
-      success: true,
-      entryId: entry.id,
-      paymentDetails: {
-        recipient: recipientWallet,
+    let paymentDetails: {
+      recipient: string
+      amount: number
+      currency: string
+      usdcMint: string
+      owlMint: string | null
+      tokenDecimals: number
+      split?: { recipient: string; amount: number }[]
+    }
+
+    if (creatorWallet) {
+      const { toCreator, toTreasury } = await getPaymentSplit(finalAmountPaid, creatorWallet)
+      paymentDetails = {
+        recipient: creatorWallet,
         amount: finalAmountPaid,
         currency: raffle.currency,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
         tokenDecimals: tokenInfo.decimals,
-      },
+        split: [
+          { recipient: creatorWallet, amount: toCreator },
+          { recipient: treasuryWallet, amount: toTreasury },
+        ],
+      }
+    } else {
+      paymentDetails = {
+        recipient: treasuryWallet,
+        amount: finalAmountPaid,
+        currency: raffle.currency,
+        usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        owlMint: tokenInfo.mintAddress,
+        tokenDecimals: tokenInfo.decimals,
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      entryId: entry.id,
+      paymentDetails,
     })
   } catch (error) {
     console.error('Error creating entry:', error)

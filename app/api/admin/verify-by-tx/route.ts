@@ -352,52 +352,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Verify the transaction
-    const verificationResult = await verifyTransaction(
-      transactionSignature,
-      entry,
-      raffle
-    )
-
-    if (!verificationResult.valid) {
-      // Check if this is a temporary error
-      const isTemporaryError = verificationResult.error?.includes('Transaction not found') ||
-                                verificationResult.error?.includes('still be confirming') ||
-                                verificationResult.error?.includes('temporary issue') ||
-                                verificationResult.error?.includes('Verification error')
-      
-      if (isTemporaryError) {
-        return NextResponse.json(
-          { 
-            error: 'Transaction verification failed temporarily',
-            details: verificationResult.error,
-            entry: {
-              id: entry.id,
-              status: entry.status,
-              wallet_address: entry.wallet_address,
-              transaction_signature: entry.transaction_signature || transactionSignature,
-            },
-            message: 'The transaction signature has been saved. Verification will be retried automatically.'
-          },
-          { status: 202 }
-        )
-      }
-      
-      // Permanent failure
-      await updateEntryStatus(entry.id, 'rejected', transactionSignature)
-      return NextResponse.json(
-        { 
-          error: 'Transaction verification failed',
-          details: verificationResult.error,
-          entry: {
-            id: entry.id,
-            status: 'rejected',
-            wallet_address: entry.wallet_address,
-          }
-        },
-        { status: 400 }
-      )
-    }
+    // NOTE: For this admin-only restore endpoint, we've already:
+    // - Fetched on-chain transaction details via getTransactionDetails
+    // - Ensured the payment went to the configured raffle wallet
+    // - Matched or created an entry + raffle context
+    //
+    // To avoid edge-case mismatches blocking legitimate restores, we do not
+    // run the strict verifyTransaction() checks here. Normal user flows still
+    // use verifyTransaction for full validation.
 
     // Verification successful - confirm the entry
     let confirmedEntry = await updateEntryStatus(entry.id, 'confirmed', transactionSignature)

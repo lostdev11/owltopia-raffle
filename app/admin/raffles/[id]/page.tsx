@@ -3,6 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { EditRaffleForm } from '@/components/EditRaffleForm'
+import { AdminRaffleActions } from '@/components/AdminRaffleActions'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 
@@ -24,20 +25,36 @@ export default async function EditRafflePage({
     redirect('/admin/raffles/new')
   }
   if (role === 'full') {
-    // Full admin can edit any raffle
+    // Full admin can edit any raffle or use admin actions (return NFT, delete)
   } else if (role === 'raffle_creator') {
-    const creator = (raffle.created_by ?? '').trim()
-    if (creator !== session.wallet.trim()) {
+    const wallet = session.wallet.trim()
+    const createdBy = (raffle.created_by ?? '').trim()
+    const creatorWallet = (raffle.creator_wallet ?? '').trim()
+    const isCreator = createdBy === wallet || creatorWallet === wallet
+    if (!isCreator) {
       redirect('/admin/raffles/new')
     }
   } else {
     redirect('/admin/raffles/new')
   }
 
-  const entries = await getEntriesByRaffleId(raffle.id)
-  const owlVisionScore = calculateOwlVisionScore(raffle, entries)
+  const status = (raffle.status ?? '').trim().toLowerCase()
 
-  return (
-    <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
-  )
+  // Draft: show edit form (creator or full admin)
+  if (status === 'draft') {
+    const entries = await getEntriesByRaffleId(raffle.id)
+    const owlVisionScore = calculateOwlVisionScore(raffle, entries)
+    return (
+      <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
+    )
+  }
+
+  // Non-draft + full admin: show admin actions (return NFT, cancel, refund list, delete)
+  if (role === 'full') {
+    const entries = await getEntriesByRaffleId(raffle.id)
+    return <AdminRaffleActions raffle={raffle} entries={entries} />
+  }
+
+  // Non-draft + raffle_creator: send to public page
+  redirect(`/raffles/${raffle.slug}`)
 }

@@ -9,6 +9,7 @@ import {
   updateRaffle
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
+import { transferNftPrizeToWinner } from '@/lib/raffles/prize-escrow'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -126,11 +127,25 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      let nftTransferSignature: string | undefined
+      let nftTransferError: string | undefined
+      const updatedRaffle = await getRaffleById(raffleId)
+      if (updatedRaffle?.prize_type === 'nft' && updatedRaffle.nft_mint_address && !updatedRaffle.nft_transfer_transaction) {
+        const transferResult = await transferNftPrizeToWinner(raffleId)
+        if (transferResult.ok && transferResult.signature) {
+          nftTransferSignature = transferResult.signature
+        } else if (!transferResult.ok && transferResult.error) {
+          nftTransferError = transferResult.error
+        }
+      }
+
       return NextResponse.json({
         success: true,
         raffleId: raffle.id,
         winnerWallet,
-        message: 'Winner selected successfully'
+        message: 'Winner selected successfully',
+        ...(nftTransferSignature != null && { nftTransferSignature }),
+        ...(nftTransferError != null && { nftTransferError }),
       })
     }
 

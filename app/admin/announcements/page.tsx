@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { Switch } from '@/components/ui/switch'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Megaphone, Plus, Pencil, Trash2, Loader2, ArrowLeft } from 'lucide-react'
 
@@ -332,42 +333,46 @@ export default function AdminAnnouncementsPage() {
               />
             </div>
             <div className="flex flex-wrap gap-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="new-show_on_hero"
+                  name="show_on_hero"
+                  ariaLabel="Show on landing (hero)"
                   checked={form.show_on_hero}
-                  onChange={(e) => setForm((f) => ({ ...f, show_on_hero: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setForm((f) => ({ ...f, show_on_hero: checked }))}
                 />
                 <span className="text-sm">Show on landing (hero)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="new-show_on_raffles"
+                  name="show_on_raffles"
+                  ariaLabel="Show on raffles page and Announcements tab"
                   checked={form.show_on_raffles}
-                  onChange={(e) => setForm((f) => ({ ...f, show_on_raffles: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setForm((f) => ({ ...f, show_on_raffles: checked }))}
                 />
                 <span className="text-sm">Show on raffles page &amp; Announcements tab</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="new-mark_as_new"
+                  name="mark_as_new"
+                  ariaLabel="Mark as new (show notification icon on tab)"
                   checked={form.mark_as_new}
-                  onChange={(e) => setForm((f) => ({ ...f, mark_as_new: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setForm((f) => ({ ...f, mark_as_new: checked }))}
                 />
                 <span className="text-sm">Mark as new (show notification icon on tab)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="new-active"
+                  name="active"
+                  ariaLabel="Active"
                   checked={form.active}
-                  onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setForm((f) => ({ ...f, active: checked }))}
                 />
                 <span className="text-sm">Active</span>
-              </label>
+              </div>
             </div>
             {createError && (
               <p className="text-sm text-destructive mb-2">{createError}</p>
@@ -464,42 +469,46 @@ export default function AdminAnnouncementsPage() {
               />
             </div>
             <div className="flex flex-wrap gap-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-show_on_hero"
+                  name="show_on_hero"
+                  ariaLabel="Show on landing"
                   checked={editForm.show_on_hero}
-                  onChange={(e) => setEditForm((f) => ({ ...f, show_on_hero: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setEditForm((f) => ({ ...f, show_on_hero: checked }))}
                 />
                 <span className="text-sm">Show on landing</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-show_on_raffles"
+                  name="show_on_raffles"
+                  ariaLabel="Show on raffles page and Announcements tab"
                   checked={editForm.show_on_raffles}
-                  onChange={(e) => setEditForm((f) => ({ ...f, show_on_raffles: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setEditForm((f) => ({ ...f, show_on_raffles: checked }))}
                 />
                 <span className="text-sm">Show on raffles page &amp; Announcements tab</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-mark_as_new"
+                  name="mark_as_new"
+                  ariaLabel="Mark as new (show notification icon on tab)"
                   checked={editForm.mark_as_new}
-                  onChange={(e) => setEditForm((f) => ({ ...f, mark_as_new: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setEditForm((f) => ({ ...f, mark_as_new: checked }))}
                 />
                 <span className="text-sm">Mark as new (show notification icon on tab)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-active"
+                  name="active"
+                  ariaLabel="Active"
                   checked={editForm.active}
-                  onChange={(e) => setEditForm((f) => ({ ...f, active: e.target.checked }))}
-                  className="rounded border-input"
+                  onCheckedChange={(checked) => setEditForm((f) => ({ ...f, active: checked }))}
                 />
                 <span className="text-sm">Active</span>
-              </label>
+              </div>
             </div>
           </div>
           <DialogFooter>

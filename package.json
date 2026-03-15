@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "dev:webpack": "next dev --webpack",
+    "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
+    "generate:escrow-key": "node scripts/generate-escrow-keypair.mjs",
+    "mint:devnet-nft": "node scripts/mint-devnet-nft.mjs",
     "build": "next build --webpack",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",
