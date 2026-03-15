@@ -67,6 +67,36 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
     })
   }, [events, raffleById, fetchRaffle])
 
+  // Load initial recent confirmed entries across ALL raffles (recent tickets, not just one raffle)
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    let cancelled = false
+    supabase
+      .from('entries')
+      .select('id,raffle_id,wallet_address,ticket_quantity,currency,verified_at,created_at')
+      .eq('status', 'confirmed')
+      .order('verified_at', { ascending: false })
+      .limit(5)
+      .then(({ data }) => {
+        if (cancelled || !data?.length) return
+        const initial: ActivityEvent[] = data.map((row: Record<string, unknown>) => ({
+          id: `${row.id}-${row.verified_at ?? row.created_at}`,
+          raffleId: row.raffle_id as string,
+          walletAddress: (row.wallet_address as string) ?? '',
+          ticketQuantity: (row.ticket_quantity as number) ?? 1,
+          currency: (row.currency as Entry['currency']) ?? 'sol',
+          createdAt: (row.verified_at as string) ?? (row.created_at as string) ?? '',
+        }))
+        setEvents(initial)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   useEffect(() => {
     if (!isSupabaseConfigured()) return
 
@@ -92,19 +122,19 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
 
           if (!becameConfirmed) return
 
+          const newId = `${newRow.id}-${newRow.verified_at ?? newRow.created_at}`
+          const newEvent: ActivityEvent = {
+            id: newId,
+            raffleId: newRow.raffle_id,
+            walletAddress: newRow.wallet_address,
+            ticketQuantity: newRow.ticket_quantity,
+            currency: newRow.currency,
+            createdAt: newRow.verified_at ?? newRow.created_at,
+          }
+
           setEvents((prev) => {
-            const next: ActivityEvent[] = [
-              {
-                id: `${newRow.id}-${newRow.verified_at ?? newRow.created_at}`,
-                raffleId: newRow.raffle_id,
-                walletAddress: newRow.wallet_address,
-                ticketQuantity: newRow.ticket_quantity,
-                currency: newRow.currency,
-                createdAt: newRow.verified_at ?? newRow.created_at,
-              },
-              ...prev,
-            ]
-            // Keep only a small history so UI stays lightweight
+            if (prev.some((e) => e.id === newId)) return prev
+            const next: ActivityEvent[] = [newEvent, ...prev]
             return next.slice(0, 5)
           })
         }

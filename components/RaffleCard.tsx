@@ -837,12 +837,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
               </div>
             )}
-            <div className="flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative">
-              <div className="flex items-start justify-between gap-2 mb-1">
+            <div className={`flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative ${isAdmin ? 'pr-24 sm:pr-20' : ''}`}>
+              <div className="flex items-start justify-between gap-3 sm:gap-4 mb-1">
                 <CardTitle className="raffle-card-title !text-[0.95rem] sm:!text-sm !leading-tight line-clamp-1 flex-1 min-w-0 overflow-hidden">
                   {raffle.title}
                 </CardTitle>
-                <div className="flex items-center gap-1 sm:gap-2 group/owlvision flex-shrink-0">
+                <div className="flex items-center gap-2 group/owlvision flex-shrink-0">
                   {showHolderBadge && (
                     <Badge
                       variant="outline"
@@ -1005,17 +1005,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       </Link>
       {isAdmin && (
         <>
-          <div className="absolute top-2 right-2 z-10 flex gap-2">
+          <div className="absolute top-2 right-2 z-10 flex gap-2 sm:gap-3 touch-manipulation" style={{ touchAction: 'manipulation' }}>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-9 w-9 sm:h-7 sm:w-7 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
+              className="h-11 w-11 sm:h-9 sm:w-9 p-0 bg-background touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 router.push(`/admin/raffles/${raffle.id}`)
               }}
+              aria-label="Edit raffle"
             >
               <Edit className="h-4 w-4" />
             </Button>
@@ -1023,12 +1024,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               type="button"
               variant="destructive"
               size="sm"
-              className="h-9 w-9 sm:h-7 sm:w-7 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[28px] sm:min-w-[28px]"
+              className="h-11 w-11 sm:h-9 sm:w-9 p-0 touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 setDeleteDialogOpen(true)
               }}
+              aria-label="Delete raffle"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -1471,17 +1473,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       </Link>
     {isAdmin && (
       <>
-        <div className="absolute top-2 right-2 z-10 flex gap-2">
+        <div className="absolute top-2 right-2 z-10 flex gap-2 sm:gap-3 touch-manipulation" style={{ touchAction: 'manipulation' }}>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-9 w-9 sm:h-8 sm:w-8 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
+              className="h-11 w-11 sm:h-9 sm:w-9 p-0 bg-background touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
               router.push(`/admin/raffles/${raffle.id}`)
             }}
+              aria-label="Edit raffle"
           >
             <Edit className="h-4 w-4" />
           </Button>
@@ -1489,12 +1492,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             type="button"
             variant="destructive"
             size="sm"
-            className="h-9 w-9 sm:h-8 sm:w-8 p-0 touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
+            className="h-11 w-11 sm:h-9 sm:w-9 p-0 touch-manipulation min-h-[44px] min-w-[44px] sm:min-h-9 sm:min-w-9"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
               setDeleteDialogOpen(true)
             }}
+            aria-label="Delete raffle"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect, ReactNode } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
+import { ContentErrorBoundary } from '@/components/ContentErrorBoundary'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
@@ -78,12 +79,15 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   )
 
   // Mount with autoConnect true from the start so the adapter's effect runs once and restores session.
+  // ContentErrorBoundary catches render errors from the wallet adapter (e.g. on mobile) so we show
+  // "Try again" / "Go home" instead of the global error screen.
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider 
-        wallets={wallets} 
-        autoConnect
-        onError={(error) => {
+      <ContentErrorBoundary>
+        <WalletProvider 
+          wallets={wallets} 
+          autoConnect
+          onError={(error) => {
           // Log all errors in development for debugging
           if (process.env.NODE_ENV === 'development') {
             console.log('Wallet adapter error:', {
@@ -192,8 +196,9 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           }
         }}
       >
-        <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
+          <WalletModalProvider>{children}</WalletModalProvider>
+        </WalletProvider>
+      </ContentErrorBoundary>
     </ConnectionProvider>
   )
 }

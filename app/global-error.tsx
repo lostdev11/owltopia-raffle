@@ -5,12 +5,25 @@
  * Prerender of /_global-error is skipped via scripts/postinstall-next-global-error.js
  * to avoid "Cannot read properties of null (reading 'useContext')" during build.
  */
-const bodyStyle = { margin: 0, fontFamily: 'system-ui, sans-serif', padding: '2rem', textAlign: 'center' as const }
+const bodyStyle = {
+  margin: 0,
+  fontFamily: 'system-ui, sans-serif',
+  padding: '2rem',
+  textAlign: 'center' as const,
+  minHeight: '100dvh',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+}
 const titleStyle = { fontSize: '1.5rem', marginBottom: '1rem' }
-const textStyle = { color: '#64748b', marginBottom: '1.5rem' }
+const textStyle = { color: '#64748b', marginBottom: '1.5rem', maxWidth: '20rem' }
+// 44px min height for touch targets (mobile-first)
 const linkStyle = {
   display: 'inline-block',
-  padding: '0.5rem 1rem',
+  padding: '0.75rem 1.25rem',
+  minHeight: '44px',
   fontSize: '1rem',
   cursor: 'pointer',
   backgroundColor: '#0f172a',
@@ -18,6 +31,7 @@ const linkStyle = {
   border: 'none',
   borderRadius: '6px',
   textDecoration: 'none' as const,
+  boxSizing: 'border-box',
 }
 
 export default function GlobalError({
@@ -32,18 +46,25 @@ export default function GlobalError({
     <html lang="en">
       <body style={bodyStyle}>
         <h1 style={titleStyle}>Something went wrong</h1>
-        <p style={textStyle}>An unexpected error occurred. Please try again.</p>
-        {isServer ? (
-          <a href="/" style={linkStyle}>Try again</a>
-        ) : (
-          <button
-            type="button"
-            onClick={reset}
-            style={{ ...linkStyle, border: 'none', font: 'inherit' }}
-          >
-            Try again
-          </button>
-        )}
+        <p style={textStyle}>
+          An unexpected error occurred. On mobile this can happen when the wallet or page is still loading. Please try again or go home.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'center' }}>
+          {isServer ? (
+            <a href="/" style={linkStyle}>Try again</a>
+          ) : (
+            <button
+              type="button"
+              onClick={reset}
+              style={{ ...linkStyle, border: 'none', font: 'inherit' }}
+            >
+              Try again
+            </button>
+          )}
+          <a href="/" style={{ ...linkStyle, backgroundColor: 'transparent', color: '#64748b', border: '1px solid #334155' }}>
+            Go home
+          </a>
+        </div>
       </body>
     </html>
   )

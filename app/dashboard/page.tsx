@@ -233,7 +233,20 @@ export default function DashboardPage() {
     return null
   }
 
-  const { myRaffles, myEntries, creatorRevenue, creatorRevenueByCurrency, feeTier, wallet, displayName } = data
+  // Defensive: avoid crashes if API returns unexpected shape (e.g. partial/cached response)
+  const myRaffles = Array.isArray(data.myRaffles) ? data.myRaffles : []
+  const myEntries = Array.isArray(data.myEntries) ? data.myEntries : []
+  const creatorRevenue = typeof data.creatorRevenue === 'number' ? data.creatorRevenue : 0
+  const creatorRevenueByCurrency =
+    data.creatorRevenueByCurrency && typeof data.creatorRevenueByCurrency === 'object'
+      ? data.creatorRevenueByCurrency
+      : {}
+  const feeTier =
+    data.feeTier && typeof data.feeTier.feeBps === 'number' && typeof data.feeTier.reason === 'string'
+      ? data.feeTier
+      : { feeBps: 600, reason: 'standard' as const }
+  const wallet = typeof data.wallet === 'string' ? data.wallet : ''
+  const displayName = data.displayName != null ? String(data.displayName) : null
 
   const filteredEntries =
     entriesFilter === 'won'
