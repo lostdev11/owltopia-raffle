@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
 
@@ -15,8 +16,6 @@ interface HeliusAsset {
   }
   grouping?: Array<{ group_key?: string; group_value?: string }>
 }
-
-const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 
 /** Parsed token account info from getParsedTokenAccountsByOwner */
 interface ParsedTokenAccountInfo {
@@ -50,7 +49,7 @@ async function getDelegatedMints(wallet: string): Promise<Set<string>> {
         jsonrpc: '2.0',
         id: 'parsed-token-accounts',
         method: 'getParsedTokenAccountsByOwner',
-        params: [wallet, { programId: TOKEN_PROGRAM_ID }],
+        params: [wallet, { programId: TOKEN_PROGRAM_ID.toBase58() }],
       }),
       cache: 'no-store',
     })
