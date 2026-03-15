@@ -21,7 +21,7 @@ This document summarizes security practices and findings for Owl Raffle Site.
   - Entry create: `raffleId` (UUID), `walletAddress` (Solana base58), `ticketQuantity` (1–1000).
   - Auth verify: wallet, message, signature.
   - Profile: `displayName` (1–32 chars, trimmed).
-- **Raffle POST** validates required fields, dates, duration (max 7 days), currency allowlist, and creation fee (with on-chain verification for non-admins).
+- **Raffle POST** validates required fields, dates, duration (max 7 days), and currency allowlist.
 - **Entries GET** now validates `raffleId` as UUID before querying the DB.
 
 ### Rate limiting
@@ -40,7 +40,7 @@ This document summarizes security practices and findings for Owl Raffle Site.
 ### Data layer
 
 - **Supabase**: Parameterized queries via client (`.eq()`, `.insert()`, etc.); no raw SQL with user input. Service role key is server-only (`lib/supabase-admin.ts`); client uses anon key only.
-- **Raffle/entry creation** uses server-side verification (creation fee tx, entry confirmation RPC).
+- **Raffle/entry creation** uses server-side verification (entry confirmation RPC).
 
 ### XSS mitigation
 

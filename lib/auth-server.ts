@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 import { getAdminRole, isAdmin } from '@/lib/db/admins'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
@@ -40,7 +41,7 @@ export function consumeNonce(nonce: string): boolean {
   return true
 }
 
-const MESSAGE_PREFIX = 'Sign in to Owl Raffle.\nNonce: '
+const MESSAGE_PREFIX = `Sign in to ${PLATFORM_NAME}.\nNonce: `
 const MESSAGE_SUFFIX = '\nExpires: '
 
 export function buildSignInMessage(nonce: string, expiresAt: Date): string {

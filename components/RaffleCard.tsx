@@ -23,7 +23,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone } from '@/lib/utils'
-import { Trash2, Edit, Trophy, Share2 } from 'lucide-react'
+import { Trash2, Edit, Trophy, Share2, BadgeCheck } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -136,6 +136,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   // Calculate minimum eligibility
   const minTickets = getRaffleMinimum(raffle)
   const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
+
+  // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
+  const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -782,18 +785,25 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         >
           <LinkifiedTextInsideLinkProvider>
           <Card
-            className={`${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-row items-stretch p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
+            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-col p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
             style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
           >
+            <div className="flex flex-row items-stretch flex-1 min-h-0">
             {isWinner && (
-              <div className="winner-golden-overlay absolute inset-0 rounded-lg pointer-events-none z-0" />
+              <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
             )}
             {userHasEntered && !isWinner && (
-              <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
+              <div className="raffle-entered-overlay absolute inset-0 rounded-[1.25rem] z-0" />
             )}
+            {/* Theme accent blob (modern card flair) */}
+            <div
+              className="raffle-card-accent-blob -top-8 -right-8 z-0"
+              style={{ background: themeColor }}
+              aria-hidden
+            />
             {raffle.image_url && !imageError && (
               <div 
-                className="!relative w-32 sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-lg"
+                className="!relative w-32 sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem]"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -813,14 +823,26 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
             {imageError && (
-              <div className="w-32 sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded z-10 relative">
+              <div className="w-32 sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
                 <span className="text-xs text-muted-foreground text-center px-2">Image unavailable</span>
               </div>
             )}
             <div className="flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative">
               <div className="flex items-start justify-between gap-2 mb-1">
-                <CardTitle className="!text-sm !font-semibold !leading-tight line-clamp-1 flex-1 min-w-0 overflow-hidden">{raffle.title}</CardTitle>
+                <CardTitle className="raffle-card-title !text-[0.95rem] sm:!text-sm !leading-tight line-clamp-1 flex-1 min-w-0 overflow-hidden">
+                  {raffle.title}
+                </CardTitle>
                 <div className="flex items-center gap-1 sm:gap-2 group/owlvision flex-shrink-0">
+                  {showHolderBadge && (
+                    <Badge
+                      variant="outline"
+                      className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-[10px] sm:text-xs px-1.5 sm:px-2 flex items-center gap-1"
+                      title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                    >
+                      <BadgeCheck className="h-3 w-3 flex-shrink-0" aria-hidden />
+                      Owl holder
+                    </Badge>
+                  )}
                   <OwlVisionBadge score={owlVisionScore} />
                 </div>
               </div>
@@ -953,6 +975,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
           </div>
+          </div>
+            {/* Accent strip (theme color) - full width at bottom */}
+            <div
+              className="raffle-card-accent-strip flex-shrink-0"
+              style={{ color: themeColor }}
+              aria-hidden
+            />
         </Card>
           </LinkifiedTextInsideLinkProvider>
       </Link>
@@ -1088,17 +1117,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       >
         <LinkifiedTextInsideLinkProvider>
         <Card
-          className={`${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-105 cursor-pointer p-0 overflow-hidden rounded-xl ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 relative winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'relative raffle-entered-card' : ''}`}
+          className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-[1.02] cursor-pointer p-0 overflow-hidden ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
           style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
         >
           {isWinner && (
-            <div className="winner-golden-overlay absolute inset-0 rounded-xl pointer-events-none z-0" />
+            <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
           )}
           {userHasEntered && !isWinner && (
-            <div className="raffle-entered-overlay absolute inset-0 rounded-xl z-0" />
+            <div className="raffle-entered-overlay absolute inset-0 rounded-[1.25rem] z-0" />
           )}
+          {/* Theme accent blob (modern card flair) */}
+          <div
+            className="raffle-card-accent-blob -top-12 -right-12 z-0"
+            style={{ background: themeColor }}
+            aria-hidden
+          />
           {raffle.image_url && !imageError && (
-            <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-xl m-0 p-0">
+            <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
               <Image
                 src={raffle.image_url}
                 alt={raffle.title}
@@ -1131,6 +1166,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                           Draw Threshold: {minTickets}
                         </Badge>
                       )}
+                      {showHolderBadge && (
+                        <Badge
+                          variant="outline"
+                          className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-xs flex items-center gap-1"
+                          title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                        >
+                          <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                          Owl holder
+                        </Badge>
+                      )}
                       <OwlVisionBadge score={owlVisionScore} />
                     </div>
                   </div>
@@ -1142,7 +1187,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               {/* Always visible overlay at bottom for key info */}
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-2 sm:p-3 z-10 pointer-events-none">
                 <div className="mb-1 sm:mb-2">
-                  <CardTitle className={`${classes.title} text-white line-clamp-2 mb-1 !text-sm sm:!text-base md:!text-lg !font-semibold !leading-tight break-words`}>{raffle.title}</CardTitle>
+                  <CardTitle className={`raffle-card-title-soft ${classes.title} text-white line-clamp-2 mb-1 !text-sm sm:!text-base md:!text-lg !leading-tight break-words`}>
+                    {raffle.title}
+                  </CardTitle>
                 </div>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
@@ -1181,7 +1228,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             <>
               <CardHeader className="p-3 sm:p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
-                  <CardTitle className={`${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>{raffle.title}</CardTitle>
+                  <CardTitle className={`raffle-card-title-soft ${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>
+                    {raffle.title}
+                  </CardTitle>
                   <div className="group/owlvision flex items-center gap-1 sm:gap-2 flex-shrink-0">
                     {minTickets && (
                       <Badge 
@@ -1190,6 +1239,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         title={`Minimum ${minTickets} tickets required to draw winner`}
                       >
                         <span className="sm:hidden">Threshold: </span><span className="hidden sm:inline">Draw Threshold: </span>{minTickets}
+                      </Badge>
+                    )}
+                    {showHolderBadge && (
+                      <Badge
+                        variant="outline"
+                        className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-[10px] sm:text-xs px-1.5 sm:px-2 flex items-center gap-1"
+                        title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                      >
+                        <BadgeCheck className="h-3 w-3 flex-shrink-0" aria-hidden />
+                        Owl holder
                       </Badge>
                     )}
                     <OwlVisionBadge score={owlVisionScore} />
@@ -1374,17 +1433,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </CardFooter>
             </>
           )}
+          {/* Accent strip (theme color) - full width at bottom */}
+          <div
+            className="raffle-card-accent-strip flex-shrink-0"
+            style={{ color: themeColor }}
+            aria-hidden
+          />
         </Card>
         </LinkifiedTextInsideLinkProvider>
       </Link>
     {isAdmin && (
       <>
         <div className="absolute top-2 right-2 z-10 flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 w-9 sm:h-8 sm:w-8 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 sm:h-8 sm:w-8 p-0 bg-background touch-manipulation min-h-[36px] min-w-[36px] sm:min-h-[32px] sm:min-w-[32px]"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()

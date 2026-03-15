@@ -19,7 +19,7 @@ export async function getPaymentSplit(
   totalAmount: number,
   creatorWallet: string
 ): Promise<PaymentSplit> {
-  const { feeBps } = await getCreatorFeeTier(creatorWallet.trim() || '')
+  const { feeBps } = await getCreatorFeeTier(creatorWallet.trim() || '', { skipCache: true })
   const safeTotal = Number.isFinite(totalAmount) && totalAmount > 0 ? totalAmount : 0
   const scaledTotal = Math.round(safeTotal * 1_000_000_000)
   const scaledFee = Math.floor((scaledTotal * feeBps) / 10_000)

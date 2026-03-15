@@ -12,6 +12,12 @@ export function getThemeAccentColor(theme: ThemeAccent): string {
       return '#00d4ff'
     case 'dawn':
       return '#a8ff00'
+    case 'ember':
+      return '#f97316'
+    case 'violet':
+      return '#a855f7'
+    case 'coral':
+      return '#f43f5e'
     default:
       return '#00ff88'
   }
@@ -28,6 +34,12 @@ export function getThemeAccentGlow(theme: ThemeAccent): string {
       return 'rgba(0, 212, 255, 0.5)'
     case 'dawn':
       return 'rgba(168, 255, 0, 0.5)'
+    case 'ember':
+      return 'rgba(249, 115, 22, 0.5)'
+    case 'violet':
+      return 'rgba(168, 85, 247, 0.5)'
+    case 'coral':
+      return 'rgba(244, 63, 94, 0.5)'
     default:
       return 'rgba(0, 255, 136, 0.5)'
   }

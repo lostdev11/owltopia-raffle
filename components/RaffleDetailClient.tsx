@@ -32,7 +32,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2 } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -48,10 +48,10 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
+import { getTokenProgramForMintInWallet } from '@/lib/solana/wallet-tokens'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
-import { LiveActivityPopups } from '@/components/LiveActivityPopups'
 
 interface RaffleDetailClientProps {
   raffle: Raffle
@@ -70,8 +70,11 @@ export function RaffleDetailClient({
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
+  const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
   const [depositVerifyLoading, setDepositVerifyLoading] = useState(false)
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
+  const [escrowCheckUrl, setEscrowCheckUrl] = useState<string | null>(null)
+  const [showEscrowConfirmDialog, setShowEscrowConfirmDialog] = useState(false)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const [showParticipants, setShowParticipants] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'owl-vision'>('overview')
@@ -85,10 +88,18 @@ export function RaffleDetailClient({
   const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false)
   const [transferError, setTransferError] = useState<string | null>(null)
   const [transferSuccess, setTransferSuccess] = useState(false)
+  const [showReturnPrizeDialog, setShowReturnPrizeDialog] = useState(false)
+  const [returnPrizeReason, setReturnPrizeReason] = useState<string>('cancelled')
+  const [returnPrizeLoading, setReturnPrizeLoading] = useState(false)
+  const [returnPrizeError, setReturnPrizeError] = useState<string | null>(null)
+  const [returnPrizeSuccess, setReturnPrizeSuccess] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const wallet = publicKey?.toBase58() ?? ''
+  const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const isCreator = connected && wallet && creatorWallet === wallet
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
@@ -207,6 +218,19 @@ export function RaffleDetailClient({
       .catch(() => {})
     return () => { cancelled = true }
   }, [raffle.prize_type, raffle.prize_deposited_at])
+
+  // Fetch block explorer URL to check NFT in escrow (for NFT raffles)
+  useEffect(() => {
+    if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address) return
+    let cancelled = false
+    fetch(`/api/raffles/${raffle.id}/escrow-check-url`)
+      .then((r) => (cancelled ? undefined : r.ok ? r.json() : undefined))
+      .then((data: { url?: string } | undefined) => {
+        if (!cancelled && data?.url) setEscrowCheckUrl(data.url)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [raffle.id, raffle.prize_type, raffle.nft_mint_address])
 
   // Refresh entries when wallet connection status changes
   // This ensures user tickets are recalculated when user connects/disconnects
@@ -1013,23 +1037,29 @@ export function RaffleDetailClient({
 
   const handleTransferNftToEscrow = useCallback(async () => {
     if (!publicKey || !escrowAddress || !raffle.nft_mint_address) return
+    setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
     setDepositEscrowLoading(true)
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
+      const tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+      if (!tokenProgram) {
+        setDepositEscrowError('NFT not found in your wallet. Supports SPL Token and Token-2022.')
+        return
+      }
       const creatorAta = await getAssociatedTokenAddress(
         mint,
         publicKey,
         false,
-        TOKEN_PROGRAM_ID,
+        tokenProgram,
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
       const escrowAta = await getAssociatedTokenAddress(
         mint,
         escrowPubkey,
         false,
-        TOKEN_PROGRAM_ID,
+        tokenProgram,
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
       const tx = new Transaction()
@@ -1042,7 +1072,7 @@ export function RaffleDetailClient({
             escrowAta,
             escrowPubkey,
             mint,
-            TOKEN_PROGRAM_ID,
+            tokenProgram,
             ASSOCIATED_TOKEN_PROGRAM_ID
           )
         )
@@ -1054,12 +1084,13 @@ export function RaffleDetailClient({
           publicKey,
           1n,
           [],
-          TOKEN_PROGRAM_ID
+          tokenProgram
         )
       )
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setDepositEscrowError(null)
+      setDepositEscrowSuccess(true)
       router.refresh()
     } catch (e) {
       setDepositEscrowError(e instanceof Error ? e.message : 'Transfer failed')
@@ -1086,6 +1117,58 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const handleReturnPrizeToCreator = useCallback(async () => {
+    const reason = returnPrizeReason as 'cancelled' | 'wrong_nft' | 'dispute' | 'platform_error' | 'testing'
+    if (!['cancelled', 'wrong_nft', 'dispute', 'platform_error', 'testing'].includes(reason)) {
+      setReturnPrizeError('Please select a reason')
+      return
+    }
+    setReturnPrizeError(null)
+    setReturnPrizeSuccess(false)
+    setReturnPrizeLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/return-prize-to-creator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = typeof data?.error === 'string' ? data.error : 'Failed to return prize to creator'
+        setReturnPrizeError(msg)
+        return
+      }
+      setReturnPrizeSuccess(true)
+      setTimeout(() => {
+        router.refresh()
+        setShowReturnPrizeDialog(false)
+      }, 1500)
+    } catch (e) {
+      setReturnPrizeError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setReturnPrizeLoading(false)
+    }
+  }, [raffle.id, returnPrizeReason, router])
+
+  const handleRequestCancellation = useCallback(async () => {
+    setRequestCancelLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/request-cancellation`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError((data as { error?: string }).error ?? 'Failed to request cancellation')
+        return
+      }
+      router.refresh()
+    } finally {
+      setRequestCancelLoading(false)
+    }
+  }, [raffle.id, router])
+
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
   const isWinnerDetail = hasEnded && !!raffle.winner_wallet && wallet === raffle.winner_wallet
@@ -1097,6 +1180,14 @@ export function RaffleDetailClient({
     raffle.prize_type === 'nft' && 
     isAdmin && 
     !raffle.nft_transfer_transaction
+
+  // Show "Return prize to creator" when: admin, NFT raffle, prize in escrow, not yet sent to winner, not already returned
+  const showReturnPrizeButton =
+    isAdmin &&
+    raffle.prize_type === 'nft' &&
+    !!raffle.prize_deposited_at &&
+    !raffle.nft_transfer_transaction &&
+    !raffle.prize_returned_at
 
   // Size-based styling classes
   const sizeClasses = {
@@ -1145,7 +1236,6 @@ export function RaffleDetailClient({
 
   return (
     <>
-      <LiveActivityPopups raffles={[raffle]} />
       <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-3' : imageSize === 'medium' ? 'py-6 px-3 sm:px-4' : 'py-8 px-3 sm:px-4'}`}>
       <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1177,47 +1267,126 @@ export function RaffleDetailClient({
             <Share2 className="mr-2 h-4 w-4" />
             Share
           </Button>
+          {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
+            <Button
+              variant="outline"
+              onClick={handleRequestCancellation}
+              disabled={requestCancelLoading}
+              className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+              title="Request cancellation. Ticket buyers get refunds in all cases. Within 24h: no fee to host. After 24h: host is charged cancellation fee."
+            >
+              {requestCancelLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <XCircle className="mr-2 h-4 w-4" />
+              )}
+              Request cancellation
+            </Button>
+          )}
+          {isCreator && raffle.cancellation_requested_at && (raffle.status !== 'cancelled') && (
+            <span className="text-sm text-amber-600 dark:text-amber-400 self-center">
+              Cancellation requested — waiting for admin
+            </span>
+          )}
         </div>
 
         {showDepositEscrow && (
-          <Card className="border-amber-500/50 bg-amber-500/5">
-            <CardHeader>
-              <CardTitle className="text-lg">Prize in escrow required</CardTitle>
-              <CardDescription>
-                This raffle uses an NFT prize. The NFT must be in platform escrow before entries can open. Your wallet will send the NFT to escrow when you click below. <strong>No listing fee</strong> — only network (gas) fees apply. Then verify the deposit.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!escrowAddress && (
-                <p className="text-sm text-muted-foreground">Loading escrow address…</p>
-              )}
-              {escrowAddress && (
-                <>
-                  <p className="text-xs text-muted-foreground break-all">
-                    Escrow: {escrowAddress}
+          <>
+            <Card className="border-amber-500/50 bg-amber-500/5">
+              <CardHeader>
+                <CardTitle className="text-lg">Prize in escrow required</CardTitle>
+                <CardDescription>
+                  <strong>Flow:</strong> You created this raffle → next, transfer the NFT to escrow (it stays locked for the duration of the raffle) → when the raffle ends, the prize is automatically sent to the winner. Transfer your NFT below; your wallet will ask you to sign. <strong>No listing fee</strong> — only network (gas) fees. Then click Verify deposit.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!connected && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">Connect your wallet to transfer the NFT to escrow.</p>
+                )}
+                {!escrowAddress && connected && (
+                  <p className="text-sm text-muted-foreground">Preparing…</p>
+                )}
+                {escrowAddress && (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={() => setShowEscrowConfirmDialog(true)}
+                        disabled={!connected || depositEscrowLoading}
+                      >
+                        {depositEscrowLoading ? 'Sending…' : 'Transfer NFT to escrow'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleVerifyPrizeDeposit}
+                        disabled={depositVerifyLoading}
+                        title="Checks on-chain that the NFT is in platform escrow, then activates the raffle"
+                      >
+                        {depositVerifyLoading ? 'Verifying…' : 'Verify deposit'}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.
+                    </p>
+                    {escrowCheckUrl && (
+                      <a
+                        href={escrowCheckUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                      >
+                        Check NFT in escrow (block explorer)
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      </a>
+                    )}
+                  </>
+                )}
+                {depositEscrowSuccess && (
+                  <p className="text-sm text-green-600 dark:text-green-400">
+                    NFT sent to escrow. Click &quot;Verify deposit&quot; below. The NFT has left your wallet on-chain; if it still appears in Phantom or in &quot;Load NFTs&quot; elsewhere, refresh or wait a moment—indexers can lag.
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      onClick={handleTransferNftToEscrow}
-                      disabled={!connected || depositEscrowLoading}
-                    >
-                      {depositEscrowLoading ? 'Sending…' : 'Transfer NFT to escrow'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleVerifyPrizeDeposit}
-                      disabled={depositVerifyLoading}
-                    >
-                      {depositVerifyLoading ? 'Verifying…' : 'Verify deposit'}
-                    </Button>
-                  </div>
-                </>
-              )}
-              {depositEscrowError && (
-                <p className="text-sm text-destructive">{depositEscrowError}</p>
-              )}
-            </CardContent>
-          </Card>
+                )}
+                {depositEscrowError && (
+                  <p className="text-sm text-destructive">{depositEscrowError}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Dialog open={showEscrowConfirmDialog} onOpenChange={setShowEscrowConfirmDialog}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Transfer NFT to escrow?</DialogTitle>
+                  <DialogDescription asChild>
+                    <div className="space-y-2 text-left">
+                      <p>
+                        You are about to send this NFT to the platform escrow wallet. Your wallet will prompt you to sign the transaction.
+                      </p>
+                      <p>
+                        <strong>The NFT will be locked in escrow</strong> until the raffle ends and a winner is chosen. At that point, <strong>the prize is automatically sent to the winner</strong> — no extra step from you.
+                      </p>
+                      <p>
+                        Are you sure you want to transfer this NFT to escrow?
+                      </p>
+                    </div>
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowEscrowConfirmDialog(false)}
+                    disabled={depositEscrowLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => handleTransferNftToEscrow()}
+                    disabled={depositEscrowLoading}
+                  >
+                    {depositEscrowLoading ? 'Sending…' : 'Yes, transfer to escrow'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
 
         <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={borderStyle}>
@@ -1233,6 +1402,16 @@ export function RaffleDetailClient({
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
+                {isOwlEnabled() && raffle.creator_is_holder === true && (
+                  <Badge
+                    variant="outline"
+                    className="bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 text-sm px-2 flex items-center gap-1.5"
+                    title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                  >
+                    <BadgeCheck className="h-4 w-4 flex-shrink-0" aria-hidden />
+                    Owl holder
+                  </Badge>
+                )}
                 <OwlVisionBadge score={currentOwlVisionScore} onOpenInTab={() => setActiveTab('owl-vision')} />
               </div>
             </div>
@@ -1294,6 +1473,20 @@ export function RaffleDetailClient({
                 </div>
               )}
             </>
+          )}
+
+          {raffle.prize_type === 'nft' && raffle.prize_deposited_at && escrowCheckUrl && (
+            <div className={`${classes.headerPadding} pt-0`}>
+              <a
+                href={escrowCheckUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+              >
+                View NFT in escrow (block explorer)
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              </a>
+            </div>
           )}
 
           <CardContent className={classes.contentPadding}>
@@ -1520,6 +1713,21 @@ export function RaffleDetailClient({
                   <span className="sm:hidden">Record Transfer</span>
                 </Button>
               )}
+              {showReturnPrizeButton && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setReturnPrizeError(null)
+                    setReturnPrizeSuccess(false)
+                    setShowReturnPrizeDialog(true)
+                  }}
+                  className="flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Return Prize to Creator</span>
+                  <span className="sm:hidden">Return Prize</span>
+                </Button>
+              )}
               {isAdmin && (
                 <Button
                   variant="outline"
@@ -1595,6 +1803,63 @@ export function RaffleDetailClient({
           nftCollectionName={raffle.nft_collection_name}
         />
       )}
+
+      <Dialog open={showReturnPrizeDialog} onOpenChange={setShowReturnPrizeDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Return Prize to Creator</DialogTitle>
+            <DialogDescription>
+              Send the NFT from escrow back to the raffle creator. Use only for: cancelled raffle, wrong NFT deposited, dispute resolution, or platform error. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="return-prize-reason">Reason</Label>
+              <select
+                id="return-prize-reason"
+                value={returnPrizeReason}
+                onChange={(e) => setReturnPrizeReason(e.target.value)}
+                disabled={returnPrizeLoading}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="cancelled">Raffle cancelled</option>
+                <option value="wrong_nft">Wrong NFT deposited</option>
+                <option value="dispute">Dispute resolution</option>
+                <option value="platform_error">Platform error</option>
+                <option value="testing">Testing</option>
+              </select>
+            </div>
+            {returnPrizeError && (
+              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive text-destructive text-sm">
+                {returnPrizeError}
+              </div>
+            )}
+            {returnPrizeSuccess && (
+              <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm">
+                Prize returned to creator successfully.
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowReturnPrizeDialog(false)}
+              disabled={returnPrizeLoading}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReturnPrizeToCreator}
+              disabled={returnPrizeLoading}
+              style={{ backgroundColor: themeColor, color: '#000' }}
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm"
+            >
+              {returnPrizeLoading ? 'Returning...' : 'Return Prize to Creator'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showNftTransferDialog} onOpenChange={setShowNftTransferDialog}>
         <DialogContent className="sm:max-w-[500px]">

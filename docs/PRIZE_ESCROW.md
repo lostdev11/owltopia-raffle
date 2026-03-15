@@ -54,12 +54,39 @@ When an NFT raffle uses the **prize escrow**, the creator sends the NFT to a pla
 
    No manual “transfer NFT to winner” or “record signature” step is required.
 
+## Return prize to creator (admin-only)
+
+In defined cases the platform can send the NFT **back from escrow to the original creator** instead of to a winner. This is **admin-only** and **reason-gated** to avoid abuse.
+
+**Allowed reasons:**
+
+| Reason | When to use |
+|--------|------------------|
+| `cancelled` | Raffle was cancelled before draw; no winner. |
+| `wrong_nft` | Creator deposited the wrong mint by mistake (before draw). |
+| `dispute` | Dispute resolution (e.g. support ticket) — return to creator after review. |
+| `platform_error` | Bug or platform mistake; returning prize to creator. |
+
+**Rules:**
+
+- Return is only allowed while the NFT is **still in escrow** (no winner has been selected, or winner was selected but automatic transfer to winner has not run yet — i.e. `nft_transfer_transaction` is null).
+- Once the NFT has been sent to the winner, it cannot be “returned” via this flow (that would be a separate winner→creator agreement).
+- Each raffle can only be returned once (`prize_returned_at` is set after a successful return).
+
+**API:** `POST /api/raffles/[id]/return-prize-to-creator`  
+- **Auth:** Full admin session required.  
+- **Body:** `{ "reason": "cancelled" | "wrong_nft" | "dispute" | "platform_error" }`  
+- **Response:** `{ success, raffleId, reason, transactionSignature, message }`
+
+**Database:** Migration `036_add_prize_return_fields.sql` adds `prize_returned_at`, `prize_return_reason`, and `prize_return_tx` to `raffles`.
+
 ## APIs
 
 | Endpoint | Purpose |
 |----------|--------|
 | **GET /api/config/prize-escrow** | Returns `{ address }` of the prize escrow (for “Send NFT to this address”). |
 | **POST /api/raffles/[id]/verify-prize-deposit** | Verifies escrow holds the NFT and sets `prize_deposited_at`. |
+| **POST /api/raffles/[id]/return-prize-to-creator** | (Admin) Returns NFT from escrow to creator; body `{ reason }`. |
 
 ## Behaviour when escrow is not configured
 

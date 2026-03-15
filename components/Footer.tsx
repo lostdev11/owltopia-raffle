@@ -2,8 +2,9 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Coins, Info } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Coins, Info, Trophy } from 'lucide-react'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 const externalLinks = [
   { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
@@ -28,6 +29,11 @@ const glassCardItems = [
     label: 'How It Works',
     href: '/how-it-works',
     icon: <Info className="h-6 w-6" />,
+  },
+  {
+    label: 'Leaderboard',
+    href: '/leaderboard',
+    icon: <Trophy className="h-6 w-6" />,
   },
   ...externalLinks.map((link) => ({
     label: link.name,
@@ -54,7 +60,7 @@ export function Footer() {
           {/* Copyright and Terms Section */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/40 pt-3 sm:pt-4">
             <div className="flex items-center gap-3 sm:gap-4">
-              <span>© {new Date().getFullYear()} Owl Raffle</span>
+              <span>© {new Date().getFullYear()} {PLATFORM_NAME}</span>
             </div>
             <div className="flex items-center gap-4 sm:gap-6">
               <Link 

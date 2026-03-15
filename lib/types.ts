@@ -1,10 +1,10 @@
-export type ThemeAccent = 'prime' | 'midnight' | 'dawn'
+export type ThemeAccent = 'prime' | 'midnight' | 'dawn' | 'ember' | 'violet' | 'coral'
 
 export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 
 export type PrizeType = 'crypto' | 'nft'
 
-export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | null
+export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | 'cancelled' | null
 
 /** Supported raffle ticket currencies */
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
@@ -50,6 +50,24 @@ export interface Raffle {
   floor_price: string | null
   /** Set when NFT prize was verified in platform escrow (prize escrow flow). */
   prize_deposited_at: string | null
+  /** Set when prize was returned from escrow to creator (admin-only, controlled reasons). */
+  prize_returned_at: string | null
+  /** Reason for return: cancelled | wrong_nft | dispute | platform_error. */
+  prize_return_reason: string | null
+  /** Solana tx signature for the return transfer to creator. */
+  prize_return_tx: string | null
+  /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
+  creator_is_holder?: boolean
+  /** When creator requested cancellation (pending admin approval). */
+  cancellation_requested_at: string | null
+  /** When admin accepted cancellation. */
+  cancelled_at: string | null
+  /** Cancellation fee amount (when refund policy is no_refund). */
+  cancellation_fee_amount: number | null
+  /** Currency of cancellation fee (e.g. SOL, USDC). */
+  cancellation_fee_currency: string | null
+  /** full_refund = within 24h; no_refund = after 24h. */
+  cancellation_refund_policy: 'full_refund' | 'no_refund' | null
 }
 
 export interface Entry {

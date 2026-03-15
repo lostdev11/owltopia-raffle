@@ -1,9 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
-import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
+import {
+  getAssociatedTokenAddress,
+  createTransferInstruction,
+  getAccount,
+  createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token'
+import { getTokenProgramForMintInWallet } from '@/lib/solana/wallet-tokens'
+import { Transaction } from '@solana/web3.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,8 +25,6 @@ import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-ac
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
-
-const LAMPORTS_PER_SOL = 1e9
 
 /** Use proxy for external NFT image URLs (e.g. IPFS) so the browser never hits flagged gateways (Safe Web). */
 function getProxiedImageUrl(url: string | null): string | null {
@@ -47,33 +54,36 @@ export function CreateRaffleForm() {
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
-  const [creationFeeRequired, setCreationFeeRequired] = useState(false)
-  const [creationFeeLamports, setCreationFeeLamports] = useState(0)
-  const [creationFeeRecipient, setCreationFeeRecipient] = useState<string | null>(null)
-  const [creationFeeSignature, setCreationFeeSignature] = useState<string | null>(null)
-  const [creationFeeLoading, setCreationFeeLoading] = useState(false)
-  const [creationFeeError, setCreationFeeError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
   const [floorPriceLoading, setFloorPriceLoading] = useState(false)
   const [floorPriceCurrency, setFloorPriceCurrency] = useState<string | null>(null)
+  const [ticketPrice, setTicketPrice] = useState('')
+  const minTicketsInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!selectedNft) {
       setFloorPrice('')
       setFloorPriceLoading(false)
       setFloorPriceCurrency(null)
+      setTicketPrice('')
       return
     }
     let cancelled = false
     setFloorPriceLoading(true)
     setFloorPriceCurrency(null)
     fetch(`/api/nft/floor-price?mint=${encodeURIComponent(selectedNft.mint)}`, { credentials: 'include' })
-      .then((r) => (cancelled ? undefined : r.json()))
-      .then((data: { floorPrice?: string | null; currency?: string | null }) => {
+      .then((r) => {
+        if (cancelled) return undefined
+        if (!r.ok) return undefined
+        return r.json()
+      })
+      .then((data: { floorPrice?: string | null; currency?: string | null } | undefined) => {
         if (cancelled) return
         if (data?.floorPrice != null && data.floorPrice !== '') {
-          setFloorPrice(String(data.floorPrice))
+          const fp = String(data.floorPrice)
+          setFloorPrice(fp)
           setFloorPriceCurrency(data.currency ?? null)
+          updateTicketPriceFromFloor(fp)
         }
       })
       .catch(() => {
@@ -85,40 +95,20 @@ export function CreateRaffleForm() {
     return () => { cancelled = true }
   }, [selectedNft?.mint])
 
-  useEffect(() => {
-    if (!connected) return
-    let cancelled = false
-    fetch('/api/config/creation-fee', { credentials: 'include' })
-      .then((r) => (cancelled ? undefined : r.json()))
-      .then((data: { creationFeeRequired?: boolean; creationFeeLamports?: number; creationFeeRecipient?: string | null }) => {
-        if (cancelled) return
-        setCreationFeeRequired(!!data?.creationFeeRequired)
-        setCreationFeeLamports(Number(data?.creationFeeLamports) || 0)
-        setCreationFeeRecipient(data?.creationFeeRecipient ?? null)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [connected])
-
-  const payCreationFee = async () => {
-    if (!publicKey || !creationFeeRecipient || creationFeeLamports <= 0) return
-    setCreationFeeError(null)
-    setCreationFeeLoading(true)
-    try {
-      const tx = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: new PublicKey(creationFeeRecipient),
-          lamports: creationFeeLamports,
-        })
-      )
-      const sig = await sendTransaction(tx, connection)
-      await connection.confirmTransaction(sig, 'confirmed')
-      setCreationFeeSignature(sig)
-    } catch (e) {
-      setCreationFeeError(e instanceof Error ? e.message : 'Payment failed')
-    } finally {
-      setCreationFeeLoading(false)
+  // Auto-calculate ticket price from floor price: ticket = floor / min_tickets (default 50)
+  const updateTicketPriceFromFloor = (floorValue: string) => {
+    const trimmed = floorValue.trim()
+    if (!trimmed) {
+      setTicketPrice('')
+      return
+    }
+    const floor = parseFloat(trimmed)
+    const minTicketsRaw = minTicketsInputRef.current?.value?.trim()
+    const minTickets = minTicketsRaw ? parseInt(minTicketsRaw, 10) : 50
+    if (Number.isFinite(floor) && floor > 0 && minTickets > 0) {
+      const calculated = floor / minTickets
+      const formatted = calculated >= 1 ? calculated.toFixed(2) : calculated >= 0.01 ? calculated.toFixed(4) : calculated.toFixed(6)
+      setTicketPrice(formatted)
     }
   }
 
@@ -171,6 +161,21 @@ export function CreateRaffleForm() {
       } catch {
         // ignore; show all if blocklist fails
       }
+      // Exclude NFTs already in escrow for this wallet (they're committed to a raffle)
+      try {
+        const escrowRes = await fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
+          credentials: 'include',
+        })
+        if (escrowRes.ok) {
+          const { mints: escrowedMints } = await escrowRes.json()
+          if (Array.isArray(escrowedMints) && escrowedMints.length > 0) {
+            const escrowedSet = new Set(escrowedMints.map((m: string) => m.toLowerCase()))
+            nfts = nfts.filter((n) => !escrowedSet.has(n.mint.toLowerCase()))
+          }
+        }
+      } catch {
+        // ignore; show all if escrow list fails
+      }
       setWalletNfts(nfts)
       setWalletTokens(tokens)
       setNftSearchQuery('')
@@ -205,11 +210,6 @@ export function CreateRaffleForm() {
     
     if (!connected || !publicKey) {
       alert('Please connect your wallet to create a raffle')
-      return
-    }
-
-    if (creationFeeRequired && !creationFeeSignature) {
-      alert('Please pay the raffle creation fee first, then submit the form.')
       return
     }
 
@@ -270,10 +270,6 @@ export function CreateRaffleForm() {
       data.prize_amount = prizeAmountValue ? parseFloat(prizeAmountValue) : 0
       data.prize_currency = formData.get('prize_currency') as string || currency
     }
-    if (creationFeeSignature) {
-      data.creation_fee_transaction_signature = creationFeeSignature
-    }
-
     try {
       const response = await fetch('/api/raffles', {
         method: 'POST',
@@ -283,8 +279,82 @@ export function CreateRaffleForm() {
 
       if (response.ok) {
         const raffle = await response.json()
-        // NFT raffles must deposit prize to escrow before going live; redirect to deposit step
-        if (raffle.prize_type === 'nft' && raffle.nft_mint_address) {
+        // NFT raffles: transfer to escrow right away, then verify, then redirect
+        if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && sendTransaction) {
+          try {
+            const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
+            const escrowData = await escrowRes.json().catch(() => ({}))
+            const escrowAddress = escrowData?.address
+            if (!escrowAddress) {
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
+            const mint = new PublicKey(raffle.nft_mint_address)
+            const escrowPubkey = new PublicKey(escrowAddress)
+            const tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+            if (!tokenProgram) {
+              alert('NFT not found in your wallet. Supports SPL Token and Token-2022.')
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
+            const creatorAta = await getAssociatedTokenAddress(
+              mint,
+              publicKey,
+              false,
+              tokenProgram,
+              ASSOCIATED_TOKEN_PROGRAM_ID
+            )
+            const escrowAta = await getAssociatedTokenAddress(
+              mint,
+              escrowPubkey,
+              false,
+              tokenProgram,
+              ASSOCIATED_TOKEN_PROGRAM_ID
+            )
+            const tx = new Transaction()
+            try {
+              await getAccount(connection, escrowAta)
+            } catch {
+              tx.add(
+                createAssociatedTokenAccountInstruction(
+                  publicKey,
+                  escrowAta,
+                  escrowPubkey,
+                  mint,
+                  tokenProgram,
+                  ASSOCIATED_TOKEN_PROGRAM_ID
+                )
+              )
+            }
+            tx.add(
+              createTransferInstruction(
+                creatorAta,
+                escrowAta,
+                publicKey,
+                1n,
+                [],
+                tokenProgram
+              )
+            )
+            const sig = await sendTransaction(tx, connection)
+            await connection.confirmTransaction(sig, 'confirmed')
+            const verifyRes = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+              method: 'POST',
+              credentials: 'include',
+            })
+            if (!verifyRes.ok) {
+              const errData = await verifyRes.json().catch(() => ({}))
+              console.warn('Verify deposit failed:', errData?.error)
+            }
+            router.push(`/raffles/${raffle.slug}`)
+          } catch (transferErr) {
+            console.error('NFT transfer to escrow failed:', transferErr)
+            alert(
+              transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed. You can complete it on the raffle page.'
+            )
+            router.push(`/raffles/${raffle.slug}?deposit=1`)
+          }
+        } else if (raffle.prize_type === 'nft' && raffle.nft_mint_address) {
           router.push(`/raffles/${raffle.slug}?deposit=1`)
         } else {
           router.push(`/raffles/${raffle.slug}`)
@@ -329,35 +399,10 @@ export function CreateRaffleForm() {
         <CardDescription>Fill in the details for your new raffle</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground space-y-1">
-          <p>Admins: no creation fee. Non-admins: a creation fee is charged to list a raffle (see below).</p>
+        <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia (Owl NFT) holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
         </div>
 
-        {creationFeeRequired && creationFeeLamports > 0 && creationFeeRecipient && (
-          <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-4">
-            <Label>Raffle creation fee</Label>
-            <p className="text-sm text-muted-foreground">
-              A one-time fee of <strong>{(creationFeeLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL</strong> is required to create a raffle. Pay with your wallet below, then fill out and submit the form.
-            </p>
-            {creationFeeSignature ? (
-              <p className="text-sm text-green-600 dark:text-green-400">Creation fee paid. You can submit the form.</p>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  onClick={payCreationFee}
-                  disabled={creationFeeLoading || !connected}
-                >
-                  {creationFeeLoading ? 'Sending…' : `Pay ${(creationFeeLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`}
-                </Button>
-                {creationFeeError && (
-                  <p className="text-sm text-destructive">{creationFeeError}</p>
-                )}
-              </>
-            )}
-          </div>
-        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="title">Title *</Label>
@@ -424,7 +469,7 @@ export function CreateRaffleForm() {
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
-                  Only choose an NFT you intend to give away. Scam or spam NFTs may appear in your wallet—double-check the name and collection before selecting.
+                  Only choose an NFT you intend to give away. Scam or spam NFTs may appear in your wallet—double-check the name and collection. The platform may blocklist known scam NFTs; those cannot be used as prizes.
                 </p>
               </div>
               <Button
@@ -439,7 +484,10 @@ export function CreateRaffleForm() {
                 <p className="text-sm text-destructive">{walletAssetsError}</p>
               )}
               {walletNfts && walletNfts.length === 0 && !loadingWalletAssets && (
-                <p className="text-sm text-muted-foreground">No NFTs found in this wallet.</p>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p>No NFTs found in this wallet.</p>
+                  <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                </div>
               )}
               {walletNfts && walletNfts.length > 0 && (
                 <>
@@ -523,9 +571,9 @@ export function CreateRaffleForm() {
                     Selected: {selectedNft.name ?? selectedNft.mint}
                   </p>
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
-                    <p className="font-medium text-foreground">Wallet &amp; fees</p>
+                    <p className="font-medium text-foreground">Flow &amp; fees</p>
                     <p className="text-muted-foreground mt-0.5">
-                      After you create this raffle, your wallet will be prompted to send this NFT to platform escrow on the next page. Listing fee: <strong>0 SOL</strong> — only network (gas) fees apply.
+                      <strong>1.</strong> Create raffle — your wallet will prompt you to transfer this NFT to escrow right away (locked for the duration of the raffle). <strong>2.</strong> When the raffle ends, the prize is automatically sent to the winner. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee: <strong>0 SOL</strong> — only network (gas) fees.
                     </p>
                   </div>
                 </>
@@ -564,7 +612,19 @@ export function CreateRaffleForm() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="ticket_price">Ticket Price *</Label>
-              <Input id="ticket_price" name="ticket_price" type="number" step="0.000001" required className="text-base sm:text-sm" />
+              <Input
+                id="ticket_price"
+                name="ticket_price"
+                type="number"
+                step="0.000001"
+                required
+                className="text-base sm:text-sm"
+                value={ticketPrice ?? ''}
+                onChange={(e) => setTicketPrice(e.target.value)}
+              />
+              {floorPrice && ticketPrice && (
+                <p className="text-xs text-muted-foreground">Auto-calculated from floor ÷ goal. You can edit.</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="currency">Currency *</Label>
@@ -599,12 +659,14 @@ export function CreateRaffleForm() {
           <div className="space-y-2">
             <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
             <Input
+              ref={minTicketsInputRef}
               id="min_tickets"
               name="min_tickets"
               type="number"
               min="1"
               defaultValue="50"
               placeholder="50 (recommended)"
+              onChange={() => floorPrice && updateTicketPriceFromFloor(floorPrice)}
             />
             <p className="text-xs text-muted-foreground">
               Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
@@ -635,8 +697,12 @@ export function CreateRaffleForm() {
                 id="floor_price"
                 name="floor_price"
                 type="text"
-                value={floorPrice}
-                onChange={(e) => setFloorPrice(e.target.value)}
+                value={floorPrice ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setFloorPrice(v)
+                  updateTicketPriceFromFloor(v)
+                }}
                 placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
               />
               <p className="text-xs text-muted-foreground">
@@ -677,6 +743,9 @@ export function CreateRaffleForm() {
               <option value="prime">Prime Time (Electric Green)</option>
               <option value="midnight">Midnight Drop (Cool Teal)</option>
               <option value="dawn">Dawn Run (Soft Lime)</option>
+              <option value="ember">Ember (Warm Orange)</option>
+              <option value="violet">Violet (Purple)</option>
+              <option value="coral">Coral (Rose)</option>
             </select>
           </div>
 

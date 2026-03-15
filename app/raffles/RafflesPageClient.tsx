@@ -18,12 +18,12 @@ import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame } from 'lucide-react'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
 import { MarkdownContent } from '@/components/MarkdownContent'
-import { LiveActivityPopups } from '@/components/LiveActivityPopups'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -216,12 +216,19 @@ export function RafflesPageClient({
   const wallet = publicKey?.toBase58() ?? ''
   const debug = searchParams.get('debug') === '1'
 
-  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements'
+  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
   const [topProfitableActive, setTopProfitableActive] = useState<RaffleWithEntriesAndProfit[]>([])
 
   const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
+  const [leaderboardData, setLeaderboardData] = useState<{
+    rafflesEntered: Array<{ rank: number; wallet: string; value: number }>
+    rafflesCreated: Array<{ rank: number; wallet: string; value: number }>
+    ticketsSold: Array<{ rank: number; wallet: string; value: number }>
+  } | null>(null)
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     fetch('/api/announcements?placement=raffles')
@@ -238,6 +245,16 @@ export function RafflesPageClient({
       .catch(() => { if (!cancelled) setAnnouncementsList([]) })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (tab !== 'leaderboard') return
+    setLeaderboardLoading(true)
+    fetch('/api/leaderboard', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
+      .then(setLeaderboardData)
+      .catch(() => setLeaderboardData(null))
+      .finally(() => setLeaderboardLoading(false))
+  }, [tab])
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
@@ -403,7 +420,6 @@ export function RafflesPageClient({
 
   return (
   <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
-      <LiveActivityPopups raffles={allRafflesFlat} />
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
@@ -426,7 +442,7 @@ export function RafflesPageClient({
 
       <div className="mb-6 sm:mb-8">
         <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
-          Owl Raffles
+          {PLATFORM_NAME}
         </h1>
         <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
@@ -529,6 +545,18 @@ export function RafflesPageClient({
                 aria-label="New announcement"
               />
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('leaderboard')}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${
+              tab === 'leaderboard'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Trophy className="h-4 w-4" />
+            Leaderboard
           </button>
         </div>
       </div>
@@ -678,6 +706,93 @@ export function RafflesPageClient({
                 </div>
               ) : (
                 <p className="text-muted-foreground">No announcements at the moment. Check back later!</p>
+              )}
+            </div>
+          ) : tab === 'leaderboard' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-4xl">
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 flex items-center gap-2">
+                <Trophy className="h-6 w-6 text-primary" />
+                Leaderboard
+              </h2>
+              <p className="text-muted-foreground text-sm mb-6">
+                Top 10 by raffles entered, raffles created, and tickets sold.
+              </p>
+              {leaderboardLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading…
+                </div>
+              ) : leaderboardData ? (
+                <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-3">
+                  {[
+                    {
+                      title: 'Most raffles entered',
+                      entries: leaderboardData.rafflesEntered,
+                      valueLabel: 'Raffles',
+                      icon: Ticket,
+                    },
+                    {
+                      title: 'Most raffles created',
+                      entries: leaderboardData.rafflesCreated,
+                      valueLabel: 'Raffles',
+                      icon: PlusCircle,
+                    },
+                    {
+                      title: 'Most tickets sold',
+                      entries: leaderboardData.ticketsSold,
+                      valueLabel: 'Tickets',
+                      icon: Trophy,
+                    },
+                  ].map(({ title, entries, valueLabel, icon: Icon }) => (
+                    <Card key={title} className="border-green-500/20 bg-black/40">
+                      <CardHeader className="py-3">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Icon className="h-4 w-4 text-green-500" />
+                          {title}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        {entries.length === 0 ? (
+                          <p className="text-muted-foreground text-sm py-2">No data yet.</p>
+                        ) : (
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-500/20">
+                                <th className="text-left py-1.5 font-medium w-10">#</th>
+                                <th className="text-left py-1.5 font-medium">Wallet</th>
+                                <th className="text-right py-1.5 font-medium">{valueLabel}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entries.map((e) => (
+                                <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
+                                  <td className="py-1.5">
+                                    {e.rank <= 3 ? (
+                                      <Medal
+                                        className={`h-4 w-4 inline ${
+                                          e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
+                                        }`}
+                                        aria-label={`Rank ${e.rank}`}
+                                      />
+                                    ) : (
+                                      <span className="text-muted-foreground">{e.rank}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 font-mono text-xs" title={e.wallet}>
+                                    {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
+                                  </td>
+                                  <td className="py-1.5 text-right font-medium">{e.value.toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">Could not load leaderboard. <Link href="/leaderboard" className="text-green-500 hover:underline">Open leaderboard page</Link>.</p>
               )}
             </div>
           ) : tab === 'my-entries' ? (

@@ -30,7 +30,7 @@ export const rafflesPostBody = z.object({
   prize_currency: z.string().optional(),
   nft_mint_address: z.string().optional().nullable(),
   nft_token_id: z.string().optional().nullable(),
-  theme_accent: z.enum(['prime', 'midnight', 'dawn']).optional(),
+  theme_accent: z.enum(['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']).optional(),
 })
 
 export const authVerifyBody = z.object({

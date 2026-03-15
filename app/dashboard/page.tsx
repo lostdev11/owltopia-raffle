@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User } from 'lucide-react'
+import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User, XCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
 type FeeTier = { feeBps: number; reason: string }
@@ -18,6 +18,8 @@ type Raffle = {
   creator_payout_amount: number | null
   currency: string
   end_time: string
+  prize_type?: string | null
+  cancellation_requested_at?: string | null
 }
 type EntryWithRaffle = {
   entry: { id: string; ticket_quantity: number; amount_paid: number; currency: string; status: string; created_at: string }
@@ -48,6 +50,9 @@ export default function DashboardPage() {
   const [displayNameInput, setDisplayNameInput] = useState('')
   const [displayNameSaving, setDisplayNameSaving] = useState(false)
   const [displayNameError, setDisplayNameError] = useState<string | null>(null)
+  const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
+  const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
+  const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
 
   const loadDashboard = useCallback(async () => {
     if (!connected || !publicKey) {
@@ -60,8 +65,12 @@ export default function DashboardPage() {
     setLoading(true)
     setError(null)
     setNeedsSignIn(false)
+    const walletAddr = publicKey.toBase58()
     try {
-      const res = await fetch('/api/me/dashboard', { credentials: 'include' })
+      const res = await fetch('/api/me/dashboard', {
+        credentials: 'include',
+        headers: { 'X-Connected-Wallet': walletAddr },
+      })
       if (res.status === 401) {
         setNeedsSignIn(true)
         setData(null)
@@ -69,6 +78,11 @@ export default function DashboardPage() {
       }
       if (!res.ok) throw new Error('Failed to load dashboard')
       const json = await res.json()
+      if (json.wallet && json.wallet !== walletAddr) {
+        setNeedsSignIn(true)
+        setData(null)
+        return
+      }
       setData(json)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -135,6 +149,22 @@ export default function DashboardPage() {
       setSigningIn(false)
     }
   }, [publicKey, signMessage, loadDashboard])
+
+  const openEscrowCheck = useCallback(async (raffleId: string) => {
+    setEscrowLinkLoadingId(raffleId)
+    try {
+      const res = await fetch(`/api/raffles/${raffleId}/escrow-check-url`, { credentials: 'include' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && typeof (data as { url?: string }).url === 'string') {
+        window.open((data as { url: string }).url, '_blank', 'noopener,noreferrer')
+      } else {
+        const msg = typeof (data as { error?: string }).error === 'string' ? (data as { error: string }).error : 'Could not open Solscan link.'
+        alert(msg)
+      }
+    } finally {
+      setEscrowLinkLoadingId(null)
+    }
+  }, [])
 
   if (!connected) {
     return (
@@ -214,6 +244,28 @@ export default function DashboardPage() {
     setOpenRaffleId((prev) => (prev === id ? null : id))
   }
 
+  const handleRequestCancellation = useCallback(
+    async (raffleId: string) => {
+      setRequestCancelError(null)
+      setRequestCancelId(raffleId)
+      try {
+        const res = await fetch(`/api/raffles/${raffleId}/request-cancellation`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setRequestCancelError((json as { error?: string }).error ?? 'Failed to request cancellation')
+          return
+        }
+        loadDashboard()
+      } finally {
+        setRequestCancelId(null)
+      }
+    },
+    [loadDashboard]
+  )
+
   const handleSaveDisplayName = async () => {
     setDisplayNameError(null)
     const name = displayNameInput.trim().slice(0, 32)
@@ -251,10 +303,10 @@ export default function DashboardPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <User className="h-4 w-4" />
-            Display name
+            Display name for this wallet
           </CardTitle>
           <CardDescription>
-            This name will appear in raffle participant lists instead of your wallet address. Leave blank to show your address.
+            Each wallet has its own display name. This name will appear in raffle participant lists for this wallet. Leave blank to show the wallet address.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col sm:flex-row gap-2">
@@ -290,7 +342,12 @@ export default function DashboardPage() {
             <p className="text-2xl font-bold">
               {feeTier.feeBps === 300 ? '3%' : feeTier.feeBps === 600 ? '6%' : `${(feeTier.feeBps / 100).toFixed(1)}%`} platform fee
             </p>
-            <p className="text-sm text-muted-foreground capitalize">{feeTier.reason}</p>
+            <p className="text-sm text-muted-foreground">
+              {feeTier.reason === 'holder' ? 'Owltopia (Owl NFT) holder' : 'Non-holder'}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Fee is taken from each ticket sale at purchase time.
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -338,10 +395,17 @@ export default function DashboardPage() {
                     key={r.id}
                     className="border-b border-border/50 last:border-0"
                   >
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() => toggleRaffle(r.id)}
-                      className="flex w-full items-center justify-between gap-4 py-2 text-left"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          toggleRaffle(r.id)
+                        }
+                      }}
+                      className="flex w-full cursor-pointer items-center justify-between gap-4 py-2 text-left"
                     >
                       <span className="flex min-w-0 flex-col">
                         <Link
@@ -362,6 +426,27 @@ export default function DashboardPage() {
                             {Number(r.creator_payout_amount).toFixed(r.currency === 'USDC' ? 2 : 4)} {r.currency}
                           </span>
                         )}
+                        {r.prize_type === 'nft' && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openEscrowCheck(r.id)
+                            }}
+                            disabled={escrowLinkLoadingId === r.id}
+                            className="text-primary hover:underline inline-flex items-center gap-1"
+                            title="View NFT in escrow on Solscan"
+                          >
+                            {escrowLinkLoadingId === r.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <ExternalLink className="h-4 w-4" />
+                                <span className="hidden sm:inline">Solscan</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                         <Link
                           href={`/raffles/${r.slug}`}
                           onClick={(e) => e.stopPropagation()}
@@ -369,13 +454,16 @@ export default function DashboardPage() {
                           <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                         </Link>
                       </span>
-                    </button>
+                    </div>
                     <div
                       className={`overflow-hidden transition-all duration-300 ${
                         isOpen ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
                       }`}
                     >
                       <div className="pb-3 pl-1 pr-1 text-sm text-muted-foreground space-y-1">
+                        {requestCancelError && (
+                          <p className="text-destructive text-xs">{requestCancelError}</p>
+                        )}
                         <p>
                           <span className="font-medium text-foreground">Payout:</span>{' '}
                           {r.creator_payout_amount != null && r.status === 'completed'
@@ -388,14 +476,71 @@ export default function DashboardPage() {
                           <span className="font-medium text-foreground">Status:</span>{' '}
                           <span className="capitalize">{r.status ?? 'draft'}</span>
                         </p>
+                        {(r.status === 'live' || r.status === 'ready_to_draw') && !r.cancellation_requested_at && (
+                          <p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="text-amber-600 border-amber-500/50 hover:bg-amber-500/10"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleRequestCancellation(r.id)
+                              }}
+                              disabled={requestCancelId === r.id}
+                            >
+                              {requestCancelId === r.id ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                  Requesting…
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                                  Request cancellation
+                                </>
+                              )}
+                            </Button>
+                            <span className="block text-xs mt-1 text-muted-foreground">
+                              Admin will review in Owl Vision. Ticket buyers get refunds in all cases. Within 24h: no fee to you. After 24h: you (host) are charged a cancellation fee.
+                            </span>
+                          </p>
+                        )}
+                        {r.cancellation_requested_at && r.status !== 'cancelled' && (
+                          <p className="text-amber-600 dark:text-amber-400 text-xs">
+                            Cancellation requested. Waiting for admin approval in Owl Vision.
+                          </p>
+                        )}
+                        {r.prize_type === 'nft' && (
+                          <p>
+                            <button
+                              type="button"
+                              onClick={() => openEscrowCheck(r.id)}
+                              disabled={escrowLinkLoadingId === r.id}
+                              className="text-primary hover:underline inline-flex items-center gap-1"
+                            >
+                              {escrowLinkLoadingId === r.id ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Opening…
+                                </>
+                              ) : (
+                                <>
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  View NFT in escrow (Solscan)
+                                </>
+                              )}
+                            </button>
+                          </p>
+                        )}
                       </div>
                     </div>
                   </li>
                 )
               })}
             </ul>
-          )}
-          {myRaffles.length > 20 && (
+            )}
+            {myRaffles.length > 20 && (
             <p className="text-sm text-muted-foreground mt-2">Showing latest 20 of {myRaffles.length}</p>
           )}
         </CardContent>

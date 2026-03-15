@@ -229,6 +229,24 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   pointer-events: auto !important;
 }
 
+/* Raffle card typography (modern, display-like) */
+.raffle-card-title {
+  font-family: var(--font-plus-jakarta-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.raffle-card-title-soft {
+  font-family: var(--font-plus-jakarta-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.raffle-card-subtitle {
+  font-family: var(--font-plus-jakarta-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+}
+
 /* Mobile-specific improvements for wallet button */
 @media (hover: none) and (pointer: coarse) {
   .wallet-connect-wrapper button,
@@ -446,6 +464,41 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   );
   background-size: 200% 200%;
   animation: golden-pulse 3s ease-in-out infinite, golden-shimmer 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Modern raffle card: floating look, soft shadow, rounded corners */
+.raffle-card-modern {
+  border-radius: 1.25rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.25),
+    0 10px 20px -10px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+.raffle-card-modern:hover {
+  box-shadow:
+    0 20px 40px -15px rgba(0, 0, 0, 0.4),
+    0 8px 16px -8px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+
+/* Subtle gradient accent strip under card content (theme color applied inline) */
+.raffle-card-accent-strip {
+  height: 3px;
+  border-radius: 0 0 1.25rem 1.25rem;
+  opacity: 0.85;
+  background: linear-gradient(90deg, transparent 0%, currentColor 20%, currentColor 80%, transparent 100%);
+}
+
+/* Decorative gradient blob for card corner (theme color via inline style) */
+.raffle-card-accent-blob {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.2;
   pointer-events: none;
 }
 

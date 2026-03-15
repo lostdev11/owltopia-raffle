@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ListTodo, Loader2, Pencil, RotateCcw } from 'lucide-react'
 import type { Raffle } from '@/lib/types'
 
 export function MyRafflesList() {
+  const { publicKey } = useWallet()
   const [raffles, setRaffles] = useState<Raffle[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -16,7 +18,12 @@ export function MyRafflesList() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/admin/my-raffles', { credentials: 'include' })
+      const headers: HeadersInit = {}
+      if (publicKey) headers['X-Connected-Wallet'] = publicKey.toBase58()
+      const res = await fetch('/api/admin/my-raffles', {
+        credentials: 'include',
+        ...(Object.keys(headers).length ? { headers } : {}),
+      })
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
           setRaffles([])
@@ -32,7 +39,7 @@ export function MyRafflesList() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [publicKey])
 
   useEffect(() => {
     fetchRaffles()
@@ -132,13 +139,21 @@ export function MyRafflesList() {
                   )}
                 </p>
               </div>
-              <Link href={`/admin/raffles/${raffle.id}`}>
-                <Button variant="outline" size="sm">
-                  <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
-                  <span className="hidden sm:inline">Edit / Delete</span>
-                  <span className="sm:hidden">Edit</span>
-                </Button>
-              </Link>
+              {(raffle.status ?? '').toLowerCase() === 'draft' ? (
+                <Link href={`/admin/raffles/${raffle.id}`}>
+                  <Button variant="outline" size="sm">
+                    <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
+                    <span className="hidden sm:inline">Edit / Delete</span>
+                    <span className="sm:hidden">Edit</span>
+                  </Button>
+                </Link>
+              ) : (
+                <Link href={`/raffles/${raffle.slug}`}>
+                  <Button variant="ghost" size="sm">
+                    View
+                  </Button>
+                </Link>
+              )}
             </li>
           ))}
         </ul>

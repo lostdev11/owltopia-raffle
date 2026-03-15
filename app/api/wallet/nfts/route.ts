@@ -95,10 +95,65 @@ async function getStakedMintsFromApi(wallet: string): Promise<Set<string>> {
 }
 
 /**
+ * On devnet, Helius DAS may return no assets. Fallback: use getParsedTokenAccountsByOwner
+ * to find NFT token accounts and return minimal WalletNft list (no metadata).
+ */
+async function getNftsViaRpcFallback(
+  rpcUrl: string,
+  wallet: string,
+  delegatedMints: Set<string>
+): Promise<WalletNft[]> {
+  try {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'parsed-token-accounts-nfts',
+        method: 'getParsedTokenAccountsByOwner',
+        params: [wallet, { programId: TOKEN_PROGRAM_ID.toBase58() }],
+      }),
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    const json = await res.json().catch(() => null)
+    const value = json?.result?.value as Array<{
+      pubkey?: string
+      account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } }
+    }> | undefined
+    if (!Array.isArray(value)) return []
+    const nfts: WalletNft[] = []
+    for (const item of value) {
+      const info = item.account?.data?.parsed?.info
+      if (!info?.mint) continue
+      if (delegatedMints.has(info.mint)) continue
+      const decimals = Number(info.tokenAmount?.decimals ?? 9)
+      const amount = String(info.tokenAmount?.amount ?? '0')
+      const isNft =
+        amount !== '0' && (decimals === 0 || parseFloat(amount) === 1)
+      if (!isNft) continue
+      const tokenAccount = item.pubkey ?? info.mint
+      nfts.push({
+        mint: info.mint,
+        tokenAccount,
+        amount,
+        decimals,
+        metadataUri: null,
+        name: null,
+        image: null,
+        collectionName: null,
+      })
+    }
+    return nfts
+  } catch {
+    return []
+  }
+}
+
+/**
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
- * Excludes NFTs that are delegated (e.g. staked) on-chain and, if set, those from STAKED_NFTS_API_URL.
- * Used as a fallback when client-side getWalletNfts fails or returns empty (e.g. RPC limits).
+ * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -119,6 +174,8 @@ export async function GET(request: NextRequest) {
         { status: 503 }
       )
     }
+
+    const isDevnet = /devnet/i.test(heliusRpcUrl)
 
     // Paginate to fetch more NFTs (up to 3 pages × 1000 = 3000)
     const limitPerPage = 1000
@@ -190,7 +247,7 @@ export async function GET(request: NextRequest) {
       }
       return false
     }
-    const nfts: WalletNft[] = items
+    let nfts: WalletNft[] = items
       .filter((item) => item.id && !isScam(item))
       .map((item) => {
         const mint = item.id!
@@ -214,6 +271,16 @@ export async function GET(request: NextRequest) {
           collectionName,
         }
       })
+
+    // On devnet, Helius DAS often returns no assets; use RPC getParsedTokenAccountsByOwner as fallback
+    if (nfts.length === 0 && isDevnet) {
+      const rpcFallback = await getNftsViaRpcFallback(
+        heliusRpcUrl,
+        wallet,
+        excludeMints
+      )
+      if (rpcFallback.length > 0) nfts = rpcFallback
+    }
 
     return NextResponse.json(nfts, {
       headers: {

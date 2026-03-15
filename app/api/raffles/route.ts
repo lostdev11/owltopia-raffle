@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRaffle, generateUniqueSlug, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
+import { createRaffle, generateUniqueSlug, getRaffleCreationCountForCreatorToday, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
+import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { requireSession } from '@/lib/auth-server'
-import { isAdmin } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
-import { getCreationFeeConfig } from '@/lib/creation-fee'
-import { verifyCreationFeeTransaction } from '@/lib/verify-creation-fee'
+import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
+import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -70,7 +70,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(raffles, { status: 200 })
+    const enriched = await enrichRafflesWithCreatorHolder(raffles ?? [])
+    return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)
     return NextResponse.json(
@@ -108,37 +109,6 @@ export async function POST(request: NextRequest) {
     }
     
     const walletAddress = session.wallet
-
-    // Non-admins must pay creation fee (SOL transfer); admins are exempt
-    const admin = await isAdmin(walletAddress)
-    const { creationFeeLamports, creationFeeRecipient, creationFeeRequired } = getCreationFeeConfig()
-    if (!admin && creationFeeRequired) {
-      const sig = body.creation_fee_transaction_signature?.trim()
-      if (!sig) {
-        return NextResponse.json(
-          { error: 'Raffle creation fee required. Pay the creation fee first, then submit again.' },
-          { status: 400 }
-        )
-      }
-      if (!creationFeeRecipient) {
-        return NextResponse.json(
-          { error: 'Creation fee is not configured. Please try again later.' },
-          { status: 503 }
-        )
-      }
-      const { valid, error: verifyError } = await verifyCreationFeeTransaction(
-        sig,
-        walletAddress,
-        creationFeeRecipient,
-        creationFeeLamports
-      )
-      if (!valid) {
-        return NextResponse.json(
-          { error: verifyError ?? 'Creation fee transaction could not be verified.' },
-          { status: 400 }
-        )
-      }
-    }
 
     // Generate slug from title if not provided, or use provided slug
     let slug = body.slug
@@ -232,6 +202,21 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
+      // Moderation: block scam / spam NFTs (mint or collection if provided)
+      const blocklist = await getScamBlocklist()
+      if (nftMintAddress && isBlocked(blocklist, nftMintAddress)) {
+        return NextResponse.json(
+          { error: 'This NFT cannot be used as a prize. It may be on the platform blocklist.' },
+          { status: 400 }
+        )
+      }
+      const collectionAddress = body.nft_collection_address ?? body.collection_address
+      if (typeof collectionAddress === 'string' && collectionAddress.trim() && isBlocked(blocklist, collectionAddress.trim())) {
+        return NextResponse.json(
+          { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
+          { status: 400 }
+        )
+      }
     }
 
     // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
@@ -251,6 +236,25 @@ export async function POST(request: NextRequest) {
       if (!isNaN(parsed) && parsed > 0) {
         minTickets = parsed
       }
+    }
+
+    // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day)
+    const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
+    const isHolder = isOwlEnabled() && feeTier.reason === 'holder'
+    const maxRafflesPerDay = isHolder ? 3 : 1
+    const createdToday = await withTimeout(
+      getRaffleCreationCountForCreatorToday(walletAddress),
+      SUPABASE_TIMEOUT_MS,
+      'supabase error'
+    )
+    if (createdToday >= maxRafflesPerDay) {
+      const message = isHolder
+        ? 'Owltopia holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
+        : 'You can host 1 raffle per day. Owltopia (Owl NFT) holders can host up to 3. Try again tomorrow (UTC).'
+      return NextResponse.json(
+        { error: message },
+        { status: 429 }
+      )
     }
 
     // Parse optional metadata fields
@@ -296,6 +300,14 @@ export async function POST(request: NextRequest) {
       rank: rank,
       floor_price: floorPrice,
       prize_deposited_at: null,
+      cancellation_requested_at: null,
+      cancelled_at: null,
+      cancellation_fee_amount: null,
+      cancellation_fee_currency: null,
+      cancellation_refund_policy: null,
+      prize_returned_at: null,
+      prize_return_reason: null,
+      prize_return_tx: null,
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')

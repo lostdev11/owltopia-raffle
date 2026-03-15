@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Entry, Raffle } from '@/lib/types'
 
@@ -25,6 +25,8 @@ function formatWallet(address: string): string {
 
 export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([])
+  const [extraRaffles, setExtraRaffles] = useState<Map<string, Raffle>>(new Map())
+  const fetchingIds = useRef<Set<string>>(new Set())
 
   const raffleById = useMemo(() => {
     const map = new Map<string, Raffle>()
@@ -33,8 +35,37 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
         map.set(r.id, r)
       }
     }
+    extraRaffles.forEach((r, id) => {
+      if (r?.id && !map.has(id)) map.set(id, r)
+    })
     return map
-  }, [raffles])
+  }, [raffles, extraRaffles])
+
+  const fetchRaffle = useCallback((raffleId: string) => {
+    fetch(`/api/raffles/${raffleId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((r: Raffle | null) => {
+        if (r?.id) {
+          setExtraRaffles((prev) => {
+            const next = new Map(prev)
+            next.set(r.id, r)
+            return next
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // When we have an event for a raffle not in the map, fetch that raffle so we can show its title
+  useEffect(() => {
+    events.forEach((e) => {
+      const rid = e.raffleId
+      if (!raffleById.has(rid) && !fetchingIds.current.has(rid)) {
+        fetchingIds.current.add(rid)
+        fetchRaffle(rid)
+      }
+    })
+  }, [events, raffleById, fetchRaffle])
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return
@@ -106,7 +137,7 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
   if (!events.length) return null
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center space-y-2 px-3 sm:items-end sm:px-6">
+    <div className="pointer-events-none fixed left-1/2 top-4 z-50 flex w-full max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-col items-center space-y-2 px-3">
       {events.map((event) => {
         const raffle = raffleById.get(event.raffleId)
         const title = raffle?.title ?? 'a raffle'
@@ -116,7 +147,7 @@ export function LiveActivityPopups({ raffles }: LiveActivityPopupsProps) {
         return (
           <div
             key={event.id}
-            className="pointer-events-auto w-full max-w-xs rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/20 via-background/95 to-background/95 px-4 py-3 shadow-lg shadow-emerald-500/40 backdrop-blur-sm"
+            className="pointer-events-auto w-full max-w-xs rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/20 via-background/95 to-background/95 px-4 py-3 shadow-lg shadow-emerald-500/40 backdrop-blur-sm animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-200"
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300/90">
               Live activity

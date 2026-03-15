@@ -73,7 +73,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
  * Get the base columns that exist before NFT migration
  */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy'
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
@@ -146,11 +146,11 @@ function isRetryableMessage(rawMessage: string): boolean {
   return patterns.some((p) => lower.includes(p))
 }
 
-/** Status values for public raffle listing (excludes draft) */
+/** Status values for public raffle listing (excludes draft and cancelled) */
 const PUBLIC_STATUSES = ['live', 'ready_to_draw', 'completed'] as const
 
-/** Status values when admin needs to see drafts too */
-const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed'] as const
+/** Status values when admin needs to see drafts and cancelled */
+const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'] as const
 
 /** REST select: full columns including NFT (matches Raffle type) */
 const RAFFLE_SELECT_FULL =
@@ -196,7 +196,7 @@ async function fetchRafflesViaRestRaw(
 ): Promise<Raffle[]> {
   const url = new URL(`${baseUrl}/rest/v1/raffles`)
   const statusFilter = includeDraft
-    ? 'in.(draft,live,ready_to_draw,completed)'
+    ? 'in.(draft,live,ready_to_draw,completed,cancelled)'
     : 'in.(live,ready_to_draw,completed)'
   url.searchParams.set('status', statusFilter)
   if (activeOnly) url.searchParams.set('is_active', 'is.true')
@@ -497,7 +497,8 @@ export async function getRaffleById(id: string) {
 }
 
 /**
- * Fetch raffles created by a given wallet (for "My raffles" admin list).
+ * Fetch raffles created by a given wallet (for "My raffles" list).
+ * Returns only raffles where this wallet is the creator (created_by or creator_wallet).
  */
 export async function getRafflesByCreator(walletAddress: string): Promise<Raffle[]> {
   const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
@@ -508,7 +509,7 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
     const { data, error } = await getSupabaseForRead()
       .from('raffles')
       .select(columns)
-      .eq('created_by', normalized)
+      .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -640,6 +641,42 @@ export async function generateUniqueSlug(baseSlug: string): Promise<string> {
   return slug
 }
 
+/** Start of today in UTC (00:00:00.000Z). */
+function getTodayStartUTC(): Date {
+  const d = new Date()
+  d.setUTCHours(0, 0, 0, 0)
+  return d
+}
+
+/** Start of tomorrow in UTC (00:00:00.000Z). */
+function getTomorrowStartUTC(): Date {
+  const d = getTodayStartUTC()
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d
+}
+
+/**
+ * Returns how many raffles the given creator wallet has created today (UTC calendar day).
+ * Used to enforce daily hosting limits: holders 3/day, non-holders 1/day.
+ */
+export async function getRaffleCreationCountForCreatorToday(creatorWallet: string): Promise<number> {
+  const normalized = creatorWallet?.trim()
+  if (!normalized) return 0
+  const todayStart = getTodayStartUTC().toISOString()
+  const todayEnd = getTomorrowStartUTC().toISOString()
+  const { count, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select('id', { count: 'exact', head: true })
+    .eq('creator_wallet', normalized)
+    .gte('created_at', todayStart)
+    .lt('created_at', todayEnd)
+  if (error) {
+    console.error('getRaffleCreationCountForCreatorToday error:', error)
+    return 0
+  }
+  return typeof count === 'number' ? count : 0
+}
+
 export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>) {
   // Build insert object conditionally to handle cases where NFT columns might not exist
   // Only include NFT fields if prize_type is 'nft' or if they have values
@@ -687,6 +724,12 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.platform_fee_amount = raffle.platform_fee_amount
   insertData.creator_payout_amount = raffle.creator_payout_amount
   insertData.settled_at = raffle.settled_at
+  insertData.prize_deposited_at = raffle.prize_deposited_at ?? null
+  insertData.cancellation_requested_at = raffle.cancellation_requested_at ?? null
+  insertData.cancelled_at = raffle.cancelled_at ?? null
+  insertData.cancellation_fee_amount = raffle.cancellation_fee_amount ?? null
+  insertData.cancellation_fee_currency = raffle.cancellation_fee_currency ?? null
+  insertData.cancellation_refund_policy = raffle.cancellation_refund_policy ?? null
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
@@ -879,7 +922,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
           : revenue.owl
 
       const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-      const { feeBps, reason } = await getCreatorFeeTier(creatorWallet)
+      const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
       const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
 
       // Update the raffle with the winner and settlement info
@@ -922,7 +965,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       : revenue.owl
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-  const { feeBps, reason } = await getCreatorFeeTier(creatorWallet)
+  const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
   const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
 
   const now = new Date().toISOString()

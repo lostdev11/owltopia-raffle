@@ -23,6 +23,11 @@ function getSolanaRpcUrl(): string {
   return rpcUrl
 }
 
+export type OwnsOwltopiaOptions = {
+  /** When true, always verify against chain/DAS and do not use cache. Use for dashboard and when setting raffle fee. */
+  skipCache?: boolean
+}
+
 /**
  * Check whether a wallet currently owns an NFT from the Owltopia collection.
  *
@@ -30,15 +35,31 @@ function getSolanaRpcUrl(): string {
  * - Uses Helius DAS getAssetsByOwner when HELIUS_API_KEY is configured.
  * - Falls back to Solana RPC OWL SPL token balance check when Helius is unavailable.
  * - Validates wallet address format; invalid addresses return false.
+ * - Pass { skipCache: true } to force a fresh verification (e.g. dashboard load, creating a raffle).
  */
-export async function ownsOwltopia(walletAddress: string): Promise<boolean> {
+export async function ownsOwltopia(
+  walletAddress: string,
+  options?: OwnsOwltopiaOptions
+): Promise<boolean> {
   const normalized = walletAddress.trim()
   if (!normalized) return false
 
   const now = Date.now()
-  const cached = ownsOwltopiaCache.get(normalized)
-  if (cached && cached.expiresAt > now) {
-    return cached.value
+  if (!options?.skipCache) {
+    const cached = ownsOwltopiaCache.get(normalized)
+    if (cached && cached.expiresAt > now) {
+      return cached.value
+    }
+  }
+
+  // On devnet, OWL mint does not exist; skip RPC check to avoid "could not find mint"
+  const rpcUrl = getSolanaRpcUrl()
+  if (/devnet/i.test(rpcUrl)) {
+    ownsOwltopiaCache.set(normalized, {
+      value: false,
+      expiresAt: Date.now() + OWNS_OWLTOPIA_CACHE_TTL_MS,
+    })
+    return false
   }
 
   // Validate wallet address format up front
@@ -55,67 +76,73 @@ export async function ownsOwltopia(walletAddress: string): Promise<boolean> {
   const heliusApiKey = process.env.HELIUS_API_KEY?.trim()
   if (heliusApiKey && collectionAddress && collectionAddress !== 'REPLACE_WITH_COLLECTION') {
     try {
-      const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusApiKey)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'owltopia-ownership',
-          method: 'getAssetsByOwner',
-          params: {
-            ownerAddress: normalized,
-            page: 1,
-            limit: 1000,
-            options: {
-              showFungible: false,
-              showGrandTotal: false,
-              showInscription: false,
-              showNativeBalance: false,
-              showZeroBalance: false,
-            },
-          },
-        }),
-      })
+      const limit = 1000
+      const maxPages = 5
+      const heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusApiKey)}`
 
-      if (res.ok) {
+      for (let page = 1; page <= maxPages; page++) {
+        const res = await fetch(heliusUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: `owltopia-ownership-${page}`,
+            method: 'getAssetsByOwner',
+            params: {
+              ownerAddress: normalized,
+              page,
+              limit,
+              options: {
+                showFungible: false,
+                showGrandTotal: false,
+                showInscription: false,
+                showNativeBalance: false,
+                showZeroBalance: false,
+                showUnverifiedCollections: true,
+              },
+            },
+          }),
+        })
+
+        if (!res.ok) {
+          console.error('Helius getAssetsByOwner returned non-OK status', res.status)
+          break
+        }
+
         const json: any = await res.json().catch(() => null)
         const items: any[] | undefined = json?.result?.items
-        if (Array.isArray(items) && items.length > 0) {
-          for (const item of items) {
-            const grouping: any[] | undefined = item?.grouping
-            if (Array.isArray(grouping)) {
-              const inCollection = grouping.some(
-                (g) =>
-                  g?.group_key === 'collection' &&
-                  typeof g.group_value === 'string' &&
-                  g.group_value === collectionAddress,
-              )
-              if (inCollection) {
-                const value = true
-                ownsOwltopiaCache.set(normalized, {
-                  value,
-                  expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
-                })
-                return value
-              }
+        if (!Array.isArray(items)) break
+
+        for (const item of items) {
+          const grouping: any[] | undefined = item?.grouping
+          if (Array.isArray(grouping)) {
+            const inCollection = grouping.some(
+              (g) =>
+                g?.group_key === 'collection' &&
+                typeof g.group_value === 'string' &&
+                g.group_value === collectionAddress,
+            )
+            if (inCollection) {
+              ownsOwltopiaCache.set(normalized, {
+                value: true,
+                expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+              })
+              return true
             }
           }
         }
-        // If Helius call succeeded but no matching collection asset was found, treat as not owning.
-        const value = false
-        ownsOwltopiaCache.set(normalized, {
-          value,
-          expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
-        })
-        return value
-      } else {
-        // Non-200 from Helius — log and fall through to RPC fallback
-        console.error('Helius getAssetsByOwner returned non-OK status', res.status)
+
+        if (items.length < limit) {
+          // Successfully checked all pages; no Owltopia NFT found
+          ownsOwltopiaCache.set(normalized, {
+            value: false,
+            expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+          })
+          return false
+        }
       }
+      // Helius failed or error: fall through to OWL SPL fallback
     } catch (err) {
-      // Network or other failure — log and fall back
       console.error('Helius getAssetsByOwner failed, falling back to Solana RPC:', err)
     }
   }

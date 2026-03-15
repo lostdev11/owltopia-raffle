@@ -1,7 +1,8 @@
 import { ImageResponse } from 'next/og'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 
 export const runtime = 'nodejs'
-export const alt = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
+export const alt = OG_ALT
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
@@ -29,7 +30,7 @@ export default function Image() {
             marginBottom: 16,
           }}
         >
-          Owl Raffle
+          {PLATFORM_NAME}
         </div>
         <div
           style={{

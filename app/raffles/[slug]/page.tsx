@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
+import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -10,7 +12,6 @@ export const revalidate = 0
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const DEFAULT_OG_IMAGE = `${SITE_URL}/api/og`
-const DEFAULT_OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 /** Per-raffle OG image URL (generated when raffle has no image_url). */
 function raffleOgImageUrl(slug: string) {
@@ -33,10 +34,10 @@ export async function generateMetadata({
   const { slug } = await params
   const raffle = await getRaffleBySlug(slug)
   if (!raffle) {
-    return { title: 'Raffle Not Found | Owl Raffle' }
+    return { title: `Raffle Not Found | ${PLATFORM_NAME}` }
   }
 
-  const title = `${raffle.title} | Owl Raffle`
+  const title = `${raffle.title} | ${PLATFORM_NAME}`
   const description =
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
@@ -55,7 +56,7 @@ export async function generateMetadata({
     openGraph: {
       type: 'website',
       url: canonicalUrl,
-      siteName: 'Owl Raffle',
+      siteName: PLATFORM_NAME,
       title,
       description,
       images: [ogImage],
@@ -154,10 +155,11 @@ export default async function RaffleDetailPage({
 
   const entries = await getEntriesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
+  const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle])
 
   return (
     <RaffleDetailClient
-      raffle={raffle}
+      raffle={enrichedRaffle}
       entries={entries}
       owlVisionScore={owlVisionScore}
     />

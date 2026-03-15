@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
-import { checkEscrowHoldsNft, getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
+import { getEscrowHeldNftMints } from '@/lib/raffles/prize-escrow'
+import { requireSession } from '@/lib/auth-server'
+import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/verify-prize-deposit
- * Verifies that the NFT prize is in the platform escrow and sets prize_deposited_at.
- * Call after the creator has sent the NFT to the prize escrow address.
+ * Verifies that an NFT prize is in the platform escrow (discovered by what escrow holds)
+ * and sets prize_deposited_at. Updates raffle nft_mint_address when escrow has exactly one NFT.
+ * Caller must be the raffle creator or a full admin.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const params = await context.params
     const id = params.id
     if (typeof id !== 'string') {
@@ -24,6 +30,15 @@ export async function POST(
     const raffle = await getRaffleById(id)
     if (!raffle) {
       return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
+    }
+    const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+    const isCreator = creatorWallet && session.wallet === creatorWallet
+    const isFullAdmin = (await getAdminRole(session.wallet)) === 'full'
+    if (!isCreator && !isFullAdmin) {
+      return NextResponse.json(
+        { error: 'Only the raffle creator or an admin can verify the prize deposit' },
+        { status: 403 }
+      )
     }
     if (raffle.prize_type !== 'nft') {
       return NextResponse.json(
@@ -39,29 +54,45 @@ export async function POST(
       })
     }
 
-    const { holds, error: checkError } = await checkEscrowHoldsNft(raffle)
-    if (checkError) {
-      return NextResponse.json(
-        { error: `Could not verify escrow: ${checkError}` },
-        { status: 502 }
-      )
-    }
-    if (!holds) {
+    const held = await getEscrowHeldNftMints()
+    if (held.length === 0) {
       return NextResponse.json(
         {
           error:
-            'NFT not found in prize escrow. Send the NFT to the prize escrow address and try again.',
-          prizeEscrowAddress: getPrizeEscrowPublicKey(),
+            'NFT not found in prize escrow. Complete the transfer using the button above, wait for confirmation, then try Verify again.',
         },
         { status: 400 }
       )
     }
 
+    const preferredMint = (raffle.nft_mint_address || '').trim()
+    let mintToSet: string
+    if (held.length === 1) {
+      mintToSet = held[0].mint
+    } else {
+      const match = held.find((h) => h.mint === preferredMint)
+      if (match) {
+        mintToSet = match.mint
+      } else {
+        return NextResponse.json(
+          {
+            error: `Escrow has multiple NFTs. This raffle expects mint ${preferredMint || '(not set)'}; none of the NFTs in escrow match. Set the raffle prize to the correct mint or leave only one NFT in escrow.`,
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     const now = new Date().toISOString()
-    await updateRaffle(id, { prize_deposited_at: now, is_active: true })
+    await updateRaffle(id, {
+      prize_deposited_at: now,
+      is_active: true,
+      ...(mintToSet !== preferredMint ? { nft_mint_address: mintToSet } : {}),
+    })
     return NextResponse.json({
       success: true,
       prizeDepositedAt: now,
+      nftMintAddress: mintToSet,
     })
   } catch (error) {
     console.error('Verify prize deposit error:', error)

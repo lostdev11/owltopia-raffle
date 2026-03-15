@@ -2,28 +2,28 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
 const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
 const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
-const OG_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 
 export const metadata: Metadata = {
-  title: 'Terms of Service | Owl Raffle',
-  description: 'Terms of Service for Owl Raffle platform.',
+  title: `Terms of Service | ${PLATFORM_NAME}`,
+  description: `Terms of Service for ${PLATFORM_NAME} platform.`,
   alternates: { canonical: `${SITE_URL}/terms` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/terms`,
-    siteName: 'Owl Raffle',
-    title: 'Terms of Service | Owl Raffle',
-    description: 'Terms of Service for Owl Raffle platform.',
+    siteName: PLATFORM_NAME,
+    title: `Terms of Service | ${PLATFORM_NAME}`,
+    description: `Terms of Service for ${PLATFORM_NAME} platform.`,
     images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Terms of Service | Owl Raffle',
-    description: 'Terms of Service for Owl Raffle platform.',
+    title: `Terms of Service | ${PLATFORM_NAME}`,
+    description: `Terms of Service for ${PLATFORM_NAME} platform.`,
     images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
   },
 }
@@ -45,7 +45,7 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">1. Acceptance of Terms</h2>
           <p className="mb-4">
-            By accessing and using Owl Raffle ("the Platform"), you accept and agree to be bound by the terms and provision of this agreement. 
+            By accessing and using {PLATFORM_NAME} (&quot;the Platform&quot;), you accept and agree to be bound by the terms and provision of this agreement. 
             If you do not agree to abide by the above, please do not use this service.
           </p>
         </section>
@@ -66,7 +66,7 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">3. How the Raffle Works</h2>
           <p className="mb-4">
-            Owl Raffle is a decentralized platform that facilitates raffles using blockchain technology:
+            {PLATFORM_NAME} is a decentralized platform that facilitates raffles using blockchain technology:
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
             <li>Participants purchase entries using cryptocurrency (USDC or SOL)</li>
@@ -232,7 +232,7 @@ export default function TermsPage() {
           <h2 className="text-2xl font-semibold mb-4">14. Intellectual Property</h2>
           <p className="mb-4">
             All content on the Platform, including but not limited to text, graphics, logos, and software, 
-            is the property of Owl Raffle or its licensors and is protected by copyright and other intellectual property laws.
+            is the property of {PLATFORM_NAME} or its licensors and is protected by copyright and other intellectual property laws.
           </p>
         </section>
 

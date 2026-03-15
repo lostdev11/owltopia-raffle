@@ -1,7 +1,8 @@
 import { ImageResponse } from 'next/og'
 import { getRaffleBySlug } from '@/lib/db/raffles'
+import { PLATFORM_NAME } from '@/lib/site-config'
 
-export const alt = 'Owl Raffle'
+export const alt = PLATFORM_NAME
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
@@ -90,7 +91,7 @@ export default async function Image({
             color: 'rgba(255,255,255,0.7)',
           }}
         >
-          Owl Raffle · Trusted raffles, verified on-chain
+          {PLATFORM_NAME} · Trusted raffles, verified on-chain
         </div>
       </div>
     ),

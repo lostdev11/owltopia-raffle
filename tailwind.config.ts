@@ -74,6 +74,18 @@ const config: Config = {
           DEFAULT: '#a8ff00',
           glow: 'rgba(168, 255, 0, 0.5)',
         },
+        'theme-ember': {
+          DEFAULT: '#f97316',
+          glow: 'rgba(249, 115, 22, 0.5)',
+        },
+        'theme-violet': {
+          DEFAULT: '#a855f7',
+          glow: 'rgba(168, 85, 247, 0.5)',
+        },
+        'theme-coral': {
+          DEFAULT: '#f43f5e',
+          glow: 'rgba(244, 63, 94, 0.5)',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',

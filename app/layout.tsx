@@ -2,12 +2,14 @@ import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
+import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 import { WalletContextProvider } from '@/components/WalletProvider'
 import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
 import { ErrorHandler } from '@/components/ErrorHandler'
 import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
+import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -40,13 +42,12 @@ const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-im
 // Cache-bust so Discord and other platforms re-fetch after updates (bump when you change the image)
 const OG_IMAGE_VERSION = '1'
 const OG_IMAGE_URL = `${SITE_BASE}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}${OG_IMAGE_PATH.includes('?') ? '&' : '?'}v=${OG_IMAGE_VERSION}`
-const OG_IMAGE_ALT = 'Owl Raffle - Trusted raffles with full transparency. Every entry verified on-chain.'
 const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
 
 // Default to production URL so link previews (OG/Twitter/Discord) work when sharing any page
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_BASE),
-  title: 'Owl Raffle',
+  title: PLATFORM_NAME,
   description: OG_DESCRIPTION,
   icons: {
     icon: [
@@ -70,24 +71,24 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     url: `${SITE_BASE}/`,
-    siteName: 'Owl Raffle',
-    title: 'Owl Raffle',
+    siteName: PLATFORM_NAME,
+    title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
     images: [
       {
         url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
-        alt: OG_IMAGE_ALT,
+        alt: OG_ALT,
         type: 'image/png',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Owl Raffle',
+    title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
-    images: [{ url: OG_IMAGE_URL, alt: OG_IMAGE_ALT, width: 1200, height: 630 }],
+    images: [{ url: OG_IMAGE_URL, alt: OG_ALT, width: 1200, height: 630 }],
   },
   other: {
     'mobile-web-app-capable': 'yes',
@@ -239,6 +240,7 @@ export default function RootLayout({
             <ConditionalHeader />
             <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto">
               <PageTransition>{children}</PageTransition>
+              <GlobalLiveActivity />
             </main>
             <ConditionalFooter />
           </div>

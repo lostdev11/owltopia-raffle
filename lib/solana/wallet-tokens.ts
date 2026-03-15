@@ -4,7 +4,43 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js'
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+  getAccount,
+} from '@solana/spl-token'
+
+/** Programs we support for NFTs (SPL Token + Token-2022) so any raffled NFT is recognized. */
+export const NFT_TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
+
+/**
+ * Detect which token program holds this mint in the given wallet (SPL Token or Token-2022).
+ * Use when building transfer-to-escrow so any NFT type works.
+ */
+export async function getTokenProgramForMintInWallet(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey
+): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
+  for (const programId of NFT_TOKEN_PROGRAM_IDS) {
+    try {
+      const ata = await getAssociatedTokenAddress(
+        mint,
+        owner,
+        false,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      const account = await getAccount(connection, ata)
+      if (account.amount >= 1n) return programId
+    } catch {
+      // no account or wrong program
+    }
+  }
+  return null
+}
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 
@@ -76,8 +112,10 @@ async function fetchMetadataJson(uri: string): Promise<{ name?: string; image?: 
   }
 }
 
+
 /**
  * Fetch all NFTs (token accounts with decimals 0) in the wallet.
+ * Includes both SPL Token and Token-2022 so any NFT can be selected for a raffle.
  * Optionally fetches Metaplex metadata and off-chain JSON for name/image.
  */
 export async function getWalletNfts(
@@ -86,54 +124,56 @@ export async function getWalletNfts(
   options?: { fetchMetadata?: boolean }
 ): Promise<WalletNft[]> {
   const fetchMetadata = options?.fetchMetadata !== false
-  const response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, {
-    programId: TOKEN_PROGRAM_ID,
-  })
   const nfts: WalletNft[] = []
-  for (const { pubkey, account } of response.value) {
-    const info = account.data?.parsed?.info
-    if (!info) continue
-    // Skip delegated (e.g. staked) NFTs – user can't transfer them until unstaked
-    const delegate = info.delegate
-    if (delegate && typeof delegate === 'string' && delegate !== '') continue
-    const rawDecimals = info.tokenAmount?.decimals
-    const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
-    const amount = String(info.tokenAmount?.amount ?? '0')
-    // Treat as NFT: decimals 0 and non-zero amount (some RPCs omit decimals for NFTs, so also accept amount 1 when decimals is missing/NaN)
-    const amountNum = parseFloat(amount)
-    const isNft =
-      amount !== '0' &&
-      (decimals === 0 || (Number.isNaN(decimals) && amountNum === 1))
-    if (!isNft) continue
-    const mint = info.mint as string
-    const tokenAccount = pubkey.toBase58()
-    let metadataUri: string | null = null
-    let name: string | null = null
-    let image: string | null = null
-    let collectionName: string | null = null
-    if (fetchMetadata) {
-      const meta = await fetchMetaplexMetadata(connection, new PublicKey(mint))
-      if (meta) {
-        metadataUri = meta.uri || null
-        name = meta.name || null
-        const json = meta.uri ? await fetchMetadataJson(meta.uri) : null
-        if (json) {
-          if (json.name) name = json.name
-          if (json.image) image = json.image
-          if (json.collection?.name) collectionName = json.collection.name
+  for (const programId of NFT_TOKEN_PROGRAM_IDS) {
+    const response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, {
+      programId,
+    })
+    for (const { pubkey, account } of response.value) {
+      const info = account.data?.parsed?.info
+      if (!info) continue
+      // Skip delegated (e.g. staked) NFTs – user can't transfer them until unstaked
+      const delegate = info.delegate
+      if (delegate && typeof delegate === 'string' && delegate !== '') continue
+      const rawDecimals = info.tokenAmount?.decimals
+      const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
+      const amount = String(info.tokenAmount?.amount ?? '0')
+      // Treat as NFT: decimals 0 and non-zero amount (some RPCs omit decimals for NFTs, so also accept amount 1 when decimals is missing/NaN)
+      const amountNum = parseFloat(amount)
+      const isNft =
+        amount !== '0' &&
+        (decimals === 0 || (Number.isNaN(decimals) && amountNum === 1))
+      if (!isNft) continue
+      const mint = info.mint as string
+      const tokenAccount = pubkey.toBase58()
+      let metadataUri: string | null = null
+      let name: string | null = null
+      let image: string | null = null
+      let collectionName: string | null = null
+      if (fetchMetadata) {
+        const meta = await fetchMetaplexMetadata(connection, new PublicKey(mint))
+        if (meta) {
+          metadataUri = meta.uri || null
+          name = meta.name || null
+          const json = meta.uri ? await fetchMetadataJson(meta.uri) : null
+          if (json) {
+            if (json.name) name = json.name
+            if (json.image) image = json.image
+            if (json.collection?.name) collectionName = json.collection.name
+          }
         }
       }
+      nfts.push({
+        mint,
+        tokenAccount,
+        amount,
+        decimals,
+        metadataUri,
+        name,
+        image,
+        collectionName,
+      })
     }
-    nfts.push({
-      mint,
-      tokenAccount,
-      amount,
-      decimals,
-      metadataUri,
-      name,
-      image,
-      collectionName,
-    })
   }
   return nfts
 }

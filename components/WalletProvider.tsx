@@ -17,6 +17,7 @@ import {
 } from '@solana-mobile/wallet-adapter-mobile'
 
 import { isMobileDevice } from '@/lib/utils'
+import { PLATFORM_NAME } from '@/lib/site-config'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -49,7 +50,7 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           new SolanaMobileWalletAdapter({
             addressSelector: createDefaultAddressSelector(),
             appIdentity: {
-              name: 'Owl Raffle',
+              name: PLATFORM_NAME,
               uri: window.location.origin,
               icon: `${window.location.origin}/icon.png`,
             },

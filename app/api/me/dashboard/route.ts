@@ -12,17 +12,27 @@ export const dynamic = 'force-dynamic'
  * Returns dashboard data for the signed-in wallet: my raffles, my entries, creator revenue, fee tier, display name.
  * Requires session (any connected + signed-in wallet).
  */
+const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
+
 export async function GET(request: NextRequest) {
   try {
     const session = await requireSession(request)
     if (session instanceof NextResponse) return session
+
+    const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()
+    if (connectedWallet && connectedWallet !== session.wallet) {
+      return NextResponse.json(
+        { error: 'Connected wallet does not match session. Please sign in again.' },
+        { status: 401 }
+      )
+    }
 
     const wallet = session.wallet
     const [raffles, entriesWithRaffles, revenue, feeTier, profiles] = await Promise.all([
       getRafflesByCreator(wallet),
       getEntriesByWallet(wallet),
       getCreatorRevenueByWallet(wallet),
-      getCreatorFeeTier(wallet),
+      getCreatorFeeTier(wallet, { skipCache: true }), // always verify holder status when loading dashboard
       getDisplayNamesByWallets([wallet]),
     ])
 
