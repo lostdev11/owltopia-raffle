@@ -286,9 +286,17 @@ export function CreateRaffleForm() {
             }
             const mint = new PublicKey(raffle.nft_mint_address)
             const escrowPubkey = new PublicKey(escrowAddress)
-            const tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+            // Retry: RPC can be slow or flaky on mobile; NFT list may come from API (e.g. Helius) while this uses client RPC
+            let tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+            for (let attempt = 0; attempt < 2 && !tokenProgram; attempt++) {
+              await new Promise((r) => setTimeout(r, 600))
+              tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+            }
             if (!tokenProgram) {
-              alert('NFT not found in your wallet. Supports SPL Token and Token-2022.')
+              alert(
+                'NFT not found in your wallet (supports SPL Token and Token-2022). ' +
+                  'If you still have the NFT, try again or use Wi‑Fi, then complete the deposit on the raffle page.'
+              )
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }

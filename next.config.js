@@ -18,6 +18,17 @@ const nextConfig = {
   // Disable dev indicators to reduce noise (segment explorer 500 may still occur with webpack; use dev:turbopack if needed)
   devIndicators: false,
   images: {
+    // Allow next/image to use our proxy route with ?url=... (e.g. /api/proxy-image?url=...)
+    localPatterns: [
+      {
+        pathname: '/api/proxy-image',
+        // omit search so any query string (e.g. ?url=...) is allowed
+      },
+      {
+        pathname: '/**',
+        search: '',
+      },
+    ],
     remotePatterns: [
       {
         protocol: 'https',
