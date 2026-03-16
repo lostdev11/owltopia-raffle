@@ -319,7 +319,7 @@ export function CreateRaffleForm() {
             )
             const tx = new Transaction()
             try {
-              await getAccount(connection, escrowAta)
+              await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
             } catch {
               tx.add(
                 createAssociatedTokenAccountInstruction(

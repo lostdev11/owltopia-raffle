@@ -46,7 +46,7 @@ export async function getNftHolderInWallet(
         programId,
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
-      const account = await getAccount(connection, ata, 'confirmed')
+      const account = await getAccount(connection, ata, 'confirmed', programId)
       if (account.amount >= 1n) {
         if (account.delegate) foundDelegated = true
         else return { tokenProgram: programId, tokenAccount: ata }
