@@ -27,7 +27,7 @@ export interface NftHolderDelegated {
 
 /**
  * Find the token account that holds this mint in the given wallet (SPL Token or Token-2022).
- * Checks both the canonical ATA and any other token account (e.g. from marketplaces or legacy wallets).
+ * Checks mint-filtered RPC first (no truncation), then ATA, then full scan.
  * If the only holding is delegated (staked), returns { delegated: true } so the UI can ask the user to unstake.
  */
 export async function getNftHolderInWallet(
@@ -37,6 +37,38 @@ export async function getNftHolderInWallet(
 ): Promise<NftHolderInWallet | NftHolderDelegated | null> {
   const mintStr = mint.toBase58()
   let foundDelegated = false
+
+  // 1) Mint-filtered lookup: returns only accounts holding this mint (avoids truncation when user has many tokens)
+  try {
+    const mintFilterResponse = await connection.getParsedTokenAccountsByOwner(
+      owner,
+      { mint },
+      'confirmed'
+    )
+    for (const { pubkey, account } of mintFilterResponse.value) {
+      const info = account.data?.parsed?.info
+      if (!info || (info.mint as string) !== mintStr) continue
+      const programOwner = account.owner
+      const isTokenProgram = programOwner.equals(TOKEN_PROGRAM_ID)
+      const isToken2022 = programOwner.equals(TOKEN_2022_PROGRAM_ID)
+      if (!isTokenProgram && !isToken2022) continue
+      const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+      const amount = info.tokenAmount?.amount
+      const amountStr = typeof amount === 'string' ? amount : String(amount ?? '0')
+      const amountNum = Number(amountStr)
+      if (!Number.isFinite(amountNum) || amountNum < 1) continue
+      const delegate = info.delegate
+      if (delegate && typeof delegate === 'string' && delegate !== '') {
+        foundDelegated = true
+        continue
+      }
+      return { tokenProgram, tokenAccount: pubkey }
+    }
+  } catch {
+    // RPC error; fall through to ATA and programId scan
+  }
+
+  // 2) Check canonical ATAs (SPL and Token-2022)
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -55,7 +87,8 @@ export async function getNftHolderInWallet(
       // ATA not found or wrong program
     }
   }
-  // Not in ATA: scan all token accounts for this owner and program
+
+  // 3) Full scan by program (may be truncated on some RPCs if user has many token accounts)
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
       const response = await connection.getParsedTokenAccountsByOwner(

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
-import { getEscrowHeldNftMints } from '@/lib/raffles/prize-escrow'
+import { getEscrowHeldNftMints, isMplCoreAssetInEscrow } from '@/lib/raffles/prize-escrow'
 import { requireSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -51,6 +51,33 @@ export async function POST(
         success: true,
         alreadyVerified: true,
         prizeDepositedAt: raffle.prize_deposited_at,
+      })
+    }
+
+    // Mpl Core prizes: check asset owner instead of SPL token accounts.
+    if ((raffle as any).prize_standard === 'mpl_core') {
+      if (!raffle.nft_mint_address) {
+        return NextResponse.json({ error: 'Missing NFT mint address' }, { status: 400 })
+      }
+      const inEscrow = await isMplCoreAssetInEscrow(raffle.nft_mint_address)
+      if (!inEscrow) {
+        return NextResponse.json(
+          {
+            error:
+              'Core NFT not found in prize escrow. Complete the transfer, wait for confirmation, then try Verify again.',
+          },
+          { status: 400 }
+        )
+      }
+      const now = new Date().toISOString()
+      await updateRaffle(id, {
+        prize_deposited_at: now,
+        is_active: true,
+      })
+      return NextResponse.json({
+        success: true,
+        prizeDepositedAt: now,
+        nftMintAddress: raffle.nft_mint_address,
       })
     }
 

@@ -4,6 +4,9 @@ export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 
 export type PrizeType = 'crypto' | 'nft'
 
+/** How the NFT prize is represented on-chain (used for escrow logic). */
+export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core'
+
 export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | 'cancelled' | null
 
 /** Supported raffle ticket currencies */
@@ -68,6 +71,8 @@ export interface Raffle {
   cancellation_fee_currency: string | null
   /** full_refund = within 24h; no_refund = after 24h. */
   cancellation_refund_policy: 'full_refund' | 'no_refund' | null
+  /** On-chain standard for NFT prize (SPL / Token-2022 / Mpl Core). Defaults to 'spl' when null. */
+  prize_standard?: PrizeStandard | null
 }
 
 export interface Entry {

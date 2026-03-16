@@ -18,6 +18,8 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { createUmi, publicKey as umiPublicKey } from '@metaplex-foundation/umi'
+import { fetchAssetV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 
@@ -145,6 +147,21 @@ export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
     }
   }
   return results
+}
+
+/**
+ * Check if an Mpl Core asset is owned by the escrow keypair (used for Core NFT prizes).
+ */
+export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) return false
+  const connection = getSolanaConnection()
+  const endpoint =
+    // rpcEndpoint is available on recent web3.js; fall back to internal field if needed.
+    (connection as any).rpcEndpoint || (connection as any)._rpcEndpoint
+  const umi = createUmi(endpoint)
+  const asset = await fetchAssetV1(umi, umiPublicKey(mint))
+  return asset.owner.equals(keypair.publicKey as any)
 }
 
 /**

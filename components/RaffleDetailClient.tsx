@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
@@ -49,6 +49,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
@@ -66,7 +67,8 @@ export function RaffleDetailClient({
   owlVisionScore,
 }: RaffleDetailClientProps) {
   const router = useRouter()
-  const { publicKey, sendTransaction, connected, wallet: walletAdapter } = useWallet()
+  const walletCtx = useWallet()
+  const { publicKey, sendTransaction, connected, wallet: walletAdapter } = walletCtx
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
@@ -1067,19 +1069,43 @@ export function RaffleDetailClient({
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
-      // Retry: RPC can be slow or flaky (e.g. on mobile)
+      // Fallback: if prize_standard is not loaded from DB, treat known Mpl Core mints as mpl_core.
+      const inferredStandard: PrizeStandard =
+        raffle.prize_standard ??
+        (raffle.nft_mint_address === 'Erj18hJRA6xcKbZKGFpXNx6j3DFFZXLz6QBo8uQ8wbha' ? 'mpl_core' : 'spl')
+      const standard = inferredStandard
+
+      const mintShort =
+        raffle.nft_mint_address.length > 16
+          ? `${raffle.nft_mint_address.slice(0, 4)}…${raffle.nft_mint_address.slice(-4)}`
+          : raffle.nft_mint_address
+      if (standard === 'mpl_core') {
+        if (!walletCtx) {
+          setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
+          return
+        }
+        const sig = await transferMplCoreToEscrow({
+          connection,
+          wallet: walletCtx,
+          assetId: raffle.nft_mint_address,
+          escrowAddress,
+        })
+        await connection.confirmTransaction(sig, 'confirmed')
+        setDepositEscrowError(null)
+        setDepositEscrowSuccess(true)
+        router.refresh()
+        return
+      }
+
+      // SPL / Token‑2022 path (existing behavior)
       let holder = await getNftHolderInWallet(connection, mint, publicKey)
       for (let attempt = 0; attempt < 4 && !holder; attempt++) {
         await new Promise((r) => setTimeout(r, 800))
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
-      const mintShort =
-        raffle.nft_mint_address.length > 16
-          ? `${raffle.nft_mint_address.slice(0, 4)}…${raffle.nft_mint_address.slice(-4)}`
-          : raffle.nft_mint_address
       if (!holder) {
         setDepositEscrowError(
-          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. Supports SPL Token and Token-2022.`
+          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. If you just transferred the NFT, wait a few seconds and retry. Supports SPL Token and Token-2022.`
         )
         return
       }
@@ -1134,7 +1160,7 @@ export function RaffleDetailClient({
     } finally {
       setDepositEscrowLoading(false)
     }
-  }, [publicKey, escrowAddress, raffle.nft_mint_address, connection, sendTransaction, router])
+  }, [publicKey, escrowAddress, raffle.nft_mint_address, raffle.prize_standard, connection, sendTransaction, router, walletCtx])
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
