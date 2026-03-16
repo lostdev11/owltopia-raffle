@@ -164,6 +164,11 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(10px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        /* Raffle list: scroll-in on mobile when card enters viewport */
+        'raffle-scroll-in': {
+          from: { opacity: '0', transform: 'translateY(14px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -179,6 +184,7 @@ const config: Config = {
         'enter-glow': 'enter-glow 2s ease-in-out infinite',
         'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
         'button-glow-pulse': 'button-glow-pulse 2s ease-in-out infinite',
+        'raffle-scroll-in': 'raffle-scroll-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards',
       },
     },
   },

@@ -14,24 +14,46 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/svg+xml',
 ])
 
+const IPFS_GATEWAYS = [
+  'https://cloudflare-ipfs.com/ipfs/',
+  'https://ipfs.io/ipfs/',
+  'https://dweb.link/ipfs/',
+] as const
+
 /**
- * Convert ipfs:// or IPFS CID to an HTTPS gateway URL.
- * Uses Cloudflare's gateway (generally reliable and less likely to be blocked).
+ * Convert ipfs:// or IPFS CID to an HTTPS gateway URL (primary: Cloudflare).
  */
 function toHttpsImageUrl(url: string): string {
   const trimmed = url.trim()
   if (trimmed.startsWith('ipfs://')) {
     const cid = trimmed.slice(7).replace(/^\/+/, '')
-    return `https://cloudflare-ipfs.com/ipfs/${cid}`
+    return `${IPFS_GATEWAYS[0]}${cid}`
   }
   if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
     return trimmed
   }
   // Could be a bare CID (bafy...); treat as IPFS
   if (/^[a-zA-Z0-9]+$/.test(trimmed) && trimmed.length >= 32) {
-    return `https://cloudflare-ipfs.com/ipfs/${trimmed}`
+    return `${IPFS_GATEWAYS[0]}${trimmed}`
   }
   return trimmed
+}
+
+/** Get alternate IPFS gateway URLs for the same CID (for retries). */
+function getIpfsGatewayUrls(normalizedUrl: string): string[] {
+  const urls: string[] = [normalizedUrl]
+  for (const base of IPFS_GATEWAYS) {
+    if (normalizedUrl.startsWith(base)) {
+      const cid = normalizedUrl.slice(base.length).split('/')[0]
+      if (cid) {
+        for (const g of IPFS_GATEWAYS) {
+          if (g !== base) urls.push(`${g}${cid}`)
+        }
+      }
+      break
+    }
+  }
+  return urls
 }
 
 /**
@@ -66,47 +88,66 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid url scheme' }, { status: 400 })
     }
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    const urlsToTry = getIpfsGatewayUrls(targetUrl.toString())
+    let lastError: NextResponse | null = null
 
-    const res = await fetch(targetUrl.toString(), {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
-      },
-      cache: 'no-store',
-    })
-    clearTimeout(timeoutId)
+    for (const tryUrl of urlsToTry) {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+      try {
+        const res = await fetch(tryUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
+          },
+          cache: 'no-store',
+        })
+        clearTimeout(timeoutId)
 
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: 'Image fetch failed' },
-        { status: res.status >= 500 ? 502 : 404 }
-      )
+        if (!res.ok) {
+          lastError = NextResponse.json(
+            { error: 'Image fetch failed' },
+            { status: res.status >= 500 ? 502 : 404 }
+          )
+          continue
+        }
+
+        const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+        if (!ALLOWED_IMAGE_TYPES.has(contentType) && !contentType.startsWith('image/')) {
+          lastError = NextResponse.json({ error: 'Not an image' }, { status: 400 })
+          continue
+        }
+
+        const contentLength = res.headers.get('content-length')
+        if (contentLength && parseInt(contentLength, 10) > MAX_SIZE_BYTES) {
+          lastError = NextResponse.json({ error: 'Image too large' }, { status: 413 })
+          continue
+        }
+
+        const buffer = await res.arrayBuffer()
+        if (buffer.byteLength > MAX_SIZE_BYTES) {
+          lastError = NextResponse.json({ error: 'Image too large' }, { status: 413 })
+          continue
+        }
+
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            'Content-Type': contentType || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          },
+        })
+      } catch (err) {
+        clearTimeout(timeoutId)
+        if (err instanceof Error && err.name === 'AbortError') {
+          lastError = NextResponse.json({ error: 'Request timeout' }, { status: 504 })
+        } else {
+          lastError = NextResponse.json({ error: 'Proxy failed' }, { status: 502 })
+        }
+      }
     }
 
-    const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-    if (!ALLOWED_IMAGE_TYPES.has(contentType) && !contentType.startsWith('image/')) {
-      return NextResponse.json({ error: 'Not an image' }, { status: 400 })
-    }
-
-    const contentLength = res.headers.get('content-length')
-    if (contentLength && parseInt(contentLength, 10) > MAX_SIZE_BYTES) {
-      return NextResponse.json({ error: 'Image too large' }, { status: 413 })
-    }
-
-    const buffer = await res.arrayBuffer()
-    if (buffer.byteLength > MAX_SIZE_BYTES) {
-      return NextResponse.json({ error: 'Image too large' }, { status: 413 })
-    }
-
-    return new NextResponse(buffer, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
-      },
-    })
+    return lastError ?? NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return NextResponse.json({ error: 'Request timeout' }, { status: 504 })

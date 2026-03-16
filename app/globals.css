@@ -523,6 +523,24 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   pointer-events: none;
 }
 
+/* Scroll reveal for raffle list (mobile): animate in when card enters viewport */
+.raffle-scroll-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+}
+.raffle-scroll-reveal.raffle-scroll-visible {
+  animation: raffle-scroll-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .raffle-scroll-reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .raffle-scroll-reveal.raffle-scroll-visible {
+    animation: none;
+  }
+}
+
 /* Footer link tab flair */
 .footer-link-tab {
   position: relative;

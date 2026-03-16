@@ -15,15 +15,22 @@ import {
 /** Programs we support for NFTs (SPL Token + Token-2022) so any raffled NFT is recognized. */
 export const NFT_TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
 
+export interface NftHolderInWallet {
+  tokenProgram: typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID
+  tokenAccount: PublicKey
+}
+
 /**
- * Detect which token program holds this mint in the given wallet (SPL Token or Token-2022).
- * Use when building transfer-to-escrow so any NFT type works.
+ * Find the token account that holds this mint in the given wallet (SPL Token or Token-2022).
+ * Checks both the canonical ATA and any other token account (e.g. from marketplaces or legacy wallets).
+ * Use when building transfer-to-escrow so any NFT type and account type works.
  */
-export async function getTokenProgramForMintInWallet(
+export async function getNftHolderInWallet(
   connection: Connection,
   mint: PublicKey,
   owner: PublicKey
-): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
+): Promise<NftHolderInWallet | null> {
+  const mintStr = mint.toBase58()
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -34,12 +41,36 @@ export async function getTokenProgramForMintInWallet(
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
       const account = await getAccount(connection, ata)
-      if (account.amount >= 1n) return programId
+      if (account.amount >= 1n) return { tokenProgram: programId, tokenAccount: ata }
     } catch {
-      // no account or wrong program
+      // ATA not found or wrong program
+    }
+  }
+  // Not in ATA: scan all token accounts for this owner and program
+  for (const programId of NFT_TOKEN_PROGRAM_IDS) {
+    const response = await connection.getParsedTokenAccountsByOwner(owner, { programId })
+    for (const { pubkey, account } of response.value) {
+      const info = account.data?.parsed?.info
+      if (!info || (info.mint as string) !== mintStr) continue
+      const amount = info.tokenAmount?.amount
+      const amountStr = typeof amount === 'string' ? amount : String(amount ?? '0')
+      if (BigInt(amountStr) >= 1n) return { tokenProgram: programId, tokenAccount: pubkey }
     }
   }
   return null
+}
+
+/**
+ * Detect which token program holds this mint in the given wallet (SPL Token or Token-2022).
+ * Prefer getNftHolderInWallet when you need to transfer (so you can use the actual token account).
+ */
+export async function getTokenProgramForMintInWallet(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey
+): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
+  const holder = await getNftHolderInWallet(connection, mint, owner)
+  return holder?.tokenProgram ?? null
 }
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')

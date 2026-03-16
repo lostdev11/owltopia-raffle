@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2, Upload } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -48,7 +48,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getTokenProgramForMintInWallet } from '@/lib/solana/wallet-tokens'
+import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
@@ -106,6 +106,45 @@ export function RaffleDetailClient({
   )
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
+  const [fallbackImageError, setFallbackImageError] = useState(false)
+  const [imageUploading, setImageUploading] = useState(false)
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  // Use proxy for external image URLs so they load on mobile (avoid Safe Web / CORS issues)
+  const displayImageUrl = (() => {
+    const url = raffle.image_url
+    if (!url) return null
+    try {
+      const siteOrigin =
+        typeof process.env.NEXT_PUBLIC_SITE_URL === 'string' && process.env.NEXT_PUBLIC_SITE_URL
+          ? new URL(process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')).origin
+          : typeof window !== 'undefined'
+            ? window.location.origin
+            : ''
+      const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://www.owltopia.xyz')
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && siteOrigin && u.origin !== siteOrigin)
+        return `/api/proxy-image?url=${encodeURIComponent(url)}`
+    } catch {
+      // ignore invalid URLs
+    }
+    return url
+  })()
+  // When proxy fails, try raw URL (decoded from proxy param) as fallback
+  const fallbackRawUrl = (() => {
+    const url = displayImageUrl ?? raffle.image_url
+    if (!url || !url.startsWith('/api/proxy-image')) return null
+    try {
+      const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://www.owltopia.xyz')
+      const raw = parsed.searchParams.get('url')
+      if (!raw) return null
+      const decoded = decodeURIComponent(raw)
+      const u = new URL(decoded)
+      if (u.protocol === 'http:' || u.protocol === 'https:') return decoded
+    } catch {
+      // ignore
+    }
+    return null
+  })()
   const { serverNow: serverTime } = useServerTime()
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
@@ -1023,18 +1062,12 @@ export function RaffleDetailClient({
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
-      const tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
-      if (!tokenProgram) {
+      const holder = await getNftHolderInWallet(connection, mint, publicKey)
+      if (!holder) {
         setDepositEscrowError('NFT not found in your wallet. Supports SPL Token and Token-2022.')
         return
       }
-      const creatorAta = await getAssociatedTokenAddress(
-        mint,
-        publicKey,
-        false,
-        tokenProgram,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
+      const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
       const escrowAta = await getAssociatedTokenAddress(
         mint,
         escrowPubkey,
@@ -1059,7 +1092,7 @@ export function RaffleDetailClient({
       }
       tx.add(
         createTransferInstruction(
-          creatorAta,
+          sourceTokenAccount,
           escrowAta,
           publicKey,
           1n,
@@ -1436,7 +1469,41 @@ export function RaffleDetailClient({
             </div>
           </CardHeader>
 
-          {raffle.image_url && (
+          {(isCreator || isAdmin) && (
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+              className="hidden"
+              aria-hidden
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setImageUploadError(null)
+                setImageUploading(true)
+                try {
+                  const formData = new FormData()
+                  formData.append('file', file)
+                  const res = await fetch(`/api/raffles/${raffle.id}/image`, {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include',
+                  })
+                  const data = await res.json()
+                  if (!res.ok) throw new Error(data.error || 'Upload failed')
+                  setImageError(false)
+                  setFallbackImageError(false)
+                  router.refresh()
+                } catch (err) {
+                  setImageUploadError(err instanceof Error ? err.message : 'Upload failed')
+                } finally {
+                  setImageUploading(false)
+                  if (imageInputRef.current) imageInputRef.current.value = ''
+                }
+              }}
+            />
+          )}
+          {(displayImageUrl ?? raffle.image_url) && (
             <>
               {!imageError && (
                 <div className={`flex items-center justify-end gap-2 ${classes.headerPadding} pt-0 pb-2`}>
@@ -1475,7 +1542,7 @@ export function RaffleDetailClient({
               {!imageError ? (
                 <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
                   <Image
-                    src={raffle.image_url}
+                    src={displayImageUrl ?? raffle.image_url ?? ''}
                     alt={raffle.title}
                     fill
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
@@ -1483,15 +1550,74 @@ export function RaffleDetailClient({
                     loading="eager"
                     className="object-contain"
                     onError={() => setImageError(true)}
-                    unoptimized={raffle.image_url.startsWith('http://')}
+                    unoptimized={
+                      (displayImageUrl ?? raffle.image_url)?.startsWith('http://') === true ||
+                      (displayImageUrl ?? raffle.image_url)?.startsWith('/api/proxy-image') === true
+                    }
+                  />
+                </div>
+              ) : fallbackRawUrl && !fallbackImageError ? (
+                <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={fallbackRawUrl}
+                    alt={raffle.title}
+                    className="w-full h-full object-contain"
+                    onError={() => setFallbackImageError(true)}
                   />
                 </div>
               ) : (
-                <div className={`w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} flex items-center justify-center bg-muted border rounded`}>
+                <div className={`w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} flex flex-col items-center justify-center gap-3 bg-muted border rounded p-4`}>
                   <span className="text-muted-foreground">Image unavailable</span>
+                  {(isCreator || isAdmin) && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={imageUploading}
+                        onClick={() => imageInputRef.current?.click()}
+                        className="gap-2"
+                      >
+                        {imageUploading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Upload className="h-4 w-4" aria-hidden />
+                        )}
+                        {imageUploading ? 'Uploading…' : 'Upload photo'}
+                      </Button>
+                      {imageUploadError && (
+                        <p className="text-sm text-destructive">{imageUploadError}</p>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </>
+          )}
+
+          {!(displayImageUrl ?? raffle.image_url) && (isCreator || isAdmin) && (
+            <div className={`w-full aspect-[4/3] flex flex-col items-center justify-center gap-3 bg-muted border rounded p-4 ${classes.headerPadding}`}>
+              <span className="text-muted-foreground">No image</span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={imageUploading}
+                onClick={() => imageInputRef.current?.click()}
+                className="gap-2"
+              >
+                {imageUploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Upload className="h-4 w-4" aria-hidden />
+                )}
+                {imageUploading ? 'Uploading…' : 'Upload photo'}
+              </Button>
+              {imageUploadError && (
+                <p className="text-sm text-destructive">{imageUploadError}</p>
+              )}
+            </div>
           )}
 
           {raffle.prize_type === 'nft' && raffle.prize_deposited_at && escrowCheckUrl && (

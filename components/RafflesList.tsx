@@ -1,8 +1,9 @@
  'use client'
  
  import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
- import { RaffleCard } from '@/components/RaffleCard'
- import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { RaffleCard } from '@/components/RaffleCard'
+import { RaffleScrollReveal } from '@/components/RaffleScrollReveal'
+import { WalletConnectButton } from '@/components/WalletConnectButton'
  import type { Raffle, Entry } from '@/lib/types'
  import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
@@ -380,17 +381,18 @@ export function RafflesList({
       </div>
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
         {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
-          <RaffleCard
-            key={raffle.id}
-            raffle={raffle}
-            entries={entries}
-            size={size}
-            section={section}
-            profitInfo={profitInfo}
-            onDeleted={handleRaffleDeleted}
-            priority={index < 6}
-            serverNow={serverNow}
-          />
+          <RaffleScrollReveal key={raffle.id}>
+            <RaffleCard
+              raffle={raffle}
+              entries={entries}
+              size={size}
+              section={section}
+              profitInfo={profitInfo}
+              onDeleted={handleRaffleDeleted}
+              priority={index < 6}
+              serverNow={serverNow}
+            />
+          </RaffleScrollReveal>
         ))}
       </div>
     </div>

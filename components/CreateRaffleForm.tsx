@@ -11,7 +11,7 @@ import {
   createAssociatedTokenAccountInstruction,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getTokenProgramForMintInWallet } from '@/lib/solana/wallet-tokens'
+import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { Transaction } from '@solana/web3.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -287,12 +287,12 @@ export function CreateRaffleForm() {
             const mint = new PublicKey(raffle.nft_mint_address)
             const escrowPubkey = new PublicKey(escrowAddress)
             // Retry: RPC can be slow or flaky on mobile; NFT list may come from API (e.g. Helius) while this uses client RPC
-            let tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
-            for (let attempt = 0; attempt < 2 && !tokenProgram; attempt++) {
+            let holder = await getNftHolderInWallet(connection, mint, publicKey)
+            for (let attempt = 0; attempt < 2 && !holder; attempt++) {
               await new Promise((r) => setTimeout(r, 600))
-              tokenProgram = await getTokenProgramForMintInWallet(connection, mint, publicKey)
+              holder = await getNftHolderInWallet(connection, mint, publicKey)
             }
-            if (!tokenProgram) {
+            if (!holder) {
               alert(
                 'NFT not found in your wallet (supports SPL Token and Token-2022). ' +
                   'If you still have the NFT, try again or use Wi‑Fi, then complete the deposit on the raffle page.'
@@ -300,13 +300,7 @@ export function CreateRaffleForm() {
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
-            const creatorAta = await getAssociatedTokenAddress(
-              mint,
-              publicKey,
-              false,
-              tokenProgram,
-              ASSOCIATED_TOKEN_PROGRAM_ID
-            )
+            const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
             const escrowAta = await getAssociatedTokenAddress(
               mint,
               escrowPubkey,
@@ -331,7 +325,7 @@ export function CreateRaffleForm() {
             }
             tx.add(
               createTransferInstruction(
-                creatorAta,
+                sourceTokenAccount,
                 escrowAta,
                 publicKey,
                 1n,
