@@ -305,6 +305,10 @@ export function CreateRaffleForm() {
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
+            if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
             const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
             const escrowAta = await getAssociatedTokenAddress(
               mint,

@@ -1078,6 +1078,10 @@ export function RaffleDetailClient({
         setDepositEscrowError('This NFT is staked or delegated. Unstake it in your wallet or staking app, then try again.')
         return
       }
+      if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
+        setDepositEscrowError('NFT holder data incomplete. Try again.')
+        return
+      }
       const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
       const escrowAta = await getAssociatedTokenAddress(
         mint,
