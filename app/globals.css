@@ -523,9 +523,9 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   pointer-events: none;
 }
 
-/* Scroll reveal for raffle list (mobile): animate in when card enters viewport */
+/* Scroll reveal for raffle list (mobile): visible by default; animate slide-up when card enters viewport */
 .raffle-scroll-reveal {
-  opacity: 0;
+  opacity: 1;
   transform: translateY(14px);
 }
 .raffle-scroll-reveal.raffle-scroll-visible {
@@ -533,7 +533,6 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 }
 @media (prefers-reduced-motion: reduce) {
   .raffle-scroll-reveal {
-    opacity: 1;
     transform: none;
   }
   .raffle-scroll-reveal.raffle-scroll-visible {

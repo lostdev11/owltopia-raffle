@@ -260,11 +260,10 @@ export function RafflesPageClient({
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
   // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel
+  // Use serverTime (always a Date; may be client time until /api/time syncs) so we don't block on sync
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!isEmptyFromServer && !initialError) return
-    // Wait for server time so client-side bucketing uses universal time (not wrong PC clock)
-    if (!serverTimeSynced) return
     let cancelled = false
     setClientFetchError(null)
     setClientFetchStarted(true)
@@ -354,7 +353,7 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer, serverTimeSynced])
+  }, [initialError, isEmptyFromServer])
 
   const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
   const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])

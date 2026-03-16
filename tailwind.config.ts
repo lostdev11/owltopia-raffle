@@ -164,9 +164,9 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(10px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
-        /* Raffle list: scroll-in on mobile when card enters viewport */
+        /* Raffle list: scroll-in on mobile when card enters viewport (opacity 1 so cards stay visible) */
         'raffle-scroll-in': {
-          from: { opacity: '0', transform: 'translateY(14px)' },
+          from: { opacity: '1', transform: 'translateY(14px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
       },
