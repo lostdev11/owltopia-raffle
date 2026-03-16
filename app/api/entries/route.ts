@@ -95,20 +95,26 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
         console.log(`✅ Auto-verified entry ${entry.id} for raffle ${raffleId}`)
       } else {
         // Check if this is a temporary error that might resolve
-        const isTemporaryError = verificationResult.error?.includes('Transaction not found') ||
-                                  verificationResult.error?.includes('still be confirming') ||
-                                  verificationResult.error?.includes('temporary issue') ||
-                                  verificationResult.error?.includes('Verification error')
-        
+        const isTemporaryError =
+          verificationResult.error?.includes('Transaction not found') ||
+          verificationResult.error?.includes('still be confirming') ||
+          verificationResult.error?.includes('temporary issue') ||
+          verificationResult.error?.includes('Verification error')
+
         if (isTemporaryError) {
           // Leave as pending for retry - don't log as error, just info
-          console.log(`⏳ Entry ${entry.id} verification pending (temporary error): ${verificationResult.error}`)
+          console.log(
+            `⏳ Entry ${entry.id} verification pending (temporary error): ${verificationResult.error}`
+          )
           continue
         }
-        
-        // Permanent failure - reject
-        await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature ?? undefined)
-        console.log(`❌ Auto-rejected entry ${entry.id}: ${verificationResult.error}`)
+
+        // For non-temporary verification failures, keep the entry pending so it
+        // can be manually reviewed or retried via admin restore flows instead
+        // of marking it as permanently rejected when funds may have been sent.
+        console.warn(
+          `⚠️ Verification failed for entry ${entry.id} (kept as pending, not rejected): ${verificationResult.error}`
+        )
       }
     } catch (error: any) {
       console.error(`⚠️ Error auto-verifying entry ${entry.id}:`, error.message)

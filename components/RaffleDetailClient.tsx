@@ -1499,11 +1499,11 @@ export function RaffleDetailClient({
                     className={`text-xs font-medium border-0 px-0 py-0 h-auto ${isFuture ? 'text-red-400' : isActive ? 'text-green-400' : 'text-blue-400'}`}
                   >
                     {isFuture
-                      ? `Starts ${formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
+                      ? `Starts ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
                       : isActive
                         ? (new Date(raffle.end_time) <= serverTime
-                            ? `Ended ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
-                            : `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`)
+                            ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
+                            : `Ends ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`)
                         : 'Ended'}
                   </Badge>
                 </div>

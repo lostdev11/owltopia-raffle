@@ -822,17 +822,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                     Starts {serverNow
-                      ? (new Date(raffle.start_time) <= serverNow
-                          ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
-                          : formatDistance(serverNow, new Date(raffle.start_time), { addSuffix: true }))
+                      ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
                       : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
                   </span>
                 ) : isActive ? (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>
                     {serverNow
                       ? (new Date(raffle.end_time) <= serverNow
-                          ? `Ended ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`
-                          : `Ends ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`)
+                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                          : `Ends ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`)
                       : `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`}
                   </span>
                 ) : (

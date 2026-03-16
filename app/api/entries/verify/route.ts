@@ -7,6 +7,7 @@ import {
   InsufficientTicketsError,
   ConfirmEntryInvalidStateError,
   TransactionSignatureAlreadyUsedError,
+  saveTransactionSignature,
 } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
@@ -102,6 +103,8 @@ export async function POST(request: NextRequest) {
           verificationResult.error?.includes('temporary issue') ||
           verificationResult.error?.includes('Verification error')
 
+        // For temporary errors, keep the entry pending and signal 202 so the
+        // client can show a "verifying" state and retry later.
         if (isTemporaryError) {
           console.log(
             `Verification failed temporarily for entry ${entryId}. Error: ${verificationResult.error}`
@@ -109,8 +112,22 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(ERROR_BODY, { status: 202 })
         }
 
-        await updateEntryStatus(entryId, 'rejected', transactionSignature)
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+        // For non-temporary errors, store the transaction signature so that
+        // background verification and admin restore flows can inspect it,
+        // but keep the entry in "pending" rather than marking it as rejected.
+        // This avoids tickets incorrectly showing as permanently rejected when
+        // funds were actually sent, while still requiring explicit confirmation
+        // before the entry counts towards tickets sold.
+        try {
+          await saveTransactionSignature(entryId, transactionSignature)
+        } catch (err) {
+          console.error(
+            `Error saving transaction signature for entry ${entryId} during failed verification:`,
+            err
+          )
+        }
+
+        return NextResponse.json(ERROR_BODY, { status: 202 })
       }
 
       // --- 2) Atomic RPC: lock raffle + entry, verified_transactions, max_tickets, update entry ---
