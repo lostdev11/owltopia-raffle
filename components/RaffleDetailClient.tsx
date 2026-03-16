@@ -1059,7 +1059,10 @@ export function RaffleDetailClient({
   }
 
   const showDepositEscrow =
-    raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !!raffle.nft_mint_address
+    raffle.prize_type === 'nft' &&
+    !raffle.prize_deposited_at &&
+    !!raffle.nft_mint_address &&
+    (isCreator || isAdmin)
 
   const handleTransferNftToEscrow = useCallback(async () => {
     if (!publicKey || !escrowAddress || !raffle.nft_mint_address) return
@@ -1498,7 +1501,9 @@ export function RaffleDetailClient({
                     {isFuture
                       ? `Starts ${formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
                       : isActive
-                        ? `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
+                        ? (new Date(raffle.end_time) <= serverTime
+                            ? `Ended ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
+                            : `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`)
                         : 'Ended'}
                   </Badge>
                 </div>
@@ -1739,9 +1744,13 @@ export function RaffleDetailClient({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}>
                       {isFuture
-                        ? `Starts ${new Date(raffle.start_time) <= serverTime ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
+                        ? `Starts ${new Date(raffle.start_time) <= serverTime
+                            ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })
+                            : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
                         : isActive
-                        ? `Ends ${new Date(raffle.end_time) <= serverTime ? formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
+                        ? (new Date(raffle.end_time) <= serverTime
+                            ? `Ended ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
+                            : `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`)
                         : 'Ended'}
                     </Badge>
                     {minTickets && (

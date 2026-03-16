@@ -82,7 +82,9 @@ function getMinimalBaseRaffleColumns(): string {
 // Cache column list so we only run migration check once per process (faster subsequent loads)
 let raffleColumnsCache: string | null = null
 
-const FULL_RAFFLE_COLUMNS = getBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+const FULL_RAFFLE_COLUMNS =
+  getBaseRaffleColumns() +
+  ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
 
 /**
  * Get all columns including NFT columns if migration is applied.
@@ -157,7 +159,8 @@ const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'
 
 /** REST select: full columns including NFT (matches Raffle type) */
 const RAFFLE_SELECT_FULL =
-  getBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
+  getBaseRaffleColumns() +
+  ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
 /** REST select: base only (when NFT migration not applied) */
 const RAFFLE_SELECT_BASE = getBaseRaffleColumns()
 
@@ -522,6 +525,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     cancellation_fee_currency: (row.cancellation_fee_currency as string | null) ?? null,
     cancellation_refund_policy: (row.cancellation_refund_policy as string | null) ?? null,
     prize_type: (row.prize_type as 'crypto' | 'nft') ?? 'crypto',
+    prize_standard: (row.prize_standard as any) ?? null,
     nft_mint_address: (row.nft_mint_address as string | null) ?? null,
     nft_collection_name: (row.nft_collection_name as string | null) ?? null,
     nft_token_id: (row.nft_token_id as string | null) ?? null,

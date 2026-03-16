@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { updateRaffle, getRaffleById } from '@/lib/db/raffles'
+import {
+  updateRaffle,
+  getRaffleById,
+  getEntriesByRaffleId,
+  calculateTicketsSold,
+} from '@/lib/db/raffles'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -42,10 +47,22 @@ export async function POST(
       )
     }
 
-    const endTimeToCheck = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
+    const endTimeToCheck = raffle.original_end_time
+      ? new Date(raffle.original_end_time)
+      : new Date(raffle.end_time)
     if (endTimeToCheck > new Date()) {
       return NextResponse.json(
         { error: 'Raffle has not ended yet. Use the normal edit form to update the raffle.' },
+        { status: 400 }
+      )
+    }
+
+    // Do not allow restore if any tickets have been purchased (confirmed entries)
+    const entries = await getEntriesByRaffleId(raffleId)
+    const ticketsSold = calculateTicketsSold(entries)
+    if (ticketsSold > 0) {
+      return NextResponse.json(
+        { error: 'Cannot restore raffle: tickets have already been purchased.' },
         { status: 400 }
       )
     }

@@ -573,15 +573,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </Card>
         )}
 
-        {/* Outage Recovery: Restore Raffle - only when ended, no winner */}
+        {/* Outage Recovery: Restore Raffle - only when ended, no winner, and no tickets purchased */}
         {(() => {
           const now = new Date()
           // Use end_time only: after restore, end_time is the extended time
           const endTimeToCheck = new Date(raffle.end_time)
           const hasEnded = endTimeToCheck <= now
           const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
+          const ticketsSold = calculateTicketsSold(entriesList)
 
-          if (!hasEnded || !hasNoWinner) return null
+          // Only allow restore when raffle ended, no winner, and absolutely no confirmed tickets
+          if (!hasEnded || !hasNoWinner || ticketsSold > 0) return null
 
           return (
             <Card className="border-amber-500/30 bg-amber-500/5">
@@ -591,7 +593,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   Outage Recovery
                 </CardTitle>
                 <CardDescription>
-                  Use only when tickets couldn&apos;t be purchased due to site or database outage. Extends the raffle end time (24 hours, 3 days, or 7 days) so people can buy tickets again.
+                  Use only when tickets couldn&apos;t be purchased due to site or database outage and no tickets were bought. Extends the raffle end time (24 hours, 3 days, or 7 days) so people can buy tickets again.
                 </CardDescription>
               </CardHeader>
               <CardContent>

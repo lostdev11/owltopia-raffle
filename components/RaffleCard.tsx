@@ -808,10 +808,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </span>
               )}
             </div>
-            {/* Raffle/item name — always visible between Price/Entries and actions */}
-            <p className="text-xs sm:text-sm font-semibold text-foreground line-clamp-2 mb-1 sm:mb-1.5 mt-0 break-words min-w-0" title={raffle.title}>
-              {raffle.title}
-            </p>
+            {/* Raffle description — single secondary text below title */}
+            {raffle.description && (
+              <p
+                className="text-[11px] sm:text-xs text-muted-foreground line-clamp-2 mb-1 sm:mb-1.5 mt-0 break-words min-w-0"
+                title={raffle.description}
+              >
+                <LinkifiedText text={raffle.description} />
+              </p>
+            )}
               <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
               <span className="text-[11px] sm:text-xs text-muted-foreground flex-1 min-w-0 truncate basis-0 sm:basis-auto">
                 {isFuture ? (
@@ -824,11 +829,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   </span>
                 ) : isActive ? (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                    Ends {serverNow
+                    {serverNow
                       ? (new Date(raffle.end_time) <= serverNow
-                          ? formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })
-                          : formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true }))
-                      : formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
+                          ? `Ended ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`
+                          : `Ends ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`)
+                      : `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`}
                   </span>
                 ) : (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
@@ -976,8 +981,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               >
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <CardTitle className={`${classes.title} text-white line-clamp-2`}>{raffle.title}</CardTitle>
-                    <div className="group/owlvision flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      {raffle.description && (
+                        <p className={`${classes.description} text-white/90 line-clamp-3`}>
+                          <LinkifiedText text={raffle.description} />
+                        </p>
+                      )}
+                    </div>
+                    <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
                       {showHolderBadge && (
                         <span
                           className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
@@ -1097,11 +1108,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       </span>
                     ) : isActive ? (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                        Ends {serverNow
+                        {serverNow
                           ? (new Date(raffle.end_time) <= serverNow
-                              ? formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })
-                              : formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true }))
-                          : formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}
+                              ? `Ended ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`
+                              : `Ends ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`)
+                          : `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`}
                       </span>
                     ) : (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
