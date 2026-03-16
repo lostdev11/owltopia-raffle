@@ -118,63 +118,58 @@ export function CreateRaffleForm() {
     setWalletAssetsError(null)
     const walletAddr = publicKey.toBase58()
     try {
-      const { getWalletNfts, getWalletTokens } = await import('@/lib/solana/wallet-tokens')
+      // Prefer API first: faster (batch from Helius) and returns more NFTs (paginated).
+      const [apiRes, escrowRes] = await Promise.all([
+        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+        fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+      ])
       let nfts: WalletNft[] = []
-      try {
-        nfts = await getWalletNfts(connection, publicKey)
-      } catch (rpcErr) {
-        console.warn('RPC getWalletNfts failed, trying API fallback', rpcErr)
-        const apiRes = await fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, {
-          credentials: 'include',
-        })
-        if (apiRes.ok) {
-          const data = await apiRes.json()
-          nfts = Array.isArray(data) ? data : []
-        }
-        if (nfts.length === 0) throw rpcErr
+      if (apiRes.ok) {
+        const data = await apiRes.json()
+        nfts = Array.isArray(data) ? data : []
       }
-      if (nfts.length === 0) {
-        const apiRes = await fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, {
-          credentials: 'include',
-        })
-        if (apiRes.ok) {
-          const data = await apiRes.json()
-          if (Array.isArray(data) && data.length > 0) nfts = data
+      // Fallback to client RPC when API is unavailable (e.g. no HELIUS_API_KEY) or fails
+      if (nfts.length === 0 || apiRes.status === 503) {
+        const { getWalletNfts, getWalletTokens } = await import('@/lib/solana/wallet-tokens')
+        try {
+          nfts = await getWalletNfts(connection, publicKey)
+        } catch (rpcErr) {
+          if (nfts.length === 0) throw rpcErr
         }
       }
-      let tokens: WalletToken[] = []
-      try {
-        tokens = await getWalletTokens(connection, publicKey)
-      } catch {
-        // tokens are optional for raffle creation
-      }
-      // Exclude scam/spam NFTs (API path already filters; this applies when using RPC)
-      try {
-        const blockRes = await fetch('/api/config/scam-blocklist', { credentials: 'include' })
-        if (blockRes.ok) {
-          const { addresses } = await blockRes.json()
-          if (Array.isArray(addresses) && addresses.length > 0) {
-            const blockSet = new Set((addresses as string[]).map((a) => a.toLowerCase()))
-            nfts = nfts.filter((n) => !blockSet.has(n.mint.toLowerCase()))
+      // Exclude scam/spam NFTs when we used RPC fallback (API already filters)
+      if (nfts.length > 0 && !apiRes.ok) {
+        try {
+          const blockRes = await fetch('/api/config/scam-blocklist', { credentials: 'include' })
+          if (blockRes.ok) {
+            const { addresses } = await blockRes.json()
+            if (Array.isArray(addresses) && addresses.length > 0) {
+              const blockSet = new Set((addresses as string[]).map((a) => a.toLowerCase()))
+              nfts = nfts.filter((n) => !blockSet.has(n.mint.toLowerCase()))
+            }
           }
+        } catch {
+          // ignore; show all if blocklist fails
         }
-      } catch {
-        // ignore; show all if blocklist fails
       }
-      // Exclude NFTs already in escrow for this wallet (they're committed to a raffle)
-      try {
-        const escrowRes = await fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
-          credentials: 'include',
-        })
-        if (escrowRes.ok) {
+      // Exclude NFTs already in escrow (from parallel fetch)
+      if (escrowRes.ok) {
+        try {
           const { mints: escrowedMints } = await escrowRes.json()
           if (Array.isArray(escrowedMints) && escrowedMints.length > 0) {
             const escrowedSet = new Set(escrowedMints.map((m: string) => m.toLowerCase()))
             nfts = nfts.filter((n) => !escrowedSet.has(n.mint.toLowerCase()))
           }
+        } catch {
+          // ignore
         }
+      }
+      let tokens: WalletToken[] = []
+      try {
+        const { getWalletTokens } = await import('@/lib/solana/wallet-tokens')
+        tokens = await getWalletTokens(connection, publicKey)
       } catch {
-        // ignore; show all if escrow list fails
+        // tokens are optional for raffle creation
       }
       setWalletNfts(nfts)
       setWalletTokens(tokens)

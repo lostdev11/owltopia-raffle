@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
 
@@ -94,55 +94,73 @@ async function getStakedMintsFromApi(wallet: string): Promise<Set<string>> {
   }
 }
 
+/** Parse one page of getParsedTokenAccountsByOwner into WalletNft list. */
+function parseTokenAccountsToNfts(
+  value: Array<{ pubkey?: string; account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } } }>,
+  delegatedMints: Set<string>
+): WalletNft[] {
+  const nfts: WalletNft[] = []
+  for (const item of value) {
+    const info = item.account?.data?.parsed?.info
+    if (!info?.mint) continue
+    if (delegatedMints.has(info.mint)) continue
+    const decimals = Number(info.tokenAmount?.decimals ?? 9)
+    const amount = String(info.tokenAmount?.amount ?? '0')
+    const isNft =
+      amount !== '0' && (decimals === 0 || parseFloat(amount) === 1)
+    if (!isNft) continue
+    const tokenAccount = item.pubkey ?? info.mint
+    nfts.push({
+      mint: info.mint,
+      tokenAccount,
+      amount,
+      decimals,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+    })
+  }
+  return nfts
+}
+
 /**
  * On devnet, Helius DAS may return no assets. Fallback: use getParsedTokenAccountsByOwner
- * to find NFT token accounts and return minimal WalletNft list (no metadata).
+ * for both SPL Token and Token-2022 to find NFT token accounts (minimal WalletNft list, no metadata).
  */
 async function getNftsViaRpcFallback(
   rpcUrl: string,
   wallet: string,
   delegatedMints: Set<string>
 ): Promise<WalletNft[]> {
+  const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
+  const seenMints = new Set<string>()
+  const nfts: WalletNft[] = []
   try {
-    const res = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'parsed-token-accounts-nfts',
-        method: 'getParsedTokenAccountsByOwner',
-        params: [wallet, { programId: TOKEN_PROGRAM_ID.toBase58() }],
-      }),
-      cache: 'no-store',
-    })
-    if (!res.ok) return []
-    const json = await res.json().catch(() => null)
-    const value = json?.result?.value as Array<{
-      pubkey?: string
-      account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } }
-    }> | undefined
-    if (!Array.isArray(value)) return []
-    const nfts: WalletNft[] = []
-    for (const item of value) {
-      const info = item.account?.data?.parsed?.info
-      if (!info?.mint) continue
-      if (delegatedMints.has(info.mint)) continue
-      const decimals = Number(info.tokenAmount?.decimals ?? 9)
-      const amount = String(info.tokenAmount?.amount ?? '0')
-      const isNft =
-        amount !== '0' && (decimals === 0 || parseFloat(amount) === 1)
-      if (!isNft) continue
-      const tokenAccount = item.pubkey ?? info.mint
-      nfts.push({
-        mint: info.mint,
-        tokenAccount,
-        amount,
-        decimals,
-        metadataUri: null,
-        name: null,
-        image: null,
-        collectionName: null,
+    for (const programId of programIds) {
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: `parsed-token-accounts-nfts-${programId.toBase58().slice(0, 8)}`,
+          method: 'getParsedTokenAccountsByOwner',
+          params: [wallet, { programId: programId.toBase58() }],
+        }),
+        cache: 'no-store',
       })
+      if (!res.ok) continue
+      const json = await res.json().catch(() => null)
+      const value = json?.result?.value as Array<{
+        pubkey?: string
+        account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } }
+      }> | undefined
+      if (!Array.isArray(value)) continue
+      for (const nft of parseTokenAccountsToNfts(value, delegatedMints)) {
+        if (seenMints.has(nft.mint)) continue
+        seenMints.add(nft.mint)
+        nfts.push(nft)
+      }
     }
     return nfts
   } catch {
@@ -177,9 +195,9 @@ export async function GET(request: NextRequest) {
 
     const isDevnet = /devnet/i.test(heliusRpcUrl)
 
-    // Paginate to fetch more NFTs (up to 3 pages × 1000 = 3000)
+    // Paginate to fetch more NFTs (up to 10 pages × 1000 = 10,000)
     const limitPerPage = 1000
-    const maxPages = 3
+    const maxPages = 10
     const allItems: HeliusAsset[] = []
     for (let page = 1; page <= maxPages; page++) {
       const res = await fetch(heliusRpcUrl, {
