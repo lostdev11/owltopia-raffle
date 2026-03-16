@@ -46,7 +46,7 @@ export async function getNftHolderInWallet(
         programId,
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
-      const account = await getAccount(connection, ata)
+      const account = await getAccount(connection, ata, 'confirmed')
       if (account.amount >= 1n) {
         if (account.delegate) foundDelegated = true
         else return { tokenProgram: programId, tokenAccount: ata }
@@ -58,7 +58,10 @@ export async function getNftHolderInWallet(
   // Not in ATA: scan all token accounts for this owner and program
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
-      const response = await connection.getParsedTokenAccountsByOwner(owner, { programId })
+      const response = await connection.getParsedTokenAccountsByOwner(owner, {
+        programId,
+        commitment: 'confirmed',
+      })
       for (const { pubkey, account } of response.value) {
         const info = account.data?.parsed?.info
         if (!info || (info.mint as string) !== mintStr) continue

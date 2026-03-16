@@ -20,6 +20,12 @@ const IPFS_GATEWAYS = [
   'https://dweb.link/ipfs/',
 ] as const
 
+/** Arweave gateways (some block server requests without Referer; we retry with Referer on 403). */
+const ARWEAVE_GATEWAYS = [
+  'https://arweave.net/',
+  'https://arweave.dev/',
+] as const
+
 /**
  * Convert ipfs:// or IPFS CID to an HTTPS gateway URL (primary: Cloudflare).
  */
@@ -56,6 +62,32 @@ function getIpfsGatewayUrls(normalizedUrl: string): string[] {
   return urls
 }
 
+/** Get URLs to try for Arweave (multiple gateways in case one returns 403). */
+function getArweaveUrls(normalizedUrl: string): string[] {
+  const urls: string[] = [normalizedUrl]
+  try {
+    const u = new URL(normalizedUrl)
+    if (!u.pathname || u.pathname === '/') return urls
+    const path = u.pathname + u.search
+    for (const base of ARWEAVE_GATEWAYS) {
+      if (normalizedUrl.startsWith(base)) {
+        for (const g of ARWEAVE_GATEWAYS) {
+          if (g !== base) urls.push(`${g}${path.replace(/^\//, '')}`)
+        }
+        break
+      }
+    }
+  } catch {
+    // keep single url
+  }
+  return urls
+}
+
+/** Whether the target is an Arweave URL (gateways may 403 without Referer). */
+function isArweaveUrl(url: string): boolean {
+  return ARWEAVE_GATEWAYS.some((g) => url.startsWith(g))
+}
+
 /**
  * GET /api/proxy-image?url=<encoded-image-url>
  *
@@ -88,21 +120,36 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid url scheme' }, { status: 400 })
     }
 
-    const urlsToTry = getIpfsGatewayUrls(targetUrl.toString())
+    const targetStr = targetUrl.toString()
+    const urlsToTry = isArweaveUrl(targetStr)
+      ? getArweaveUrls(targetStr)
+      : getIpfsGatewayUrls(targetStr)
     let lastError: NextResponse | null = null
 
     for (const tryUrl of urlsToTry) {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
       try {
-        const res = await fetch(tryUrl, {
+        let res = await fetch(tryUrl, {
           signal: controller.signal,
-          headers: {
-            'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
-          },
+          headers: { 'User-Agent': 'OwlRaffle/1.0 (Image Proxy)' },
           cache: 'no-store',
         })
         clearTimeout(timeoutId)
+        // Arweave sometimes returns 403 when no Referer; retry once with Referer
+        if (!res.ok && res.status === 403 && isArweaveUrl(tryUrl)) {
+          const c2 = new AbortController()
+          const t2 = setTimeout(() => c2.abort(), FETCH_TIMEOUT_MS)
+          res = await fetch(tryUrl, {
+            signal: c2.signal,
+            headers: {
+              'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
+              Referer: new URL(tryUrl).origin + '/',
+            },
+            cache: 'no-store',
+          })
+          clearTimeout(t2)
+        }
 
         if (!res.ok) {
           lastError = NextResponse.json(

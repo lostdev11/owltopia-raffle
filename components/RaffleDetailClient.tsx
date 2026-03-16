@@ -224,9 +224,14 @@ export function RaffleDetailClient({
     return () => { cancelled = true }
   }, [raffle.prize_type, raffle.prize_deposited_at])
 
-  // Fetch block explorer URL to check NFT in escrow (for NFT raffles)
+  // Fetch block explorer URL to check NFT in escrow (only once prize is deposited)
   useEffect(() => {
-    if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address) return
+    if (
+      raffle.prize_type !== 'nft' ||
+      !raffle.nft_mint_address ||
+      !raffle.prize_deposited_at
+    )
+      return
     let cancelled = false
     fetch(`/api/raffles/${raffle.id}/escrow-check-url`)
       .then((r) => (cancelled ? undefined : r.ok ? r.json() : undefined))
@@ -235,7 +240,7 @@ export function RaffleDetailClient({
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [raffle.id, raffle.prize_type, raffle.nft_mint_address])
+  }, [raffle.id, raffle.prize_type, raffle.nft_mint_address, raffle.prize_deposited_at])
 
   // Refresh entries when wallet connection status changes
   // This ensures user tickets are recalculated when user connects/disconnects
@@ -1064,13 +1069,17 @@ export function RaffleDetailClient({
       const escrowPubkey = new PublicKey(escrowAddress)
       // Retry: RPC can be slow or flaky (e.g. on mobile)
       let holder = await getNftHolderInWallet(connection, mint, publicKey)
-      for (let attempt = 0; attempt < 2 && !holder; attempt++) {
-        await new Promise((r) => setTimeout(r, 600))
+      for (let attempt = 0; attempt < 4 && !holder; attempt++) {
+        await new Promise((r) => setTimeout(r, 800))
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
+      const mintShort =
+        raffle.nft_mint_address.length > 16
+          ? `${raffle.nft_mint_address.slice(0, 4)}…${raffle.nft_mint_address.slice(-4)}`
+          : raffle.nft_mint_address
       if (!holder) {
         setDepositEscrowError(
-          'NFT not found in your wallet. Use the same network as this site (e.g. Mainnet), ensure the connected wallet holds the NFT, then try again. Supports SPL Token and Token-2022.'
+          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. Supports SPL Token and Token-2022.`
         )
         return
       }
