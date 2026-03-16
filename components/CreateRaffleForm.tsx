@@ -288,7 +288,7 @@ export function CreateRaffleForm() {
             const escrowPubkey = new PublicKey(escrowAddress)
             // Retry: RPC can be slow or flaky on mobile; NFT list may come from API (e.g. Helius) while this uses client RPC
             let holder = await getNftHolderInWallet(connection, mint, publicKey)
-            for (let attempt = 0; attempt < 2 && !holder; attempt++) {
+            for (let attempt = 0; attempt < 2 && holder === null; attempt++) {
               await new Promise((r) => setTimeout(r, 600))
               holder = await getNftHolderInWallet(connection, mint, publicKey)
             }
@@ -297,6 +297,11 @@ export function CreateRaffleForm() {
                 'NFT not found in your wallet (supports SPL Token and Token-2022). ' +
                   'If you still have the NFT, try again or use Wi‑Fi, then complete the deposit on the raffle page.'
               )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
+            if ('delegated' in holder && holder.delegated) {
+              alert('This NFT is staked or delegated. Unstake it in your wallet or staking app, then try the deposit again on the raffle page.')
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }

@@ -20,17 +20,23 @@ export interface NftHolderInWallet {
   tokenAccount: PublicKey
 }
 
+/** Returned when the mint is in the wallet but only in a delegated (staked) account. */
+export interface NftHolderDelegated {
+  delegated: true
+}
+
 /**
  * Find the token account that holds this mint in the given wallet (SPL Token or Token-2022).
  * Checks both the canonical ATA and any other token account (e.g. from marketplaces or legacy wallets).
- * Use when building transfer-to-escrow so any NFT type and account type works.
+ * If the only holding is delegated (staked), returns { delegated: true } so the UI can ask the user to unstake.
  */
 export async function getNftHolderInWallet(
   connection: Connection,
   mint: PublicKey,
   owner: PublicKey
-): Promise<NftHolderInWallet | null> {
+): Promise<NftHolderInWallet | NftHolderDelegated | null> {
   const mintStr = mint.toBase58()
+  let foundDelegated = false
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -41,22 +47,37 @@ export async function getNftHolderInWallet(
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
       const account = await getAccount(connection, ata)
-      if (account.amount >= 1n) return { tokenProgram: programId, tokenAccount: ata }
+      if (account.amount >= 1n) {
+        if (account.delegate) foundDelegated = true
+        else return { tokenProgram: programId, tokenAccount: ata }
+      }
     } catch {
       // ATA not found or wrong program
     }
   }
   // Not in ATA: scan all token accounts for this owner and program
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
-    const response = await connection.getParsedTokenAccountsByOwner(owner, { programId })
-    for (const { pubkey, account } of response.value) {
-      const info = account.data?.parsed?.info
-      if (!info || (info.mint as string) !== mintStr) continue
-      const amount = info.tokenAmount?.amount
-      const amountStr = typeof amount === 'string' ? amount : String(amount ?? '0')
-      if (BigInt(amountStr) >= 1n) return { tokenProgram: programId, tokenAccount: pubkey }
+    try {
+      const response = await connection.getParsedTokenAccountsByOwner(owner, { programId })
+      for (const { pubkey, account } of response.value) {
+        const info = account.data?.parsed?.info
+        if (!info || (info.mint as string) !== mintStr) continue
+        const amount = info.tokenAmount?.amount
+        const amountStr = typeof amount === 'string' ? amount : String(amount ?? '0')
+        const amountNum = Number(amountStr)
+        if (!Number.isFinite(amountNum) || amountNum < 1) continue
+        const delegate = info.delegate
+        if (delegate && typeof delegate === 'string' && delegate !== '') {
+          foundDelegated = true
+          continue
+        }
+        return { tokenProgram: programId, tokenAccount: pubkey }
+      }
+    } catch {
+      // RPC error; continue to next program or return null
     }
   }
+  if (foundDelegated) return { delegated: true }
   return null
 }
 
@@ -70,7 +91,7 @@ export async function getTokenProgramForMintInWallet(
   owner: PublicKey
 ): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
   const holder = await getNftHolderInWallet(connection, mint, owner)
-  return holder?.tokenProgram ?? null
+  return holder && 'tokenProgram' in holder ? holder.tokenProgram : null
 }
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')

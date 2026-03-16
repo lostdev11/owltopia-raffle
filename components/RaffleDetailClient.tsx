@@ -1062,9 +1062,20 @@ export function RaffleDetailClient({
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
-      const holder = await getNftHolderInWallet(connection, mint, publicKey)
+      // Retry: RPC can be slow or flaky (e.g. on mobile)
+      let holder = await getNftHolderInWallet(connection, mint, publicKey)
+      for (let attempt = 0; attempt < 2 && !holder; attempt++) {
+        await new Promise((r) => setTimeout(r, 600))
+        holder = await getNftHolderInWallet(connection, mint, publicKey)
+      }
       if (!holder) {
-        setDepositEscrowError('NFT not found in your wallet. Supports SPL Token and Token-2022.')
+        setDepositEscrowError(
+          'NFT not found in your wallet. Use the same network as this site (e.g. Mainnet), ensure the connected wallet holds the NFT, then try again. Supports SPL Token and Token-2022.'
+        )
+        return
+      }
+      if ('delegated' in holder && holder.delegated) {
+        setDepositEscrowError('This NFT is staked or delegated. Unstake it in your wallet or staking app, then try again.')
         return
       }
       const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
