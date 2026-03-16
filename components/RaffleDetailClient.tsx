@@ -855,8 +855,9 @@ export function RaffleDetailClient({
         }),
       })
 
-      if (!verifyResponse.ok) {
-        // Safe parse for desktop and mobile: avoid JSON errors on 502/non-JSON bodies
+      // Handle "verification pending" responses explicitly (202 Accepted).
+      // Note: fetch treats 202 as ok, so we must branch on status before checking response.ok.
+      if (verifyResponse.status === 202) {
         let errorData: { error?: string; details?: string; message?: string } = {}
         try {
           const contentType = verifyResponse.headers.get('content-type') || ''
@@ -867,21 +868,31 @@ export function RaffleDetailClient({
           // Non-JSON or empty body
         }
 
-        // Handle temporary verification failures (202 Accepted)
-        if (verifyResponse.status === 202) {
-          // Transaction signature saved, verification will retry automatically (confetti already fired on tx confirm)
-          setSuccess(true)
-          setError(null)
-          console.log('Verification pending:', errorData.message || errorData.details)
+        // Transaction signature saved; verification will retry automatically (confetti already fired on tx confirm)
+        setSuccess(true)
+        setError(null)
+        console.log('Verification pending:', errorData.message || errorData.details)
 
-          router.refresh()
-          await new Promise(resolve => setTimeout(resolve, 1000))
-          fetchEntries()
+        router.refresh()
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        fetchEntries()
 
-          setTimeout(() => {
-            setShowEnterRaffleDialog(false)
-          }, 2000)
-          return
+        setTimeout(() => {
+          setShowEnterRaffleDialog(false)
+        }, 2000)
+        return
+      }
+
+      if (!verifyResponse.ok) {
+        // Safe parse for desktop and mobile: avoid JSON errors on 502/non-JSON bodies
+        let errorData: { error?: string; details?: string; message?: string } = {}
+        try {
+          const contentType = verifyResponse.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            errorData = await verifyResponse.json()
+          }
+        } catch {
+          // Non-JSON or empty body
         }
 
         // Permanent failure
