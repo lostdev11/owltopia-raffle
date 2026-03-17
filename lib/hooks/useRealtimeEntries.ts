@@ -31,6 +31,13 @@ export function useRealtimeEntries({
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isRealtimeActiveRef = useRef(false) // Track subscription status synchronously
 
+  // When server supplies initialEntries and we have no entries yet, use them so "Your tickets"
+  // and participant counts are correct on first paint (before refetch or when realtime is disabled)
+  useEffect(() => {
+    if (initialEntries.length === 0) return
+    setEntries((prev) => (prev.length === 0 ? initialEntries : prev))
+  }, [initialEntries])
+
   // Fetch entries from API (absolute URL to avoid "Failed to fetch" with Turbopack/relative URLs).
   // Use AbortSignal + timeout so a stuck server or Supabase connection cannot hold the request for minutes.
   const ENTRY_FETCH_TIMEOUT_MS = 15_000

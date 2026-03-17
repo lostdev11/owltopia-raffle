@@ -9,6 +9,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { LayoutDashboard, Ticket, Coins, TrendingUp, ExternalLink, Loader2, User, XCircle, Check } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
+import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -34,6 +35,8 @@ type DashboardData = {
   myEntries: EntryWithRaffle[]
   creatorRevenue: number
   creatorRevenueByCurrency: Record<string, number>
+  creatorLiveRevenueByCurrency?: Record<string, number>
+  creatorAllTimeGrossByCurrency?: Record<string, number>
   feeTier: FeeTier
 }
 
@@ -62,6 +65,7 @@ export default function DashboardPage() {
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const hasRetried401OnMobile = useRef(false)
+  const visibilityTick = useVisibilityTick()
 
   // Use wallet address string in deps so callback identity is stable (publicKey object ref can change every render and cause infinite loop).
   const walletAddr = publicKey?.toBase58() ?? ''
@@ -120,20 +124,26 @@ export default function DashboardPage() {
   }, [walletAddr, connected])
 
   // On mobile, delay first dashboard load so wallet has time to stabilize after nav/redirect.
+  // If already connected on mount (e.g. returning from wallet), don't delay so connection feels instant.
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!isMobileDevice()) {
       setWalletReady(true)
       return
     }
+    if (connected && publicKey) {
+      setWalletReady(true)
+      return
+    }
     const t = setTimeout(() => setWalletReady(true), MOBILE_WALLET_STABILIZE_MS)
     return () => clearTimeout(t)
-  }, [])
+  }, [connected, publicKey])
 
+  // Load dashboard when wallet is ready and when user returns to tab (visibility tick) so connection updates apply right away.
   useEffect(() => {
     if (!walletReady && isMobileDevice()) return
     loadDashboard()
-  }, [loadDashboard, walletReady])
+  }, [loadDashboard, walletReady, visibilityTick])
 
   // Sync display name input when dashboard data loads (must be unconditional for Rules of Hooks)
   useEffect(() => {
@@ -316,6 +326,14 @@ export default function DashboardPage() {
     data.creatorRevenueByCurrency && typeof data.creatorRevenueByCurrency === 'object'
       ? data.creatorRevenueByCurrency
       : {}
+  const creatorLiveRevenueByCurrency =
+    data.creatorLiveRevenueByCurrency && typeof data.creatorLiveRevenueByCurrency === 'object'
+      ? data.creatorLiveRevenueByCurrency
+      : {}
+  const creatorAllTimeGrossByCurrency =
+    data.creatorAllTimeGrossByCurrency && typeof data.creatorAllTimeGrossByCurrency === 'object'
+      ? data.creatorAllTimeGrossByCurrency
+      : {}
   const feeTier =
     data.feeTier && typeof data.feeTier.feeBps === 'number' && typeof data.feeTier.reason === 'string'
       ? data.feeTier
@@ -445,6 +463,25 @@ export default function DashboardPage() {
             {creatorRevenue === 0 && (
               <p className="text-sm text-muted-foreground">From completed raffles you created</p>
             )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              All-time gross ticket sales
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">
+              {Object.keys(creatorAllTimeGrossByCurrency).length > 0
+                ? Object.entries(creatorAllTimeGrossByCurrency)
+                    .map(([cur, amt]) => `${amt.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
+                    .join(' + ')
+                : '—'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Includes live raffles (confirmed entries) and completed raffles, before platform fees.
+            </p>
           </CardContent>
         </Card>
       </div>

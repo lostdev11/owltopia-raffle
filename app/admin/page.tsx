@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
+import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 interface DeletedEntry {
   id: string
@@ -72,6 +73,7 @@ export default function AdminDashboardPage() {
   const router = useRouter()
   const { publicKey, connected, signMessage: walletSignMessage } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
+  const visibilityTick = useVisibilityTick()
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
@@ -140,6 +142,7 @@ export default function AdminDashboardPage() {
     }
   }, [publicKey])
 
+  // Re-run when connection changes or user returns to tab so Owl Vision connects right away.
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
@@ -158,7 +161,7 @@ export default function AdminDashboardPage() {
       return
     }
     runAdminCheck()
-  }, [connected, publicKey, runAdminCheck])
+  }, [connected, publicKey, runAdminCheck, visibilityTick])
 
   // Junior admin (raffle_creator) must not see Owl Vision dashboard; redirect to create raffle
   useEffect(() => {
@@ -167,6 +170,7 @@ export default function AdminDashboardPage() {
     }
   }, [isAdmin, sessionReady, adminRole, router])
 
+  // Re-check session when connection/admin change or user returns to tab.
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin) {
       setSessionReady(null)
@@ -182,7 +186,7 @@ export default function AdminDashboardPage() {
         if (!cancelled) setSessionReady(false)
       })
     return () => { cancelled = true }
-  }, [connected, publicKey, isAdmin])
+  }, [connected, publicKey, isAdmin, visibilityTick])
 
   const handleSignIn = useCallback(async () => {
     if (!publicKey || !walletSignMessage) {

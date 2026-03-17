@@ -14,10 +14,12 @@ import {
 } from '@/components/ui/dialog'
 import { Settings, Plus, LayoutDashboard, Trophy, Menu } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
+import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 export function Header() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
+  const visibilityTick = useVisibilityTick()
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
@@ -25,6 +27,7 @@ export function Header() {
     typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   )
 
+  // Re-run when connected/publicKey change or when user returns to tab so Owl Vision link appears right away.
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
@@ -57,7 +60,7 @@ export function Header() {
         }
       })
     return () => { cancelled = true }
-  }, [connected, publicKey])
+  }, [connected, publicKey, visibilityTick])
 
   // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
   const showOwlVision = isAdmin && (adminRole === 'full' || adminRole === null)

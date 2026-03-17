@@ -105,10 +105,20 @@ export async function POST(request: NextRequest) {
 
         // For temporary errors, keep the entry pending and signal 202 so the
         // client can show a "verifying" state and retry later.
+        // Save the signature so GET /api/entries can auto-verify when RPC has the tx,
+        // and the client can show "X confirming" for pending entries.
         if (isTemporaryError) {
           console.log(
             `Verification failed temporarily for entry ${entryId}. Error: ${verificationResult.error}`
           )
+          try {
+            await saveTransactionSignature(entryId, transactionSignature)
+          } catch (err) {
+            console.error(
+              `Error saving transaction signature for entry ${entryId} (temporary):`,
+              err
+            )
+          }
           return NextResponse.json(ERROR_BODY, { status: 202 })
         }
 

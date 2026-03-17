@@ -272,6 +272,18 @@ export function RaffleDetailClient({
         .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
     : 0
 
+  // Pending entries for this wallet that have a tx signature (confirming on-chain)
+  const userPendingTickets = connected && publicKey
+    ? entries
+        .filter(
+          e =>
+            e.status === 'pending' &&
+            e.wallet_address === publicKey.toBase58() &&
+            e.transaction_signature
+        )
+        .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+    : 0
+
   // Determine max tickets user can purchase in one transaction
   const maxPurchaseQuantity = availableTickets !== null 
     ? Math.max(0, availableTickets) 
@@ -876,6 +888,32 @@ export function RaffleDetailClient({
         router.refresh()
         await new Promise(resolve => setTimeout(resolve, 1000))
         fetchEntries()
+
+        // Schedule refetches so when backend confirms (RPC delay), "Your Tickets" updates without manual refresh
+        const refetchDelays = [2000, 5000, 10000, 20000]
+        refetchDelays.forEach((ms) => {
+          setTimeout(() => fetchEntries(), ms)
+        })
+
+        // Retry verify a few times so server can confirm once RPC has the tx (common on mobile)
+        const verifyRetryDelays = [5000, 15000]
+        verifyRetryDelays.forEach((ms) => {
+          setTimeout(async () => {
+            try {
+              const retryRes = await fetch('/api/entries/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entryId, transactionSignature: signature }),
+              })
+              if (retryRes.ok) {
+                router.refresh()
+                fetchEntries()
+              }
+            } catch {
+              // ignore
+            }
+          }, ms)
+        })
 
         setTimeout(() => {
           setShowEnterRaffleDialog(false)
@@ -1508,14 +1546,17 @@ export function RaffleDetailClient({
                   <Badge
                     variant="outline"
                     className={`text-xs font-medium border-0 px-0 py-0 h-auto ${isFuture ? 'text-red-400' : isActive ? 'text-green-400' : 'text-blue-400'}`}
+                    title={isFuture ? formatDateTimeWithTimezone(raffle.start_time) : formatDateTimeWithTimezone(raffle.end_time)}
                   >
                     {isFuture
-                      ? `Starts ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
+                      ? (new Date(raffle.start_time) <= serverTime
+                          ? `Started ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
+                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`)
                       : isActive
                         ? (new Date(raffle.end_time) <= serverTime
                             ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
-                            : `Ends ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`)
-                        : 'Ended'}
+                            : `Ends ${formatDateTimeLocal(raffle.end_time)}`)
+                        : `Ended ${formatDateTimeLocal(raffle.end_time)}`}
                   </Badge>
                 </div>
               </div>
@@ -1753,16 +1794,16 @@ export function RaffleDetailClient({
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="mt-3 sm:mt-2 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}>
+                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`} title={isFuture ? formatDateTimeWithTimezone(raffle.start_time) : formatDateTimeWithTimezone(raffle.end_time)}>
                       {isFuture
-                        ? `Starts ${new Date(raffle.start_time) <= serverTime
-                            ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })
-                            : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}`
+                        ? (new Date(raffle.start_time) <= serverTime
+                            ? `Started ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
+                            : `Starts ${formatDateTimeLocal(raffle.start_time)}`)
                         : isActive
                         ? (new Date(raffle.end_time) <= serverTime
                             ? `Ended ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`
-                            : `Ends ${formatDistance(serverTime, new Date(raffle.end_time), { addSuffix: true })}`)
-                        : 'Ended'}
+                            : `Ends ${formatDateTimeLocal(raffle.end_time)}`)
+                        : `Ended ${formatDateTimeLocal(raffle.end_time)}`}
                     </Badge>
                     {minTickets && (
                       <Badge 
@@ -1855,17 +1896,30 @@ export function RaffleDetailClient({
                     <p className={classes.labelText + ' text-muted-foreground'}>Your Tickets</p>
                     <p className={`${imageSize === 'small' ? 'text-lg' : imageSize === 'medium' ? 'text-xl' : 'text-2xl'} font-bold`} style={{ color: themeColor }}>
                       {userTickets} {userTickets === 1 ? 'ticket' : 'tickets'}
+                      {userPendingTickets > 0 && (
+                        <span className="text-sm font-normal text-muted-foreground ml-1">
+                          ({userPendingTickets} confirming…)
+                        </span>
+                      )}
                     </p>
                   </div>
-                  {userTickets > 0 && (
+                  {(userTickets > 0 || userPendingTickets > 0) && (
                     <Badge variant="default" className={`${imageSize === 'small' ? 'text-xs px-2 py-1' : imageSize === 'medium' ? 'text-sm px-3 py-1.5' : 'text-lg px-4 py-2'}`}>
-                      {userTickets}
+                      {userTickets + userPendingTickets}
                     </Badge>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  💡 Don't see your entry? Try refreshing the page.
-                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <p className="text-xs text-muted-foreground">💡 Don't see your entry?</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs touch-manipulation"
+                    onClick={() => fetchEntries()}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -1889,8 +1943,8 @@ export function RaffleDetailClient({
             )}
             {isFuture && (
               <div className="flex justify-center">
-                <Badge variant="default" className="bg-red-500 hover:bg-red-600 text-white px-4 py-2">
-                  Starts {new Date(raffle.start_time) <= serverTime ? formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true }) : formatDistance(serverTime, new Date(raffle.start_time), { addSuffix: true })}
+                <Badge variant="default" className="bg-red-500 hover:bg-red-600 text-white px-4 py-2" title={formatDateTimeWithTimezone(raffle.start_time)}>
+                  {new Date(raffle.start_time) <= serverTime ? `Started ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}` : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
                 </Badge>
               </div>
             )}

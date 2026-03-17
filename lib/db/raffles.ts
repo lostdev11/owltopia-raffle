@@ -620,6 +620,59 @@ export async function getCreatorRevenueByWallet(walletAddress: string): Promise<
   return { totalCreatorRevenue: total, byCurrency }
 }
 
+/**
+ * Live creator revenue (gross) from confirmed entries for raffles that are not yet completed.
+ * Used for dashboard "live revenue" and all-time gross calculations.
+ */
+export async function getCreatorLiveRevenueByWallet(walletAddress: string): Promise<{
+  totalCreatorRevenue: number
+  byCurrency: Record<string, number>
+}> {
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) return { totalCreatorRevenue: 0, byCurrency: {} }
+
+  // First, find all active/ongoing raffles for this creator.
+  const { data: raffles, error: rafflesError } = await getSupabaseForRead()
+    .from('raffles')
+    .select('id, status')
+    .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
+    .in('status', ['live', 'ready_to_draw'])
+
+  if (rafflesError) {
+    console.error('Error fetching live raffles for creator revenue:', rafflesError)
+    return { totalCreatorRevenue: 0, byCurrency: {} }
+  }
+
+  if (!raffles || raffles.length === 0) {
+    return { totalCreatorRevenue: 0, byCurrency: {} }
+  }
+
+  const raffleIds = raffles.map((r) => r.id as string)
+
+  const { data: entries, error: entriesError } = await getSupabaseForRead()
+    .from('entries')
+    .select('amount_paid, currency, raffle_id, status')
+    .in('raffle_id', raffleIds)
+    .eq('status', 'confirmed')
+
+  if (entriesError) {
+    console.error('Error fetching live creator revenue entries:', entriesError)
+    return { totalCreatorRevenue: 0, byCurrency: {} }
+  }
+
+  const byCurrency: Record<string, number> = {}
+  let total = 0
+  for (const row of entries || []) {
+    const amount = Number((row as any).amount_paid ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    const cur = ((row as any).currency as string) || 'SOL'
+    byCurrency[cur] = (byCurrency[cur] ?? 0) + amount
+    total += amount
+  }
+
+  return { totalCreatorRevenue: total, byCurrency }
+}
+
 export async function getEntriesByRaffleId(raffleId: string) {
   // Fetch all entries using pagination to handle any Supabase row limits
   // Supabase defaults to 1000 rows per query, but projects can have custom limits

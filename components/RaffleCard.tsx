@@ -22,7 +22,7 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
-import { formatDateTimeWithTimezone } from '@/lib/utils'
+import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { Trophy, Share2, BadgeCheck } from 'lucide-react'
 import Image from 'next/image'
 import {
@@ -821,20 +821,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               <span className="text-[11px] sm:text-xs text-muted-foreground flex-1 min-w-0 truncate basis-0 sm:basis-auto">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                    Starts {serverNow
-                      ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
-                      : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                    {serverNow && new Date(raffle.start_time) <= serverNow
+                      ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                      : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
                   </span>
                 ) : isActive ? (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                    {serverNow
-                      ? (new Date(raffle.end_time) <= serverNow
-                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
-                          : `Ends ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`)
-                      : `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`}
+                    {serverNow && new Date(raffle.end_time) <= serverNow
+                      ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                      : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
                   </span>
                 ) : (
-                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
+                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                 )}
               </span>
               {/* Status badge only when not in active section (redundant under "Active raffles") */}
@@ -1098,22 +1096,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <span>
                     {isFuture ? (
                       <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                        Starts {serverNow
-                          ? (new Date(raffle.start_time) <= serverNow
-                              ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true })
-                              : formatDistance(serverNow, new Date(raffle.start_time), { addSuffix: true }))
-                          : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}
+                        {serverNow && new Date(raffle.start_time) <= serverNow
+                          ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
                       </span>
                     ) : isActive ? (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                        {serverNow
-                          ? (new Date(raffle.end_time) <= serverNow
-                              ? `Ended ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`
-                              : `Ends ${formatDistance(serverNow, new Date(raffle.end_time), { addSuffix: true })}`)
-                          : `Ends ${formatDistanceToNow(new Date(raffle.end_time), { addSuffix: true })}`}
+                        {serverNow && new Date(raffle.end_time) <= serverNow
+                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                          : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
                       </span>
                     ) : (
-                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended</span>
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                     )}
                   </span>
                   {section !== 'active' && (
