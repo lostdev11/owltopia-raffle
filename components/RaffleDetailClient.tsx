@@ -851,6 +851,10 @@ export function RaffleDetailClient({
         throw new Error('Transaction confirmation timeout. Please check your wallet or transaction explorer.')
       }
 
+      // At this point the on-chain transaction is confirmed. Hide the entry form
+      // and keep only the processing dialog visible while we verify and sync tickets.
+      setShowEnterRaffleDialog(false)
+
       // Celebrate as soon as the transaction is confirmed (before verify) so OWL and others get confetti even if server verification is delayed or fails
       setSuccess(true)
       requestAnimationFrame(() => fireGreenConfetti())
@@ -915,9 +919,6 @@ export function RaffleDetailClient({
           }, ms)
         })
 
-        setTimeout(() => {
-          setShowEnterRaffleDialog(false)
-        }, 2000)
         return
       }
 
@@ -956,10 +957,7 @@ export function RaffleDetailClient({
         fetchEntries()
       }
       
-      // Close the dialog after successful purchase
-      setTimeout(() => {
-        setShowEnterRaffleDialog(false)
-      }, 1500)
+      // Dialog has already been closed once the transaction confirmed.
     } catch (err) {
       console.error('Purchase error:', err)
       setSuccess(false)
@@ -1896,12 +1894,12 @@ export function RaffleDetailClient({
                     <p className={classes.labelText + ' text-muted-foreground'}>Your Tickets</p>
                     <p className={`${imageSize === 'small' ? 'text-lg' : imageSize === 'medium' ? 'text-xl' : 'text-2xl'} font-bold`} style={{ color: themeColor }}>
                       {userTickets} {userTickets === 1 ? 'ticket' : 'tickets'}
-                      {userPendingTickets > 0 && (
-                        <span className="text-sm font-normal text-muted-foreground ml-1">
-                          ({userPendingTickets} confirming…)
-                        </span>
-                      )}
                     </p>
+                    {userPendingTickets > 0 && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        We&apos;re confirming {userPendingTickets} recent {userPendingTickets === 1 ? 'entry' : 'entries'} on Solana. Your total will update automatically.
+                      </p>
+                    )}
                   </div>
                   {(userTickets > 0 || userPendingTickets > 0) && (
                     <Badge variant="default" className={`${imageSize === 'small' ? 'text-xs px-2 py-1' : imageSize === 'medium' ? 'text-sm px-3 py-1.5' : 'text-lg px-4 py-2'}`}>
@@ -2199,6 +2197,25 @@ export function RaffleDetailClient({
                 : 'Record Transaction'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* While a purchase is processing, keep users on the page with a simple blocking dialog */}
+      <Dialog open={isProcessing} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Processing your entry</DialogTitle>
+            <DialogDescription>
+              Your payment was sent. We&apos;re confirming it on Solana — this usually takes a few seconds.
+              Please keep this page open; your tickets will update automatically once confirmed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-3 mt-3">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">
+              You can safely read this page while we verify on-chain. Closing the tab won&apos;t cancel the transaction.
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
 
