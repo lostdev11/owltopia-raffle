@@ -1897,7 +1897,6 @@ export function RaffleDetailClient({
                         <p className={classes.contentText + ' font-semibold text-emerald-600 dark:text-emerald-400'}>
                           +{amountOver.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
                         </p>
-                        <p className="text-xs text-muted-foreground mt-1">This amount goes to rev share (50% founder / 50% community).</p>
                       </div>
                     )}
                   </div>
