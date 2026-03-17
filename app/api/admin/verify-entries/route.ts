@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
     const results = {
       verified: 0,
       rejected: 0,
+      skipped: 0,
       errors: [] as string[]
     }
 
@@ -76,7 +77,30 @@ export async function POST(request: NextRequest) {
         )
 
         if (!verificationResult.valid) {
-          await updateEntryStatus(entry.id, 'rejected', entry.transaction_signature ?? undefined)
+          const errMsg = verificationResult.error || ''
+
+          // Treat common RPC / "still confirming" issues as temporary:
+          // keep the entry pending so it can be auto-confirmed later
+          const isTemporaryError =
+            errMsg.includes('Transaction not found') ||
+            errMsg.includes('still be confirming') ||
+            errMsg.includes('temporary issue') ||
+            errMsg.includes('Verification error')
+
+          if (isTemporaryError) {
+            results.skipped++
+            results.errors.push(
+              `Entry ${entry.id}: temporary verification issue (${errMsg || 'unknown error'})`
+            )
+            continue
+          }
+
+          // For non‑temporary errors, treat as a real failure and reject.
+          await updateEntryStatus(
+            entry.id,
+            'rejected',
+            entry.transaction_signature ?? undefined
+          )
           results.rejected++
           results.errors.push(
             `Entry ${entry.id}: ${verificationResult.error || 'Verification failed'}`
@@ -113,10 +137,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Verified ${results.verified} entries, rejected ${results.rejected}`,
+      message: `Verified ${results.verified} entries, rejected ${results.rejected}, skipped ${results.skipped}`,
       verified: results.verified,
       rejected: results.rejected,
-      errors: results.errors
+      skipped: results.skipped,
+      errors: results.errors,
     })
   } catch (error) {
     // Don't log full error object which might contain wallet addresses

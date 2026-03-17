@@ -167,21 +167,28 @@ export async function verifyTransaction(
       if (useSplit && creatorPubkey) {
         const creatorIndex = accountKeys.findIndex((key: PublicKey) => key.equals(creatorPubkey))
         const treasuryIndex = accountKeys.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
-        if (creatorIndex === -1 || treasuryIndex === -1) {
-          return {
-            valid: false,
-            error: `Split SOL: creator or treasury wallet not found in transaction. Raffle: ${raffle.slug}`,
+
+        if (creatorIndex !== -1 && treasuryIndex !== -1) {
+          const creatorIncrease =
+            (transaction.meta.postBalances[creatorIndex] - transaction.meta.preBalances[creatorIndex]) /
+            LAMPORTS_PER_SOL
+          const treasuryIncrease =
+            (transaction.meta.postBalances[treasuryIndex] - transaction.meta.preBalances[treasuryIndex]) /
+            LAMPORTS_PER_SOL
+
+          if (
+            Math.abs(creatorIncrease - expectedCreatorAmount) <= tolerance &&
+            Math.abs(treasuryIncrease - expectedTreasuryAmount) <= tolerance
+          ) {
+            return { valid: true }
           }
+
+          // If split amounts don't line up exactly, fall through to
+          // single-recipient validation below so legacy "send full
+          // amount to treasury only" flows can still succeed.
         }
-        const creatorIncrease = (transaction.meta.postBalances[creatorIndex] - transaction.meta.preBalances[creatorIndex]) / LAMPORTS_PER_SOL
-        const treasuryIncrease = (transaction.meta.postBalances[treasuryIndex] - transaction.meta.preBalances[treasuryIndex]) / LAMPORTS_PER_SOL
-        if (Math.abs(creatorIncrease - expectedCreatorAmount) > tolerance || Math.abs(treasuryIncrease - expectedTreasuryAmount) > tolerance) {
-          return {
-            valid: false,
-            error: `SOL split amount mismatch: creator ${creatorIncrease} (expected ${expectedCreatorAmount}), treasury ${treasuryIncrease} (expected ${expectedTreasuryAmount}). Raffle: ${raffle.slug}, Entry ID: ${entry.id}`,
-          }
-        }
-        return { valid: true }
+        // If one of the split recipients is missing, also fall through
+        // to the single-recipient SOL check instead of hard failing.
       }
 
       const recipientIndex = accountKeys.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
