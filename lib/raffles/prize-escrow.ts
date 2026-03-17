@@ -19,8 +19,8 @@ import {
 } from '@solana/spl-token'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
-import { publicKey as umiPublicKey } from '@metaplex-foundation/umi'
-import { fetchAssetV1 } from '@metaplex-foundation/mpl-core'
+import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
+import { fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 
@@ -167,6 +167,77 @@ export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
   const umi: any = (createUmi as any)(endpoint as any)
   const asset: any = await fetchAssetV1(umi, umiPublicKey(mint))
   return asset.owner?.toString() === keypair.publicKey.toBase58()
+}
+
+/**
+ * Transfer an Mpl Core NFT prize from the platform escrow to the winner.
+ * Mirrors SPL / Token-2022 flow but uses Mpl Core's transferV1 with the escrow keypair as signer.
+ * Idempotent when nft_transfer_transaction is already set.
+ */
+export async function transferMplCorePrizeToWinner(raffleId: string): Promise<{
+  ok: boolean
+  signature?: string
+  error?: string
+}> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+  if (
+    raffle.prize_type !== 'nft' ||
+    !raffle.nft_mint_address ||
+    !raffle.winner_wallet
+  ) {
+    return { ok: false, error: 'Raffle is not an NFT raffle or has no winner' }
+  }
+  // Only handle Core prizes here; SPL / Token-2022 uses transferNftPrizeToWinner.
+  const standard = raffle.prize_standard ?? null
+  if (standard !== 'mpl_core') {
+    return { ok: false, error: 'Raffle prize is not an Mpl Core asset' }
+  }
+  if (raffle.nft_transfer_transaction) {
+    return { ok: true, signature: raffle.nft_transfer_transaction }
+  }
+
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  // Use configured RPC URL or fall back to a public mainnet endpoint for Core transfers.
+  const endpoint =
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
+    'https://solana.drpc.org'
+
+  // createUmi has multiple overloads; use any to avoid version-specific type issues.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const umi: any = (createUmi as any)(endpoint as any)
+
+  // Convert web3.js Keypair into an Umi signer so the escrow can sign the Core transfer.
+  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
+  const signer = createSignerFromKeypair(umi, umiKeypair)
+  umi.use(signerIdentity(signer))
+
+  const asset = umiPublicKey(raffle.nft_mint_address)
+  const newOwner = umiPublicKey(raffle.winner_wallet)
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const builder: any = transferV1(umi as any, {
+      asset,
+      newOwner,
+    } as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await builder.sendAndConfirm(umi as any)
+    const sig = String(result.signature ?? result)
+
+    await updateRaffle(raffleId, { nft_transfer_transaction: sig })
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`Mpl Core prize transfer failed for raffle ${raffleId}:`, err)
+    return { ok: false, error: message }
+  }
 }
 
 /**

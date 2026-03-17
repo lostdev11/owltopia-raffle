@@ -166,6 +166,15 @@ export function RaffleDetailClient({
       ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' }
       : baseBorderStyle
   const themeColor = isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent))
+  const isEndingSoon =
+    isActive && endTimeMs - nowMs <= 60 * 60 * 1000 && new Date(raffle.end_time) > serverTime
+  const timeToEndLabel = isFuture
+    ? `Starts ${formatDateTimeLocal(raffle.start_time)}`
+    : isActive
+      ? (new Date(raffle.end_time) <= serverTime
+          ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
+          : `Ends in ${formatDistance(new Date(raffle.end_time), serverTime)}`)
+      : `Ended ${formatDateTimeLocal(raffle.end_time)}`
 
   // Use real-time entries hook (with polling fallback)
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
@@ -1522,40 +1531,49 @@ export function RaffleDetailClient({
                   <LinkifiedText text={raffle.description} />
                 </CardDescription>
               </div>
-              {/* At-a-glance stats: use the space to the right of title/description (above image) */}
               <div
-                className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap sm:flex-col sm:items-end sm:gap-1.5 shrink-0 rounded-lg bg-muted/40 border border-border/60 px-3 py-2 sm:py-2.5 sm:min-w-[140px] touch-manipulation"
-                style={{ touchAction: 'manipulation' }}
+                className={`relative w-full sm:w-auto shrink-0 rounded-2xl bg-gradient-to-r from-emerald-400/70 via-emerald-500/80 to-emerald-300/70 p-[1px] shadow-[0_0_30px_rgba(16,185,129,0.85)] ${
+                  isEndingSoon ? 'animate-pulse' : ''
+                }`}
               >
-                {raffle.ticket_price > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">Price</span>
-                    <span className={`${classes.description} font-semibold flex items-center gap-1`}>
-                      {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={14} className="inline-block" />
+                <div className="flex items-center justify-between gap-3 rounded-[1rem] bg-background/90 px-3 py-2 sm:px-4 sm:py-2.5 touch-manipulation"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <div className="flex flex-col gap-1">
+                    {raffle.ticket_price > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-emerald-100/80">Price</span>
+                        <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-50`}>
+                          {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
+                          <CurrencyIcon
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
+                            size={14}
+                            className="inline-block"
+                          />
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-emerald-100/80">Tickets</span>
+                      <span className={`${classes.description} font-semibold text-emerald-50`}>{totalTicketsSold}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span
+                      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                        isFuture
+                          ? 'border-amber-300/80 bg-amber-500/20 text-amber-100'
+                          : isActive
+                            ? 'border-emerald-300/80 bg-emerald-500/25 text-emerald-50'
+                            : 'border-sky-300/80 bg-sky-500/20 text-sky-50'
+                      }`}
+                    >
+                      {isFuture ? 'Upcoming' : isActive ? (isEndingSoon ? 'Ending soon' : 'Live now') : 'Ended'}
+                    </span>
+                    <span className="text-[11px] text-emerald-50/80">
+                      {timeToEndLabel}
                     </span>
                   </div>
-                )}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">Tickets</span>
-                  <span className={`${classes.description} font-semibold`}>{totalTicketsSold}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className={`text-xs font-medium border-0 px-0 py-0 h-auto ${isFuture ? 'text-red-400' : isActive ? 'text-green-400' : 'text-blue-400'}`}
-                    title={isFuture ? formatDateTimeWithTimezone(raffle.start_time) : formatDateTimeWithTimezone(raffle.end_time)}
-                  >
-                    {isFuture
-                      ? (new Date(raffle.start_time) <= serverTime
-                          ? `Started ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
-                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`)
-                      : isActive
-                        ? (new Date(raffle.end_time) <= serverTime
-                            ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
-                            : `Ends ${formatDateTimeLocal(raffle.end_time)}`)
-                        : `Ended ${formatDateTimeLocal(raffle.end_time)}`}
-                  </Badge>
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:flex-shrink-0">

@@ -9,7 +9,7 @@ import {
   updateRaffle
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
-import { transferNftPrizeToWinner } from '@/lib/raffles/prize-escrow'
+import { transferMplCorePrizeToWinner, transferNftPrizeToWinner } from '@/lib/raffles/prize-escrow'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -130,8 +130,15 @@ export async function POST(request: NextRequest) {
       let nftTransferSignature: string | undefined
       let nftTransferError: string | undefined
       const updatedRaffle = await getRaffleById(raffleId)
-      if (updatedRaffle?.prize_type === 'nft' && updatedRaffle.nft_mint_address && !updatedRaffle.nft_transfer_transaction) {
-        const transferResult = await transferNftPrizeToWinner(raffleId)
+      if (
+        updatedRaffle?.prize_type === 'nft' &&
+        updatedRaffle.nft_mint_address &&
+        !updatedRaffle.nft_transfer_transaction
+      ) {
+        const isCore = updatedRaffle.prize_standard === 'mpl_core'
+        const transferResult = isCore
+          ? await transferMplCorePrizeToWinner(raffleId)
+          : await transferNftPrizeToWinner(raffleId)
         if (transferResult.ok && transferResult.signature) {
           nftTransferSignature = transferResult.signature
         } else if (!transferResult.ok && transferResult.error) {
