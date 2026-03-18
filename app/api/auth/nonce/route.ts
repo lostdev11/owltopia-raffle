@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
       )
     }
     
-    const nonce = generateNonce(wallet)
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
+    const nonce = generateNonce(wallet, expiresAt.getTime())
     const message = buildSignInMessage(nonce, expiresAt)
     return NextResponse.json({ nonce, message, expiresAt: expiresAt.toISOString() })
   } catch (error) {

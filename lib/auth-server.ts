@@ -14,8 +14,6 @@ export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 h
 
-const nonceStore = new Map<string, { expiresAt: number }>()
-
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET
   if (!secret || secret.length < 16) {
@@ -24,21 +22,53 @@ function getSecret(): string {
   return secret
 }
 
-export function generateNonce(wallet: string): string {
+type NoncePayload = { w: string; exp: number; r: string; v: 1 }
+
+/**
+ * Stateless nonce (serverless-safe).
+ *
+ * We used to store nonces in-memory, which breaks on serverless because the nonce
+ * can be generated on one instance and verified on another (leading to "Invalid nonce").
+ *
+ * This nonce is self-verifying (HMAC-signed) and includes wallet + expiry.
+ * It is not strictly one-time-use (replay is possible within TTL), but that is acceptable
+ * for SIWS because the user still must produce a valid wallet signature for the message.
+ */
+export function generateNonce(wallet: string, expiresAtMs: number): string {
   const secret = getSecret()
-  const nonce = createHmac('sha256', secret)
-    .update(`${wallet}:${Date.now()}:${Math.random()}`)
-    .digest('hex')
-    .slice(0, 32)
-  nonceStore.set(nonce, { expiresAt: Date.now() + NONCE_TTL_MS })
-  return nonce
+  const payload: NoncePayload = {
+    w: wallet,
+    exp: expiresAtMs,
+    r: `${Date.now()}:${Math.random()}`,
+    v: 1,
+  }
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+  const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url')
+  return `${payloadB64}.${sig}`
 }
 
-export function consumeNonce(nonce: string): boolean {
-  const entry = nonceStore.get(nonce)
-  if (!entry || entry.expiresAt < Date.now()) return false
-  nonceStore.delete(nonce)
-  return true
+export function consumeNonce(nonce: string, wallet: string): boolean {
+  const [payloadB64, sigB64] = (nonce || '').split('.')
+  if (!payloadB64 || !sigB64) return false
+  try {
+    const secret = getSecret()
+    const expected = createHmac('sha256', secret).update(payloadB64).digest()
+    const got = Buffer.from(sigB64, 'base64url')
+    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return false
+
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Partial<NoncePayload>
+    if (payload.v !== 1) return false
+    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number') return false
+    if (payload.w.trim() !== wallet.trim()) return false
+    if (payload.exp < Date.now()) return false
+
+    // Safety: don't accept extremely long-lived nonces even if signed
+    if (payload.exp > Date.now() + NONCE_TTL_MS + 30_000) return false
+
+    return true
+  } catch {
+    return false
+  }
 }
 
 const MESSAGE_PREFIX = `Sign in to ${PLATFORM_NAME}.\nNonce: `

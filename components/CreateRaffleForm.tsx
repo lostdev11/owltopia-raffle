@@ -41,7 +41,17 @@ export function CreateRaffleForm() {
   const wallet = publicKey?.toBase58() ?? ''
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
-  const [startTime, setStartTime] = useState(() => new Date().toISOString().slice(0, 16))
+  // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
+  // causing raffles to start/end earlier or later than intended.
+  const [startTime, setStartTime] = useState(() => {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const hours = String(now.getHours()).padStart(2, '0')
+    const minutes = String(now.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  })
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -210,8 +220,8 @@ export function CreateRaffleForm() {
 
     // Validate 7-day maximum duration
     if (startTime && endTime) {
-      const startDate = new Date(startTime)
-      const endDate = new Date(endTime)
+      const startDate = new Date(localDateTimeToUtc(startTime))
+      const endDate = new Date(localDateTimeToUtc(endTime))
       const durationMs = endDate.getTime() - startDate.getTime()
       const durationDays = durationMs / (1000 * 60 * 60 * 24)
       
@@ -823,24 +833,21 @@ export function CreateRaffleForm() {
                   required
                   className="text-base sm:text-sm flex-1"
                   max={startTime ? (() => {
-                    const maxDate = new Date(startTime)
-                    maxDate.setDate(maxDate.getDate() + 7)
-                    return maxDate.toISOString().slice(0, 16)
+                    // Build max in local time, but base calculations on the UTC conversion to avoid browser parsing quirks.
+                    const startUtc = localDateTimeToUtc(startTime)
+                    const maxUtc = new Date(startUtc)
+                    maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
+                    return utcToLocalDateTime(maxUtc.toISOString())
                   })() : undefined}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    const base = startTime ? new Date(startTime) : new Date()
-                    const maxDate = new Date(base)
-                    maxDate.setDate(maxDate.getDate() + 7)
-                    const year = maxDate.getFullYear()
-                    const month = String(maxDate.getMonth() + 1).padStart(2, '0')
-                    const day = String(maxDate.getDate()).padStart(2, '0')
-                    const hours = String(maxDate.getHours()).padStart(2, '0')
-                    const minutes = String(maxDate.getMinutes()).padStart(2, '0')
-                    setEndTime(`${year}-${month}-${day}T${hours}:${minutes}`)
+                    const baseUtc = startTime ? localDateTimeToUtc(startTime) : new Date().toISOString()
+                    const maxUtc = new Date(baseUtc)
+                    maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
+                    setEndTime(utcToLocalDateTime(maxUtc.toISOString()))
                   }}
                   title="Set to 7 days from start"
                   className="touch-manipulation min-h-[44px] px-3 sm:px-4"

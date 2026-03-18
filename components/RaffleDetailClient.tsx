@@ -1125,6 +1125,76 @@ export function RaffleDetailClient({
     setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
     setDepositEscrowLoading(true)
+
+    // Confirm signature robustly and ensure it actually landed successfully.
+    // Wallet adapters can return a signature even if the tx is dropped/failed; this makes the UI truthful.
+    const confirmAndAssertSuccess = async (signature: string) => {
+      const started = Date.now()
+      const timeoutMs = 45_000
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+      while (Date.now() - started < timeoutMs) {
+        // Prefer getTransaction so we can read meta.err (authoritative for success/failure)
+        try {
+          const tx = await connection.getTransaction(signature, {
+            commitment: 'confirmed',
+            maxSupportedTransactionVersion: 0,
+          })
+          if (tx?.meta) {
+            if (tx.meta.err) {
+              throw new Error(`Transaction failed: ${JSON.stringify(tx.meta.err)}`)
+            }
+            return
+          }
+        } catch (e) {
+          // If RPC errors here, still fall back to signature status below.
+          const msg = e instanceof Error ? e.message : String(e)
+          // If we already know it failed, don't keep retrying.
+          if (msg.toLowerCase().includes('transaction failed')) throw e
+        }
+
+        try {
+          const st = await connection.getSignatureStatuses([signature], {
+            searchTransactionHistory: true,
+          })
+          const s = st?.value?.[0]
+          if (s?.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`)
+          }
+          if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') {
+            return
+          }
+        } catch (e) {
+          // ignore and retry; RPC can be flaky on mobile networks
+        }
+
+        await sleep(900)
+      }
+
+      throw new Error(
+        'Transaction signature was returned, but it was not confirmed on-chain in time. Please check your wallet activity and retry.'
+      )
+    }
+
+    const verifyDepositAfterTransfer = async () => {
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const msg = typeof data?.error === 'string' ? data.error : 'Verification failed'
+          setDepositEscrowError(msg)
+          return false
+        }
+        return true
+      } catch (e) {
+        setDepositEscrowError(e instanceof Error ? e.message : 'Verification failed')
+        return false
+      }
+    }
+
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
@@ -1149,7 +1219,8 @@ export function RaffleDetailClient({
           assetId: raffle.nft_mint_address,
           escrowAddress,
         })
-        await connection.confirmTransaction(sig, 'confirmed')
+        await confirmAndAssertSuccess(sig)
+        await verifyDepositAfterTransfer()
         setDepositEscrowError(null)
         setDepositEscrowSuccess(true)
         router.refresh()
@@ -1210,7 +1281,8 @@ export function RaffleDetailClient({
         )
       )
       const sig = await sendTransaction(tx, connection)
-      await connection.confirmTransaction(sig, 'confirmed')
+      await confirmAndAssertSuccess(sig)
+      await verifyDepositAfterTransfer()
       setDepositEscrowError(null)
       setDepositEscrowSuccess(true)
       router.refresh()

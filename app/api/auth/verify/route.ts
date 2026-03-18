@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     const nonceMatch = messageStr.match(/Nonce: ([^\n]+)/)
     const nonce = nonceMatch?.[1]?.trim()
-    if (!nonce || !consumeNonce(nonce)) {
+    if (!nonce || !consumeNonce(nonce, walletStr)) {
       return NextResponse.json(
         { error: 'Invalid or expired nonce' },
         { status: 400 }

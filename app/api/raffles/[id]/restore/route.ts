@@ -83,11 +83,16 @@ export async function POST(
 
     const originalEndTime = raffle.original_end_time || raffle.end_time
 
+    // For NFT raffles, never make it active unless the prize is verified in escrow.
+    // (verify-prize-deposit sets prize_deposited_at + is_active.)
+    const shouldBeActive =
+      raffle.prize_type === 'nft' ? !!raffle.prize_deposited_at : true
+
     await updateRaffle(raffleId, {
       original_end_time: originalEndTime,
       end_time: newEndTime.toISOString(),
       status: 'live',
-      is_active: true,
+      is_active: shouldBeActive,
     })
 
     const hoursLabel = validHours >= 168 ? '7 days' : validHours >= 72 ? '3 days' : `${validHours} hours`
