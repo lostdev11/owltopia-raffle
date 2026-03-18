@@ -70,9 +70,11 @@ export async function POST(
         )
       }
       const now = new Date().toISOString()
+      // Keep raffle.nft_mint_address in sync with what's actually in escrow for Core prizes.
       await updateRaffle(id, {
         prize_deposited_at: now,
         is_active: true,
+        nft_mint_address: raffle.nft_mint_address,
       })
       return NextResponse.json({
         success: true,
