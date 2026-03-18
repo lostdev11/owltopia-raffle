@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Trophy, Ticket, PlusCircle, Loader2, Medal } from 'lucide-react'
+import { ArrowLeft, Trophy, Ticket, PlusCircle, Loader2, Medal, Crown } from 'lucide-react'
 
 type LeaderboardEntry = {
   rank: number
@@ -16,6 +16,7 @@ type LeaderboardData = {
   rafflesEntered: LeaderboardEntry[]
   rafflesCreated: LeaderboardEntry[]
   ticketsSold: LeaderboardEntry[]
+  rafflesWon: LeaderboardEntry[]
 }
 
 function formatWallet(wallet: string): string {
@@ -51,47 +52,50 @@ function LeaderboardTable({
         {entries.length === 0 ? (
           <p className="text-muted-foreground text-sm py-4">No data yet.</p>
         ) : (
-          <div className="overflow-x-auto -mx-1 px-1">
-            <table className="w-full text-sm min-w-[240px]">
-              <thead>
-                <tr className="border-b border-green-500/20">
-                  <th className="text-left py-2.5 sm:py-2 font-medium w-10 sm:w-12">#</th>
-                  <th className="text-left py-2.5 sm:py-2 font-medium">Name</th>
-                  <th className="text-right py-2.5 sm:py-2 font-medium">{valueLabel}</th>
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-[12%]" />
+              <col className="w-[64%]" />
+              <col className="w-[24%]" />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-green-500/20">
+                <th className="text-left py-2.5 sm:py-2 font-medium">#</th>
+                <th className="text-left py-2.5 sm:py-2 font-medium">Name</th>
+                <th className="text-right py-2.5 sm:py-2 font-medium">{valueLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
+                  <td className="py-3 sm:py-2 align-middle">
+                    {e.rank <= 3 ? (
+                      <Medal
+                        className={`h-5 w-5 inline ${
+                          e.rank === 1
+                            ? 'text-amber-400'
+                            : e.rank === 2
+                              ? 'text-slate-300'
+                              : 'text-amber-700'
+                        }`}
+                        aria-label={`Rank ${e.rank}`}
+                      />
+                    ) : (
+                      <span className="text-muted-foreground">{e.rank}</span>
+                    )}
+                  </td>
+                  <td className="py-3 sm:py-2 text-xs sm:text-sm align-middle truncate" title={e.wallet}>
+                    {displayNames[e.wallet] ? (
+                      <span className="font-medium">{displayNames[e.wallet]}</span>
+                    ) : (
+                      <span className="font-mono">{formatWallet(e.wallet)}</span>
+                    )}
+                  </td>
+                  <td className="py-3 sm:py-2 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {entries.map((e) => (
-                  <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
-                    <td className="py-3 sm:py-2 align-middle">
-                      {e.rank <= 3 ? (
-                        <Medal
-                          className={`h-5 w-5 inline ${
-                            e.rank === 1
-                              ? 'text-amber-400'
-                              : e.rank === 2
-                                ? 'text-slate-300'
-                                : 'text-amber-700'
-                          }`}
-                          aria-label={`Rank ${e.rank}`}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground">{e.rank}</span>
-                      )}
-                    </td>
-                    <td className="py-3 sm:py-2 text-xs sm:text-sm align-middle" title={e.wallet}>
-                      {displayNames[e.wallet] ? (
-                        <span className="font-medium">{displayNames[e.wallet]}</span>
-                      ) : (
-                        <span className="font-mono">{formatWallet(e.wallet)}</span>
-                      )}
-                    </td>
-                    <td className="py-3 sm:py-2 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </CardContent>
     </Card>
@@ -122,6 +126,7 @@ export default function LeaderboardPage() {
     data.rafflesEntered.forEach((e) => wallets.add(e.wallet))
     data.rafflesCreated.forEach((e) => wallets.add(e.wallet))
     data.ticketsSold.forEach((e) => wallets.add(e.wallet))
+    data.rafflesWon.forEach((e) => wallets.add(e.wallet))
     const list = [...wallets].slice(0, 200)
     if (list.length === 0) return
     const q = list.join(',')
@@ -159,12 +164,10 @@ export default function LeaderboardPage() {
         </div>
       )}
 
-      {error && (
-        <p className="text-destructive py-4">{error}</p>
-      )}
+      {error && <p className="text-destructive py-4">{error}</p>}
 
       {!loading && !error && data && (
-        <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
           <LeaderboardTable
             title="Most raffles entered"
             description="Users with the most distinct raffles participated in (confirmed entries). Display names are set in My Dashboard."
@@ -179,6 +182,14 @@ export default function LeaderboardPage() {
             entries={data.rafflesCreated}
             valueLabel="Raffles"
             icon={PlusCircle}
+            displayNames={displayNames}
+          />
+          <LeaderboardTable
+            title="Most raffles won"
+            description="Players who have won the most completed raffles on Owl Raffle."
+            entries={data.rafflesWon}
+            valueLabel="Wins"
+            icon={Crown}
             displayNames={displayNames}
           />
           <LeaderboardTable

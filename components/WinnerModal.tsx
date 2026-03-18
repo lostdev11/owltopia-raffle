@@ -13,6 +13,7 @@ import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { Trophy, ExternalLink } from 'lucide-react'
 import type { PrizeType } from '@/lib/types'
+import { useEffect, useState } from 'react'
 
 interface WinnerModalProps {
   open: boolean
@@ -40,6 +41,25 @@ export function WinnerModal({
   nftCollectionName,
 }: WinnerModalProps) {
   const borderStyle = getThemeAccentBorderStyle(themeAccent)
+  const [displayName, setDisplayName] = useState<string | null>(null)
+
+  // Fetch display name for the winner wallet when the modal opens
+  useEffect(() => {
+    if (!open || !winnerWallet) {
+      setDisplayName(null)
+      return
+    }
+    const walletAddr = winnerWallet
+    fetch(`/api/profiles?wallets=${encodeURIComponent(walletAddr)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => {
+        const name = map?.[walletAddr]
+        setDisplayName(typeof name === 'string' && name.trim() ? name.trim() : null)
+      })
+      .catch(() => {
+        setDisplayName(null)
+      })
+  }, [open, winnerWallet])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -58,10 +78,19 @@ export function WinnerModal({
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="text-center space-y-2">
-            <p className="text-sm text-muted-foreground">Winner Wallet</p>
-            <code className="block p-3 rounded-lg bg-muted font-mono text-sm break-all">
-              {winnerWallet}
-            </code>
+            <p className="text-sm text-muted-foreground">Winner</p>
+            {displayName ? (
+              <>
+                <p className="text-xl font-semibold break-words">{displayName}</p>
+                <code className="block p-2 rounded-lg bg-muted font-mono text-xs break-all mt-1">
+                  {winnerWallet}
+                </code>
+              </>
+            ) : (
+              <code className="block p-3 rounded-lg bg-muted font-mono text-sm break-all">
+                {winnerWallet}
+              </code>
+            )}
           </div>
           {prizeType === 'nft' ? (
             <div className="text-center space-y-2">

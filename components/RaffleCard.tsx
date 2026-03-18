@@ -79,6 +79,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [imageError, setImageError] = useState(false)
+  const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
   // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
@@ -146,6 +147,24 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
+
+  // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
+  useEffect(() => {
+    if (!raffle.winner_wallet || isActive || isFuture) {
+      setWinnerDisplayName(null)
+      return
+    }
+    const walletAddr = raffle.winner_wallet
+    fetch(`/api/profiles?wallets=${encodeURIComponent(walletAddr)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => {
+        const name = map?.[walletAddr]
+        setWinnerDisplayName(typeof name === 'string' && name.trim() ? name.trim() : null)
+      })
+      .catch(() => {
+        setWinnerDisplayName(null)
+      })
+  }, [raffle.winner_wallet, isActive, isFuture])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -851,9 +870,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               <div className="mt-1.5 pt-1.5 sm:mt-2 sm:pt-2 border-t flex items-center gap-1.5 min-w-0">
                 <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
                 <span className="text-[11px] sm:text-xs text-muted-foreground truncate min-w-0">
-                  Winner: <span className="font-mono font-semibold text-foreground">
-                    {raffle.winner_wallet.slice(0, 6)}…{raffle.winner_wallet.slice(-4)}
-                  </span>
+                  Winner:{' '}
+                  {winnerDisplayName ? (
+                    <span className="font-semibold text-foreground">{winnerDisplayName}</span>
+                  ) : (
+                    <span className="font-mono font-semibold text-foreground">
+                      {raffle.winner_wallet.slice(0, 6)}…{raffle.winner_wallet.slice(-4)}
+                    </span>
+                  )}
                 </span>
               </div>
             )}
@@ -1032,9 +1056,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <div className={`${classes.footer} text-white/90 flex items-center gap-1.5 mt-1 pt-1 border-t border-white/20`}>
                     <Trophy className={`${displaySize === 'large' ? 'h-3.5 w-3.5' : 'h-3 w-3'} text-yellow-400 flex-shrink-0`} />
                     <span className="truncate">
-                      Winner: <span className="font-mono font-semibold">
-                        {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
-                      </span>
+                      Winner:{' '}
+                      {winnerDisplayName ? (
+                        <span className="font-semibold">{winnerDisplayName}</span>
+                      ) : (
+                        <span className="font-mono font-semibold">
+                          {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                        </span>
+                      )}
                     </span>
                   </div>
                 )}
@@ -1125,9 +1154,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
                     <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />
                     <span className="text-muted-foreground">
-                      Winner: <span className="font-mono font-semibold text-foreground">
-                        {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
-                      </span>
+                      Winner:{' '}
+                      {winnerDisplayName ? (
+                        <span className="font-semibold text-foreground">{winnerDisplayName}</span>
+                      ) : (
+                        <span className="font-mono font-semibold text-foreground">
+                          {raffle.winner_wallet.slice(0, 6)}...{raffle.winner_wallet.slice(-4)}
+                        </span>
+                      )}
                     </span>
                   </div>
                 )}

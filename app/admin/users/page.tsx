@@ -120,9 +120,9 @@ export default function AdminUsersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Wallets & revenue</CardTitle>
+          <CardTitle>Users</CardTitle>
           <CardDescription>
-            Creators and entrants; creator revenue from completed raffles, total spent from confirmed entries.
+            Per user (wallet address or username): raffles created, creator revenue from completed raffles, entries, and total spent from confirmed entries.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -140,7 +140,7 @@ export default function AdminUsersPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-2 font-medium">Wallet</th>
+                    <th className="text-left py-2 font-medium">User (wallet / name)</th>
                     <th className="text-right py-2 font-medium">Raffles</th>
                     <th className="text-right py-2 font-medium">Creator revenue</th>
                     <th className="text-right py-2 font-medium">Entries</th>

@@ -19,7 +19,7 @@ import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2 } from 'lucide-react'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -226,9 +226,11 @@ export function RafflesPageClient({
   const [leaderboardData, setLeaderboardData] = useState<{
     rafflesEntered: Array<{ rank: number; wallet: string; value: number }>
     rafflesCreated: Array<{ rank: number; wallet: string; value: number }>
+    rafflesWon: Array<{ rank: number; wallet: string; value: number }>
     ticketsSold: Array<{ rank: number; wallet: string; value: number }>
   } | null>(null)
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -256,6 +258,29 @@ export function RafflesPageClient({
       .catch(() => setLeaderboardData(null))
       .finally(() => setLeaderboardLoading(false))
   }, [tab])
+
+  // Fetch display names for wallets that appear in the in-page leaderboard
+  useEffect(() => {
+    if (!leaderboardData) {
+      setLeaderboardDisplayNames({})
+      return
+    }
+    const wallets = new Set<string>()
+    leaderboardData.rafflesEntered.forEach((e) => wallets.add(e.wallet))
+    leaderboardData.rafflesCreated.forEach((e) => wallets.add(e.wallet))
+    leaderboardData.rafflesWon.forEach((e) => wallets.add(e.wallet))
+    leaderboardData.ticketsSold.forEach((e) => wallets.add(e.wallet))
+    const list = [...wallets].slice(0, 200)
+    if (list.length === 0) {
+      setLeaderboardDisplayNames({})
+      return
+    }
+    const q = list.join(',')
+    fetch(`/api/profiles?wallets=${encodeURIComponent(q)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => setLeaderboardDisplayNames(map))
+      .catch(() => setLeaderboardDisplayNames({}))
+  }, [leaderboardData])
 
   const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
 
@@ -709,7 +734,7 @@ export function RafflesPageClient({
                 Leaderboard
               </h2>
               <p className="text-muted-foreground text-sm mb-6">
-                Top 10 by raffles entered, raffles created, and tickets sold.
+                Top 10 by raffles entered, raffles created, raffles won, and tickets sold.
               </p>
               {leaderboardLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8">
@@ -717,7 +742,7 @@ export function RafflesPageClient({
                   Loading…
                 </div>
               ) : leaderboardData ? (
-                <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3">
+                <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4">
                   {[
                     {
                       title: 'Most raffles entered',
@@ -730,6 +755,12 @@ export function RafflesPageClient({
                       entries: leaderboardData.rafflesCreated,
                       valueLabel: 'Raffles',
                       icon: PlusCircle,
+                    },
+                    {
+                      title: 'Most raffles won',
+                      entries: leaderboardData.rafflesWon,
+                      valueLabel: 'Wins',
+                      icon: Crown,
                     },
                     {
                       title: 'Most tickets sold',
@@ -749,39 +780,48 @@ export function RafflesPageClient({
                         {entries.length === 0 ? (
                           <p className="text-muted-foreground text-sm py-2">No data yet.</p>
                         ) : (
-                          <div className="overflow-x-auto -mx-1 px-1">
-                            <table className="w-full text-sm min-w-[200px]">
-                              <thead>
-                                <tr className="border-b border-green-500/20">
-                                  <th className="text-left py-2 sm:py-1.5 font-medium w-10">#</th>
-                                  <th className="text-left py-2 sm:py-1.5 font-medium">Wallet</th>
-                                  <th className="text-right py-2 sm:py-1.5 font-medium">{valueLabel}</th>
+                          <table className="w-full text-sm table-fixed">
+                            <colgroup>
+                              <col className="w-[12%]" />
+                              <col className="w-[64%]" />
+                              <col className="w-[24%]" />
+                            </colgroup>
+                            <thead>
+                              <tr className="border-b border-green-500/20">
+                                <th className="text-left py-2 sm:py-1.5 font-medium">#</th>
+                                <th className="text-left py-2 sm:py-1.5 font-medium">Name</th>
+                                <th className="text-right py-2 sm:py-1.5 font-medium">{valueLabel}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entries.map((e) => (
+                                <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
+                                  <td className="py-2.5 sm:py-1.5 align-middle">
+                                    {e.rank <= 3 ? (
+                                      <Medal
+                                        className={`h-4 w-4 inline ${
+                                          e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
+                                        }`}
+                                        aria-label={`Rank ${e.rank}`}
+                                      />
+                                    ) : (
+                                      <span className="text-muted-foreground">{e.rank}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 sm:py-1.5 text-xs sm:text-sm align-middle truncate" title={e.wallet}>
+                                    {leaderboardDisplayNames[e.wallet] ? (
+                                      <span className="font-medium">{leaderboardDisplayNames[e.wallet]}</span>
+                                    ) : (
+                                      <span className="font-mono">
+                                        {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 sm:py-1.5 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
                                 </tr>
-                              </thead>
-                              <tbody>
-                                {entries.map((e) => (
-                                  <tr key={`${e.wallet}-${e.rank}`} className="border-b border-border/50">
-                                    <td className="py-2.5 sm:py-1.5 align-middle">
-                                      {e.rank <= 3 ? (
-                                        <Medal
-                                          className={`h-4 w-4 inline ${
-                                            e.rank === 1 ? 'text-amber-400' : e.rank === 2 ? 'text-slate-300' : 'text-amber-700'
-                                          }`}
-                                          aria-label={`Rank ${e.rank}`}
-                                        />
-                                      ) : (
-                                        <span className="text-muted-foreground">{e.rank}</span>
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 sm:py-1.5 font-mono text-xs sm:text-sm align-middle" title={e.wallet}>
-                                      {e.wallet.length <= 12 ? e.wallet : `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`}
-                                    </td>
-                                    <td className="py-2.5 sm:py-1.5 text-right font-medium align-middle">{e.value.toLocaleString()}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                              ))}
+                            </tbody>
+                          </table>
                         )}
                       </CardContent>
                     </Card>

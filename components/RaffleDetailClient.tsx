@@ -1295,6 +1295,30 @@ export function RaffleDetailClient({
   const hasEnded = !isActive && !isFuture
   const isWinnerDetail = hasEnded && !!raffle.winner_wallet && wallet === raffle.winner_wallet
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
+
+  // Confetti: show once when opening the winner modal on a past raffle you won
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!isWinnerDetail || !showWinner) return
+
+    // Respect OS-level reduced motion
+    const prefersReducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefersReducedMotion) return
+
+    const key = `confetti:raffle-win:${raffle.id}:${raffle.winner_wallet}`
+    try {
+      if (window.sessionStorage.getItem(key) === '1') return
+      window.sessionStorage.setItem(key, '1')
+    } catch {
+      // sessionStorage can be blocked; still allow confetti once per mount
+    }
+
+    // Ensure module is warm for instant fire
+    preloadConfetti()
+    fireGreenConfetti()
+  }, [isWinnerDetail, showWinner, raffle.id, raffle.winner_wallet])
   // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
   const showNftTransferButton = 
     hasEnded && 

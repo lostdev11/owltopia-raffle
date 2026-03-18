@@ -54,7 +54,6 @@ export default function DashboardPage() {
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [entriesFilter, setEntriesFilter] = useState<'all' | 'won'>('all')
-  const [openEntryId, setOpenEntryId] = useState<string | null>(null)
   const [openRaffleId, setOpenRaffleId] = useState<string | null>(null)
   const [displayNameInput, setDisplayNameInput] = useState('')
   const [displayNameSaving, setDisplayNameSaving] = useState(false)
@@ -341,14 +340,32 @@ export default function DashboardPage() {
   const wallet = typeof data.wallet === 'string' ? data.wallet : ''
   const displayName = data.displayName != null ? String(data.displayName) : null
 
-  const filteredEntries =
+  const sourceEntries =
     entriesFilter === 'won'
       ? myEntries.filter(({ raffle }) => raffle.winner_wallet === wallet)
       : myEntries
 
-  const toggleEntry = (id: string) => {
-    setOpenEntryId((prev) => (prev === id ? null : id))
+  type RaffleEntrySummary = {
+    raffle: (typeof myEntries)[number]['raffle']
+    totalTickets: number
   }
+
+  const raffleSummaries: RaffleEntrySummary[] = Object.values(
+    sourceEntries.reduce<Record<string, RaffleEntrySummary>>((acc, { entry, raffle }) => {
+      const key = raffle.id
+      const qty = Number(entry.ticket_quantity) || 0
+      const existing = acc[key]
+      if (existing) {
+        existing.totalTickets += qty
+      } else {
+        acc[key] = {
+          raffle,
+          totalTickets: qty,
+        }
+      }
+      return acc
+    }, {})
+  )
 
   const toggleRaffle = (id: string) => {
     setOpenRaffleId((prev) => (prev === id ? null : id))
@@ -670,7 +687,7 @@ export default function DashboardPage() {
               <Ticket className="h-5 w-5" />
               My entries
             </CardTitle>
-            <CardDescription>Raffles you entered ({myEntries.length})</CardDescription>
+            <CardDescription>Raffles you entered ({raffleSummaries.length})</CardDescription>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Show</span>
@@ -685,25 +702,22 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {filteredEntries.length === 0 ? (
+          {raffleSummaries.length === 0 ? (
             <p className="text-muted-foreground">
-              {myEntries.length === 0
+              {raffleSummaries.length === 0
                 ? 'You haven’t entered any raffles yet.'
                 : 'No entries match this filter.'}
             </p>
           ) : (
             <ul className="space-y-2">
-              {filteredEntries.slice(0, 20).map(({ entry, raffle }) => {
-                const isOpen = openEntryId === entry.id
-                const createdAt = new Date(entry.created_at)
+              {raffleSummaries.slice(0, 20).map(({ raffle, totalTickets }) => {
                 return (
                   <li
-                    key={entry.id}
+                    key={raffle.id}
                     className="border-b border-border/50 last:border-0"
                   >
                     <button
                       type="button"
-                      onClick={() => toggleEntry(entry.id)}
                       className="flex w-full items-center justify-between gap-4 py-2 text-left"
                     >
                       <span className="flex min-w-0 flex-col">
@@ -714,13 +728,10 @@ export default function DashboardPage() {
                         >
                           {raffle.title}
                         </Link>
-                        <span className="text-xs text-muted-foreground">
-                          {createdAt.toLocaleString()}
-                        </span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground">
-                        {entry.ticket_quantity} ticket
-                        {entry.ticket_quantity !== 1 ? 's' : ''}
+                        {totalTickets} ticket
+                        {totalTickets !== 1 ? 's' : ''}
                         {raffle.winner_wallet === wallet && (
                           <span className="text-green-600">· You won!</span>
                         )}
@@ -732,31 +743,14 @@ export default function DashboardPage() {
                         </Link>
                       </span>
                     </button>
-                    <div
-                      className={`overflow-hidden transition-all duration-300 ${
-                        isOpen ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
-                      }`}
-                    >
-                      <div className="pb-3 pl-1 pr-1 text-sm text-muted-foreground space-y-1">
-                        <p>
-                          <span className="font-medium text-foreground">Amount paid:</span>{' '}
-                          {entry.amount_paid.toFixed(entry.currency === 'USDC' ? 2 : 4)}{' '}
-                          {entry.currency}
-                        </p>
-                        <p className="capitalize">
-                          <span className="font-medium text-foreground">Entry status:</span>{' '}
-                          {entry.status.replace(/_/g, ' ')}
-                        </p>
-                      </div>
-                    </div>
                   </li>
                 )
               })}
             </ul>
           )}
-          {filteredEntries.length > 20 && (
+          {raffleSummaries.length > 20 && (
             <p className="text-sm text-muted-foreground mt-2">
-              Showing latest 20 of {filteredEntries.length}
+              Showing latest 20 of {raffleSummaries.length}
             </p>
           )}
         </CardContent>

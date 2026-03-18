@@ -13,6 +13,7 @@ export type LeaderboardData = {
   rafflesEntered: LeaderboardEntry[]
   rafflesCreated: LeaderboardEntry[]
   ticketsSold: LeaderboardEntry[]
+  rafflesWon: LeaderboardEntry[]
 }
 
 function normalizeWallet(v: string | null | undefined): string {
@@ -37,7 +38,7 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
   const [rafflesRes, entriesRes] = await Promise.all([
     db
       .from('raffles')
-      .select('id, created_by, creator_wallet')
+      .select('id, created_by, creator_wallet, winner_wallet, status')
       .limit(5000),
     db
       .from('entries')
@@ -50,6 +51,8 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     id: string
     created_by: string | null
     creator_wallet: string | null
+    winner_wallet: string | null
+    status: string | null
   }[]
   const entries = (entriesRes.data || []) as {
     raffle_id: string
@@ -105,9 +108,22 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     Array.from(ticketsByCreator.entries()).map(([wallet, value]) => ({ wallet, value }))
   )
 
+  // Raffles won: count of completed raffles where this wallet is the recorded winner
+  const winsByWallet = new Map<string, number>()
+  for (const r of raffles) {
+    const winner = normalizeWallet(r.winner_wallet)
+    if (!winner) continue
+    if ((r.status || '').toLowerCase() !== 'completed') continue
+    winsByWallet.set(winner, (winsByWallet.get(winner) ?? 0) + 1)
+  }
+  const rafflesWon = takeTopTen(
+    Array.from(winsByWallet.entries()).map(([wallet, value]) => ({ wallet, value }))
+  )
+
   return {
     rafflesEntered,
     rafflesCreated,
     ticketsSold,
+    rafflesWon,
   }
 }
