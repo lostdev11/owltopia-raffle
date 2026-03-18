@@ -287,10 +287,17 @@ export async function POST(request: NextRequest) {
       created_by: walletAddress,
       creator_wallet: walletAddress,
       // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active)
+      // NFT raffles are always created as draft and inactive until the prize is deposited.
+      // Status will be promoted (e.g. to 'live') only after successful prize deposit/verification.
       is_active: prizeType !== 'nft',
       winner_wallet: null,
       winner_selected_at: null,
-      status: ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status) ? body.status : 'draft',
+      status:
+        prizeType === 'nft'
+          ? 'draft'
+          : ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status)
+          ? body.status
+          : 'draft',
       nft_transfer_transaction: null,
       fee_bps_applied: null,
       fee_tier_reason: null,

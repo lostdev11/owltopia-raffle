@@ -294,14 +294,17 @@ export function CreateRaffleForm() {
             }
             if (!holder) {
               alert(
-                'NFT not found in your wallet (supports SPL Token and Token-2022). ' +
+                'Your raffle was created as a draft, but we could not find this NFT in your wallet (supports SPL Token and Token-2022). ' +
                   'If you still have the NFT, try again or use Wi‑Fi, then complete the deposit on the raffle page.'
               )
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
             if ('delegated' in holder && holder.delegated) {
-              alert('This NFT is staked or delegated. Unstake it in your wallet or staking app, then try the deposit again on the raffle page.')
+              alert(
+                'Your raffle was created as a draft, but this NFT is currently staked or delegated. ' +
+                  'Unstake it in your wallet or staking app, then complete the prize deposit from the raffle page.'
+              )
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
@@ -579,7 +582,10 @@ export function CreateRaffleForm() {
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
                     <p className="font-medium text-foreground">Flow &amp; fees</p>
                     <p className="text-muted-foreground mt-0.5">
-                      <strong>1.</strong> Create raffle — your wallet will prompt you to transfer this NFT to escrow right away (locked for the duration of the raffle). <strong>2.</strong> When the raffle ends, the prize is automatically sent to the winner. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee: <strong>0 SOL</strong> — only network (gas) fees.
+                      <strong>1.</strong> Create raffle — it is saved as a draft and linked to this NFT.{' '}
+                      <strong>2.</strong> Deposit the NFT to escrow from the raffle page (your wallet will prompt a transfer; the NFT is then locked for the duration of the raffle).{' '}
+                      <strong>3.</strong> When the raffle ends, the prize is automatically sent to the winner. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee:{' '}
+                      <strong>0 SOL</strong> — only network (gas) fees when you deposit and when the winner is paid out.
                     </p>
                   </div>
                 </>
