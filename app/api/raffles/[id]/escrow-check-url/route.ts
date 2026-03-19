@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById } from '@/lib/db/raffles'
-import { getEscrowTokenAccountForMint } from '@/lib/raffles/prize-escrow'
+import { getEscrowTokenAccountForMint, isMplCoreAssetInEscrow } from '@/lib/raffles/prize-escrow'
 import { PublicKey } from '@solana/web3.js'
 
 export const dynamic = 'force-dynamic'
@@ -13,8 +13,10 @@ const isDevnet = /devnet/i.test(rpcUrl)
 
 /**
  * GET /api/raffles/[id]/escrow-check-url
- * Returns a block explorer URL to view the escrow's token account for this raffle's NFT.
- * Used so users can verify the NFT is in escrow without exposing the escrow address on the app.
+ * Returns explorer URLs so users can verify the listed prize mint and (for SPL) escrow custody.
+ * - `prizeMintUrl`: Solscan token page for the mint (matches the raffle’s prize identity).
+ * - `custodyUrl`: SPL/Token-2022 = escrow’s ATA for that mint; Mpl Core = same as prizeMintUrl (owner on page).
+ * - `url`: legacy field, same as `custodyUrl` for backward compatibility.
  */
 export async function GET(
   _request: NextRequest,
@@ -38,22 +40,42 @@ export async function GET(
       )
     }
 
-    const mint = new PublicKey(raffle.nft_mint_address)
+    const mintStr = raffle.nft_mint_address.trim()
+    const mint = new PublicKey(mintStr)
+    const cluster = isDevnet ? '?cluster=devnet' : ''
+    const prizeMintUrl = `https://solscan.io/token/${mintStr}${cluster}`
+
     const ata = await getEscrowTokenAccountForMint(mint)
-    if (!ata) {
-      return NextResponse.json(
-        {
-          error:
-            'Escrow account not found on-chain. The NFT may not have been transferred to escrow yet (e.g. raffle still draft or transfer was not completed). Supports SPL Token and Token-2022 NFTs.',
-        },
-        { status: 404 }
-      )
+    if (ata) {
+      const custodyUrl = `https://solscan.io/account/${ata.toBase58()}${cluster}`
+      return NextResponse.json({
+        url: custodyUrl,
+        prizeMintUrl,
+        custodyUrl,
+      })
     }
 
-    const cluster = isDevnet ? '?cluster=devnet' : ''
-    const url = `https://solscan.io/account/${ata.toBase58()}${cluster}`
+    let inCoreEscrow = false
+    try {
+      inCoreEscrow = await isMplCoreAssetInEscrow(mintStr)
+    } catch {
+      inCoreEscrow = false
+    }
+    if (inCoreEscrow) {
+      return NextResponse.json({
+        url: prizeMintUrl,
+        prizeMintUrl,
+        custodyUrl: prizeMintUrl,
+      })
+    }
 
-    return NextResponse.json({ url })
+    return NextResponse.json(
+      {
+        error:
+          'Escrow custody not found on-chain for this mint. The NFT may not be in escrow yet, or it may use a standard this link does not cover (e.g. compressed NFT).',
+      },
+      { status: 404 }
+    )
   } catch (error) {
     console.error('Escrow check URL error:', error)
     return NextResponse.json(

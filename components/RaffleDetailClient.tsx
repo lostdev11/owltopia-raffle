@@ -81,7 +81,11 @@ export function RaffleDetailClient({
   const [showManualEscrowFallback, setShowManualEscrowFallback] = useState(false)
   const [depositVerifyLoading, setDepositVerifyLoading] = useState(false)
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
-  const [escrowCheckUrl, setEscrowCheckUrl] = useState<string | null>(null)
+  /** Explorer links: prize mint (identity) vs escrow token account (SPL custody), or single URL for Core. */
+  const [escrowExplorer, setEscrowExplorer] = useState<{
+    prizeMintUrl: string
+    custodyUrl: string
+  } | null>(null)
   const [showEscrowConfirmDialog, setShowEscrowConfirmDialog] = useState(false)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const [showParticipants, setShowParticipants] = useState(false)
@@ -283,8 +287,12 @@ export function RaffleDetailClient({
     let cancelled = false
     fetch(`/api/raffles/${raffle.id}/escrow-check-url`)
       .then((r) => (cancelled ? undefined : r.ok ? r.json() : undefined))
-      .then((data: { url?: string } | undefined) => {
-        if (!cancelled && data?.url) setEscrowCheckUrl(data.url)
+      .then((data: { url?: string; prizeMintUrl?: string; custodyUrl?: string } | undefined) => {
+        if (cancelled || !data?.url || !raffle.nft_mint_address) return
+        const mint = raffle.nft_mint_address.trim()
+        const prizeMintUrl = data.prizeMintUrl ?? `https://solscan.io/token/${mint}`
+        const custodyUrl = data.custodyUrl ?? data.url
+        setEscrowExplorer({ prizeMintUrl, custodyUrl })
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -1835,16 +1843,34 @@ export function RaffleDetailClient({
                     <p className="text-xs text-muted-foreground">
                       Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.
                     </p>
-                    {escrowCheckUrl && (
-                      <a
-                        href={escrowCheckUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary hover:underline inline-flex items-center gap-1"
-                      >
-                        Check NFT in escrow (block explorer)
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      </a>
+                    {escrowExplorer && (
+                      <div className="flex flex-col gap-2">
+                        <a
+                          href={escrowExplorer.prizeMintUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                        >
+                          View prize mint on explorer
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        </a>
+                        {escrowExplorer.custodyUrl !== escrowExplorer.prizeMintUrl && (
+                          <a
+                            href={escrowExplorer.custodyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                          >
+                            Escrow token account (custody proof)
+                            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          </a>
+                        )}
+                        {escrowExplorer.custodyUrl === escrowExplorer.prizeMintUrl && (
+                          <p className="text-xs text-muted-foreground">
+                            On Solscan, confirm the owner is the platform escrow wallet.
+                          </p>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
@@ -2126,17 +2152,33 @@ export function RaffleDetailClient({
             </div>
           )}
 
-          {raffle.prize_type === 'nft' && raffle.prize_deposited_at && escrowCheckUrl && (
-            <div className={`${classes.headerPadding} pt-0`}>
+          {raffle.prize_type === 'nft' && raffle.prize_deposited_at && escrowExplorer && (
+            <div className={`${classes.headerPadding} pt-0 flex flex-col gap-2`}>
               <a
-                href={escrowCheckUrl}
+                href={escrowExplorer.prizeMintUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
               >
-                View NFT in escrow (block explorer)
+                View prize mint on explorer
                 <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
               </a>
+              {escrowExplorer.custodyUrl !== escrowExplorer.prizeMintUrl && (
+                <a
+                  href={escrowExplorer.custodyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                >
+                  Escrow token account (custody proof)
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                </a>
+              )}
+              {escrowExplorer.custodyUrl === escrowExplorer.prizeMintUrl && (
+                <p className="text-xs text-muted-foreground">
+                  On Solscan, confirm the owner is the platform escrow wallet.
+                </p>
+              )}
             </div>
           )}
 

@@ -116,6 +116,15 @@ function isColumnError(errorMessage: string, errorCode?: string): boolean {
   )
 }
 
+/** Postgrest errors often print as `{}` with console — log message/code/details explicitly. */
+function formatPostgrestError(err: { message?: string; code?: string; details?: string } | null | undefined): string {
+  if (!err) return 'null'
+  const msg = err.message ?? ''
+  const code = err.code ?? ''
+  const details = err.details ?? ''
+  return `message=${msg} code=${code} details=${details}`
+}
+
 /** User-friendly message for connection/timeout errors shown in the UI */
 const CONNECTION_ERROR_MESSAGE =
   'Unable to load raffles. Please check your connection and try again.'
@@ -435,12 +444,14 @@ export async function getRaffleBySlug(slug: string) {
           .eq('slug', slug)
           .single()
         if (retry.error || !retry.data) {
-          console.error('Error fetching raffle by slug (retry with minimal columns):', retry.error)
+          console.warn(
+            `Error fetching raffle by slug (retry with minimal columns): ${formatPostgrestError(retry.error)}`,
+          )
           return null
         }
         return normalizeRaffleRow(retry.data as unknown as Record<string, unknown>)
       }
-      console.error('Error fetching raffle:', error)
+      console.warn(`Error fetching raffle: ${formatPostgrestError(error)}`)
       return null
     }
 
@@ -483,12 +494,14 @@ export async function getRaffleById(id: string) {
           .eq('id', id)
           .single()
         if (retry.error || !retry.data) {
-          console.error('Error fetching raffle by id (retry with minimal columns):', retry.error)
+          console.warn(
+            `Error fetching raffle by id (retry with minimal columns): ${formatPostgrestError(retry.error)}`,
+          )
           return null
         }
         return normalizeRaffleRow(retry.data as unknown as Record<string, unknown>)
       }
-      console.error('Error fetching raffle:', error)
+      console.warn(`Error fetching raffle: ${formatPostgrestError(error)}`)
       return null
     }
 
@@ -559,13 +572,15 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
           .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
           .order('created_at', { ascending: false })
         if (retry.error) {
-          console.error('Error fetching raffles by creator (retry with minimal columns):', retry.error)
+          console.warn(
+            `Error fetching raffles by creator (retry with minimal columns): ${formatPostgrestError(retry.error)}`,
+          )
           return []
         }
         const rows = (retry.data || []) as unknown as Record<string, unknown>[]
         return rows.map(normalizeRaffleRow)
       }
-      console.error('Error fetching raffles by creator:', error)
+      console.warn(`Error fetching raffles by creator: ${formatPostgrestError(error)}`)
       return []
     }
 
