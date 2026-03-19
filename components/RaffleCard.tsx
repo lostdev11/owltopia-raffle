@@ -120,17 +120,24 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const isActive = section !== undefined
     ? section === 'active'
     : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
+  const isPendingDraft = raffle.status === 'draft' && raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
   // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const borderStyle = isFuture
+  const borderStyle = isPendingDraft
+    ? { borderColor: '#f59e0b', boxShadow: '0 0 20px rgba(245, 158, 11, 0.45)' }
+    : isFuture
     ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
     : !isActive
       ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' } // blue-500, blue glow
       : baseBorderStyle
-  const themeColor = isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent))
+  const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
+  const statusLabel = isPendingDraft ? 'Pending' : (isFuture ? 'Future' : (isActive ? 'Active' : 'Ended'))
+  const statusBadgeClass = isPendingDraft
+    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+    : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
   
   // Calculate available tickets
   const totalTicketsSold = calculateTicketsSold(entries)
@@ -850,6 +857,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
                       : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
                   </span>
+                ) : isPendingDraft ? (
+                  <span>Pending escrow deposit</span>
                 ) : (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                 )}
@@ -858,10 +867,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               {section !== 'active' && (
                 <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
                   <Badge 
-                    variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                    className={`rounded-full text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
+                    variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
+                    className={`rounded-full text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${statusBadgeClass}`}
                   >
-                    {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
+                    {statusLabel}
                   </Badge>
                 </div>
               )}
@@ -1044,10 +1053,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   {section !== 'active' && (
                     <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                       <Badge 
-                        variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} 
-                        className={`${classes.badge} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`}
+                        variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
+                        className={`${classes.badge} ${statusBadgeClass}`}
                       >
-                        {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
+                        {statusLabel}
                       </Badge>
                     </div>
                   )}
@@ -1135,6 +1144,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                           ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
                           : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
                       </span>
+                    ) : isPendingDraft ? (
+                      <span>Pending escrow deposit</span>
                     ) : (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                     )}
@@ -1142,10 +1153,10 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   {section !== 'active' && (
                     <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                       <Badge 
-                        variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')}
-                        className={isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}
+                        variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'}
+                        className={statusBadgeClass}
                       >
-                        {isFuture ? 'Future' : (isActive ? 'Active' : 'Ended')}
+                        {statusLabel}
                       </Badge>
                     </div>
                   )}

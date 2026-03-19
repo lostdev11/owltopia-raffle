@@ -157,6 +157,7 @@ export function RaffleDetailClient({
   const nowMs = serverTime.getTime()
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
+  const isPendingDraft = raffle.status === 'draft' && raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
   // Delay "entered" card styling to avoid flash when wallet/entries resolve on open (mobile)
   const [showEnteredStyle, setShowEnteredStyle] = useState(false)
   useEffect(() => {
@@ -164,20 +165,28 @@ export function RaffleDetailClient({
     return () => clearTimeout(t)
   }, [])
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const borderStyle = isFuture
+  const borderStyle = isPendingDraft
+    ? { borderColor: '#f59e0b', boxShadow: '0 0 20px rgba(245, 158, 11, 0.45)' }
+    : isFuture
     ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
     : !isActive
       ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' }
       : baseBorderStyle
-  const themeColor = isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent))
+  const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const isEndingSoon =
     isActive && endTimeMs - nowMs <= 60 * 60 * 1000 && new Date(raffle.end_time) > serverTime
+  const statusPillLabel = isPendingDraft ? 'Pending' : (isFuture ? 'Upcoming' : isActive ? (isEndingSoon ? 'Ending soon' : 'Live now') : 'Ended')
+  const statusBadgeClass = isPendingDraft
+    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+    : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
   const timeToEndLabel = isFuture
     ? `Starts ${formatDateTimeLocal(raffle.start_time)}`
     : isActive
       ? (new Date(raffle.end_time) <= serverTime
           ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
           : `Ends in ${formatDistance(new Date(raffle.end_time), serverTime)}`)
+      : isPendingDraft
+        ? 'Pending escrow deposit'
       : `Ended ${formatDateTimeLocal(raffle.end_time)}`
 
   // Use real-time entries hook (with polling fallback)
@@ -1253,24 +1262,21 @@ export function RaffleDetailClient({
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
-      // Fallback: if prize_standard is not loaded from DB, treat known Mpl Core mints as mpl_core.
-      const inferredStandard: PrizeStandard =
-        raffle.prize_standard ??
-        (raffle.nft_mint_address === 'Erj18hJRA6xcKbZKGFpXNx6j3DFFZXLz6QBo8uQ8wbha' ? 'mpl_core' : 'spl')
-      const standard = inferredStandard
+      // Prefer DB value; otherwise default to SPL/Token-2022 path first and fall back to Mpl Core.
+      const standard: PrizeStandard = raffle.prize_standard ?? 'spl'
 
       const mintShort =
         raffle.nft_mint_address.length > 16
           ? `${raffle.nft_mint_address.slice(0, 4)}…${raffle.nft_mint_address.slice(-4)}`
           : raffle.nft_mint_address
       if (standard === 'mpl_core') {
-        if (!walletCtx) {
+        if (!walletAdapter) {
           setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
           return
         }
         const sig = await transferMplCoreToEscrow({
           connection,
-          wallet: walletCtx,
+          wallet: walletAdapter,
           assetId: raffle.nft_mint_address,
           escrowAddress,
         })
@@ -1289,8 +1295,32 @@ export function RaffleDetailClient({
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
       if (!holder) {
+        // Auto-fallback: if the prize standard was not explicitly mpl_core,
+        // attempt a Core transfer before failing so creators still get a wallet prompt for Core NFTs.
+        if (raffle.prize_standard !== 'mpl_core') {
+          try {
+            if (!walletAdapter) {
+              setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
+              return
+            }
+            const sig = await transferMplCoreToEscrow({
+              connection,
+              wallet: walletAdapter,
+              assetId: raffle.nft_mint_address,
+              escrowAddress,
+            })
+            await confirmAndAssertSuccess(sig)
+            await verifyDepositAfterTransfer()
+            setDepositEscrowError(null)
+            setDepositEscrowSuccess(true)
+            router.refresh()
+            return
+          } catch {
+            // Fall through to the detailed not-found guidance below.
+          }
+        }
         setDepositEscrowError(
-          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. If you just transferred the NFT, wait a few seconds and retry. Supports SPL Token and Token-2022.`
+          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. If you just transferred the NFT, wait a few seconds and retry. Supports SPL Token, Token-2022, and Mpl Core.`
         )
         return
       }
@@ -1346,7 +1376,7 @@ export function RaffleDetailClient({
     } finally {
       setDepositEscrowLoading(false)
     }
-  }, [publicKey, escrowAddress, raffle.nft_mint_address, raffle.prize_standard, connection, sendTransaction, router, walletCtx])
+  }, [publicKey, escrowAddress, raffle.nft_mint_address, raffle.prize_standard, connection, sendTransaction, router, walletAdapter])
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
@@ -1728,7 +1758,7 @@ export function RaffleDetailClient({
                             : 'border-sky-300/80 bg-sky-500/20 text-sky-50'
                       }`}
                     >
-                      {isFuture ? 'Upcoming' : isActive ? (isEndingSoon ? 'Ending soon' : 'Live now') : 'Ended'}
+                      {statusPillLabel}
                     </span>
                     <span className="text-[11px] text-emerald-50/80">
                       {timeToEndLabel}
@@ -1970,8 +2000,10 @@ export function RaffleDetailClient({
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="mt-3 sm:mt-2 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={isFuture ? 'default' : (isActive ? 'default' : 'secondary')} className={`${imageSize === 'small' ? 'text-xs' : ''} ${isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white')}`} title={isFuture ? formatDateTimeWithTimezone(raffle.start_time) : formatDateTimeWithTimezone(raffle.end_time)}>
-                      {isFuture
+                    <Badge variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} className={`${imageSize === 'small' ? 'text-xs' : ''} ${statusBadgeClass}`} title={isFuture ? formatDateTimeWithTimezone(raffle.start_time) : formatDateTimeWithTimezone(raffle.end_time)}>
+                      {isPendingDraft
+                        ? 'Pending escrow deposit'
+                        : isFuture
                         ? (new Date(raffle.start_time) <= serverTime
                             ? `Started ${formatDistance(new Date(raffle.start_time), serverTime, { addSuffix: true })}`
                             : `Starts ${formatDateTimeLocal(raffle.start_time)}`)
@@ -2011,6 +2043,8 @@ export function RaffleDetailClient({
                   <p className="text-xs text-muted-foreground">
                     {isFuture ? (
                       <>Starts: {formatDateTimeWithTimezone(raffle.start_time)}</>
+                    ) : isPendingDraft ? (
+                      <>Pending: waiting for NFT escrow deposit verification</>
                     ) : isActive ? (
                       <>Ends: {formatDateTimeWithTimezone(raffle.end_time)}</>
                     ) : (
