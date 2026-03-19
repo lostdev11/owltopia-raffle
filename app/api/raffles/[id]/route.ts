@@ -211,6 +211,18 @@ export async function PATCH(
     // Update status if provided (valid values: draft, live, ready_to_draw, completed)
     const validStatuses = ['draft', 'live', 'ready_to_draw', 'completed']
     if (body.status !== undefined && validStatuses.includes(body.status)) {
+      const isNftRaffle = existingRaffle.prize_type === 'nft'
+      const isGoingLive =
+        body.status === 'live' || body.status === 'ready_to_draw'
+      if (isNftRaffle && isGoingLive && !existingRaffle.prize_deposited_at) {
+        return NextResponse.json(
+          {
+            error:
+              'NFT raffle cannot go live before prize escrow deposit is verified. Transfer NFT to escrow and click Verify deposit first.',
+          },
+          { status: 400 }
+        )
+      }
       updates.status = body.status
     }
 

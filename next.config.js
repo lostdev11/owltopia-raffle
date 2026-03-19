@@ -35,6 +35,10 @@ const nextConfig = {
         hostname: '**.supabase.co',
       },
       {
+        protocol: 'https',
+        hostname: 'image2url.com',
+      },
+      {
         protocol: 'http',
         hostname: 'localhost',
       },

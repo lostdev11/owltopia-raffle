@@ -139,6 +139,11 @@ export function WinnerModal({
               </p>
             </div>
           )}
+          {prizeType === 'nft' && !nftTransferTransaction && (
+            <p className="text-center text-xs text-muted-foreground">
+              NFT prize is in escrow and ready for the winner to claim.
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button

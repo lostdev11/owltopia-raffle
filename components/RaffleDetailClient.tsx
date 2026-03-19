@@ -96,6 +96,9 @@ export function RaffleDetailClient({
   const [returnPrizeLoading, setReturnPrizeLoading] = useState(false)
   const [returnPrizeError, setReturnPrizeError] = useState<string | null>(null)
   const [returnPrizeSuccess, setReturnPrizeSuccess] = useState(false)
+  const [claimPrizeLoading, setClaimPrizeLoading] = useState(false)
+  const [claimPrizeError, setClaimPrizeError] = useState<string | null>(null)
+  const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -106,6 +109,7 @@ export function RaffleDetailClient({
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
+  const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
   const [fallbackImageError, setFallbackImageError] = useState(false)
@@ -221,6 +225,22 @@ export function RaffleDetailClient({
       })
     return () => { cancelled = true }
   }, [connected, publicKey])
+
+  useEffect(() => {
+    if (!creatorWallet) {
+      setCreatorDisplayName(null)
+      return
+    }
+    fetch(`/api/profiles?wallets=${encodeURIComponent(creatorWallet)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => {
+        const name = map?.[creatorWallet]
+        setCreatorDisplayName(typeof name === 'string' && name.trim() ? name.trim() : null)
+      })
+      .catch(() => {
+        setCreatorDisplayName(null)
+      })
+  }, [creatorWallet])
 
   // Fetch prize escrow address when NFT raffle needs deposit
   useEffect(() => {
@@ -1114,6 +1134,41 @@ export function RaffleDetailClient({
     }
   }
 
+  const handleClaimPrize = async () => {
+    if (!connected || !publicKey) {
+      setClaimPrizeError('Please connect your wallet first.')
+      return
+    }
+    setClaimPrizeLoading(true)
+    setClaimPrizeError(null)
+    setClaimPrizeSuccessTx(null)
+    try {
+      const response = await fetch(`/api/raffles/${raffle.id}/claim-prize`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        const msg = typeof data?.error === 'string' ? data.error : 'Failed to claim prize'
+        throw new Error(msg)
+      }
+      const signature =
+        typeof data?.transactionSignature === 'string' ? data.transactionSignature : null
+      if (signature) {
+        setClaimPrizeSuccessTx(signature)
+      } else {
+        setClaimPrizeSuccessTx('success')
+      }
+      setTimeout(() => {
+        router.refresh()
+      }, 1200)
+    } catch (err) {
+      setClaimPrizeError(err instanceof Error ? err.message : 'Failed to claim prize')
+    } finally {
+      setClaimPrizeLoading(false)
+    }
+  }
+
   const showDepositEscrow =
     raffle.prize_type === 'nft' &&
     !raffle.prize_deposited_at &&
@@ -1399,6 +1454,15 @@ export function RaffleDetailClient({
     isAdmin && 
     !raffle.nft_transfer_transaction
 
+  const showClaimPrizeButton =
+    hasEnded &&
+    raffle.prize_type === 'nft' &&
+    !!raffle.winner_wallet &&
+    wallet === raffle.winner_wallet &&
+    !!raffle.prize_deposited_at &&
+    !raffle.nft_transfer_transaction &&
+    !raffle.prize_returned_at
+
   // Show "Return prize to creator" when: admin, NFT raffle, prize in escrow, not yet sent to winner, not already returned
   const showReturnPrizeButton =
     isAdmin &&
@@ -1522,7 +1586,7 @@ export function RaffleDetailClient({
               <CardHeader>
                 <CardTitle className="text-lg">Prize in escrow required</CardTitle>
                 <CardDescription>
-                  <strong>Flow:</strong> You created this raffle → next, transfer the NFT to escrow (it stays locked for the duration of the raffle) → when the raffle ends, the prize is automatically sent to the winner. Transfer your NFT below; your wallet will ask you to sign. <strong>No listing fee</strong> — only network (gas) fees. Then click Verify deposit.
+                  <strong>Flow:</strong> You created this raffle → next, transfer the NFT to escrow (it stays locked for the duration of the raffle) → when the raffle ends and a winner is selected, the winner can claim the prize from escrow. Transfer your NFT below; your wallet will ask you to sign. <strong>No listing fee</strong> — only network (gas) fees. Then click Verify deposit.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1587,7 +1651,7 @@ export function RaffleDetailClient({
                         You are about to send this NFT to the platform escrow wallet. Your wallet will prompt you to sign the transaction.
                       </p>
                       <p>
-                        <strong>The NFT will be locked in escrow</strong> until the raffle ends and a winner is chosen. At that point, <strong>the prize is automatically sent to the winner</strong> — no extra step from you.
+                        <strong>The NFT will be locked in escrow</strong> until the raffle ends and a winner is chosen. At that point, <strong>the winner can claim the prize</strong> from escrow.
                       </p>
                       <p>
                         Are you sure you want to transfer this NFT to escrow?
@@ -1926,6 +1990,23 @@ export function RaffleDetailClient({
                         Draw Threshold: {minTickets}
                       </Badge>
                     )}
+                    {raffle.prize_type === 'nft' && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          raffle.prize_deposited_at
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 hover:bg-emerald-500/30'
+                            : 'bg-amber-500/20 border-amber-500 text-amber-400 hover:bg-amber-500/30'
+                        }
+                        title={
+                          raffle.prize_deposited_at
+                            ? 'Prize escrow deposit verified'
+                            : 'Prize escrow deposit not verified'
+                        }
+                      >
+                        Escrow: {raffle.prize_deposited_at ? 'Deposited' : 'Not Deposited'}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {isFuture ? (
@@ -1937,6 +2018,12 @@ export function RaffleDetailClient({
                     )}
                   </p>
                 </div>
+              </div>
+              <div>
+                <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
+                <p className={classes.contentText + ' font-semibold break-all'}>
+                  {creatorDisplayName || creatorWallet || 'Unknown'}
+                </p>
               </div>
             </div>
 
@@ -2084,6 +2171,23 @@ export function RaffleDetailClient({
                   View Winner
                 </Button>
               )}
+              {showClaimPrizeButton && (
+                <Button
+                  variant="default"
+                  size="default"
+                  onClick={handleClaimPrize}
+                  disabled={claimPrizeLoading}
+                  style={{ backgroundColor: themeColor, color: '#000' }}
+                  className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
+                >
+                  <Send className="mr-2 h-4 w-4 shrink-0" />
+                  {!connected
+                    ? 'Connect Wallet'
+                    : claimPrizeLoading
+                    ? 'Claiming...'
+                    : 'Claim Prize'}
+                </Button>
+              )}
               {showNftTransferButton && (
                 <Button
                   variant="outline"
@@ -2163,6 +2267,16 @@ export function RaffleDetailClient({
                 </div>
               </TabsContent>
             </Tabs>
+            {showClaimPrizeButton && claimPrizeError && (
+              <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {claimPrizeError}
+              </div>
+            )}
+            {showClaimPrizeButton && claimPrizeSuccessTx && (
+              <div className="mt-3 rounded-md border border-green-500/50 bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
+                Prize claimed successfully. Refreshing details...
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

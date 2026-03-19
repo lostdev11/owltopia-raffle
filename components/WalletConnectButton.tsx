@@ -27,9 +27,33 @@ export function WalletConnectButton() {
   const connectingStartTimeRef = useRef<number | null>(null)
   const cancelButtonTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  const clearWalletSelectionStorage = useCallback(() => {
+    try {
+      if (typeof window === 'undefined') return
+      // Wallet Adapter UI commonly stores selected wallet name here.
+      localStorage.removeItem('walletName')
+      // Some setups may store it under namespaced keys too.
+      Object.keys(localStorage)
+        .filter((key) => key.toLowerCase().includes('wallet') && key.toLowerCase().includes('name'))
+        .forEach((key) => localStorage.removeItem(key))
+    } catch (e) {
+      // ignore
+    }
+  }, [])
+
   // Handle stuck "connecting" state with timeout
   useEffect(() => {
     if (connecting) {
+      // Prevent stacking timers if this effect re-runs while still connecting
+      if (connectingTimeoutRef.current) {
+        clearTimeout(connectingTimeoutRef.current)
+        connectingTimeoutRef.current = null
+      }
+      if (cancelButtonTimeoutRef.current) {
+        clearTimeout(cancelButtonTimeoutRef.current)
+        cancelButtonTimeoutRef.current = null
+      }
+
       // Track when connection started
       if (!connectingStartTimeRef.current) {
         connectingStartTimeRef.current = Date.now()
@@ -52,6 +76,8 @@ export function WalletConnectButton() {
           disconnect().catch((err) => {
             console.error('Error disconnecting after timeout:', err)
           })
+          // Clear selected wallet so autoConnect doesn't immediately re-trigger a stuck connection loop.
+          clearWalletSelectionStorage()
           // Force remount to clear any stuck state
           setRemountKey((k) => k + 1)
           // Reset tracking
@@ -83,7 +109,7 @@ export function WalletConnectButton() {
         cancelButtonTimeoutRef.current = null
       }
     }
-  }, [connecting, connected, disconnect])
+  }, [connecting, connected, disconnect, clearWalletSelectionStorage])
 
   // Manual cancel handler
   const handleCancelConnection = useCallback(async () => {
@@ -104,13 +130,16 @@ export function WalletConnectButton() {
     } catch (err) {
       console.error('Error disconnecting:', err)
     }
+
+    // Clear selected wallet so autoConnect doesn't immediately retry.
+    clearWalletSelectionStorage()
     
     // Force remount to clear any stuck state
     setRemountKey((k) => k + 1)
     // Reset tracking
     connectingStartTimeRef.current = null
     setShowCancelButton(false)
-  }, [disconnect])
+  }, [disconnect, clearWalletSelectionStorage])
 
   useEffect(() => {
     setMounted(true)
@@ -485,11 +514,8 @@ export function WalletConnectButton() {
         )
         mobileWalletKeys.forEach(key => localStorage.removeItem(key))
         
-        // Clear wallet adapter connection state (but keep other preferences)
-        const adapterKeys = Object.keys(localStorage).filter(key =>
-          key.includes('wallet-adapter') && key.includes('walletName')
-        )
-        adapterKeys.forEach(key => localStorage.removeItem(key))
+        // Clear wallet adapter selected wallet so autoConnect doesn't loop.
+        clearWalletSelectionStorage()
         
         // Clear sessionStorage wallet-related items
         const sessionKeys = Object.keys(sessionStorage).filter(key =>
@@ -509,7 +535,7 @@ export function WalletConnectButton() {
     const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
     walletNames.forEach((name) => sessionStorage.removeItem(`${name}_redirect_url`))
     sessionStorage.removeItem('mobile_wallet_redirect_url')
-  }, [disconnect])
+  }, [disconnect, clearWalletSelectionStorage])
 
   // When connected, clicking should show wallet info or disconnect option
   // Don't force reconnection - let wallet stay connected until user disconnects

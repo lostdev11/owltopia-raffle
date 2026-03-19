@@ -20,7 +20,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ImageUpload } from '@/components/ImageUpload'
 import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
-import type { PrizeType } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -57,7 +56,7 @@ export function CreateRaffleForm() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   /** When imageUrl was set from an NFT, store raw URL so ImageUpload can fallback on proxy failure. */
   const [prizeImageRawUrl, setPrizeImageRawUrl] = useState<string | null>(null)
-  const [prizeType, setPrizeType] = useState<PrizeType>('crypto')
+  const prizeType = 'nft' as const
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
   const [walletTokens, setWalletTokens] = useState<WalletToken[] | null>(null)
@@ -260,21 +259,15 @@ export function CreateRaffleForm() {
       wallet_address: publicKey.toBase58(),
       prize_type: prizeType,
     }
-    if (prizeType === 'nft') {
-      if (!selectedNft) {
-        alert('Please select an NFT from your wallet for an NFT raffle.')
-        setLoading(false)
-        return
-      }
-      data.nft_mint_address = selectedNft.mint
-      data.nft_token_id = selectedNft.mint
-      data.nft_metadata_uri = selectedNft.metadataUri ?? undefined
-      data.nft_collection_name = selectedNft.collectionName ?? undefined
-    } else {
-      const prizeAmountValue = formData.get('prize_amount') as string
-      data.prize_amount = prizeAmountValue ? parseFloat(prizeAmountValue) : 0
-      data.prize_currency = formData.get('prize_currency') as string || currency
+    if (!selectedNft) {
+      alert('Please select an NFT from your wallet for an NFT raffle.')
+      setLoading(false)
+      return
     }
+    data.nft_mint_address = selectedNft.mint
+    data.nft_token_id = selectedNft.mint
+    data.nft_metadata_uri = selectedNft.metadataUri ?? undefined
+    data.nft_collection_name = selectedNft.collectionName ?? undefined
     try {
       const response = await fetch('/api/raffles', {
         method: 'POST',
@@ -404,7 +397,7 @@ export function CreateRaffleForm() {
         <CardHeader>
           <CardTitle>Create a raffle</CardTitle>
           <CardDescription>
-            Connect your wallet to create a raffle. You can create NFT or crypto prize raffles. Sign in from your dashboard first so we can save your raffle.
+            Connect your wallet to create an NFT raffle. Sign in from your dashboard first so we can save your raffle.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -448,39 +441,7 @@ export function CreateRaffleForm() {
             fallbackUrl={prizeImageRawUrl}
           />
 
-          <div className="space-y-3">
-            <Label>Prize type</Label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="prize_type"
-                  checked={prizeType === 'crypto'}
-                  onChange={() => {
-                    setPrizeType('crypto')
-                    setSelectedNft(null)
-                    setFloorPrice('')
-                    setFloorPriceCurrency(null)
-                  }}
-                  className="rounded-full"
-                />
-                <span>Crypto (SOL, USDC, etc.)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="prize_type"
-                  checked={prizeType === 'nft'}
-                  onChange={() => setPrizeType('nft')}
-                  className="rounded-full"
-                />
-                <span>NFT</span>
-              </label>
-            </div>
-          </div>
-
-          {prizeType === 'nft' && (
-            <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+          <div className="space-y-3 rounded-md border bg-muted/30 p-4">
               <Label>NFT prize (from your wallet)</Label>
               <p className="text-xs text-muted-foreground">
                 Load your wallet to see NFTs you can use as the raffle prize.
@@ -594,42 +555,13 @@ export function CreateRaffleForm() {
                     <p className="text-muted-foreground mt-0.5">
                       <strong>1.</strong> Create raffle — it is saved as a draft and linked to this NFT.{' '}
                       <strong>2.</strong> Deposit the NFT to escrow from the raffle page (your wallet will prompt a transfer; the NFT is then locked for the duration of the raffle).{' '}
-                      <strong>3.</strong> When the raffle ends, the prize is automatically sent to the winner. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee:{' '}
+                      <strong>3.</strong> When the raffle ends and a winner is selected, the winner claims the prize from escrow. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee:{' '}
                       <strong>0 SOL</strong> — only network (gas) fees when you deposit and when the winner is paid out.
                     </p>
                   </div>
                 </>
               )}
             </div>
-          )}
-
-          {prizeType === 'crypto' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="prize_amount">Prize amount (optional)</Label>
-                <Input
-                  id="prize_amount"
-                  name="prize_amount"
-                  type="number"
-                  step="0.000001"
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="prize_currency">Prize currency</Label>
-                <select
-                  id="prize_currency"
-                  name="prize_currency"
-                  defaultValue="SOL"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm"
-                >
-                  <option value="SOL">SOL</option>
-                  <option value="USDC">USDC</option>
-                  {isOwlEnabled() && <option value="OWL">OWL</option>}
-                </select>
-              </div>
-            </div>
-          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -746,10 +678,17 @@ export function CreateRaffleForm() {
               required
             >
               <option value="draft">Draft</option>
-              <option value="live">Live</option>
-              <option value="ready_to_draw">Ready to Draw</option>
+              <option value="live" disabled>
+                Live (NFT requires escrow deposit)
+              </option>
+              <option value="ready_to_draw" disabled>
+                Ready to Draw (NFT requires escrow deposit)
+              </option>
               <option value="completed">Completed</option>
             </select>
+            <p className="text-xs text-muted-foreground">
+              NFT raffles are created as draft. They go live only after escrow deposit is verified.
+            </p>
           </div>
 
           <div className="space-y-2">

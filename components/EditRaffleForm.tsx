@@ -327,6 +327,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
 
   const creatorWalletRaffle = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
+  const canSetNftLive = !isNftRaffle || !!raffle.prize_deposited_at
   const canReturnNftDraft =
     isNftRaffle &&
     !!creatorWalletRaffle &&
@@ -998,10 +999,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   required
                 >
                   <option value="draft">Draft</option>
-                  <option value="live">Live</option>
-                  <option value="ready_to_draw">Ready to Draw</option>
+                  <option value="live" disabled={!canSetNftLive}>
+                    Live{!canSetNftLive ? ' (requires escrow deposit)' : ''}
+                  </option>
+                  <option value="ready_to_draw" disabled={!canSetNftLive}>
+                    Ready to Draw{!canSetNftLive ? ' (requires escrow deposit)' : ''}
+                  </option>
                   <option value="completed">Completed</option>
                 </select>
+                {isNftRaffle && (
+                  <p className="text-xs text-muted-foreground">
+                    Escrow status:{' '}
+                    {raffle.prize_deposited_at
+                      ? 'Deposited and verified.'
+                      : 'Not deposited yet. NFT raffles stay draft until deposit is verified.'}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

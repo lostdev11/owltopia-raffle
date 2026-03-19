@@ -174,49 +174,41 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Determine prize_type based on provided fields
-    // Default to 'crypto' unless NFT identifiers are explicitly provided
-    let prizeType: 'crypto' | 'nft' = body.prize_type || 'crypto'
-    if (!body.prize_type && (body.nft_mint_address || body.nft_token_id)) {
-      prizeType = 'nft'
+    // Creating raffles is NFT-only for now.
+    if (body.prize_type && body.prize_type !== 'nft') {
+      return NextResponse.json(
+        { error: 'Only NFT raffles can be created right now.' },
+        { status: 400 }
+      )
     }
+    const prizeType: 'nft' = 'nft'
+    const prizeAmount: number | null = null
+    const prizeCurrency: string | null = null
 
-    // Handle prize data based on type
-    let prizeAmount: number | null = null
-    let prizeCurrency: string | null = null
-    let nftMintAddress: string | null = null
-    let nftTokenId: string | null = null
+    // For NFT prizes, ensure at least one identifier is provided
+    const nftMintAddress = body.nft_mint_address || null
+    const nftTokenId = body.nft_token_id || null
 
-    if (prizeType === 'crypto') {
-      // For crypto prizes, use provided values or default to 0 with ticket currency
-      prizeAmount = body.prize_amount !== undefined ? parseFloat(body.prize_amount) : 0
-      prizeCurrency = body.prize_currency || body.currency || 'SOL'
-    } else {
-      // For NFT prizes, ensure at least one identifier is provided
-      nftMintAddress = body.nft_mint_address || null
-      nftTokenId = body.nft_token_id || null
-      
-      if (!nftMintAddress && !nftTokenId) {
-        return NextResponse.json(
-          { error: 'NFT prizes require either nft_mint_address or nft_token_id' },
-          { status: 400 }
-        )
-      }
-      // Moderation: block scam / spam NFTs (mint or collection if provided)
-      const blocklist = await getScamBlocklist()
-      if (nftMintAddress && isBlocked(blocklist, nftMintAddress)) {
-        return NextResponse.json(
-          { error: 'This NFT cannot be used as a prize. It may be on the platform blocklist.' },
-          { status: 400 }
-        )
-      }
-      const collectionAddress = body.nft_collection_address ?? body.collection_address
-      if (typeof collectionAddress === 'string' && collectionAddress.trim() && isBlocked(blocklist, collectionAddress.trim())) {
-        return NextResponse.json(
-          { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
-          { status: 400 }
-        )
-      }
+    if (!nftMintAddress && !nftTokenId) {
+      return NextResponse.json(
+        { error: 'NFT prizes require either nft_mint_address or nft_token_id' },
+        { status: 400 }
+      )
+    }
+    // Moderation: block scam / spam NFTs (mint or collection if provided)
+    const blocklist = await getScamBlocklist()
+    if (nftMintAddress && isBlocked(blocklist, nftMintAddress)) {
+      return NextResponse.json(
+        { error: 'This NFT cannot be used as a prize. It may be on the platform blocklist.' },
+        { status: 400 }
+      )
+    }
+    const collectionAddress = body.nft_collection_address ?? body.collection_address
+    if (typeof collectionAddress === 'string' && collectionAddress.trim() && isBlocked(blocklist, collectionAddress.trim())) {
+      return NextResponse.json(
+        { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
+        { status: 400 }
+      )
     }
 
     // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
@@ -286,18 +278,11 @@ export async function POST(request: NextRequest) {
       edited_after_entries: false,
       created_by: walletAddress,
       creator_wallet: walletAddress,
-      // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active)
-      // NFT raffles are always created as draft and inactive until the prize is deposited.
-      // Status will be promoted (e.g. to 'live') only after successful prize deposit/verification.
-      is_active: prizeType !== 'nft',
+      // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active).
+      is_active: false,
       winner_wallet: null,
       winner_selected_at: null,
-      status:
-        prizeType === 'nft'
-          ? 'draft'
-          : ['draft', 'live', 'ready_to_draw', 'completed'].includes(body.status)
-          ? body.status
-          : 'draft',
+      status: 'draft',
       nft_transfer_transaction: null,
       fee_bps_applied: null,
       fee_tier_reason: null,

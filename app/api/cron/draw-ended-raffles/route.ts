@@ -33,8 +33,6 @@ export async function GET(request: NextRequest) {
         success: r.success,
         winnerWallet: r.winnerWallet ?? undefined,
         extended: r.extended,
-        nftTransferSignature: r.nftTransferSignature ?? undefined,
-        nftTransferError: r.nftTransferError ?? undefined,
       })),
     })
   } catch (error) {
