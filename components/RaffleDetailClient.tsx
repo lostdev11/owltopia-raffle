@@ -50,6 +50,7 @@ import {
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
+import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
@@ -74,6 +75,7 @@ export function RaffleDetailClient({
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
+  const [showManualEscrowFallback, setShowManualEscrowFallback] = useState(false)
   const [depositVerifyLoading, setDepositVerifyLoading] = useState(false)
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
   const [escrowCheckUrl, setEscrowCheckUrl] = useState<string | null>(null)
@@ -1188,6 +1190,7 @@ export function RaffleDetailClient({
     if (!publicKey || !escrowAddress || !raffle.nft_mint_address) return
     setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
+    setShowManualEscrowFallback(false)
     setDepositEscrowLoading(true)
 
     // Confirm signature robustly and ensure it actually landed successfully.
@@ -1295,14 +1298,26 @@ export function RaffleDetailClient({
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
       if (!holder) {
-        // Auto-fallback: if the prize standard was not explicitly mpl_core,
-        // attempt a Core transfer before failing so creators still get a wallet prompt for Core NFTs.
-        if (raffle.prize_standard !== 'mpl_core') {
+        // Auto-fallbacks: try compressed NFT transfer first, then Mpl Core transfer.
+        // This keeps "transfer to escrow" wallet-sign flow working across common NFT standards.
+        if (raffle.prize_standard !== 'mpl_core' && walletAdapter) {
           try {
-            if (!walletAdapter) {
-              setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
-              return
-            }
+            const sig = await transferCompressedNftToEscrow({
+              connection,
+              wallet: walletAdapter,
+              assetId: raffle.nft_mint_address,
+              escrowAddress,
+            })
+            await confirmAndAssertSuccess(sig)
+            await verifyDepositAfterTransfer()
+            setDepositEscrowError(null)
+            setDepositEscrowSuccess(true)
+            router.refresh()
+            return
+          } catch {
+            // Not a compressed NFT (or proof/build failed); continue to Core fallback.
+          }
+          try {
             const sig = await transferMplCoreToEscrow({
               connection,
               wallet: walletAdapter,
@@ -1320,8 +1335,9 @@ export function RaffleDetailClient({
           }
         }
         setDepositEscrowError(
-          `NFT not found in your wallet (mint: ${mintShort}). This site uses Solana Mainnet — switch your wallet to Mainnet (not Devnet) if needed. Ensure the connected wallet holds this NFT, then try again. If you just transferred the NFT, wait a few seconds and retry. Supports SPL Token, Token-2022, and Mpl Core.`
+          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.`
         )
+        setShowManualEscrowFallback(true)
         return
       }
       if ('delegated' in holder && holder.delegated) {
@@ -1373,6 +1389,7 @@ export function RaffleDetailClient({
       router.refresh()
     } catch (e) {
       setDepositEscrowError(e instanceof Error ? e.message : 'Transfer failed')
+      setShowManualEscrowFallback(true)
     } finally {
       setDepositEscrowLoading(false)
     }
@@ -1644,6 +1661,30 @@ export function RaffleDetailClient({
                         {depositVerifyLoading ? 'Verifying…' : 'Verify deposit'}
                       </Button>
                     </div>
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <code className="text-xs break-all rounded bg-background/80 px-2 py-1">{escrowAddress}</code>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(escrowAddress)
+                              setDepositEscrowError(null)
+                            } catch {
+                              setDepositEscrowError('Could not copy escrow address. Please copy it manually.')
+                            }
+                          }}
+                        >
+                          Copy escrow address
+                        </Button>
+                      </div>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.
                     </p>
@@ -1667,6 +1708,11 @@ export function RaffleDetailClient({
                 )}
                 {depositEscrowError && (
                   <p className="text-sm text-destructive">{depositEscrowError}</p>
+                )}
+                {showManualEscrowFallback && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Manual fallback is enabled: transfer NFT to escrow from wallet, then click Verify deposit.
+                  </p>
                 )}
               </CardContent>
             </Card>
