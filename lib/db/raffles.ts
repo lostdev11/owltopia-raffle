@@ -884,6 +884,10 @@ export async function promoteDraftRafflesToLive(): Promise<void> {
     .from('raffles')
     .update({ status: 'live', updated_at: now })
     .eq('status', 'draft')
+    // NFT raffles start as `draft` and `is_active=false` until the prize is verified in escrow.
+    // Only promote drafts to `live` when they are active; otherwise we can end up with a misleading
+    // "ended" state and (worse) cron winner selection for a raffle that hasn't deposited escrow yet.
+    .eq('is_active', true)
     .lte('start_time', now)
     .gt('end_time', now)
 
@@ -1154,7 +1158,10 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   // Use end_time only: after restore, end_time is the extended time; don't treat as ended until it passes.
   const filteredRaffles = raffles.filter(raffle => {
     const endTime = new Date(raffle.end_time)
-    return endTime <= now
+    if (endTime > now) return false
+    // NFT raffles must not progress to winner selection until the prize is deposited to escrow.
+    if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) return false
+    return true
   })
 
   return filteredRaffles

@@ -85,6 +85,38 @@ export async function POST(
 
     const held = await getEscrowHeldNftMints()
     if (held.length === 0) {
+      // Fallback: some raffles are created as SPL but transferred as Mpl Core asset IDs.
+      // If escrow owns the Core asset, treat deposit as verified and sync raffle standard.
+      const coreCandidates = Array.from(
+        new Set(
+          [raffle.nft_token_id, raffle.nft_mint_address]
+            .filter((v): v is string => typeof v === 'string')
+            .map((v) => v.trim())
+            .filter(Boolean)
+        )
+      )
+      for (const assetId of coreCandidates) {
+        try {
+          const inCoreEscrow = await isMplCoreAssetInEscrow(assetId)
+          if (!inCoreEscrow) continue
+          const now = new Date().toISOString()
+          await updateRaffle(id, {
+            prize_deposited_at: now,
+            is_active: true,
+            prize_standard: 'mpl_core' as any,
+            // Keep the canonical on-chain id in nft_mint_address for existing winner-claim flow.
+            nft_mint_address: assetId,
+          })
+          return NextResponse.json({
+            success: true,
+            prizeDepositedAt: now,
+            nftMintAddress: assetId,
+            prizeStandard: 'mpl_core',
+          })
+        } catch {
+          // continue trying other candidates
+        }
+      }
       return NextResponse.json(
         {
           error:

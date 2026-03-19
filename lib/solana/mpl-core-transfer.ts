@@ -1,9 +1,10 @@
 'use client'
 
 import type { Connection } from '@solana/web3.js'
-import { createUmi, publicKey } from '@metaplex-foundation/umi'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
+import { publicKey } from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
-import { transferV1 } from '@metaplex-foundation/mpl-core'
+import { fetchAsset, transferV1 } from '@metaplex-foundation/mpl-core'
 
 interface TransferMplCoreToEscrowArgs {
   connection: Connection
@@ -36,12 +37,22 @@ export async function transferMplCoreToEscrow({
 
   const asset = publicKey(assetId)
   const newOwner = publicKey(escrowAddress)
+  // Mpl Core assets in a collection must pass `collection` for transfer.
+  // Otherwise the program throws "Missing collection" (custom error 0x19).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assetAccount: any = await fetchAsset(umi as any, asset)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const maybeCollection: any =
+    assetAccount?.updateAuthority?.type === 'Collection'
+      ? assetAccount.updateAuthority.address
+      : undefined
 
   // Use TransactionBuilder API directly; types in kinobi are stricter than we need here.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const builder: any = transferV1(umi as any, {
     asset,
     newOwner,
+    ...(maybeCollection ? { collection: maybeCollection } : {}),
   } as any)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

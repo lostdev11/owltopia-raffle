@@ -87,11 +87,13 @@ export async function POST(
     // (verify-prize-deposit sets prize_deposited_at + is_active.)
     const shouldBeActive =
       raffle.prize_type === 'nft' ? !!raffle.prize_deposited_at : true
+    const nextStatus =
+      raffle.prize_type === 'nft' ? (shouldBeActive ? 'live' : 'draft') : 'live'
 
     await updateRaffle(raffleId, {
       original_end_time: originalEndTime,
       end_time: newEndTime.toISOString(),
-      status: 'live',
+      status: nextStatus,
       is_active: shouldBeActive,
     })
 

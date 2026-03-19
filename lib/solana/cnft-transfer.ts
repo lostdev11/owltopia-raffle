@@ -1,7 +1,8 @@
 'use client'
 
 import type { Connection } from '@solana/web3.js'
-import { createUmi, publicKey } from '@metaplex-foundation/umi'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
+import { publicKey } from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import {

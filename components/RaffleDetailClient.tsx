@@ -51,6 +51,7 @@ import {
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
+import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
@@ -69,7 +70,9 @@ export function RaffleDetailClient({
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
-  const { publicKey, sendTransaction, connected, wallet: walletAdapter } = walletCtx
+  const { publicKey, sendTransaction, connected, wallet, signMessage } = walletCtx
+  // Umi walletAdapterIdentity expects the actual WalletAdapter (with publicKey), not the Wallet metadata wrapper
+  const walletAdapter = wallet?.adapter ?? null
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
@@ -105,11 +108,11 @@ export function RaffleDetailClient({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
-  const wallet = publicKey?.toBase58() ?? ''
+  const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-  const isCreator = connected && wallet && creatorWallet === wallet
+  const isCreator = connected && walletAddress && creatorWallet === walletAddress
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
-    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+    typeof window !== 'undefined' && walletAddress ? getCachedAdmin(walletAddress) : null
   )
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
@@ -159,7 +162,10 @@ export function RaffleDetailClient({
   const nowMs = serverTime.getTime()
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
-  const isPendingDraft = raffle.status === 'draft' && raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
+  // Pending escrow deposit should be based on escrow verification state, not solely on `raffle.status`,
+  // since status can drift (e.g. restore/maintenance) while `is_active` remains false.
+  const isPendingDraft =
+    raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
   // Delay "entered" card styling to avoid flash when wallet/entries resolve on open (mobile)
   const [showEnteredStyle, setShowEnteredStyle] = useState(false)
   useEffect(() => {
@@ -1243,12 +1249,68 @@ export function RaffleDetailClient({
       )
     }
 
+    const signInForSession = async (): Promise<boolean> => {
+      if (!publicKey || !signMessage) {
+        setDepositEscrowError('Sign in required. Connect your wallet and sign in.')
+        return false
+      }
+      try {
+        const walletAddr = publicKey.toBase58()
+        const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
+          credentials: 'include',
+        })
+        if (!nonceRes.ok) {
+          const data = await nonceRes.json().catch(() => ({}))
+          const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
+          setDepositEscrowError(msg)
+          return false
+        }
+        const { message } = (await nonceRes.json()) as { message: string }
+        const messageBytes = new TextEncoder().encode(message)
+        const signature = await signMessage(messageBytes)
+        const signatureBase64 =
+          typeof signature === 'string'
+            ? btoa(signature)
+            : btoa(String.fromCharCode(...new Uint8Array(signature)))
+
+        const verifyRes = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            wallet: walletAddr,
+            message,
+            signature: signatureBase64,
+          }),
+        })
+        if (!verifyRes.ok) {
+          const data = await verifyRes.json().catch(() => ({}))
+          const msg =
+            typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
+          setDepositEscrowError(msg)
+          return false
+        }
+        return true
+      } catch (e) {
+        setDepositEscrowError(e instanceof Error ? e.message : 'Sign-in failed')
+        return false
+      }
+    }
+
     const verifyDepositAfterTransfer = async () => {
       try {
-        const res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+        let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
           method: 'POST',
           credentials: 'include',
         })
+        if (res.status === 401) {
+          const signedIn = await signInForSession()
+          if (!signedIn) return false
+          res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+            method: 'POST',
+            credentials: 'include',
+          })
+        }
         const data = await res.json().catch(() => ({}))
         if (!res.ok) {
           const msg = typeof data?.error === 'string' ? data.error : 'Verification failed'
@@ -1261,17 +1323,32 @@ export function RaffleDetailClient({
         return false
       }
     }
+    const finalizeAfterTransfer = async () => {
+      const verified = await verifyDepositAfterTransfer()
+      // Keep a clear user signal that the NFT left the wallet.
+      setDepositEscrowSuccess(true)
+      if (verified) {
+        setDepositEscrowError(null)
+        router.refresh()
+      }
+    }
 
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
       // Prefer DB value; otherwise default to SPL/Token-2022 path first and fall back to Mpl Core.
       const standard: PrizeStandard = raffle.prize_standard ?? 'spl'
+      // Compressed/Core transfers generally need the asset id (often stored as nft_token_id),
+      // while SPL/Token-2022 transfers use mint address.
+      const transferAssetId =
+        typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
+          ? raffle.nft_token_id.trim()
+          : raffle.nft_mint_address
 
       const mintShort =
-        raffle.nft_mint_address.length > 16
-          ? `${raffle.nft_mint_address.slice(0, 4)}…${raffle.nft_mint_address.slice(-4)}`
-          : raffle.nft_mint_address
+        transferAssetId.length > 16
+          ? `${transferAssetId.slice(0, 4)}…${transferAssetId.slice(-4)}`
+          : transferAssetId
       if (standard === 'mpl_core') {
         if (!walletAdapter) {
           setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
@@ -1280,14 +1357,11 @@ export function RaffleDetailClient({
         const sig = await transferMplCoreToEscrow({
           connection,
           wallet: walletAdapter,
-          assetId: raffle.nft_mint_address,
+          assetId: transferAssetId,
           escrowAddress,
         })
         await confirmAndAssertSuccess(sig)
-        await verifyDepositAfterTransfer()
-        setDepositEscrowError(null)
-        setDepositEscrowSuccess(true)
-        router.refresh()
+        await finalizeAfterTransfer()
         return
       }
 
@@ -1298,6 +1372,7 @@ export function RaffleDetailClient({
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
       if (!holder) {
+        let transferFallbackDetails: string | null = null
         // Auto-fallbacks: try compressed NFT transfer first, then Mpl Core transfer.
         // This keeps "transfer to escrow" wallet-sign flow working across common NFT standards.
         if (raffle.prize_standard !== 'mpl_core' && walletAdapter) {
@@ -1305,37 +1380,36 @@ export function RaffleDetailClient({
             const sig = await transferCompressedNftToEscrow({
               connection,
               wallet: walletAdapter,
-              assetId: raffle.nft_mint_address,
+              assetId: transferAssetId,
               escrowAddress,
             })
             await confirmAndAssertSuccess(sig)
-            await verifyDepositAfterTransfer()
-            setDepositEscrowError(null)
-            setDepositEscrowSuccess(true)
-            router.refresh()
+            await finalizeAfterTransfer()
             return
-          } catch {
+          } catch (e) {
             // Not a compressed NFT (or proof/build failed); continue to Core fallback.
+            transferFallbackDetails = e instanceof Error ? e.message : String(e)
           }
           try {
             const sig = await transferMplCoreToEscrow({
               connection,
               wallet: walletAdapter,
-              assetId: raffle.nft_mint_address,
+              assetId: transferAssetId,
               escrowAddress,
             })
             await confirmAndAssertSuccess(sig)
-            await verifyDepositAfterTransfer()
-            setDepositEscrowError(null)
-            setDepositEscrowSuccess(true)
-            router.refresh()
+            await finalizeAfterTransfer()
             return
-          } catch {
+          } catch (e) {
             // Fall through to the detailed not-found guidance below.
+            transferFallbackDetails = e instanceof Error ? e.message : String(e)
           }
         }
+        const detailsSuffix = transferFallbackDetails
+          ? ` Details: ${transferFallbackDetails}`
+          : ''
         setDepositEscrowError(
-          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.`
+          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
         )
         setShowManualEscrowFallback(true)
         return
@@ -1349,6 +1423,23 @@ export function RaffleDetailClient({
         return
       }
       const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
+
+      // Try Token Metadata transfer first for Tokenkeg NFTs. This handles many pNFT/token-metadata
+      // assets that can fail plain SPL transfer simulation in some wallets.
+      if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+        try {
+          const sig = await transferTokenMetadataNftToEscrow({
+            connection,
+            wallet: walletAdapter,
+            mintAddress: raffle.nft_mint_address,
+            escrowAddress,
+          })
+          await confirmAndAssertSuccess(sig)
+          await finalizeAfterTransfer()
+          return
+        } catch {}
+      }
+
       const escrowAta = await getAssociatedTokenAddress(
         mint,
         escrowPubkey,
@@ -1383,23 +1474,79 @@ export function RaffleDetailClient({
       )
       const sig = await sendTransaction(tx, connection)
       await confirmAndAssertSuccess(sig)
-      await verifyDepositAfterTransfer()
-      setDepositEscrowError(null)
-      setDepositEscrowSuccess(true)
-      router.refresh()
+      await finalizeAfterTransfer()
     } catch (e) {
-      setDepositEscrowError(e instanceof Error ? e.message : 'Transfer failed')
+      const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
+      setDepositEscrowError(baseMessage)
       setShowManualEscrowFallback(true)
     } finally {
       setDepositEscrowLoading(false)
     }
-  }, [publicKey, escrowAddress, raffle.nft_mint_address, raffle.prize_standard, connection, sendTransaction, router, walletAdapter])
+  }, [publicKey, signMessage, escrowAddress, raffle.nft_mint_address, raffle.nft_token_id, raffle.prize_standard, connection, sendTransaction, router, walletAdapter])
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
     setDepositVerifyLoading(true)
     try {
-      const res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, { method: 'POST' })
+      const signInForSession = async (): Promise<boolean> => {
+        if (!publicKey || !signMessage) {
+          setDepositEscrowError('Sign in required. Connect your wallet and sign in.')
+          return false
+        }
+        try {
+          const walletAddr = publicKey.toBase58()
+          const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
+            credentials: 'include',
+          })
+          if (!nonceRes.ok) {
+            const data = await nonceRes.json().catch(() => ({}))
+            const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
+            setDepositEscrowError(msg)
+            return false
+          }
+          const { message } = (await nonceRes.json()) as { message: string }
+          const messageBytes = new TextEncoder().encode(message)
+          const signature = await signMessage(messageBytes)
+          const signatureBase64 =
+            typeof signature === 'string'
+              ? btoa(signature)
+              : btoa(String.fromCharCode(...new Uint8Array(signature)))
+          const verifyRes = await fetch('/api/auth/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              wallet: walletAddr,
+              message,
+              signature: signatureBase64,
+            }),
+          })
+          if (!verifyRes.ok) {
+            const data = await verifyRes.json().catch(() => ({}))
+            const msg =
+              typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
+            setDepositEscrowError(msg)
+            return false
+          }
+          return true
+        } catch (e) {
+          setDepositEscrowError(e instanceof Error ? e.message : 'Sign-in failed')
+          return false
+        }
+      }
+
+      let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (res.status === 401) {
+        const signedIn = await signInForSession()
+        if (!signedIn) return
+        res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+      }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setDepositEscrowError(data?.error ?? 'Verification failed')
@@ -1411,7 +1558,7 @@ export function RaffleDetailClient({
     } finally {
       setDepositVerifyLoading(false)
     }
-  }, [raffle.id, router])
+  }, [raffle.id, router, publicKey, signMessage])
 
   const handleReturnPrizeToCreator = useCallback(async () => {
     const reason = returnPrizeReason as 'cancelled' | 'wrong_nft' | 'dispute' | 'platform_error' | 'testing'
@@ -1467,7 +1614,7 @@ export function RaffleDetailClient({
 
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
-  const isWinnerDetail = hasEnded && !!raffle.winner_wallet && wallet === raffle.winner_wallet
+  const isWinnerDetail = hasEnded && !!raffle.winner_wallet && walletAddress === raffle.winner_wallet
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
 
   // Confetti: show once when opening the winner modal on a past raffle you won
@@ -1505,7 +1652,7 @@ export function RaffleDetailClient({
     hasEnded &&
     raffle.prize_type === 'nft' &&
     !!raffle.winner_wallet &&
-    wallet === raffle.winner_wallet &&
+    walletAddress === raffle.winner_wallet &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at

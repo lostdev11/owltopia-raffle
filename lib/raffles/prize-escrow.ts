@@ -20,7 +20,7 @@ import {
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
-import { fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
+import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 
@@ -220,12 +220,21 @@ export async function transferMplCorePrizeToWinner(raffleId: string): Promise<{
 
   const asset = umiPublicKey(raffle.nft_mint_address)
   const newOwner = umiPublicKey(raffle.winner_wallet)
+  // If the Core asset belongs to a collection, transfer must include that account.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assetAccount: any = await fetchAsset(umi as any, asset)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const maybeCollection: any =
+    assetAccount?.updateAuthority?.type === 'Collection'
+      ? assetAccount.updateAuthority.address
+      : undefined
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const builder: any = transferV1(umi as any, {
       asset,
       newOwner,
+      ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await builder.sendAndConfirm(umi as any)
