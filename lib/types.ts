@@ -53,6 +53,8 @@ export interface Raffle {
   floor_price: string | null
   /** Set when NFT prize was verified in platform escrow (prize escrow flow). */
   prize_deposited_at: string | null
+  /** Tx signature when creator deposited NFT to escrow. Used to identify mint when escrow holds multiple NFTs. */
+  prize_deposit_tx: string | null
   /** Set when prize was returned from escrow to creator (admin-only, controlled reasons). */
   prize_returned_at: string | null
   /** Reason for return: cancelled | wrong_nft | dispute | platform_error. */

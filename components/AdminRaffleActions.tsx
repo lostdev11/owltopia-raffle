@@ -58,6 +58,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
+  const pendingSectionEligible = isNftRaffle
   const canReturnNft =
     isNftRaffle &&
     !!creatorWallet &&
@@ -254,6 +255,24 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             )}
           </p>
         </div>
+        {isNftRaffle && (
+          <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">
+            <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
+              Escrow moderation quick link
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              If escrow signing/deposit looks wrong, verify the escrow NFT portfolio directly on Solscan before allowing raffle activity.
+            </p>
+            <a
+              href="https://solscan.io/account/3STVmBQNzymnTQx5DNTjFQUeHFx42rtSEGBxmnzFCfg7#portfolio_nfts"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center text-sm text-primary hover:underline touch-manipulation min-h-[44px] break-all"
+            >
+              solscan.io/account/3STVmB...FCfg7#portfolio_nfts
+            </a>
+          </div>
+        )}
 
         {message && (
           <div
@@ -340,6 +359,32 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 </Dialog>
               </>
             )}
+            {/* Move between normal lists and Pending/Paused section for NFT raffles waiting on escrow */}
+            {pendingSectionEligible && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant={purchasesBlocked ? 'default' : 'outline'}
+                  className={
+                    purchasesBlocked
+                      ? 'bg-green-600 hover:bg-green-700 touch-manipulation min-h-[44px]'
+                      : 'border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]'
+                  }
+                  onClick={() => handleBlockPurchases(!purchasesBlocked)}
+                  disabled={blockingPurchases}
+                >
+                  {purchasesBlocked
+                    ? (blockingPurchases ? 'Restoring...' : 'Return to normal sections')
+                    : (blockingPurchases ? 'Moving...' : 'Move to Pending/Paused section')}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {purchasesBlocked
+                    ? 'Currently in Pending/Paused section on the raffles page.'
+                    : 'Manually place this raffle in Pending/Paused while escrow signing/verification is unresolved.'}
+                </span>
+              </div>
+            )}
+
             {/* Block purchases — admin can block ticket purchases on any raffle (e.g. NFT not in escrow) */}
             <div className="flex flex-wrap items-center gap-2">
                 <Button

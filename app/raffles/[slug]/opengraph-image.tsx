@@ -1,6 +1,10 @@
 import { ImageResponse } from 'next/og'
+import { cookies } from 'next/headers'
 import { getRaffleBySlug } from '@/lib/db/raffles'
 import { PLATFORM_NAME } from '@/lib/site-config'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
+import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 
 export const alt = PLATFORM_NAME
 export const size = { width: 1200, height: 630 }
@@ -25,6 +29,32 @@ export default async function Image({
   const raffle = await getRaffleBySlug(slug)
 
   if (!raffle) {
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          <div style={{ fontSize: 48, color: 'rgba(255,255,255,0.9)' }}>Raffle not found</div>
+        </div>
+      ),
+      { ...size }
+    )
+  }
+
+  // Pending NFT raffles should not be publicly visible (even via OG preview).
+  const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+  const session = parseSessionCookieValue(sessionValue)
+  const viewerWallet = session?.wallet ?? null
+  const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
+  if (!canViewerSeeRafflePending(raffle, viewerWallet, viewerIsAdmin)) {
     return new ImageResponse(
       (
         <div

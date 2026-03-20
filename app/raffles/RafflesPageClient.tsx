@@ -25,11 +25,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
 import { MarkdownContent } from '@/components/MarkdownContent'
 import { PLATFORM_NAME } from '@/lib/site-config'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
 interface RafflesPageClientProps {
   activeRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
+  pausedPendingRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
   futureRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
   pastRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
   /** Server-side fetch result: success (has data), empty (0 raffles), or error */
@@ -40,10 +43,11 @@ interface RafflesPageClientProps {
   rafflesTotalCount?: number
 }
 
-function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
+function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntries[]; pausedPending: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
   const withEntries = (r: Raffle): RaffleWithEntries => ({ raffle: r, entries: [] })
   const nowTime = now.getTime()
   const active: RaffleWithEntries[] = []
+  const pausedPending: RaffleWithEntries[] = []
   const future: RaffleWithEntries[] = []
   const past: RaffleWithEntries[] = []
   for (const raffle of raffles) {
@@ -53,6 +57,16 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
     const endTimeMs = endTime.getTime()
     if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
       past.push(withEntries(raffle))
+      continue
+    }
+    const status = (raffle.status ?? '').toLowerCase()
+    const isPausedPendingEscrow =
+      raffle.prize_type === 'nft' &&
+      (!!raffle.purchases_blocked_at ||
+        (!raffle.prize_deposited_at &&
+          ((status === 'draft' && startTimeMs <= nowTime) || status === 'live')))
+    if (isPausedPendingEscrow) {
+      pausedPending.push(withEntries(raffle))
       continue
     }
     if (raffle.winner_selected_at || raffle.status === 'completed') {
@@ -74,7 +88,7 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
     }
     past.push(withEntries(raffle))
   }
-  return { active, future, past }
+  return { active, pausedPending, future, past }
 }
 
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
@@ -191,6 +205,7 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
 
 export function RafflesPageClient({
   activeRafflesWithEntries,
+  pausedPendingRafflesWithEntries,
   futureRafflesWithEntries,
   pastRafflesWithEntries,
   fetchStatus = 'success',
@@ -200,11 +215,13 @@ export function RafflesPageClient({
   const featuredCardTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Defensive: coerce null/undefined to [] so we never read .length on null (e.g. after serialization)
   const serverActive = activeRafflesWithEntries ?? []
+  const serverPausedPending = pausedPendingRafflesWithEntries ?? []
   const serverFuture = futureRafflesWithEntries ?? []
   const serverPast = pastRafflesWithEntries ?? []
 
   const [clientBuckets, setClientBuckets] = useState<{
     active: RaffleWithEntries[]
+    pausedPending: RaffleWithEntries[]
     future: RaffleWithEntries[]
     past: RaffleWithEntries[]
   } | null>(null)
@@ -215,8 +232,38 @@ export function RafflesPageClient({
   const router = useRouter()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
+  const [viewerIsAdmin, setViewerIsAdmin] = useState(false)
   const debug = searchParams.get('debug') === '1'
   const { serverNow: serverTime, isSynced: serverTimeSynced } = useServerTime()
+
+  // Used to gate visibility of pending NFT raffles in client-side fallback flows.
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setViewerIsAdmin(false)
+      return
+    }
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setViewerIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const isAdmin = data?.isAdmin === true
+        setCachedAdmin(addr, isAdmin)
+        setViewerIsAdmin(isAdmin)
+      })
+      .catch(() => {
+        if (!cancelled) setViewerIsAdmin(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
 
   type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
@@ -310,7 +357,11 @@ export function RafflesPageClient({
       .catch(() => setLeaderboardDisplayNames({}))
   }, [leaderboardData])
 
-  const isEmptyFromServer = serverActive.length === 0 && serverFuture.length === 0 && serverPast.length === 0
+  const isEmptyFromServer =
+    serverActive.length === 0 &&
+    serverPausedPending.length === 0 &&
+    serverFuture.length === 0 &&
+    serverPast.length === 0
 
   // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel
   // Use serverTime (always a Date; may be client time until /api/time syncs) so we don't block on sync
@@ -346,8 +397,9 @@ export function RafflesPageClient({
             nft_collection_name: r.nft_collection_name ?? null,
             nft_token_id: r.nft_token_id ?? null,
             nft_metadata_uri: r.nft_metadata_uri ?? null,
-          })) as Raffle[]
-          setClientBuckets(bucketRaffles(normalized, serverTime))
+            })) as Raffle[]
+            const filtered = filterRafflesByPendingVisibility(normalized, wallet || null, viewerIsAdmin)
+            setClientBuckets(bucketRaffles(filtered, serverTime))
           setClientFetchError(null)
         }
       } catch {
@@ -392,7 +444,8 @@ export function RafflesPageClient({
         // Handle both raw array and wrapped { data: [...] } responses
         const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
         if (list.length > 0) {
-          setClientBuckets(bucketRaffles(list as Raffle[], serverTime))
+          const filtered = filterRafflesByPendingVisibility(list as Raffle[], wallet || null, viewerIsAdmin)
+          setClientBuckets(bucketRaffles(filtered, serverTime))
         } else {
           tryDirectSupabase()
         }
@@ -406,13 +459,16 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer])
+  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet])
 
   const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
+  const pausedPending =
+    serverPausedPending.length > 0 ? serverPausedPending : (clientBuckets?.pausedPending ?? [])
   const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])
   const past = serverPast.length > 0 ? serverPast : (clientBuckets?.past ?? [])
   const allRafflesFlat: Raffle[] = [
     ...active.map((item) => item.raffle),
+    ...pausedPending.map((item) => item.raffle),
     ...future.map((item) => item.raffle),
     ...past.map((item) => item.raffle),
   ]
@@ -422,9 +478,9 @@ export function RafflesPageClient({
     if (!debug || typeof window === 'undefined') return
     const errorCode = initialError?.code
     const errorMessage = initialError?.message
-    const dataCount = active.length + future.length + past.length
+    const dataCount = active.length + pausedPending.length + future.length + past.length
     console.log('raffles fetch', { dataCount, errorCode, errorMessage, fromClient: !!clientBuckets })
-  }, [debug, initialError?.code, initialError?.message, active.length, future.length, past.length, clientBuckets])
+  }, [debug, initialError?.code, initialError?.message, active.length, pausedPending.length, future.length, past.length, clientBuckets])
 
   const handleRefresh = useCallback(() => {
     setClientBuckets(null)
@@ -464,9 +520,18 @@ export function RafflesPageClient({
     }
   }, [tab, router])
 
-  const isEmpty = active.length === 0 && future.length === 0 && past.length === 0
+  const isEmpty = active.length === 0 && pausedPending.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
-  const recoveredFromError = !!initialError && !!(clientBuckets && (clientBuckets.active.length + clientBuckets.future.length + clientBuckets.past.length > 0))
+  const recoveredFromError =
+    !!initialError &&
+    !!(
+      clientBuckets &&
+      (clientBuckets.active.length +
+        clientBuckets.pausedPending.length +
+        clientBuckets.future.length +
+        clientBuckets.past.length >
+        0)
+    )
   const hasError = (initialError || (isEmpty && clientFetchError)) && !recoveredFromError
   const rawErrorMessage = initialError?.message ?? clientFetchError ?? 'Unknown error'
   const showConnectivityMessage = hasError && isConnectivityError(rawErrorMessage)
@@ -489,7 +554,7 @@ export function RafflesPageClient({
               </li>
             )}
             {clientFetchError && <li>client fallback error: {clientFetchError}</li>}
-            <li>raffles count: {active.length + future.length + past.length} (server: {rafflesTotalCount})</li>
+            <li>raffles count: {active.length + pausedPending.length + future.length + past.length} (server: {rafflesTotalCount})</li>
           </ul>
         </div>
       )}
@@ -899,6 +964,25 @@ export function RafflesPageClient({
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-8 sm:mb-12">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
+            </p>
+            {pausedPending.length > 0 ? (
+              <RafflesList
+                rafflesWithEntries={pausedPending}
+                title={undefined}
+                section="future"
+                serverNow={serverTime}
+              />
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">No pending or paused raffles right now.</p>
               </div>
             )}
           </div>

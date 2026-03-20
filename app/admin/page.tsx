@@ -113,6 +113,29 @@ export default function AdminDashboardPage() {
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
   const [loadingRevenue, setLoadingRevenue] = useState(false)
+  const [autoRefreshTick, setAutoRefreshTick] = useState(0)
+
+  // Keep dashboard data live while open and force a refresh each new day.
+  useEffect(() => {
+    const intervalMs = 60 * 1000
+    const intervalId = setInterval(() => {
+      setAutoRefreshTick((t) => t + 1)
+    }, intervalMs)
+
+    const now = new Date()
+    const nextMidnight = new Date(now)
+    nextMidnight.setHours(24, 0, 0, 0)
+    const msUntilMidnight = Math.max(1_000, nextMidnight.getTime() - now.getTime())
+
+    const midnightTimeoutId = setTimeout(() => {
+      setAutoRefreshTick((t) => t + 1)
+    }, msUntilMidnight)
+
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(midnightTimeoutId)
+    }
+  }, [])
 
   const runAdminCheck = useCallback(async () => {
     if (!publicKey) return
@@ -120,7 +143,7 @@ export default function AdminDashboardPage() {
     setAdminCheckError(null)
     setLoading(true)
     try {
-      const res = await fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
+      const res = await fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         const msg = (data?.error as string) || 'Could not verify admin status.'
@@ -177,7 +200,7 @@ export default function AdminDashboardPage() {
       return
     }
     let cancelled = false
-    fetch('/api/auth/session', { credentials: 'include' })
+    fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' })
       .then((res) => {
         if (cancelled) return
         setSessionReady(res.ok)
@@ -242,7 +265,7 @@ export default function AdminDashboardPage() {
       try {
         const response = await fetch(
           `/api/admin/deleted-entries?wallet=${publicKey.toBase58()}`,
-          { credentials: 'include' }
+          { credentials: 'include', cache: 'no-store' }
         )
         if (response.ok) {
           const data = await response.json()
@@ -260,7 +283,7 @@ export default function AdminDashboardPage() {
     if (isAdmin && sessionReady) {
       fetchDeletedEntries()
     }
-  }, [connected, publicKey, isAdmin, sessionReady])
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   const fetchRestoredEntries = async () => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) {
@@ -271,7 +294,7 @@ export default function AdminDashboardPage() {
     try {
       const response = await fetch(
         `/api/admin/restored-entries?wallet=${publicKey.toBase58()}`,
-        { credentials: 'include' }
+        { credentials: 'include', cache: 'no-store' }
       )
       if (response.ok) {
         const data = await response.json()
@@ -291,7 +314,7 @@ export default function AdminDashboardPage() {
     if (isAdmin && sessionReady) {
       fetchRestoredEntries()
     }
-  }, [connected, publicKey, isAdmin, sessionReady])
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   const fetchEntriesToConfirm = async () => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -300,7 +323,7 @@ export default function AdminDashboardPage() {
     try {
       const response = await fetch(
         `/api/admin/entries-to-confirm?wallet=${publicKey.toBase58()}`,
-        { credentials: 'include' }
+        { credentials: 'include', cache: 'no-store' }
       )
       if (response.ok) {
         const data = await response.json()
@@ -325,7 +348,7 @@ export default function AdminDashboardPage() {
     if (isAdmin && sessionReady) {
       fetchEntriesToConfirm()
     }
-  }, [connected, publicKey, isAdmin, sessionReady])
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
     const fetchRevenue = async () => {
@@ -334,7 +357,7 @@ export default function AdminDashboardPage() {
       try {
         const res = await fetch(
           `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
-          { credentials: 'include' }
+          { credentials: 'include', cache: 'no-store' }
         )
         if (res.ok) {
           const data = await res.json()
@@ -347,7 +370,7 @@ export default function AdminDashboardPage() {
       }
     }
     if (isAdmin && sessionReady) fetchRevenue()
-  }, [connected, publicKey, isAdmin, sessionReady])
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -355,6 +378,7 @@ export default function AdminDashboardPage() {
       try {
         const res = await fetch(`/api/admin/rev-share-schedule?wallet=${publicKey.toBase58()}`, {
           credentials: 'include',
+          cache: 'no-store',
         })
         if (res.ok) {
           const data = await res.json()
@@ -370,7 +394,7 @@ export default function AdminDashboardPage() {
       }
     }
     fetchRevShareSchedule()
-  }, [connected, publicKey, isAdmin, sessionReady])
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   const saveRevShareSchedule = async () => {
     if (!publicKey) return

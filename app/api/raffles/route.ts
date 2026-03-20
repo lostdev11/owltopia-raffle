@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createRaffle, generateUniqueSlug, getRaffleCreationCountForCreatorToday, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
-import { requireSession } from '@/lib/auth-server'
+import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { getAdminRole } from '@/lib/db/admins'
+import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,6 +45,10 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
 
+    const session = getSessionFromRequest(request)
+    const viewerWallet = session?.wallet ?? null
+    const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
+
     await promoteDraftRafflesToLive()
 
     const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
@@ -70,7 +76,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const enriched = await enrichRafflesWithCreatorHolder(raffles ?? [])
+    const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
+    const enriched = await enrichRafflesWithCreatorHolder(filtered)
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

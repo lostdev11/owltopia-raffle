@@ -5,12 +5,16 @@
  */
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
+import { cookies } from 'next/headers'
 import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
+import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -70,6 +74,12 @@ export default async function RafflesPage() {
       )
     }
 
+    // Viewer auth is only needed to gate "pending" NFT raffles (drafts/paused escrow).
+    const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+    const session = parseSessionCookieValue(sessionValue)
+    const viewerWallet = session?.wallet ?? null
+    const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
+
     // Promote any draft raffles whose start_time has passed to live (so they show as active)
     await promoteDraftRafflesToLive()
 
@@ -109,6 +119,7 @@ export default async function RafflesPage() {
         <Suspense fallback={<RafflesLoadingFallback />}>
           <RafflesPageClient
             activeRafflesWithEntries={[]}
+            pausedPendingRafflesWithEntries={[]}
             futureRafflesWithEntries={[]}
             pastRafflesWithEntries={[]}
             fetchStatus="error"
@@ -118,6 +129,9 @@ export default async function RafflesPage() {
       )
     }
 
+    // Pending NFT raffles should only be visible to admins and the creator.
+    allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
+
     // Enrich with creator Owl holder status for card badges
     allRaffles = await enrichRafflesWithCreatorHolder(allRaffles)
 
@@ -125,6 +139,7 @@ export default async function RafflesPage() {
     const nowTime = now.getTime()
     const pastRaffles: Raffle[] = []
     const activeRaffles: Raffle[] = []
+    const pausedPendingRaffles: Raffle[] = []
     const futureRaffles: Raffle[] = []
 
     // Bucket by status + times (status already filtered: live, ready_to_draw, completed — no draft)
@@ -135,6 +150,16 @@ export default async function RafflesPage() {
       const endTimeMs = endTime.getTime()
       if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
         pastRaffles.push(raffle)
+        continue
+      }
+      const status = (raffle.status ?? '').toLowerCase()
+      const isPausedPendingEscrow =
+        raffle.prize_type === 'nft' &&
+        (!!raffle.purchases_blocked_at ||
+          (!raffle.prize_deposited_at &&
+            ((status === 'draft' && startTimeMs <= nowTime) || status === 'live')))
+      if (isPausedPendingEscrow) {
+        pausedPendingRaffles.push(raffle)
         continue
       }
       if (raffle.winner_selected_at || raffle.status === 'completed') {
@@ -159,6 +184,7 @@ export default async function RafflesPage() {
 
     const pastRafflesWithEntries = toRaffleWithEntries(pastRaffles)
     const activeRafflesWithEntries = toRaffleWithEntries(activeRaffles)
+    const pausedPendingRafflesWithEntries = toRaffleWithEntries(pausedPendingRaffles)
     const futureRafflesWithEntries = toRaffleWithEntries(futureRaffles)
     const totalCount = allRaffles.length
     const fetchStatus = totalCount === 0 ? 'empty' : 'success'
@@ -167,6 +193,7 @@ export default async function RafflesPage() {
       <Suspense fallback={<RafflesLoadingFallback />}>
         <RafflesPageClient
           activeRafflesWithEntries={activeRafflesWithEntries}
+          pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
           futureRafflesWithEntries={futureRafflesWithEntries}
           pastRafflesWithEntries={pastRafflesWithEntries}
           fetchStatus={fetchStatus}
@@ -180,6 +207,7 @@ export default async function RafflesPage() {
       <Suspense fallback={<RafflesLoadingFallback />}>
         <RafflesPageClient
           activeRafflesWithEntries={[]}
+          pausedPendingRafflesWithEntries={[]}
           futureRafflesWithEntries={[]}
           pastRafflesWithEntries={[]}
           fetchStatus="error"

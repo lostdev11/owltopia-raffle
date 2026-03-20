@@ -1,10 +1,14 @@
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
 import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
+import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -80,6 +84,15 @@ export default async function RaffleDetailPage({
   let raffle = await getRaffleBySlug(slug)
   
   if (!raffle) {
+    notFound()
+  }
+
+  // Pending NFT raffles should only be visible to admins and the raffle creator.
+  const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+  const session = parseSessionCookieValue(sessionValue)
+  const viewerWallet = session?.wallet ?? null
+  const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
+  if (!canViewerSeeRafflePending(raffle, viewerWallet, viewerIsAdmin)) {
     notFound()
   }
 

@@ -52,6 +52,7 @@ export default async function AdminRafflesPage() {
   const pastRaffles: typeof allRaffles = []
   const activeRaffles: typeof allRaffles = []
   const futureRaffles: typeof allRaffles = []
+  const pausedPendingRaffles: typeof allRaffles = []
 
   for (const raffle of allRaffles) {
     const startTime = new Date(raffle.start_time)
@@ -62,6 +63,16 @@ export default async function AdminRafflesPage() {
     // Skip invalid dates
     if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
       pastRaffles.push(raffle)
+      continue
+    }
+
+    const status = (raffle.status ?? '').toLowerCase()
+    const isPausedPendingEscrow =
+      raffle.prize_type === 'nft' &&
+      !raffle.prize_deposited_at &&
+      ((status === 'draft' && startTimeMs <= nowTime) || !!raffle.purchases_blocked_at)
+    if (isPausedPendingEscrow) {
+      pausedPendingRaffles.push(raffle)
       continue
     }
     
@@ -102,10 +113,11 @@ export default async function AdminRafflesPage() {
     )
   }
   
-  const [pastRafflesWithEntries, activeRafflesWithEntries, futureRafflesWithEntries] = await Promise.all([
+  const [pastRafflesWithEntries, activeRafflesWithEntries, futureRafflesWithEntries, pausedPendingRafflesWithEntries] = await Promise.all([
     getRafflesWithEntries(pastRaffles),
     getRafflesWithEntries(activeRaffles),
-    getRafflesWithEntries(futureRaffles)
+    getRafflesWithEntries(futureRaffles),
+    getRafflesWithEntries(pausedPendingRaffles),
   ])
 
   return (
@@ -113,6 +125,7 @@ export default async function AdminRafflesPage() {
       activeRafflesWithEntries={activeRafflesWithEntries}
       futureRafflesWithEntries={futureRafflesWithEntries}
       pastRafflesWithEntries={pastRafflesWithEntries}
+      pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
     />
   )
 }

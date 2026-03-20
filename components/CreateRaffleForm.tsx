@@ -352,6 +352,8 @@ export function CreateRaffleForm() {
             await connection.confirmTransaction(sig, 'confirmed')
             const verifyRes = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
               method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ deposit_tx: sig }),
               credentials: 'include',
             })
             if (!verifyRes.ok) {

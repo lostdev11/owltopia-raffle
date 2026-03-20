@@ -15,18 +15,21 @@ interface AdminRafflesPageClientProps {
   activeRafflesWithEntries: RaffleWithEntriesAndProfit[]
   futureRafflesWithEntries: RaffleWithEntriesAndProfit[]
   pastRafflesWithEntries: RaffleWithEntriesAndProfit[]
+  pausedPendingRafflesWithEntries: RaffleWithEntriesAndProfit[]
 }
 
 export function AdminRafflesPageClient({
   activeRafflesWithEntries,
   futureRafflesWithEntries,
   pastRafflesWithEntries,
+  pausedPendingRafflesWithEntries,
 }: AdminRafflesPageClientProps) {
   const router = useRouter()
   const [rafflesState, setRafflesState] = useState({
     active: activeRafflesWithEntries,
     future: futureRafflesWithEntries,
     past: pastRafflesWithEntries,
+    pausedPending: pausedPendingRafflesWithEntries,
   })
 
   const handleRaffleDeleted = useCallback((raffleId: string) => {
@@ -35,6 +38,7 @@ export function AdminRafflesPageClient({
       active: prev.active.filter(({ raffle }) => raffle.id !== raffleId),
       future: prev.future.filter(({ raffle }) => raffle.id !== raffleId),
       past: prev.past.filter(({ raffle }) => raffle.id !== raffleId),
+      pausedPending: prev.pausedPending.filter(({ raffle }) => raffle.id !== raffleId),
     }))
     
     // Refresh the page after a short delay to ensure database is updated
@@ -79,6 +83,22 @@ export function AdminRafflesPageClient({
       </div>
 
       <div className="mb-8 sm:mb-12">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Paused / Pending Escrow Verification</h2>
+        {rafflesState.pausedPending.length > 0 ? (
+          <RafflesList
+            rafflesWithEntries={rafflesState.pausedPending}
+            title={undefined}
+            section="future"
+            onRaffleDeleted={handleRaffleDeleted}
+          />
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">No paused or pending escrow raffles.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-8 sm:mb-12">
         <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
         {rafflesState.future.length > 0 ? (
           <RafflesList
@@ -113,6 +133,7 @@ export function AdminRafflesPageClient({
       </div>
 
       {rafflesState.active.length === 0 && 
+       rafflesState.pausedPending.length === 0 &&
        rafflesState.future.length === 0 && 
        rafflesState.past.length === 0 && (
         <div className="text-center py-16">

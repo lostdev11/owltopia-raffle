@@ -45,6 +45,19 @@ export function MyRafflesList() {
     fetchRaffles()
   }, [fetchRaffles])
 
+  const nowMs = Date.now()
+  const pausedPendingRaffles = raffles.filter((raffle) => {
+    if (raffle.prize_type !== 'nft') return false
+    if (raffle.prize_deposited_at) return false
+    const status = (raffle.status ?? '').toLowerCase()
+    const hasStarted = !Number.isNaN(Date.parse(raffle.start_time)) && Date.parse(raffle.start_time) <= nowMs
+    const purchasesBlocked = !!raffle.purchases_blocked_at
+    // Show only stalled NFT raffles that should be live now but are still waiting for escrow verification.
+    return (status === 'draft' && hasStarted) || purchasesBlocked
+  })
+  const pausedPendingIds = new Set(pausedPendingRaffles.map((raffle) => raffle.id))
+  const otherRaffles = raffles.filter((raffle) => !pausedPendingIds.has(raffle.id))
+
   if (loading) {
     return (
       <Card className="mb-8">
@@ -121,9 +134,48 @@ export function MyRafflesList() {
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
-        <ul className="space-y-2">
-          {raffles.map((raffle) => (
+      <CardContent className="space-y-5">
+        {pausedPendingRaffles.length > 0 && (
+          <div className="space-y-2">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                Paused / Pending Escrow Verification
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                These NFT raffles are paused because escrow verification is still pending (for example, deposit
+                signature was not completed or escrow verification failed). They stay paused until admin verifies escrow.
+              </p>
+            </div>
+            <ul className="space-y-2">
+              {pausedPendingRaffles.map((raffle) => (
+                <li
+                  key={raffle.id}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{raffle.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      /{raffle.slug}
+                      <span className="ml-2 inline-flex items-center rounded-md bg-amber-500/20 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                        paused
+                      </span>
+                    </p>
+                  </div>
+                  <Link href={`/admin/raffles/${raffle.id}`}>
+                    <Button variant="outline" size="sm">
+                      <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
+                      <span className="hidden sm:inline">Resolve / Edit</span>
+                      <span className="sm:hidden">Resolve</span>
+                    </Button>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {otherRaffles.length > 0 && (
+          <ul className="space-y-2">
+            {otherRaffles.map((raffle) => (
             <li
               key={raffle.id}
               className="flex items-center justify-between gap-4 rounded-lg border bg-muted/30 px-4 py-3"
@@ -155,8 +207,9 @@ export function MyRafflesList() {
                 </Link>
               )}
             </li>
-          ))}
-        </ul>
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   )

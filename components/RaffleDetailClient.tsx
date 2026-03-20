@@ -1338,10 +1338,13 @@ export function RaffleDetailClient({
       }
     }
 
-    const verifyDepositAfterTransfer = async () => {
+    const verifyDepositAfterTransfer = async (depositTx?: string) => {
       try {
+        const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
         let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
           method: 'POST',
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body,
           credentials: 'include',
         })
         if (res.status === 401) {
@@ -1349,6 +1352,8 @@ export function RaffleDetailClient({
           if (!signedIn) return false
           res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
             method: 'POST',
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body,
             credentials: 'include',
           })
         }
@@ -1364,8 +1369,8 @@ export function RaffleDetailClient({
         return false
       }
     }
-    const finalizeAfterTransfer = async () => {
-      const verified = await verifyDepositAfterTransfer()
+    const finalizeAfterTransfer = async (depositTx?: string) => {
+      const verified = await verifyDepositAfterTransfer(depositTx)
       // Keep a clear user signal that the NFT left the wallet.
       setDepositEscrowSuccess(true)
       if (verified) {
@@ -1402,7 +1407,7 @@ export function RaffleDetailClient({
           escrowAddress,
         })
         await confirmAndAssertSuccess(sig)
-        await finalizeAfterTransfer()
+        await finalizeAfterTransfer(sig)
         return
       }
 
@@ -1425,7 +1430,7 @@ export function RaffleDetailClient({
               escrowAddress,
             })
             await confirmAndAssertSuccess(sig)
-            await finalizeAfterTransfer()
+            await finalizeAfterTransfer(sig)
             return
           } catch (e) {
             // Not a compressed NFT (or proof/build failed); continue to Core fallback.
@@ -1439,7 +1444,7 @@ export function RaffleDetailClient({
               escrowAddress,
             })
             await confirmAndAssertSuccess(sig)
-            await finalizeAfterTransfer()
+            await finalizeAfterTransfer(sig)
             return
           } catch (e) {
             // Fall through to the detailed not-found guidance below.
@@ -1476,7 +1481,7 @@ export function RaffleDetailClient({
             escrowAddress,
           })
           await confirmAndAssertSuccess(sig)
-          await finalizeAfterTransfer()
+          await finalizeAfterTransfer(sig)
           return
         } catch {}
       }
@@ -1515,7 +1520,7 @@ export function RaffleDetailClient({
       )
       const sig = await sendTransaction(tx, connection)
       await confirmAndAssertSuccess(sig)
-      await finalizeAfterTransfer()
+      await finalizeAfterTransfer(sig)
     } catch (e) {
       const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
       setDepositEscrowError(baseMessage)
