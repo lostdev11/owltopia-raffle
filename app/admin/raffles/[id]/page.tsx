@@ -39,10 +39,24 @@ export default async function EditRafflePage({
   }
 
   const status = (raffle.status ?? '').trim().toLowerCase()
+  const entries = await getEntriesByRaffleId(raffle.id)
+  const hasConfirmedEntries = entries.some((entry) => entry.status === 'confirmed')
 
   // Draft: show edit form (creator or full admin)
   if (status === 'draft') {
-    const entries = await getEntriesByRaffleId(raffle.id)
+    const owlVisionScore = calculateOwlVisionScore(raffle, entries)
+    return (
+      <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
+    )
+  }
+
+  // Full admin safety override: allow time corrections for live/ready_to_draw only when
+  // there are no confirmed tickets yet.
+  if (
+    role === 'full' &&
+    (status === 'live' || status === 'ready_to_draw') &&
+    !hasConfirmedEntries
+  ) {
     const owlVisionScore = calculateOwlVisionScore(raffle, entries)
     return (
       <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
@@ -51,7 +65,6 @@ export default async function EditRafflePage({
 
   // Non-draft + full admin: show admin actions (return NFT, cancel, refund list, delete)
   if (role === 'full') {
-    const entries = await getEntriesByRaffleId(raffle.id)
     return <AdminRaffleActions raffle={raffle} entries={entries} />
   }
 

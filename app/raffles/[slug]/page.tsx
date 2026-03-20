@@ -88,7 +88,7 @@ export default async function RaffleDetailPage({
   }
 
   // Pending NFT raffles should only be visible to admins and the raffle creator.
-  const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+  const sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
   const session = parseSessionCookieValue(sessionValue)
   const viewerWallet = session?.wallet ?? null
   const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false

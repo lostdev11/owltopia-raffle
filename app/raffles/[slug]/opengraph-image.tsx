@@ -50,7 +50,7 @@ export default async function Image({
   }
 
   // Pending NFT raffles should not be publicly visible (even via OG preview).
-  const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+  const sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
   const session = parseSessionCookieValue(sessionValue)
   const viewerWallet = session?.wallet ?? null
   const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false

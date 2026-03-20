@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getRaffleById } from '@/lib/db/raffles'
+import { acquireNftPrizeClaimLock, getRaffleById } from '@/lib/db/raffles'
 import { requireSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
@@ -53,6 +53,13 @@ export async function POST(
       )
     }
 
+    if (raffle.status !== 'completed') {
+      return NextResponse.json(
+        { error: 'Prize can only be claimed after the raffle has completed' },
+        { status: 400 }
+      )
+    }
+
     if (raffle.prize_returned_at) {
       return NextResponse.json(
         { error: 'Prize was returned to creator and is no longer claimable' },
@@ -70,6 +77,14 @@ export async function POST(
       return NextResponse.json(
         { error: 'Prize has not been deposited to escrow yet' },
         { status: 400 }
+      )
+    }
+
+    const { acquired } = await acquireNftPrizeClaimLock(raffleId, sessionWallet)
+    if (!acquired) {
+      return NextResponse.json(
+        { error: 'Prize is being claimed right now. Please try again in a moment.' },
+        { status: 423 }
       )
     }
 

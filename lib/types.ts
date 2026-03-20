@@ -42,6 +42,10 @@ export interface Raffle {
   winner_selected_at: string | null
   status: RaffleStatus
   nft_transfer_transaction: string | null
+  // Short-lived server-side lock to prevent concurrent winner-claim
+  // requests from both trying to transfer the escrowed NFT.
+  nft_claim_locked_at?: string | null
+  nft_claim_locked_wallet?: string | null
   // V1 fee settlement fields (creator-based platform fee)
   creator_wallet: string | null
   fee_bps_applied: number | null

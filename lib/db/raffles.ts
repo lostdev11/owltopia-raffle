@@ -71,12 +71,12 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** Base columns including prize return, cancellation, and purchases_blocked (migrations 036, 038, 040). */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
 }
 
 /** Minimal columns when prize return / cancellation migrations (036, 038) are not yet applied. */
 function getMinimalBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
@@ -940,6 +940,45 @@ export async function updateRaffle(
   }
 
   return data as unknown as Raffle
+}
+
+/**
+ * Atomically acquire a short-lived winner-claim lock so only one request
+ * attempts the escrow NFT transfer at a time.
+ *
+ * Lock rules:
+ * - Only when `nft_transfer_transaction` is still null (not yet claimed).
+ * - Only when the prize was not returned to the creator.
+ * - If a lock is already set, only the current winner can reuse it.
+ */
+export async function acquireNftPrizeClaimLock(
+  raffleId: string,
+  walletAddress: string
+): Promise<{ acquired: boolean }> {
+  const wallet = walletAddress.trim()
+  const lockAt = new Date().toISOString()
+
+  // Service role client: bypasses RLS, so this is safe for server-side enforcement.
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({
+      nft_claim_locked_at: lockAt,
+      nft_claim_locked_wallet: wallet,
+    })
+    .eq('id', raffleId)
+    .is('nft_transfer_transaction', null)
+    .is('prize_returned_at', null)
+    // True mutex: only the first in-flight request can acquire the lock.
+    .is('nft_claim_locked_at', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error('acquireNftPrizeClaimLock error:', error)
+    throw new Error(`Failed to acquire NFT claim lock: ${error.message}`)
+  }
+
+  return { acquired: !!data }
 }
 
 export async function deleteRaffle(id: string) {

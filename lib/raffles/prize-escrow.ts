@@ -22,6 +22,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Raffle } from '@/lib/types'
 
 const NFT_AMOUNT = 1n
@@ -240,11 +241,41 @@ export async function transferMplCorePrizeToWinner(raffleId: string): Promise<{
     const result: any = await builder.sendAndConfirm(umi as any)
     const sig = String(result.signature ?? result)
 
-    await updateRaffle(raffleId, { nft_transfer_transaction: sig })
+    // Persist winner claim + release lock (best effort; on-chain transfer already succeeded).
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({
+          nft_transfer_transaction: sig,
+          nft_claim_locked_at: null,
+          nft_claim_locked_wallet: null,
+        })
+        .eq('id', raffleId)
+    } catch (dbErr) {
+      console.error(`Failed to persist Core prize transfer for raffle ${raffleId}:`, dbErr)
+      // Avoid leaving the raffle stuck in "locked" state.
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // swallow - we still return the on-chain signature
+      }
+    }
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`Mpl Core prize transfer failed for raffle ${raffleId}:`, err)
+    // Release lock so the winner can retry if the transfer fails.
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+        .eq('id', raffleId)
+    } catch {
+      // ignore
+    }
     return { ok: false, error: message }
   }
 }
@@ -342,11 +373,41 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     })
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
 
-    await updateRaffle(raffleId, { nft_transfer_transaction: sig })
+    // Persist winner claim + release lock (best effort; on-chain transfer already succeeded).
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({
+          nft_transfer_transaction: sig,
+          nft_claim_locked_at: null,
+          nft_claim_locked_wallet: null,
+        })
+        .eq('id', raffleId)
+    } catch (dbErr) {
+      console.error(`Failed to persist NFT prize transfer for raffle ${raffleId}:`, dbErr)
+      // Avoid leaving the raffle stuck in "locked" state.
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // swallow - we still return the on-chain signature
+      }
+    }
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`Prize escrow transfer failed for raffle ${raffleId}:`, err)
+    // Release lock so the winner can retry if the transfer fails.
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+        .eq('id', raffleId)
+    } catch {
+      // ignore
+    }
     return { ok: false, error: message }
   }
 }

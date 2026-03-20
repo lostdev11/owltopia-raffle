@@ -22,6 +22,7 @@ export default function RafflesError({
     <div className="container mx-auto py-8 px-4">
       <RafflesPageClient
         activeRafflesWithEntries={[]}
+        pausedPendingRafflesWithEntries={[]}
         futureRafflesWithEntries={[]}
         pastRafflesWithEntries={[]}
         fetchStatus="error"

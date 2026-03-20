@@ -75,7 +75,7 @@ export default async function RafflesPage() {
     }
 
     // Viewer auth is only needed to gate "pending" NFT raffles (drafts/paused escrow).
-    const sessionValue = cookies().get(SESSION_COOKIE_NAME)?.value
+    const sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
     const session = parseSessionCookieValue(sessionValue)
     const viewerWallet = session?.wallet ?? null
     const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false

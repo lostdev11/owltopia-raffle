@@ -299,6 +299,7 @@ export async function POST(request: NextRequest) {
       rank: rank,
       floor_price: floorPrice,
       prize_deposited_at: null,
+      prize_deposit_tx: null,
       cancellation_requested_at: null,
       cancelled_at: null,
       cancellation_fee_amount: null,

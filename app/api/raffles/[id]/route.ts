@@ -54,13 +54,10 @@ export async function PATCH(
       )
     }
 
-    // Only draft raffles can be edited
-    if ((existingRaffle.status ?? '').toLowerCase() !== 'draft') {
-      return NextResponse.json(
-        { error: 'Only draft raffles can be edited' },
-        { status: 403 }
-      )
-    }
+    const role = await getAdminRole(session.wallet)
+    const status = (existingRaffle.status ?? '').toLowerCase()
+    const isDraft = status === 'draft'
+    const isLiveLike = status === 'live' || status === 'ready_to_draw'
 
     // Validate currency: SOL, USDC, and OWL when enabled
     const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
@@ -77,6 +74,37 @@ export async function PATCH(
     // Check if there are confirmed entries
     const entries = await getEntriesByRaffleId(raffleId)
     const hasConfirmedEntries = entries.some(e => e.status === 'confirmed')
+    const requestedStartTime = body.start_time
+    const requestedEndTime = body.end_time
+    const isStartTimeChanged =
+      requestedStartTime !== undefined && requestedStartTime !== existingRaffle.start_time
+    const isEndTimeChanged =
+      requestedEndTime !== undefined && requestedEndTime !== existingRaffle.end_time
+    const isTimeEdit = isStartTimeChanged || isEndTimeChanged
+
+    // Non-draft edits are restricted:
+    // - raffle_creator: cannot edit non-draft raffles
+    // - full admin: may edit time for live/ready_to_draw only when there are no confirmed entries
+    if (!isDraft) {
+      if (role !== 'full') {
+        return NextResponse.json(
+          { error: 'Only draft raffles can be edited' },
+          { status: 403 }
+        )
+      }
+      if (!isLiveLike || !isTimeEdit) {
+        return NextResponse.json(
+          { error: 'For non-draft raffles, full admins can only edit start/end time.' },
+          { status: 403 }
+        )
+      }
+      if (hasConfirmedEntries) {
+        return NextResponse.json(
+          { error: 'Cannot edit raffle time after confirmed tickets exist.' },
+          { status: 400 }
+        )
+      }
+    }
 
     // Parse max_tickets safely
     let maxTickets: number | null = null
@@ -203,8 +231,10 @@ export async function PATCH(
       updates.prize_type = body.prize_type
     }
 
-    // Set edited_after_entries if there are confirmed entries
-    if (hasConfirmedEntries) {
+    // Preserve Owl Vision integrity signal:
+    // - any edit after confirmed entries
+    // - any full-admin time edit on live/ready_to_draw raffles
+    if (hasConfirmedEntries || (!isDraft && role === 'full' && isLiveLike && isTimeEdit)) {
       updates.edited_after_entries = true
     }
 
