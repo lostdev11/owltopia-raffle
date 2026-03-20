@@ -16,6 +16,7 @@ interface AdminRafflesPageClientProps {
   futureRafflesWithEntries: RaffleWithEntriesAndProfit[]
   pastRafflesWithEntries: RaffleWithEntriesAndProfit[]
   pausedPendingRafflesWithEntries: RaffleWithEntriesAndProfit[]
+  cancelledRecoveryRafflesWithEntries: RaffleWithEntriesAndProfit[]
 }
 
 export function AdminRafflesPageClient({
@@ -23,6 +24,7 @@ export function AdminRafflesPageClient({
   futureRafflesWithEntries,
   pastRafflesWithEntries,
   pausedPendingRafflesWithEntries,
+  cancelledRecoveryRafflesWithEntries,
 }: AdminRafflesPageClientProps) {
   const router = useRouter()
   const [rafflesState, setRafflesState] = useState({
@@ -30,6 +32,7 @@ export function AdminRafflesPageClient({
     future: futureRafflesWithEntries,
     past: pastRafflesWithEntries,
     pausedPending: pausedPendingRafflesWithEntries,
+    cancelledRecovery: cancelledRecoveryRafflesWithEntries,
   })
 
   const handleRaffleDeleted = useCallback((raffleId: string) => {
@@ -39,6 +42,7 @@ export function AdminRafflesPageClient({
       future: prev.future.filter(({ raffle }) => raffle.id !== raffleId),
       past: prev.past.filter(({ raffle }) => raffle.id !== raffleId),
       pausedPending: prev.pausedPending.filter(({ raffle }) => raffle.id !== raffleId),
+      cancelledRecovery: prev.cancelledRecovery.filter(({ raffle }) => raffle.id !== raffleId),
     }))
     
     // Refresh the page after a short delay to ensure database is updated
@@ -99,6 +103,25 @@ export function AdminRafflesPageClient({
       </div>
 
       <div className="mb-8 sm:mb-12">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Cancelled / Deleted NFT Recovery</h2>
+        <p className="text-sm text-muted-foreground mb-3">
+          NFT raffles that were cancelled and still have the prize in escrow. Use this section to return NFTs to creators before any cleanup.
+        </p>
+        {rafflesState.cancelledRecovery.length > 0 ? (
+          <RafflesList
+            rafflesWithEntries={rafflesState.cancelledRecovery}
+            title={undefined}
+            section="past"
+            onRaffleDeleted={handleRaffleDeleted}
+          />
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">No cancelled NFT raffles need prize return.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-8 sm:mb-12">
         <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
         {rafflesState.future.length > 0 ? (
           <RafflesList
@@ -133,6 +156,7 @@ export function AdminRafflesPageClient({
       </div>
 
       {rafflesState.active.length === 0 && 
+       rafflesState.cancelledRecovery.length === 0 &&
        rafflesState.pausedPending.length === 0 &&
        rafflesState.future.length === 0 && 
        rafflesState.past.length === 0 && (

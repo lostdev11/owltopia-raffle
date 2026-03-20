@@ -663,6 +663,7 @@ export function CreateRaffleForm() {
               />
               <p className="text-xs text-muted-foreground">
                 Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
+                <span className="block mt-0.5">Tip: enter a floor price and ticket price will auto-populate from your goal.</span>
                 {floorPriceCurrency && floorPrice && (
                   <span className="block mt-0.5">Auto-filled from marketplace ({floorPriceCurrency}). You can edit.</span>
                 )}

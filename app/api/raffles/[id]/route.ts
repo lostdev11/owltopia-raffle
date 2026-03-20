@@ -4,6 +4,7 @@ import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { checkEscrowHoldsNft, transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -318,6 +319,39 @@ export async function DELETE(
       // Full admin can delete any raffle (any status)
     } else {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    let escrowCurrentlyHoldsPrize = false
+    if (existingRaffle.prize_type === 'nft') {
+      // Always check live escrow wallet state before deletion; DB flags can be stale.
+      const escrowCheck = await checkEscrowHoldsNft(existingRaffle)
+      if (!escrowCheck.holds && escrowCheck.error) {
+        return NextResponse.json(
+          {
+            error: `Escrow wallet check failed. Verify escrow state before deleting: ${escrowCheck.error}`,
+          },
+          { status: 400 }
+        )
+      }
+      escrowCurrentlyHoldsPrize = escrowCheck.holds
+    }
+
+    // Safety net: for NFT raffles with prize in escrow (DB flag or live escrow check), attempt return before hard delete.
+    const requiresPrizeReturnBeforeDelete =
+      existingRaffle.prize_type === 'nft' &&
+      (!!existingRaffle.prize_deposited_at || escrowCurrentlyHoldsPrize) &&
+      !existingRaffle.prize_returned_at &&
+      !existingRaffle.nft_transfer_transaction
+    if (requiresPrizeReturnBeforeDelete) {
+      const returnResult = await transferNftPrizeToCreator(raffleId, 'cancelled')
+      if (!returnResult.ok) {
+        return NextResponse.json(
+          {
+            error: `Cannot delete raffle until NFT prize is returned to creator: ${returnResult.error ?? 'return failed'}`,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Delete the raffle (entries will be cascade deleted)
