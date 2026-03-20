@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/leaderboard
- * Returns top 10 users by raffles entered, raffles created, and tickets sold.
+ * Returns top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (creators).
  * Public endpoint.
  */
 export async function GET() {

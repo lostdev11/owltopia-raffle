@@ -1,5 +1,5 @@
 /**
- * Public leaderboard: top 10 platform users by raffles entered, raffles created, and tickets sold.
+ * Public leaderboard: top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
  */
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
@@ -11,6 +11,7 @@ export type LeaderboardEntry = {
 
 export type LeaderboardData = {
   rafflesEntered: LeaderboardEntry[]
+  ticketsPurchased: LeaderboardEntry[]
   rafflesCreated: LeaderboardEntry[]
   ticketsSold: LeaderboardEntry[]
   rafflesWon: LeaderboardEntry[]
@@ -79,6 +80,19 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     }))
   )
 
+  // Tickets purchased: per buyer wallet, sum of ticket_quantity (confirmed entries)
+  const purchasedByWallet = new Map<string, number>()
+  for (const e of entries) {
+    const w = normalizeWallet(e.wallet_address)
+    if (!w) continue
+    const qty = Number(e.ticket_quantity)
+    if (!Number.isFinite(qty) || qty < 0) continue
+    purchasedByWallet.set(w, (purchasedByWallet.get(w) ?? 0) + qty)
+  }
+  const ticketsPurchased = takeTopTen(
+    Array.from(purchasedByWallet.entries()).map(([wallet, value]) => ({ wallet, value }))
+  )
+
   // Raffles created: count per creator
   const createdByWallet = new Map<string, number>()
   for (const r of raffles) {
@@ -122,6 +136,7 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
 
   return {
     rafflesEntered,
+    ticketsPurchased,
     rafflesCreated,
     ticketsSold,
     rafflesWon,

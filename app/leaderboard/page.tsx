@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Trophy, Ticket, PlusCircle, Loader2, Medal, Crown } from 'lucide-react'
+import { ArrowLeft, Trophy, Ticket, PlusCircle, Loader2, Medal, Crown, ShoppingCart } from 'lucide-react'
 
 type LeaderboardEntry = {
   rank: number
@@ -14,6 +14,7 @@ type LeaderboardEntry = {
 
 type LeaderboardData = {
   rafflesEntered: LeaderboardEntry[]
+  ticketsPurchased: LeaderboardEntry[]
   rafflesCreated: LeaderboardEntry[]
   ticketsSold: LeaderboardEntry[]
   rafflesWon: LeaderboardEntry[]
@@ -124,6 +125,7 @@ export default function LeaderboardPage() {
     if (!data) return
     const wallets = new Set<string>()
     data.rafflesEntered.forEach((e) => wallets.add(e.wallet))
+    ;(data.ticketsPurchased ?? []).forEach((e) => wallets.add(e.wallet))
     data.rafflesCreated.forEach((e) => wallets.add(e.wallet))
     data.ticketsSold.forEach((e) => wallets.add(e.wallet))
     data.rafflesWon.forEach((e) => wallets.add(e.wallet))
@@ -153,7 +155,7 @@ export default function LeaderboardPage() {
           Leaderboard
         </h1>
         <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-          Top 10 platform users by raffles entered, raffles created, and tickets sold.
+          Top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
         </p>
       </div>
 
@@ -167,13 +169,21 @@ export default function LeaderboardPage() {
       {error && <p className="text-destructive py-4">{error}</p>}
 
       {!loading && !error && data && (
-        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           <LeaderboardTable
             title="Most raffles entered"
             description="Users with the most distinct raffles participated in (confirmed entries). Display names are set in My Dashboard."
             entries={data.rafflesEntered}
             valueLabel="Raffles"
             icon={Ticket}
+            displayNames={displayNames}
+          />
+          <LeaderboardTable
+            title="Most tickets purchased"
+            description="Players who have bought the most tickets across all raffles (confirmed entries)."
+            entries={data.ticketsPurchased ?? []}
+            valueLabel="Tickets"
+            icon={ShoppingCart}
             displayNames={displayNames}
           />
           <LeaderboardTable

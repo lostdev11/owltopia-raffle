@@ -19,7 +19,7 @@ import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown } from 'lucide-react'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -225,6 +225,7 @@ export function RafflesPageClient({
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
   const [leaderboardData, setLeaderboardData] = useState<{
     rafflesEntered: Array<{ rank: number; wallet: string; value: number }>
+    ticketsPurchased: Array<{ rank: number; wallet: string; value: number }>
     rafflesCreated: Array<{ rank: number; wallet: string; value: number }>
     rafflesWon: Array<{ rank: number; wallet: string; value: number }>
     ticketsSold: Array<{ rank: number; wallet: string; value: number }>
@@ -267,6 +268,7 @@ export function RafflesPageClient({
     }
     const wallets = new Set<string>()
     leaderboardData.rafflesEntered.forEach((e) => wallets.add(e.wallet))
+    ;(leaderboardData.ticketsPurchased ?? []).forEach((e) => wallets.add(e.wallet))
     leaderboardData.rafflesCreated.forEach((e) => wallets.add(e.wallet))
     leaderboardData.rafflesWon.forEach((e) => wallets.add(e.wallet))
     leaderboardData.ticketsSold.forEach((e) => wallets.add(e.wallet))
@@ -734,7 +736,7 @@ export function RafflesPageClient({
                 Leaderboard
               </h2>
               <p className="text-muted-foreground text-sm mb-6">
-                Top 10 by raffles entered, raffles created, raffles won, and tickets sold.
+                Top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold.
               </p>
               {leaderboardLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8">
@@ -742,13 +744,19 @@ export function RafflesPageClient({
                   Loading…
                 </div>
               ) : leaderboardData ? (
-                <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                   {[
                     {
                       title: 'Most raffles entered',
                       entries: leaderboardData.rafflesEntered,
                       valueLabel: 'Raffles',
                       icon: Ticket,
+                    },
+                    {
+                      title: 'Most tickets purchased',
+                      entries: leaderboardData.ticketsPurchased ?? [],
+                      valueLabel: 'Tickets',
+                      icon: ShoppingCart,
                     },
                     {
                       title: 'Most raffles created',
