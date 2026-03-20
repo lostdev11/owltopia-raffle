@@ -130,7 +130,7 @@ export default function HowItWorksPage() {
             Rev Share
           </h2>
           <p className="mb-4">
-            For any ticket sales <strong>after</strong> the raffle&apos;s threshold is met, <strong>50%</strong> goes to the founder and <strong>50%</strong> goes to the community as revenue share. Amounts are shown in <strong>SOL</strong> and <strong>USDC</strong>. This applies to every raffle that hits its minimum.
+            Raffle site revenue is generated from platform fees on ticket sales: <strong>6%</strong> for non-holder creators and <strong>3%</strong> for holder creators. From that site revenue, <strong>50%</strong> goes to holders as rev share (shown in <strong>SOL</strong> and <strong>USDC</strong>).
           </p>
         </section>
 

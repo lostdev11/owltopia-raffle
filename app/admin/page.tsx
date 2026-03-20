@@ -784,25 +784,25 @@ export default function AdminDashboardPage() {
                       )}
                     </div>
 
-                    {/* Rev Share: 50% founder / 50% community — always show SOL and USDC (actual numbers) */}
+                    {/* Rev Share: 50% of site fee revenue goes to holders */}
                     <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-                      <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% founder / 50% community)</h3>
-                      <p className="text-xs text-muted-foreground mb-3">Amounts in SOL and USDC from profit over threshold.</p>
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% to holders)</h3>
+                      <p className="text-xs text-muted-foreground mb-3">Calculated from site fee revenue: 6% on non-holder creator tickets and 3% on holder creator tickets.</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                         <div>
-                          <p className="font-medium text-muted-foreground mb-1">Founder (50%)</p>
+                          <p className="font-medium text-muted-foreground mb-1">Site fee revenue</p>
                           <p className="tabular-nums">
-                            <span><span className="font-semibold">{(revenue.byCurrency.sol?.profit != null ? (revenue.byCurrency.sol.profit * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
+                            <span><span className="font-semibold">{(revenue.platformFees?.sol != null ? revenue.platformFees.sol.toFixed(4) : '0.0000')}</span> SOL</span>
                             {' · '}
-                            <span><span className="font-semibold">{(revenue.byCurrency.usdc?.profit != null ? (revenue.byCurrency.usdc.profit * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
+                            <span><span className="font-semibold">{(revenue.platformFees?.usdc != null ? revenue.platformFees.usdc.toFixed(2) : '0.00')}</span> USDC</span>
                           </p>
                         </div>
                         <div>
-                          <p className="font-medium text-muted-foreground mb-1">Community (50%)</p>
+                          <p className="font-medium text-muted-foreground mb-1">Holders share (50%)</p>
                           <p className="tabular-nums">
-                            <span><span className="font-semibold">{(revenue.byCurrency.sol?.profit != null ? (revenue.byCurrency.sol.profit * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
+                            <span><span className="font-semibold">{(revenue.platformFees?.sol != null ? (revenue.platformFees.sol * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
                             {' · '}
-                            <span><span className="font-semibold">{(revenue.byCurrency.usdc?.profit != null ? (revenue.byCurrency.usdc.profit * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
+                            <span><span className="font-semibold">{(revenue.platformFees?.usdc != null ? (revenue.platformFees.usdc * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
                           </p>
                         </div>
                       </div>

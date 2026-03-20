@@ -137,7 +137,7 @@ export function EnterOwlTopia() {
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mb-3">
-            Any amount over each raffle&apos;s threshold is split 50% founder, 50% community.
+            Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators). 50% of that site revenue goes to holders.
           </p>
           <div className="space-y-3">
             <div>

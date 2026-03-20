@@ -1,44 +1,31 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { HOLDER_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import { ownsOwltopia } from '@/lib/platform-fees'
 
 export const dynamic = 'force-dynamic'
 
-/** Compute total threshold per currency from all raffles (prize/floor). */
-async function getThresholdsFromRaffles(supabase: ReturnType<typeof getSupabaseAdmin>) {
-  const { data: raffles, error } = await supabase
-    .from('raffles')
-    .select('prize_type, prize_amount, prize_currency, floor_price, currency')
+type FeeTierReason = 'holder' | 'standard'
+type FeeTier = { feeBps: number; reason: FeeTierReason }
 
-  const out = { usdc: 0, sol: 0, owl: 0 }
-  if (error || !raffles?.length) return out
+async function resolveCreatorFeeTier(creatorWallet: string, cache: Map<string, FeeTier>): Promise<FeeTier> {
+  const normalized = creatorWallet.trim()
+  if (!normalized) return { feeBps: STANDARD_FEE_BPS, reason: 'standard' }
+  const cached = cache.get(normalized)
+  if (cached) return cached
 
-  for (const r of raffles) {
-    const prizeType = (r.prize_type || 'crypto').toString().toLowerCase()
-    if (prizeType === 'nft') {
-      const fp = r.floor_price != null ? parseFloat(String(r.floor_price)) : NaN
-      const cur = (r.currency || 'SOL').toString().toUpperCase()
-      if (Number.isFinite(fp) && fp >= 0 && (cur === 'USDC' || cur === 'SOL' || cur === 'OWL')) {
-        if (cur === 'USDC') out.usdc += fp
-        else if (cur === 'SOL') out.sol += fp
-        else out.owl += fp
-      }
-    } else {
-      const amount = r.prize_amount != null ? Number(r.prize_amount) : NaN
-      const cur = (r.prize_currency || r.currency || 'SOL').toString().toUpperCase()
-      if (Number.isFinite(amount) && amount >= 0 && (cur === 'USDC' || cur === 'SOL' || cur === 'OWL')) {
-        if (cur === 'USDC') out.usdc += amount
-        else if (cur === 'SOL') out.sol += amount
-        else out.owl += amount
-      }
-    }
-  }
-  return out
+  const isHolder = await ownsOwltopia(normalized, { skipCache: true })
+  const tier: FeeTier = isHolder
+    ? { feeBps: HOLDER_FEE_BPS, reason: 'holder' }
+    : { feeBps: STANDARD_FEE_BPS, reason: 'standard' }
+  cache.set(normalized, tier)
+  return tier
 }
 
 /**
  * GET /api/rev-share
- * Public. Returns total rev share pool (profit over threshold) in SOL and USDC.
- * 50% goes to founder, 50% to community; this returns the total pool amounts.
+ * Public. Returns site fee revenue and holder rev share amounts.
+ * 50% of raffle site fee revenue goes to holders.
  */
 export async function GET() {
   try {
@@ -46,7 +33,7 @@ export async function GET() {
 
     const { data: entries, error: entriesError } = await supabase
       .from('entries')
-      .select('amount_paid, currency')
+      .select('amount_paid, currency, raffle_id')
       .eq('status', 'confirmed')
 
     if (entriesError) {
@@ -54,41 +41,59 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to load rev share data' }, { status: 500 })
     }
 
-    let sol = 0
-    let usdc = 0
-    for (const row of entries || []) {
-      const amount = Number(row.amount_paid) || 0
-      const c = (String(row.currency || '')).toUpperCase()
-      if (c === 'SOL') sol += amount
-      else if (c === 'USDC') usdc += amount
+    const raffleIds = Array.from(
+      new Set((entries || []).map((e) => String(e.raffle_id || '').trim()).filter(Boolean))
+    )
+
+    const raffleCreatorById = new Map<string, string>()
+    if (raffleIds.length > 0) {
+      const { data: raffles, error: rafflesError } = await supabase
+        .from('raffles')
+        .select('id, creator_wallet, created_by')
+        .in('id', raffleIds)
+
+      if (rafflesError) {
+        console.error('Error fetching raffles for rev-share:', rafflesError)
+        return NextResponse.json({ error: 'Failed to load rev share data' }, { status: 500 })
+      }
+
+      for (const r of raffles || []) {
+        const creatorWallet = String(r.creator_wallet || r.created_by || '').trim()
+        raffleCreatorById.set(String(r.id), creatorWallet)
+      }
     }
 
-    const thresholds = await getThresholdsFromRaffles(supabase)
-    const thresholdSol = process.env.REVENUE_THRESHOLD_SOL != null && process.env.REVENUE_THRESHOLD_SOL !== ''
-      ? Number(process.env.REVENUE_THRESHOLD_SOL)
-      : thresholds.sol > 0 ? thresholds.sol : 0
-    const thresholdUsdc = process.env.REVENUE_THRESHOLD_USDC != null && process.env.REVENUE_THRESHOLD_USDC !== ''
-      ? Number(process.env.REVENUE_THRESHOLD_USDC)
-      : thresholds.usdc > 0 ? thresholds.usdc : 0
+    const feeTierByCreator = new Map<string, FeeTier>()
+    let siteRevenueSol = 0
+    let siteRevenueUsdc = 0
 
-    const profitSol = Math.max(0, sol - thresholdSol)
-    const profitUsdc = Math.max(0, usdc - thresholdUsdc)
+    for (const row of entries || []) {
+      const amount = Number(row.amount_paid) || 0
+      if (!Number.isFinite(amount) || amount <= 0) continue
+      const c = String(row.currency || '').toUpperCase()
+      if (c !== 'SOL' && c !== 'USDC') continue
+
+      const raffleId = String(row.raffle_id || '')
+      const creatorWallet = raffleCreatorById.get(raffleId) || ''
+      const { feeBps } = await resolveCreatorFeeTier(creatorWallet, feeTierByCreator)
+      const feeAmount = Math.floor(Math.round(amount * 1_000_000_000) * feeBps / 10_000) / 1_000_000_000
+
+      if (c === 'SOL') siteRevenueSol += feeAmount
+      else siteRevenueUsdc += feeAmount
+    }
+
+    const holdersSol = siteRevenueSol * 0.5
+    const holdersUsdc = siteRevenueUsdc * 0.5
 
     return NextResponse.json({
-      sol: Math.round(profitSol * 1e4) / 1e4,
-      usdc: Math.round(profitUsdc * 1e2) / 1e2,
-      // For showing the calculation: revenue, threshold, profit (over threshold), then 50/50 split
+      sol: Math.round(holdersSol * 1e4) / 1e4,
+      usdc: Math.round(holdersUsdc * 1e2) / 1e2,
+      // Calculation details for transparency.
       calculation: {
-        revenueSol: Math.round(sol * 1e4) / 1e4,
-        revenueUsdc: Math.round(usdc * 1e2) / 1e2,
-        thresholdSol: Math.round(thresholdSol * 1e4) / 1e4,
-        thresholdUsdc: Math.round(thresholdUsdc * 1e2) / 1e2,
-        overThresholdSol: Math.round(profitSol * 1e4) / 1e4,
-        overThresholdUsdc: Math.round(profitUsdc * 1e2) / 1e2,
-        founderSol: Math.round(profitSol * 0.5 * 1e4) / 1e4,
-        founderUsdc: Math.round(profitUsdc * 0.5 * 1e2) / 1e2,
-        communitySol: Math.round(profitSol * 0.5 * 1e4) / 1e4,
-        communityUsdc: Math.round(profitUsdc * 0.5 * 1e2) / 1e2,
+        siteRevenueSol: Math.round(siteRevenueSol * 1e4) / 1e4,
+        siteRevenueUsdc: Math.round(siteRevenueUsdc * 1e2) / 1e2,
+        holdersSol: Math.round(holdersSol * 1e4) / 1e4,
+        holdersUsdc: Math.round(holdersUsdc * 1e2) / 1e2,
       },
     })
   } catch (error) {
