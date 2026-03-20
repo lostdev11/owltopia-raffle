@@ -438,6 +438,13 @@ export async function transferNftPrizeToCreator(
   if (raffle.prize_type !== 'nft') {
     return { ok: false, error: 'Raffle is not an NFT raffle' }
   }
+  if (!raffle.prize_deposited_at) {
+    return {
+      ok: false,
+      error:
+        'Prize deposit is not verified for this raffle. Cannot return from escrow before a verified deposit.',
+    }
+  }
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   if (!creatorWallet) {
     return { ok: false, error: 'Raffle has no creator wallet to return the prize to' }
@@ -454,7 +461,8 @@ export async function transferNftPrizeToCreator(
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
-  // Determine which NFT to return from what the escrow actually holds (sent from creator's wallet)
+  // Determine which NFT to return from what the escrow actually holds.
+  // Safety: only allow returning the exact raffle mint once deposit was verified.
   const held = await getEscrowHeldNftMints()
   if (held.length === 0) {
     return {
@@ -463,12 +471,19 @@ export async function transferNftPrizeToCreator(
     }
   }
   const preferredMint = (raffle.nft_mint_address || '').trim()
-  let chosen: EscrowHeldNft
-  if (held.length === 1) {
-    chosen = held[0]
-  } else {
-    const match = held.find((h) => h.mint === preferredMint)
-    chosen = match ?? held[0]
+  if (!preferredMint) {
+    return {
+      ok: false,
+      error:
+        'Raffle NFT mint is missing. Re-verify prize deposit before attempting return.',
+    }
+  }
+  const chosen = held.find((h) => h.mint === preferredMint)
+  if (!chosen) {
+    return {
+      ok: false,
+      error: `Escrow does not hold this raffle's verified mint (${preferredMint}). Return blocked.`,
+    }
   }
 
   const connection = getSolanaConnection()
@@ -482,11 +497,6 @@ export async function transferNftPrizeToCreator(
       ok: false,
       error: `Escrow reports no balance for mint ${chosen.mint}. It may have been transferred out, or the RPC list was stale. Try again; if it persists, check the escrow on Solscan: ${keypair.publicKey.toBase58()}.`,
     }
-  }
-
-  // Keep raffle in sync with what's actually in escrow
-  if (chosen.mint !== preferredMint) {
-    await updateRaffle(raffleId, { nft_mint_address: chosen.mint })
   }
 
   const sourceAta = await getAssociatedTokenAddress(

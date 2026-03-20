@@ -332,6 +332,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     isNftRaffle &&
     !!creatorWalletRaffle &&
     !!raffle.prize_deposited_at &&
+    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
@@ -490,8 +491,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </CardContent>
         </Card>
 
-        {/* Admin: Return NFT to creator (draft NFT raffles with prize in escrow) */}
-        {isNftRaffle && (
+        {/* Admin: Return NFT to creator (only when NFT is in escrow and return is possible) */}
+        {canReturnNftDraft && (
           <Card className="border-amber-500/30 bg-amber-500/5">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -510,25 +511,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     type="button"
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
-                    onClick={() => canReturnNftDraft && setReturnNftDialogOpen(true)}
-                    disabled={returningNft || !canReturnNftDraft}
+                    onClick={() => setReturnNftDialogOpen(true)}
+                    disabled={returningNft}
                   >
                     <ArrowLeftCircle className="h-4 w-4 mr-2" />
                     Return NFT to creator
                   </Button>
-                  {!canReturnNftDraft && (
-                    <span className="text-sm text-muted-foreground">
-                      {raffle.prize_returned_at
-                        ? '(Already returned)'
-                        : raffle.nft_transfer_transaction
-                          ? '(Prize sent to winner)'
-                          : !raffle.prize_deposited_at
-                            ? '(Prize not in escrow yet)'
-                            : !creatorWalletRaffle
-                              ? '(No creator wallet)'
-                              : '(Not available)'}
-                    </span>
-                  )}
                 </div>
                 <DialogContent>
                   <DialogHeader>

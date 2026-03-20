@@ -8,7 +8,11 @@ import { Button } from '@/components/ui/button'
 import { ListTodo, Loader2, Pencil, RotateCcw } from 'lucide-react'
 import type { Raffle } from '@/lib/types'
 
-export function MyRafflesList() {
+interface MyRafflesListProps {
+  deletedOnly?: boolean
+}
+
+export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
   const { publicKey } = useWallet()
   const [raffles, setRaffles] = useState<Raffle[]>([])
   const [loading, setLoading] = useState(true)
@@ -56,7 +60,11 @@ export function MyRafflesList() {
     return (status === 'draft' && hasStarted) || purchasesBlocked
   })
   const pausedPendingIds = new Set(pausedPendingRaffles.map((raffle) => raffle.id))
-  const otherRaffles = raffles.filter((raffle) => !pausedPendingIds.has(raffle.id))
+  const deletedRaffles = raffles.filter((raffle) => (raffle.status ?? '').toLowerCase() === 'cancelled')
+  const deletedIds = new Set(deletedRaffles.map((raffle) => raffle.id))
+  const otherRaffles = raffles.filter(
+    (raffle) => !pausedPendingIds.has(raffle.id) && !deletedIds.has(raffle.id)
+  )
 
   if (loading) {
     return (
@@ -64,9 +72,13 @@ export function MyRafflesList() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ListTodo className="h-5 w-5" />
-            My raffles
+            {deletedOnly ? 'Deleted raffles' : 'My raffles'}
           </CardTitle>
-          <CardDescription>Raffles you created. Open to edit or delete.</CardDescription>
+          <CardDescription>
+            {deletedOnly
+              ? 'Raffles you deleted from your active list.'
+              : 'Raffles you created. Open to edit or delete.'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground flex items-center gap-2">
@@ -84,7 +96,7 @@ export function MyRafflesList() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ListTodo className="h-5 w-5" />
-            My raffles
+            {deletedOnly ? 'Deleted raffles' : 'My raffles'}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -94,7 +106,7 @@ export function MyRafflesList() {
     )
   }
 
-  if (raffles.length === 0) {
+  if (raffles.length === 0 && !deletedOnly) {
     return (
       <Card className="mb-8">
         <CardHeader>
@@ -125,9 +137,13 @@ export function MyRafflesList() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <ListTodo className="h-5 w-5" />
-              My raffles
+              {deletedOnly ? 'Deleted raffles' : 'My raffles'}
             </CardTitle>
-            <CardDescription>Raffles you created. Open to edit or delete.</CardDescription>
+            <CardDescription>
+              {deletedOnly
+                ? 'Raffles you deleted from your active list.'
+                : 'Raffles you created. Open to edit or delete.'}
+            </CardDescription>
           </div>
           <Button variant="ghost" size="sm" onClick={fetchRaffles} disabled={loading} title="Refresh list">
             <RotateCcw className="h-4 w-4" />
@@ -135,7 +151,7 @@ export function MyRafflesList() {
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        {pausedPendingRaffles.length > 0 && (
+        {!deletedOnly && pausedPendingRaffles.length > 0 && (
           <div className="space-y-2">
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
               <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
@@ -173,7 +189,7 @@ export function MyRafflesList() {
             </ul>
           </div>
         )}
-        {otherRaffles.length > 0 && (
+        {!deletedOnly && otherRaffles.length > 0 && (
           <ul className="space-y-2">
             {otherRaffles.map((raffle) => (
             <li
@@ -209,6 +225,44 @@ export function MyRafflesList() {
             </li>
             ))}
           </ul>
+        )}
+        {(deletedOnly || deletedRaffles.length > 0) && (
+          <div className="space-y-2">
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2">
+              <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                Deleted Raffles
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                These raffles were deleted from your active list and are kept here for history.
+              </p>
+            </div>
+            <ul className="space-y-2">
+              {deletedRaffles.map((raffle) => (
+                <li
+                  key={raffle.id}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{raffle.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      /{raffle.slug}
+                      <span className="ml-2 inline-flex items-center rounded-md bg-red-500/20 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
+                        deleted
+                      </span>
+                    </p>
+                  </div>
+                  <Link href={`/raffles/${raffle.slug}`}>
+                    <Button variant="ghost" size="sm">
+                      View
+                    </Button>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {deletedOnly && deletedRaffles.length === 0 && (
+              <p className="text-sm text-muted-foreground">No deleted raffles yet.</p>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

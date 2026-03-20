@@ -63,6 +63,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     isNftRaffle &&
     !!creatorWallet &&
     !!raffle.prize_deposited_at &&
+    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
@@ -550,33 +551,20 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 </Card>
               )
             })()}
-            {/* Return NFT — always show for NFT raffles so the action is visible */}
-            {isNftRaffle ? (
+            {/* Return NFT — show only when escrow return is actually possible */}
+            {canReturnNft ? (
               <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
-                    onClick={() => canReturnNft && setReturnDialogOpen(true)}
-                    disabled={returning || !canReturnNft}
+                    onClick={() => setReturnDialogOpen(true)}
+                    disabled={returning}
                   >
                     <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
                     Return NFT to creator
                   </Button>
-                  {!canReturnNft && (
-                    <span className="text-sm text-muted-foreground">
-                      {raffle.prize_returned_at
-                        ? '(Already returned)'
-                        : raffle.nft_transfer_transaction
-                          ? '(Prize sent to winner)'
-                          : !raffle.prize_deposited_at
-                            ? '(Prize not in escrow yet)'
-                            : !creatorWallet
-                              ? '(No creator wallet)'
-                              : '(Not available)'}
-                    </span>
-                  )}
                 </div>
                 <DialogContent>
                   <DialogHeader>
@@ -620,9 +608,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
-            ) : (
-              <p className="text-sm text-muted-foreground">This raffle has no NFT prize.</p>
-            )}
+            ) : null}
 
             <div className="pt-2">
               <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

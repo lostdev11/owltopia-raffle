@@ -336,10 +336,11 @@ export async function DELETE(
       escrowCurrentlyHoldsPrize = escrowCheck.holds
     }
 
-    // Safety net: for NFT raffles with prize in escrow (DB flag or live escrow check), attempt return before hard delete.
+    // Safety net: only require return when escrow wallet currently holds the NFT.
+    // DB flags can be stale; live escrow state is authoritative.
     const requiresPrizeReturnBeforeDelete =
       existingRaffle.prize_type === 'nft' &&
-      (!!existingRaffle.prize_deposited_at || escrowCurrentlyHoldsPrize) &&
+      escrowCurrentlyHoldsPrize &&
       !existingRaffle.prize_returned_at &&
       !existingRaffle.nft_transfer_transaction
     if (requiresPrizeReturnBeforeDelete) {
@@ -354,7 +355,18 @@ export async function DELETE(
       }
     }
 
-    // Delete the raffle (entries will be cascade deleted)
+    if (role === 'raffle_creator') {
+      // Creator delete = soft delete so creators can review deleted raffles in dashboard history.
+      const now = new Date().toISOString()
+      await updateRaffle(raffleId, {
+        status: 'cancelled',
+        cancelled_at: now,
+        is_active: false,
+      })
+      return NextResponse.json({ success: true, message: 'Raffle moved to deleted section' })
+    }
+
+    // Full admin delete = hard delete (entries cascade delete).
     const success = await deleteRaffle(raffleId)
 
     if (!success) {

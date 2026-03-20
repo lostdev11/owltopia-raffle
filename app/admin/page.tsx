@@ -978,6 +978,20 @@ export default function AdminDashboardPage() {
               </CardDescription>
             </CardHeader>
           </Card>
+
+          <Card className="hover:border-primary transition-colors cursor-pointer">
+            <Link href="/admin/raffles/deleted">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Trash2 className="h-5 w-5" />
+                  Deleted Raffles
+                </CardTitle>
+                <CardDescription>
+                  View creator-deleted raffles history and open the public page for review.
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
         </div>
 
         {/* Transaction Verification Tool */}
