@@ -125,6 +125,7 @@ export function RaffleDetailClient({
   const [imageUploading, setImageUploading] = useState(false)
   const [imageUploadError, setImageUploadError] = useState<string | null>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Use proxy for external image URLs so they load on mobile (avoid Safe Web / CORS issues)
   const displayImageUrl = (() => {
     const url = raffle.image_url
@@ -200,6 +201,32 @@ export function RaffleDetailClient({
       : isPendingDraft
         ? 'Pending escrow deposit'
       : `Ended ${formatDateTimeLocal(raffle.end_time)}`
+
+  const handleMobileLinkTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    const touch = e.touches[0]
+    if (!touch) return
+    mobileLinkTouchRef.current = { x: touch.clientX, y: touch.clientY, moved: false }
+  }
+
+  const handleMobileLinkTouchMove = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    const touch = e.touches[0]
+    const start = mobileLinkTouchRef.current
+    if (!touch || !start) return
+    const movedX = Math.abs(touch.clientX - start.x)
+    const movedY = Math.abs(touch.clientY - start.y)
+    if (movedX > 8 || movedY > 8) {
+      mobileLinkTouchRef.current = { ...start, moved: true }
+    }
+  }
+
+  const handleMobileLinkTouchEnd = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    if (mobileLinkTouchRef.current?.moved) {
+      // Prevent accidental open when user stops scrolling on a link.
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    mobileLinkTouchRef.current = null
+  }
 
   // Use real-time entries hook (with polling fallback)
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
@@ -1673,6 +1700,36 @@ export function RaffleDetailClient({
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
+  const handleShareRaffle = useCallback(async () => {
+    if (typeof window === 'undefined') return
+    const url = `${window.location.origin}/raffles/${raffle.slug}`
+    const shareData = {
+      title: raffle.title,
+      text: `Check out this raffle: ${raffle.title}`,
+      url,
+    }
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share(shareData)
+        return
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+      }
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(url)
+        return
+      } catch {
+        // If clipboard fails (permissions/unsupported), use prompt fallback.
+      }
+    }
+
+    window.prompt('Copy raffle link:', url)
+  }, [raffle.slug, raffle.title])
+
   // Size-based styling classes
   const sizeClasses = {
     small: {
@@ -1735,20 +1792,9 @@ export function RaffleDetailClient({
           <Button
             variant="outline"
             size="default"
-            onClick={() => {
-              const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
-              if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(url).catch(() => {})
-              }
-              const prefix = 'Check out this raffle: '
-              const maxTitleLen = 280 - prefix.length - 1
-              const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
-              const text = `${prefix}${title}`
-              const shareUrl = `https://x.com/intent/post?${new URLSearchParams({ text, url }).toString()}`
-              window.open(shareUrl, '_blank', 'noopener,noreferrer')
-            }}
+            onClick={handleShareRaffle}
             className="touch-manipulation min-h-[44px] text-sm sm:text-base"
-            title="Share on X. Link is copied and included in the post."
+            title="Share this raffle or copy the raffle link."
           >
             <Share2 className="mr-2 h-4 w-4" />
             Share
@@ -1850,6 +1896,9 @@ export function RaffleDetailClient({
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                          onTouchStart={handleMobileLinkTouchStart}
+                          onTouchMove={handleMobileLinkTouchMove}
+                          onTouchEnd={handleMobileLinkTouchEnd}
                         >
                           View prize mint on explorer
                           <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -1860,6 +1909,9 @@ export function RaffleDetailClient({
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                            onTouchStart={handleMobileLinkTouchStart}
+                            onTouchMove={handleMobileLinkTouchMove}
+                            onTouchEnd={handleMobileLinkTouchEnd}
                           >
                             Escrow token account (custody proof)
                             <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -2159,6 +2211,9 @@ export function RaffleDetailClient({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                onTouchStart={handleMobileLinkTouchStart}
+                onTouchMove={handleMobileLinkTouchMove}
+                onTouchEnd={handleMobileLinkTouchEnd}
               >
                 View prize mint on explorer
                 <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -2169,6 +2224,9 @@ export function RaffleDetailClient({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-primary hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                  onTouchStart={handleMobileLinkTouchStart}
+                  onTouchMove={handleMobileLinkTouchMove}
+                  onTouchEnd={handleMobileLinkTouchEnd}
                 >
                   Escrow token account (custody proof)
                   <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />

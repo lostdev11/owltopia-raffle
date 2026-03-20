@@ -9,7 +9,7 @@
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
  * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -197,6 +197,7 @@ export function RafflesPageClient({
   initialError,
   rafflesTotalCount = 0,
 }: RafflesPageClientProps) {
+  const featuredCardTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Defensive: coerce null/undefined to [] so we never read .length on null (e.g. after serialization)
   const serverActive = activeRafflesWithEntries ?? []
   const serverFuture = futureRafflesWithEntries ?? []
@@ -232,6 +233,31 @@ export function RafflesPageClient({
   } | null>(null)
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
+
+  const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    const touch = e.touches[0]
+    if (!touch) return
+    featuredCardTouchRef.current = { x: touch.clientX, y: touch.clientY, moved: false }
+  }
+
+  const handleFeaturedCardTouchMove = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    const touch = e.touches[0]
+    const start = featuredCardTouchRef.current
+    if (!touch || !start) return
+    const movedX = Math.abs(touch.clientX - start.x)
+    const movedY = Math.abs(touch.clientY - start.y)
+    if (movedX > 8 || movedY > 8) {
+      featuredCardTouchRef.current = { ...start, moved: true }
+    }
+  }
+
+  const handleFeaturedCardTouchEnd = (e: React.TouchEvent<HTMLAnchorElement>) => {
+    if (featuredCardTouchRef.current?.moved) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    featuredCardTouchRef.current = null
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -491,6 +517,9 @@ export function RafflesPageClient({
                   key={raffle.id}
                   href={`/raffles/${raffle.slug}`}
                   className="relative overflow-hidden rounded-xl border border-emerald-400/70 bg-gradient-to-br from-emerald-500/15 via-emerald-400/5 to-transparent shadow-[0_0_25px_rgba(16,185,129,0.7)] px-3 py-3 sm:px-4 sm:py-4 hover:border-emerald-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.85)] transition-all cursor-pointer"
+                  onTouchStart={handleFeaturedCardTouchStart}
+                  onTouchMove={handleFeaturedCardTouchMove}
+                  onTouchEnd={handleFeaturedCardTouchEnd}
                 >
                   <div className="pointer-events-none absolute -inset-px bg-[radial-gradient(circle_at_0_0,rgba(74,222,128,0.35),transparent_55%),radial-gradient(circle_at_100%_0,rgba(16,185,129,0.4),transparent_50%)] opacity-70" />
                   <div className="relative flex flex-col gap-1.5">

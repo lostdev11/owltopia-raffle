@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
@@ -731,6 +731,36 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
     setShowQuickBuy(!showQuickBuy)
   }
 
+  const handleShareRaffle = useCallback(async () => {
+    if (typeof window === 'undefined') return
+    const url = `${window.location.origin}/raffles/${raffle.slug}`
+    const shareData = {
+      title: raffle.title,
+      text: `Check out this raffle: ${raffle.title}`,
+      url,
+    }
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share(shareData)
+        return
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+      }
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(url)
+        return
+      } catch {
+        // Last resort below when clipboard permissions are denied.
+      }
+    }
+
+    window.prompt('Copy raffle link:', url)
+  }, [raffle.slug, raffle.title])
+
   // Small size - List format (horizontal)
   if (size === 'small') {
     return (
@@ -1192,21 +1222,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       variant="outline"
                       size={displaySize === 'large' ? 'default' : 'sm'}
                       className="w-full touch-manipulation min-h-[40px] text-sm"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        const url = typeof window !== 'undefined' ? `${window.location.origin}/raffles/${raffle.slug}` : ''
-                        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                          navigator.clipboard.writeText(url).catch(() => {})
-                        }
-                        const prefix = 'Check out this raffle: '
-                        const maxTitleLen = 280 - prefix.length - 1
-                        const title = maxTitleLen >= raffle.title.length ? raffle.title : `${raffle.title.slice(0, Math.max(0, maxTitleLen - 3))}…`
-                        const text = `${prefix}${title}`
-                        const shareUrl = `https://x.com/intent/post?${new URLSearchParams({ text, url }).toString()}`
-                        window.open(shareUrl, '_blank', 'noopener,noreferrer')
+                        await handleShareRaffle()
                       }}
-                      title="Share this raffle on X. Link is copied and included in the post."
+                      title="Share this raffle or copy the raffle link."
                     >
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
