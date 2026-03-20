@@ -167,6 +167,7 @@ export function RaffleDetailClient({
   const nowMs = serverTime.getTime()
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
+  const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   // Pending escrow deposit should be based on escrow verification state, not solely on `raffle.status`,
   // since status can drift (e.g. restore/maintenance) while `is_active` remains false.
   const isPendingDraft =
@@ -317,7 +318,12 @@ export function RaffleDetailClient({
       .then((data: { url?: string; prizeMintUrl?: string; custodyUrl?: string } | undefined) => {
         if (cancelled || !data?.url || !raffle.nft_mint_address) return
         const mint = raffle.nft_mint_address.trim()
-        const prizeMintUrl = data.prizeMintUrl ?? `https://solscan.io/token/${mint}`
+        const cluster = /devnet/i.test(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? '') ? '?cluster=devnet' : ''
+        const fallbackUrl =
+          raffle.prize_standard === 'mpl_core'
+            ? `https://solscan.io/account/${mint}${cluster}`
+            : `https://solscan.io/token/${mint}${cluster}`
+        const prizeMintUrl = data.prizeMintUrl ?? fallbackUrl
         const custodyUrl = data.custodyUrl ?? data.url
         setEscrowExplorer({ prizeMintUrl, custodyUrl })
       })
@@ -2450,17 +2456,26 @@ export function RaffleDetailClient({
 
             {isActive && !isFuture && (
               <div className="flex flex-col gap-3 items-stretch">
+                {purchasesBlocked && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    Ticket purchases are temporarily blocked. Please check back later.
+                  </p>
+                )}
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
-                  disabled={availableTickets !== null && availableTickets <= 0}
+                  disabled={purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
                   size={classes.buttonSize as any}
-                  style={{
-                    backgroundColor: themeColor,
-                    color: '#000',
-                  }}
-                  className="w-full touch-manipulation min-h-[44px] text-sm sm:text-base px-4 sm:px-6"
+                  style={
+                    purchasesBlocked
+                      ? undefined
+                      : { backgroundColor: themeColor, color: '#000' }
+                  }
+                  variant={purchasesBlocked ? 'secondary' : 'default'}
+                  className={`w-full touch-manipulation min-h-[44px] text-sm sm:text-base px-4 sm:px-6 ${purchasesBlocked ? 'opacity-70' : ''}`}
                 >
-                  {availableTickets !== null && availableTickets <= 0
+                  {purchasesBlocked
+                    ? 'Purchases Blocked'
+                    : availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
                     : 'Enter Raffle'}
                 </Button>

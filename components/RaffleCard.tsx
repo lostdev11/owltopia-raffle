@@ -121,6 +121,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
     ? section === 'active'
     : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
   const isPendingDraft = raffle.status === 'draft' && raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
+  const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
@@ -1210,12 +1211,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <>
                     <Button 
                       type="button"
-                      className="w-full touch-manipulation min-h-[44px] text-base sm:text-sm" 
+                      className={`w-full touch-manipulation min-h-[44px] text-base sm:text-sm ${purchasesBlocked ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-70' : ''}`}
                       size={displaySize === 'large' ? 'lg' : 'default'}
                       onClick={handleToggleQuickBuy}
-                      disabled={!isActive || isFuture || (availableTickets !== null && availableTickets <= 0)}
+                      disabled={!isActive || isFuture || purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
                     >
-                      {isFuture ? 'Starts Soon' : (isActive ? (availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
+                      {isFuture ? 'Starts Soon' : (isActive ? (purchasesBlocked ? 'Purchases Blocked' : availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
                     </Button>
                     <Button
                       type="button"
@@ -1234,7 +1235,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     </Button>
                   </>
                 )}
-                {showQuickBuy && isActive && !isFuture && (
+                {showQuickBuy && isActive && !isFuture && !purchasesBlocked && (
             <div className="w-full space-y-3 pt-2">
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <div className="p-2 rounded-lg bg-muted border">

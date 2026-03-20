@@ -65,6 +65,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
+    // NFT raffles: block purchases until prize is verified in escrow (defense in depth)
+    if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    // Admin-flagged: block purchases (e.g. NFT not in escrow, wrong link, dispute)
+    const purchasesBlockedAt = (raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
+    if (purchasesBlockedAt) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
     if (new Date(raffle.end_time) <= new Date()) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }

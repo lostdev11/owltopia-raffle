@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Trash2, ArrowLeftCircle, XCircle } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 
@@ -49,9 +50,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [acceptCancelDialogOpen, setAcceptCancelDialogOpen] = useState(false)
   const [acceptingCancel, setAcceptingCancel] = useState(false)
+  const [blockingPurchases, setBlockingPurchases] = useState(false)
+  const [fixMintDialogOpen, setFixMintDialogOpen] = useState(false)
+  const [fixMintInput, setFixMintInput] = useState('')
+  const [fixingMint, setFixingMint] = useState(false)
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
+  const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const canReturnNft =
     isNftRaffle &&
     !!creatorWallet &&
@@ -120,6 +126,73 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
       })
     } finally {
       setAcceptingCancel(false)
+    }
+  }
+
+  const handleFixNftMint = async () => {
+    const mint = fixMintInput.trim()
+    if (!mint) {
+      setMessage({ type: 'error', text: 'Enter the correct NFT mint address from Solscan' })
+      return
+    }
+    setFixingMint(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/fix-nft-mint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nft_mint_address: mint }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text: data.message ?? 'NFT mint address updated. Solscan link will now show the correct prize.',
+        })
+        setFixMintDialogOpen(false)
+        setFixMintInput('')
+        router.refresh()
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to fix NFT mint address' })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to fix NFT mint address',
+      })
+    } finally {
+      setFixingMint(false)
+    }
+  }
+
+  const handleBlockPurchases = async (block: boolean) => {
+    setBlockingPurchases(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/block-purchases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text: data.message ?? (block ? 'Ticket purchases blocked.' : 'Ticket purchases unblocked.'),
+        })
+        router.refresh()
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to update' })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to update',
+      })
+    } finally {
+      setBlockingPurchases(false)
     }
   }
 
@@ -266,6 +339,96 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </DialogContent>
                 </Dialog>
               </>
+            )}
+            {/* Block purchases — admin can block ticket purchases on any raffle (e.g. NFT not in escrow) */}
+            <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant={purchasesBlocked ? 'default' : 'outline'}
+                  className={
+                    purchasesBlocked
+                      ? 'bg-green-600 hover:bg-green-700 touch-manipulation min-h-[44px]'
+                      : 'border-red-500/50 text-red-600 hover:bg-red-500/10 touch-manipulation min-h-[44px]'
+                  }
+                  onClick={() => handleBlockPurchases(!purchasesBlocked)}
+                  disabled={blockingPurchases}
+                >
+                  {purchasesBlocked ? (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2 shrink-0" />
+                      {blockingPurchases ? 'Unblocking...' : 'Unblock ticket purchases'}
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="h-4 w-4 mr-2 shrink-0" />
+                      {blockingPurchases ? 'Blocking...' : 'Block ticket purchases'}
+                    </>
+                  )}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {purchasesBlocked
+                    ? 'Ticket purchases are blocked. No new tickets can be bought.'
+                    : 'Block new ticket purchases (e.g. NFT not in escrow, wrong prize).'}
+                </span>
+            </div>
+            {/* Fix NFT mint — when raffle has wrong link but correct NFT was deposited */}
+            {isNftRaffle && raffle.prize_deposited_at && !raffle.nft_transfer_transaction && (
+              <Dialog open={fixMintDialogOpen} onOpenChange={setFixMintDialogOpen}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-blue-500/50 text-blue-600 hover:bg-blue-500/10 touch-manipulation min-h-[44px]"
+                    onClick={() => {
+                      setFixMintInput('')
+                      setFixMintDialogOpen(true)
+                    }}
+                    disabled={fixingMint}
+                  >
+                    Fix NFT mint / link
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Wrong Solscan link but NFT was sent to escrow? Paste the correct mint from Solscan.
+                  </span>
+                </div>
+                <DialogContent className="max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Fix NFT mint address</DialogTitle>
+                    <DialogDescription>
+                      The raffle has the wrong NFT link stored, but the correct NFT was deposited to escrow.
+                      Paste the correct mint address from Solscan (e.g. from the token URL).
+                      Current: <code className="text-xs break-all">{raffle.nft_mint_address || '—'}</code>
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 py-4">
+                    <Label htmlFor="fix-mint-input">Correct NFT mint address</Label>
+                    <Input
+                      id="fix-mint-input"
+                      placeholder="e.g. Gh2dp9UiFsJ4k6PuVRFyCZLG72Hy3DL2XuoQqNhzkyrb"
+                      value={fixMintInput}
+                      onChange={(e) => setFixMintInput(e.target.value)}
+                      className="font-mono text-sm touch-manipulation min-h-[44px]"
+                    />
+                  </div>
+                  <DialogFooter className="gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setFixMintDialogOpen(false)}
+                      disabled={fixingMint}
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleFixNftMint}
+                      disabled={fixingMint || !fixMintInput.trim()}
+                      className="bg-blue-600 hover:bg-blue-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
+                      {fixingMint ? 'Updating...' : 'Update mint address'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             )}
             {isCancelled && raffle.cancelled_at && (
               <p className="text-sm text-muted-foreground">

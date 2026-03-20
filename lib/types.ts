@@ -73,6 +73,8 @@ export interface Raffle {
   cancellation_refund_policy: 'full_refund' | 'no_refund' | null
   /** On-chain standard for NFT prize (SPL / Token-2022 / Mpl Core). Defaults to 'spl' when null. */
   prize_standard?: PrizeStandard | null
+  /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */
+  purchases_blocked_at?: string | null
 }
 
 export interface Entry {

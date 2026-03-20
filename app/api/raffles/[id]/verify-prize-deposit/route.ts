@@ -129,7 +129,18 @@ export async function POST(
     const preferredMint = (raffle.nft_mint_address || '').trim()
     let mintToSet: string
     if (held.length === 1) {
-      mintToSet = held[0].mint
+      const onlyMint = held[0].mint
+      // Safety: do not "verify" against whatever single NFT happens to be in escrow.
+      // If the raffle has an expected mint, require a match.
+      if (preferredMint && onlyMint !== preferredMint) {
+        return NextResponse.json(
+          {
+            error: `Escrow holds a different NFT mint than this raffle expects. Expected: ${preferredMint}. Found: ${onlyMint}. Transfer the correct NFT to escrow and try Verify again.`,
+          },
+          { status: 400 }
+        )
+      }
+      mintToSet = onlyMint
     } else {
       const match = held.find((h) => h.mint === preferredMint)
       if (match) {

@@ -69,9 +69,9 @@ async function checkNftMigrationApplied(): Promise<boolean> {
   }
 }
 
-/** Base columns including prize return and cancellation (migrations 036, 038). Use when DB has them. */
+/** Base columns including prize return, cancellation, and purchases_blocked (migrations 036, 038, 040). */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy'
+  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
 }
 
 /** Minimal columns when prize return / cancellation migrations (036, 038) are not yet applied. */
@@ -543,6 +543,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_collection_name: (row.nft_collection_name as string | null) ?? null,
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
+    purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
   } as Raffle
 }
 

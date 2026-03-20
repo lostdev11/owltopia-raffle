@@ -43,7 +43,13 @@ export async function GET(
     const mintStr = raffle.nft_mint_address.trim()
     const mint = new PublicKey(mintStr)
     const cluster = isDevnet ? '?cluster=devnet' : ''
-    const prizeMintUrl = `https://solscan.io/token/${mintStr}${cluster}`
+    // Mpl Core assets use an asset account (not SPL mint); /account/ is the correct Solscan URL.
+    // SPL/Token-2022 use /token/ for the mint page.
+    const prizeStandard = (raffle as { prize_standard?: string | null }).prize_standard
+    const prizeMintUrl =
+      prizeStandard === 'mpl_core'
+        ? `https://solscan.io/account/${mintStr}${cluster}`
+        : `https://solscan.io/token/${mintStr}${cluster}`
 
     const ata = await getEscrowTokenAccountForMint(mint)
     if (ata) {
