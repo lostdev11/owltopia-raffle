@@ -32,7 +32,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2, Upload } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -122,9 +122,6 @@ export function RaffleDetailClient({
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [imageError, setImageError] = useState(false)
   const [fallbackImageError, setFallbackImageError] = useState(false)
-  const [imageUploading, setImageUploading] = useState(false)
-  const [imageUploadError, setImageUploadError] = useState<string | null>(null)
-  const imageInputRef = useRef<HTMLInputElement>(null)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Use proxy for external image URLs so they load on mobile (avoid Safe Web / CORS issues)
   const displayImageUrl = (() => {
@@ -2064,40 +2061,6 @@ export function RaffleDetailClient({
             </div>
           </CardHeader>
 
-          {(isCreator || isAdmin) && (
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-              className="hidden"
-              aria-hidden
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                setImageUploadError(null)
-                setImageUploading(true)
-                try {
-                  const formData = new FormData()
-                  formData.append('file', file)
-                  const res = await fetch(`/api/raffles/${raffle.id}/image`, {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include',
-                  })
-                  const data = await res.json()
-                  if (!res.ok) throw new Error(data.error || 'Upload failed')
-                  setImageError(false)
-                  setFallbackImageError(false)
-                  router.refresh()
-                } catch (err) {
-                  setImageUploadError(err instanceof Error ? err.message : 'Upload failed')
-                } finally {
-                  setImageUploading(false)
-                  if (imageInputRef.current) imageInputRef.current.value = ''
-                }
-              }}
-            />
-          )}
           {(displayImageUrl ?? raffle.image_url) && (
             <>
               {!imageError && (
@@ -2164,54 +2127,14 @@ export function RaffleDetailClient({
               ) : (
                 <div className={`w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} flex flex-col items-center justify-center gap-3 bg-muted border rounded p-4`}>
                   <span className="text-muted-foreground">Image unavailable</span>
-                  {(isCreator || isAdmin) && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={imageUploading}
-                        onClick={() => imageInputRef.current?.click()}
-                        className="gap-2"
-                      >
-                        {imageUploading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                        ) : (
-                          <Upload className="h-4 w-4" aria-hidden />
-                        )}
-                        {imageUploading ? 'Uploading…' : 'Upload photo'}
-                      </Button>
-                      {imageUploadError && (
-                        <p className="text-sm text-destructive">{imageUploadError}</p>
-                      )}
-                    </>
-                  )}
                 </div>
               )}
             </>
           )}
 
-          {!(displayImageUrl ?? raffle.image_url) && (isCreator || isAdmin) && (
+          {!(displayImageUrl ?? raffle.image_url) && (
             <div className={`w-full aspect-[4/3] flex flex-col items-center justify-center gap-3 bg-muted border rounded p-4 ${classes.headerPadding}`}>
-              <span className="text-muted-foreground">No image</span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={imageUploading}
-                onClick={() => imageInputRef.current?.click()}
-                className="gap-2"
-              >
-                {imageUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Upload className="h-4 w-4" aria-hidden />
-                )}
-                {imageUploading ? 'Uploading…' : 'Upload photo'}
-              </Button>
-              {imageUploadError && (
-                <p className="text-sm text-destructive">{imageUploadError}</p>
-              )}
+              <span className="text-muted-foreground">Image unavailable</span>
             </div>
           )}
 

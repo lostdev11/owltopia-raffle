@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { ListTodo, Loader2, Pencil, RotateCcw } from 'lucide-react'
 import type { Raffle } from '@/lib/types'
+import { isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 
 interface MyRafflesListProps {
   deletedOnly?: boolean
@@ -50,15 +51,7 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
   }, [fetchRaffles])
 
   const nowMs = Date.now()
-  const pausedPendingRaffles = raffles.filter((raffle) => {
-    if (raffle.prize_type !== 'nft') return false
-    if (raffle.prize_deposited_at) return false
-    const status = (raffle.status ?? '').toLowerCase()
-    const hasStarted = !Number.isNaN(Date.parse(raffle.start_time)) && Date.parse(raffle.start_time) <= nowMs
-    const purchasesBlocked = !!raffle.purchases_blocked_at
-    // Show only stalled NFT raffles that should be live now but are still waiting for escrow verification.
-    return (status === 'draft' && hasStarted) || purchasesBlocked
-  })
+  const pausedPendingRaffles = raffles.filter((raffle) => isPendingNftRaffleAtTime(raffle, nowMs))
   const pausedPendingIds = new Set(pausedPendingRaffles.map((raffle) => raffle.id))
   const deletedRaffles = raffles.filter((raffle) => (raffle.status ?? '').toLowerCase() === 'cancelled')
   const deletedIds = new Set(deletedRaffles.map((raffle) => raffle.id))

@@ -166,6 +166,21 @@ const PUBLIC_STATUSES = ['live', 'ready_to_draw', 'completed'] as const
 /** Status values when admin needs to see drafts and cancelled */
 const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'] as const
 
+/**
+ * Public list uses direct REST for cold-start resilience. Must be high enough that older **live**
+ * raffles are not dropped (admin `getRaffles` has no limit — a low cap here made long-running
+ * raffles disappear from /raffles while still visible in Owl Vision).
+ * PostgREST default max is often 1000; override via RAFFLES_REST_LIST_LIMIT if needed.
+ */
+function getRafflesRestListLimit(): number {
+  const raw = process.env.RAFFLES_REST_LIST_LIMIT?.trim()
+  if (raw) {
+    const n = parseInt(raw, 10)
+    if (Number.isFinite(n) && n >= 24 && n <= 10_000) return n
+  }
+  return 1000
+}
+
 /** REST select: full columns including NFT (matches Raffle type) */
 const RAFFLE_SELECT_FULL =
   getBaseRaffleColumns() +
@@ -216,7 +231,7 @@ async function fetchRafflesViaRestRaw(
   url.searchParams.set('status', statusFilter)
   if (activeOnly) url.searchParams.set('is_active', 'is.true')
   url.searchParams.set('order', 'created_at.desc,id.desc')
-  url.searchParams.set('limit', '24')
+  url.searchParams.set('limit', String(getRafflesRestListLimit()))
   url.searchParams.set('select', select)
 
   const controller = new AbortController()

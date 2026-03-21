@@ -5,22 +5,60 @@ function getCreatorWallet(raffle: Raffle): string | null {
   return raffle.created_by ?? raffle.creator_wallet ?? null
 }
 
-function isPendingNftRaffle(raffle: Raffle): boolean {
+let cachedEscrowRequiredSinceMs: number | null | undefined
+
+/**
+ * When set (ISO 8601), NFT raffles with `created_at` **before** this instant are treated as
+ * pre-escrow: they are not hidden from the public list and ticket creation is not blocked
+ * solely for missing `prize_deposited_at`. Must be `NEXT_PUBLIC_*` so server and browser
+ * apply the same rules (RSC + `/api/raffles` + client Supabase fallback).
+ */
+function getEscrowRequiredSinceMs(): number | null {
+  if (cachedEscrowRequiredSinceMs !== undefined) return cachedEscrowRequiredSinceMs
+  const raw = process.env.NEXT_PUBLIC_ESCROW_REQUIRED_SINCE?.trim()
+  if (!raw) {
+    cachedEscrowRequiredSinceMs = null
+    return null
+  }
+  const t = Date.parse(raw)
+  cachedEscrowRequiredSinceMs = Number.isFinite(t) ? t : null
+  return cachedEscrowRequiredSinceMs
+}
+
+/** True for legacy NFT raffles created before on-chain escrow was required. */
+export function nftRaffleExemptFromEscrowRequirement(raffle: Raffle): boolean {
+  const since = getEscrowRequiredSinceMs()
+  if (since == null) return false
+  const created = Date.parse(raffle.created_at)
+  if (!Number.isFinite(created)) return false
+  return created < since
+}
+
+/**
+ * NFT raffles that are "pending" for public listing: blocked purchases, or missing escrow
+ * verification while already live / draft-past-start. Uses `nowMs` so list bucketing matches server time.
+ */
+export function isPendingNftRaffleAtTime(raffle: Raffle, nowMs: number): boolean {
   if (raffle.prize_type !== 'nft') return false
 
-  const nowMs = Date.now()
+  const hasBlockedPurchases = Boolean(raffle.purchases_blocked_at)
+  // Admin pause always counts as pending (independent of legacy escrow cutoff).
+  if (hasBlockedPurchases) return true
+
+  if (nftRaffleExemptFromEscrowRequirement(raffle)) return false
+
   const startTimeMs = new Date(raffle.start_time).getTime()
   const status = (raffle.status ?? '').toLowerCase()
-
-  // Pending/paused means the NFT prize is not in verified platform escrow yet (or purchases are blocked),
-  // and the raffle is already "in progress" from the user's perspective.
-  const hasBlockedPurchases = Boolean(raffle.purchases_blocked_at)
   const missingDeposit = !raffle.prize_deposited_at
 
   const draftHasStarted = status === 'draft' && !isNaN(startTimeMs) && startTimeMs <= nowMs
-  const liveHasStarted = status === 'live' // "live" implies start_time <= now for our bucketing logic
+  const liveHasStarted = status === 'live'
 
-  return hasBlockedPurchases || (missingDeposit && (draftHasStarted || liveHasStarted))
+  return missingDeposit && (draftHasStarted || liveHasStarted)
+}
+
+function isPendingNftRaffle(raffle: Raffle): boolean {
+  return isPendingNftRaffleAtTime(raffle, Date.now())
 }
 
 /**

@@ -14,7 +14,7 @@ import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
-import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
+import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -152,13 +152,7 @@ export default async function RafflesPage() {
         pastRaffles.push(raffle)
         continue
       }
-      const status = (raffle.status ?? '').toLowerCase()
-      const isPausedPendingEscrow =
-        raffle.prize_type === 'nft' &&
-        (!!raffle.purchases_blocked_at ||
-          (!raffle.prize_deposited_at &&
-            ((status === 'draft' && startTimeMs <= nowTime) || status === 'live')))
-      if (isPausedPendingEscrow) {
+      if (isPendingNftRaffleAtTime(raffle, nowTime)) {
         pausedPendingRaffles.push(raffle)
         continue
       }

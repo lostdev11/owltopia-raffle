@@ -26,7 +26,7 @@ import { AnnouncementsBlock, type AnnouncementItem } from '@/components/Announce
 import { MarkdownContent } from '@/components/MarkdownContent'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
-import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
+import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -59,13 +59,7 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
       past.push(withEntries(raffle))
       continue
     }
-    const status = (raffle.status ?? '').toLowerCase()
-    const isPausedPendingEscrow =
-      raffle.prize_type === 'nft' &&
-      (!!raffle.purchases_blocked_at ||
-        (!raffle.prize_deposited_at &&
-          ((status === 'draft' && startTimeMs <= nowTime) || status === 'live')))
-    if (isPausedPendingEscrow) {
+    if (isPendingNftRaffleAtTime(raffle, nowTime)) {
       pausedPending.push(withEntries(raffle))
       continue
     }

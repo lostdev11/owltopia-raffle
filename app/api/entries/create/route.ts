@@ -9,6 +9,7 @@ import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
 import { entriesCreateBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
+import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -66,7 +67,11 @@ export async function POST(request: NextRequest) {
     }
 
     // NFT raffles: block purchases until prize is verified in escrow (defense in depth)
-    if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) {
+    if (
+      raffle.prize_type === 'nft' &&
+      !raffle.prize_deposited_at &&
+      !nftRaffleExemptFromEscrowRequirement(raffle)
+    ) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 

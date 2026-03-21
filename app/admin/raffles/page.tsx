@@ -6,6 +6,7 @@ import { getSupabaseConfigError } from '@/lib/supabase'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { AdminRafflesPageClient } from './AdminRafflesPageClient'
+import { isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -78,11 +79,7 @@ export default async function AdminRafflesPage() {
       cancelledRecoveryRaffles.push(raffle)
       continue
     }
-    const isPausedPendingEscrow =
-      raffle.prize_type === 'nft' &&
-      !raffle.prize_deposited_at &&
-      ((status === 'draft' && startTimeMs <= nowTime) || !!raffle.purchases_blocked_at)
-    if (isPausedPendingEscrow) {
+    if (isPendingNftRaffleAtTime(raffle, nowTime)) {
       pausedPendingRaffles.push(raffle)
       continue
     }
