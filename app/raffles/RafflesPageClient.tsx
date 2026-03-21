@@ -963,6 +963,22 @@ export function RafflesPageClient({
           </div>
 
           <div className="mb-8 sm:mb-12">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
+            {future.length > 0 ? (
+              <RafflesList
+                rafflesWithEntries={future}
+                title={undefined}
+                section="future"
+                serverNow={serverTime}
+              />
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-8 sm:mb-12">
             <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
             <p className="text-sm text-muted-foreground mb-4">
               NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
@@ -977,22 +993,6 @@ export function RafflesPageClient({
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground">No pending or paused raffles right now.</p>
-              </div>
-            )}
-          </div>
-
-          <div className="mb-8 sm:mb-12">
-            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
-            {future.length > 0 ? (
-              <RafflesList
-                rafflesWithEntries={future}
-                title={undefined}
-                section="future"
-                serverNow={serverTime}
-              />
-            ) : (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
               </div>
             )}
           </div>
