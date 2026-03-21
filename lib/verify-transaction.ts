@@ -265,16 +265,22 @@ export async function verifyTransaction(
         const treasuryIncrease = await getUsdcIncrease(treasuryPubkey)
         const expectedCreatorRaw = BigInt(Math.round(expectedCreatorAmount * Math.pow(10, decimals)))
         const expectedTreasuryRaw = BigInt(Math.round(expectedTreasuryAmount * Math.pow(10, decimals)))
+        const expectedTotalRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
         const toleranceRaw = BigInt(1)
+        const sumToleranceRaw = BigInt(3)
         if (creatorIncrease != null && treasuryIncrease != null &&
             creatorIncrease >= expectedCreatorRaw - toleranceRaw && creatorIncrease <= expectedCreatorRaw + toleranceRaw &&
             treasuryIncrease >= expectedTreasuryRaw - toleranceRaw && treasuryIncrease <= expectedTreasuryRaw + toleranceRaw) {
           return { valid: true }
         }
-        return {
-          valid: false,
-          error: `USDC split verification failed: creator ${creatorIncrease?.toString() ?? 'missing'} (expected ${expectedCreatorRaw}), treasury ${treasuryIncrease?.toString() ?? 'missing'} (expected ${expectedTreasuryRaw}). Raffle: ${raffle.slug}, Entry ID: ${entry.id}`,
+        // Gross paid matches creator + treasury (rounding across two transfers)
+        if (creatorIncrease != null && treasuryIncrease != null) {
+          const sum = creatorIncrease + treasuryIncrease
+          if (sum >= expectedTotalRaw - sumToleranceRaw && sum <= expectedTotalRaw + sumToleranceRaw) {
+            return { valid: true }
+          }
         }
+        // Same as SOL: fall through so legacy "full USDC to treasury only" still verifies
       }
 
       const recipientTokenAddress = await getAssociatedTokenAddress(USDC_MINT, treasuryPubkey)
@@ -320,15 +326,19 @@ export async function verifyTransaction(
         const treasuryIncrease = await getOwlIncrease(treasuryPubkey)
         const expectedCreatorRaw = BigInt(Math.round(expectedCreatorAmount * Math.pow(10, decimals)))
         const expectedTreasuryRaw = BigInt(Math.round(expectedTreasuryAmount * Math.pow(10, decimals)))
+        const expectedTotalRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
         const toleranceRaw = BigInt(1)
+        const sumToleranceRaw = BigInt(3)
         if (creatorIncrease != null && treasuryIncrease != null &&
             creatorIncrease >= expectedCreatorRaw - toleranceRaw && creatorIncrease <= expectedCreatorRaw + toleranceRaw &&
             treasuryIncrease >= expectedTreasuryRaw - toleranceRaw && treasuryIncrease <= expectedTreasuryRaw + toleranceRaw) {
           return { valid: true }
         }
-        return {
-          valid: false,
-          error: `OWL split verification failed. Raffle: ${raffle.slug}, Entry ID: ${entry.id}`,
+        if (creatorIncrease != null && treasuryIncrease != null) {
+          const sum = creatorIncrease + treasuryIncrease
+          if (sum >= expectedTotalRaw - sumToleranceRaw && sum <= expectedTotalRaw + sumToleranceRaw) {
+            return { valid: true }
+          }
         }
       }
 

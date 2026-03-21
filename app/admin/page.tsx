@@ -1200,7 +1200,14 @@ export default function AdminDashboardPage() {
                   </p>
                 )}
                 {bulkReverifyResult.errors && bulkReverifyResult.errors.length > 0 && (
-                  <details className="text-xs">
+                  <details
+                    className="text-xs"
+                    open={
+                      (bulkReverifyResult.skippedFailed ?? 0) > 0 ||
+                      ((bulkReverifyResult.verified ?? 0) === 0 &&
+                        (bulkReverifyResult.errors?.length ?? 0) > 0)
+                    }
+                  >
                     <summary className="cursor-pointer text-muted-foreground py-1">Error details</summary>
                     <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto font-mono break-all">
                       {bulkReverifyResult.errors.slice(0, 40).map((e, i) => (
