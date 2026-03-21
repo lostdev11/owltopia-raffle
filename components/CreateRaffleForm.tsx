@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ImageUpload } from '@/components/ImageUpload'
 import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
@@ -53,9 +52,8 @@ export function CreateRaffleForm() {
   })
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
+  /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
-  /** When imageUrl was set from an NFT, store raw URL so ImageUpload can fallback on proxy failure. */
-  const [prizeImageRawUrl, setPrizeImageRawUrl] = useState<string | null>(null)
   const prizeType = 'nft' as const
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
@@ -432,21 +430,10 @@ export function CreateRaffleForm() {
             />
           </div>
 
-          <ImageUpload
-            value={imageUrl}
-            onChange={(url) => {
-              setImageUrl(url)
-              setPrizeImageRawUrl(null)
-            }}
-            label="Raffle / Prize Image"
-            disabled={loading}
-            fallbackUrl={prizeImageRawUrl}
-          />
-
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
               <Label>NFT prize (from your wallet)</Label>
               <p className="text-xs text-muted-foreground">
-                Load your wallet to see NFTs you can use as the raffle prize.
+                Load your wallet to see NFTs you can use as the raffle prize. The raffle image is taken from the NFT you select.
               </p>
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
@@ -506,10 +493,9 @@ export function CreateRaffleForm() {
                       type="button"
                       onClick={() => {
                         setSelectedNft(nft)
-                        if (nft.image) {
-                          setImageUrl(getProxiedImageUrl(nft.image) ?? nft.image)
-                          setPrizeImageRawUrl(nft.image)
-                        }
+                        setImageUrl(
+                          nft.image ? (getProxiedImageUrl(nft.image) ?? nft.image) : null
+                        )
                       }}
                       className={`rounded-lg border-2 p-2 text-left transition-colors ${
                         selectedNft?.mint === nft.mint
