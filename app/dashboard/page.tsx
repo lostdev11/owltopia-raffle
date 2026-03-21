@@ -35,7 +35,7 @@ type DashboardData = {
   myEntries: EntryWithRaffle[]
   creatorRevenue: number
   creatorRevenueByCurrency: Record<string, number>
-  creatorLiveRevenueByCurrency?: Record<string, number>
+  creatorLiveEarningsByCurrency?: Record<string, number>
   creatorAllTimeGrossByCurrency?: Record<string, number>
   feeTier: FeeTier
 }
@@ -325,9 +325,9 @@ export default function DashboardPage() {
     data.creatorRevenueByCurrency && typeof data.creatorRevenueByCurrency === 'object'
       ? data.creatorRevenueByCurrency
       : {}
-  const creatorLiveRevenueByCurrency =
-    data.creatorLiveRevenueByCurrency && typeof data.creatorLiveRevenueByCurrency === 'object'
-      ? data.creatorLiveRevenueByCurrency
+  const creatorLiveEarningsByCurrency =
+    data.creatorLiveEarningsByCurrency && typeof data.creatorLiveEarningsByCurrency === 'object'
+      ? data.creatorLiveEarningsByCurrency
       : {}
   const creatorAllTimeGrossByCurrency =
     data.creatorAllTimeGrossByCurrency && typeof data.creatorAllTimeGrossByCurrency === 'object'
@@ -477,8 +477,23 @@ export default function DashboardPage() {
                     .join(' + ') || '—'
                 : '—'}
             </p>
-            {creatorRevenue === 0 && (
-              <p className="text-sm text-muted-foreground">From completed raffles you created</p>
+            {creatorRevenue > 0 ? (
+              <>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Your share after the platform fee (settled completed raffles plus live raffle sales; matches on-chain
+                  splits).
+                </p>
+                {Object.keys(creatorLiveEarningsByCurrency).length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    From live raffles:{' '}
+                    {Object.entries(creatorLiveEarningsByCurrency)
+                      .map(([cur, amt]) => `${amt.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
+                      .join(' + ')}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground mt-1">No earnings yet from raffles you created</p>
             )}
           </CardContent>
         </Card>
@@ -497,7 +512,8 @@ export default function DashboardPage() {
                 : '—'}
             </p>
             <p className="text-sm text-muted-foreground">
-              Includes live raffles (confirmed entries) and completed raffles, before platform fees.
+              Total confirmed ticket volume across your live, ready-to-draw, and completed raffles (before the platform
+              fee).
             </p>
           </CardContent>
         </Card>

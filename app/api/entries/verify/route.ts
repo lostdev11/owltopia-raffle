@@ -71,6 +71,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (entry.status === 'confirmed') {
+      const sig = (entry.transaction_signature || '').trim()
+      if (sig && sig === transactionSignature.trim()) {
+        return NextResponse.json({
+          success: true,
+          entryId: entry.id,
+          transactionSignature: sig,
+        })
+      }
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
     // Sequential processing: only one verify per entryId at a time (reject duplicates)
     if (!tryAcquireVerificationLock(entryId)) {
       return NextResponse.json(

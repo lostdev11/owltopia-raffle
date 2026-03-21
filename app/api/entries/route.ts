@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getEntriesByRaffleId, getRaffleById } from '@/lib/db/raffles'
-import { updateEntryStatus } from '@/lib/db/entries'
+import {
+  confirmEntryWithTx,
+  ConfirmEntryInvalidStateError,
+  InsufficientTicketsError,
+  TxAlreadyUsedError,
+} from '@/lib/db/entries'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import type { Entry } from '@/lib/types'
 
@@ -91,8 +96,27 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
       )
 
       if (verificationResult.valid) {
-        await updateEntryStatus(entry.id, 'confirmed', entry.transaction_signature ?? undefined)
-        console.log(`✅ Auto-verified entry ${entry.id} for raffle ${raffleId}`)
+        try {
+          await confirmEntryWithTx(
+            entry.id,
+            entry.raffle_id,
+            entry.wallet_address,
+            entry.transaction_signature!,
+            Number(entry.amount_paid),
+            entry.ticket_quantity
+          )
+          console.log(`✅ Auto-verified entry ${entry.id} for raffle ${raffleId}`)
+        } catch (e) {
+          if (e instanceof ConfirmEntryInvalidStateError) {
+            console.log(`Entry ${entry.id} skipped confirm (no longer pending or already finalized)`)
+          } else if (e instanceof InsufficientTicketsError) {
+            console.warn(`Auto-verify: insufficient tickets for entry ${entry.id} on raffle ${raffleId}`)
+          } else if (e instanceof TxAlreadyUsedError) {
+            console.warn(`Auto-verify: tx already used for entry ${entry.id}`)
+          } else {
+            console.error(`Auto-verify: confirm RPC failed for entry ${entry.id}:`, e)
+          }
+        }
       } else {
         // Check if this is a temporary error that might resolve
         const isTemporaryError =

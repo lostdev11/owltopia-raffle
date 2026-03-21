@@ -4,6 +4,38 @@ import type { Entry, Raffle } from '@/lib/types'
 import { getTokenInfo } from '@/lib/tokens'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 
+function asPublicKey(k: PublicKey | string): PublicKey {
+  return k instanceof PublicKey ? k : new PublicKey(k)
+}
+
+/**
+ * Full account list for the fetched tx: static keys + v0 address lookup table loads.
+ * Matches indices used by `meta.preBalances`, `meta.postBalances`, and `meta.*TokenBalances[].accountIndex`.
+ * Using only `staticAccountKeys` breaks verification for Phantom/Solflare v0 txs when ATAs are loaded from ALTs.
+ */
+function getFullAccountKeysForTransaction(tx: {
+  transaction: { message: unknown }
+  meta: NonNullable<NonNullable<Awaited<ReturnType<Connection['getTransaction']>>>['meta']>
+}): PublicKey[] {
+  const message = tx.transaction.message as {
+    staticAccountKeys?: (PublicKey | string)[]
+    accountKeys?: (PublicKey | string)[]
+  }
+  if (message.staticAccountKeys?.length) {
+    const keys = message.staticAccountKeys.map(asPublicKey)
+    const loaded = tx.meta.loadedAddresses
+    if (loaded?.writable?.length) {
+      keys.push(...loaded.writable.map(asPublicKey))
+    }
+    if (loaded?.readonly?.length) {
+      keys.push(...loaded.readonly.map(asPublicKey))
+    }
+    return keys
+  }
+  const legacy = message.accountKeys
+  return legacy?.length ? legacy.map(asPublicKey) : []
+}
+
 /**
  * Verify transaction on Solana blockchain
  * Checks that the transaction actually sent funds to the raffle wallet
@@ -130,6 +162,11 @@ export async function verifyTransaction(
       console.error(error)
       return { valid: false, error }
     }
+
+    const accountKeysFull = getFullAccountKeysForTransaction({
+      transaction: transaction.transaction,
+      meta: transaction.meta,
+    })
     
     const expectedAmount = entry.amount_paid
     const expectedCurrency = entry.currency
@@ -153,20 +190,15 @@ export async function verifyTransaction(
 
     // Verify based on currency type
     if (expectedCurrency === 'SOL') {
-      const message = transaction.transaction.message
-      const accountKeys = 'staticAccountKeys' in message
-        ? (message as any).staticAccountKeys
-        : (message as any).accountKeys
-
       const senderPubkey = new PublicKey(entry.wallet_address)
-      if (accountKeys.findIndex((key: PublicKey) => key.equals(senderPubkey)) === -1) {
+      if (accountKeysFull.findIndex((key: PublicKey) => key.equals(senderPubkey)) === -1) {
         return { valid: false, error: `Sender wallet ${entry.wallet_address} not found in transaction` }
       }
 
       const tolerance = 0.001
       if (useSplit && creatorPubkey) {
-        const creatorIndex = accountKeys.findIndex((key: PublicKey) => key.equals(creatorPubkey))
-        const treasuryIndex = accountKeys.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
+        const creatorIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(creatorPubkey))
+        const treasuryIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
 
         if (creatorIndex !== -1 && treasuryIndex !== -1) {
           const creatorIncrease =
@@ -191,7 +223,7 @@ export async function verifyTransaction(
         // to the single-recipient SOL check instead of hard failing.
       }
 
-      const recipientIndex = accountKeys.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
+      const recipientIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
       if (recipientIndex === -1) {
         return { valid: false, error: `Recipient wallet ${recipientWallet} not found in transaction` }
       }
@@ -216,14 +248,10 @@ export async function verifyTransaction(
       const decimals = getTokenInfo('USDC').decimals
       const preTokenBalances = transaction.meta.preTokenBalances || []
       const postTokenBalances = transaction.meta.postTokenBalances || []
-      const message = transaction.transaction.message
-      const accountKeys = 'staticAccountKeys' in message
-        ? (message as any).staticAccountKeys
-        : (message as any).accountKeys
 
       const getUsdcIncrease = (ownerPubkey: PublicKey) => {
         return getAssociatedTokenAddress(USDC_MINT, ownerPubkey).then(ata => {
-          const idx = accountKeys.findIndex((key: PublicKey) => key.equals(ata))
+          const idx = accountKeysFull.findIndex((key: PublicKey) => key.equals(ata))
           if (idx === -1) return null
           const post = postTokenBalances.find(b => b.accountIndex === idx)?.uiTokenAmount?.amount
           const pre = preTokenBalances.find(b => b.accountIndex === idx)?.uiTokenAmount?.amount
@@ -233,8 +261,6 @@ export async function verifyTransaction(
       }
 
       if (useSplit && creatorPubkey) {
-        const creatorAta = await getAssociatedTokenAddress(USDC_MINT, creatorPubkey)
-        const treasuryAta = await getAssociatedTokenAddress(USDC_MINT, treasuryPubkey)
         const creatorIncrease = await getUsdcIncrease(creatorPubkey)
         const treasuryIncrease = await getUsdcIncrease(treasuryPubkey)
         const expectedCreatorRaw = BigInt(Math.round(expectedCreatorAmount * Math.pow(10, decimals)))
@@ -252,7 +278,7 @@ export async function verifyTransaction(
       }
 
       const recipientTokenAddress = await getAssociatedTokenAddress(USDC_MINT, treasuryPubkey)
-      const recipientTokenIndex = accountKeys.findIndex((key: PublicKey) => key.equals(recipientTokenAddress))
+      const recipientTokenIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(recipientTokenAddress))
       if (recipientTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
         const rawPostUsdc = matchingPostBalance?.uiTokenAmount?.amount
@@ -277,14 +303,10 @@ export async function verifyTransaction(
       const OWL_MINT = new PublicKey(tokenInfo.mintAddress)
       const preTokenBalances = transaction.meta.preTokenBalances || []
       const postTokenBalances = transaction.meta.postTokenBalances || []
-      const message = transaction.transaction.message
-      const accountKeys = 'staticAccountKeys' in message
-        ? (message as any).staticAccountKeys
-        : (message as any).accountKeys
 
       const getOwlIncrease = (ownerPubkey: PublicKey) => {
         return getAssociatedTokenAddress(OWL_MINT, ownerPubkey).then(ata => {
-          const idx = accountKeys.findIndex((key: PublicKey) => key.equals(ata))
+          const idx = accountKeysFull.findIndex((key: PublicKey) => key.equals(ata))
           if (idx === -1) return null
           const post = postTokenBalances.find(b => b.accountIndex === idx)?.uiTokenAmount?.amount
           const pre = preTokenBalances.find(b => b.accountIndex === idx)?.uiTokenAmount?.amount
@@ -311,7 +333,7 @@ export async function verifyTransaction(
       }
 
       const recipientTokenAddress = await getAssociatedTokenAddress(OWL_MINT, treasuryPubkey)
-      const recipientTokenIndex = accountKeys.findIndex((key: PublicKey) => key.equals(recipientTokenAddress))
+      const recipientTokenIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(recipientTokenAddress))
       if (recipientTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
         const rawPostOwl = matchingPostBalance?.uiTokenAmount?.amount

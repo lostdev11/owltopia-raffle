@@ -3,7 +3,8 @@ import { requireSession } from '@/lib/auth-server'
 import {
   getRafflesByCreator,
   getCreatorRevenueByWallet,
-  getCreatorLiveRevenueByWallet,
+  getCreatorLiveEarningsByWallet,
+  getCreatorTicketSalesGrossByWallet,
 } from '@/lib/db/raffles'
 import { getEntriesByWallet } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
@@ -32,37 +33,36 @@ export async function GET(request: NextRequest) {
     }
 
     const wallet = session.wallet
-    const [raffles, entriesWithRaffles, settledRevenue, liveRevenue, feeTier, profiles] =
+    const [raffles, entriesWithRaffles, settledRevenue, liveEarnings, grossSales, feeTier, profiles] =
       await Promise.all([
         getRafflesByCreator(wallet),
         getEntriesByWallet(wallet),
         getCreatorRevenueByWallet(wallet),
-        getCreatorLiveRevenueByWallet(wallet),
+        getCreatorLiveEarningsByWallet(wallet),
+        getCreatorTicketSalesGrossByWallet(wallet),
         getCreatorFeeTier(wallet, { skipCache: true }), // always verify holder status when loading dashboard
         getDisplayNamesByWallets([wallet]),
       ])
 
-    // Merge settled + live into all-time gross by currency.
-    const allTimeGrossByCurrency: Record<string, number> = {}
+    // Earned = completed settlement totals (net) + live raffles (creator share after platform fee).
+    const creatorRevenueByCurrency: Record<string, number> = {}
     for (const [cur, amt] of Object.entries(settledRevenue.byCurrency)) {
-      allTimeGrossByCurrency[cur] = (allTimeGrossByCurrency[cur] ?? 0) + amt
+      creatorRevenueByCurrency[cur] = (creatorRevenueByCurrency[cur] ?? 0) + amt
     }
-    for (const [cur, amt] of Object.entries(liveRevenue.byCurrency)) {
-      allTimeGrossByCurrency[cur] = (allTimeGrossByCurrency[cur] ?? 0) + amt
+    for (const [cur, amt] of Object.entries(liveEarnings.byCurrency)) {
+      creatorRevenueByCurrency[cur] = (creatorRevenueByCurrency[cur] ?? 0) + amt
     }
+    const creatorRevenueTotal = Object.values(creatorRevenueByCurrency).reduce((a, b) => a + b, 0)
 
     return NextResponse.json({
       wallet,
       displayName: profiles[wallet] ?? null,
       myRaffles: raffles,
       myEntries: entriesWithRaffles,
-      // Settled creator revenue (completed raffles).
-      creatorRevenue: settledRevenue.totalCreatorRevenue,
-      creatorRevenueByCurrency: settledRevenue.byCurrency,
-      // Live gross revenue from active raffles (confirmed entries, before fees).
-      creatorLiveRevenueByCurrency: liveRevenue.byCurrency,
-      // All-time gross ticket sales (settled + live, before fees).
-      creatorAllTimeGrossByCurrency: allTimeGrossByCurrency,
+      creatorRevenue: creatorRevenueTotal,
+      creatorRevenueByCurrency,
+      creatorLiveEarningsByCurrency: liveEarnings.byCurrency,
+      creatorAllTimeGrossByCurrency: grossSales.byCurrency,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
     })
   } catch (error) {

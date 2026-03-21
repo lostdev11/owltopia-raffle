@@ -652,17 +652,16 @@ export async function getCreatorRevenueByWallet(walletAddress: string): Promise<
 }
 
 /**
- * Live creator revenue (gross) from confirmed entries for raffles that are not yet completed.
- * Used for dashboard "live revenue" and all-time gross calculations.
+ * Creator's share of ticket sales (after platform fee) from live / ready-to-draw raffles.
+ * Matches on-chain split math at purchase time (same as calculateSettlement per entry).
  */
-export async function getCreatorLiveRevenueByWallet(walletAddress: string): Promise<{
+export async function getCreatorLiveEarningsByWallet(walletAddress: string): Promise<{
   totalCreatorRevenue: number
   byCurrency: Record<string, number>
 }> {
   const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
   if (!normalized) return { totalCreatorRevenue: 0, byCurrency: {} }
 
-  // First, find all active/ongoing raffles for this creator.
   const { data: raffles, error: rafflesError } = await getSupabaseForRead()
     .from('raffles')
     .select('id, status')
@@ -670,7 +669,7 @@ export async function getCreatorLiveRevenueByWallet(walletAddress: string): Prom
     .in('status', ['live', 'ready_to_draw'])
 
   if (rafflesError) {
-    console.error('Error fetching live raffles for creator revenue:', rafflesError)
+    console.error('Error fetching live raffles for creator earnings:', rafflesError)
     return { totalCreatorRevenue: 0, byCurrency: {} }
   }
 
@@ -687,21 +686,76 @@ export async function getCreatorLiveRevenueByWallet(walletAddress: string): Prom
     .eq('status', 'confirmed')
 
   if (entriesError) {
-    console.error('Error fetching live creator revenue entries:', entriesError)
+    console.error('Error fetching live creator earnings entries:', entriesError)
     return { totalCreatorRevenue: 0, byCurrency: {} }
   }
+
+  const { feeBps } = await getCreatorFeeTier(normalized, { skipCache: true })
 
   const byCurrency: Record<string, number> = {}
   let total = 0
   for (const row of entries || []) {
-    const amount = Number((row as any).amount_paid ?? 0)
+    const amount = Number((row as { amount_paid?: unknown }).amount_paid ?? 0)
     if (!Number.isFinite(amount) || amount <= 0) continue
-    const cur = ((row as any).currency as string) || 'SOL'
-    byCurrency[cur] = (byCurrency[cur] ?? 0) + amount
-    total += amount
+    const cur = String((row as { currency?: string }).currency || 'SOL').toUpperCase()
+    const { creatorPayout } = calculateSettlement(amount, feeBps)
+    byCurrency[cur] = (byCurrency[cur] ?? 0) + creatorPayout
+    total += creatorPayout
   }
 
   return { totalCreatorRevenue: total, byCurrency }
+}
+
+/**
+ * Total confirmed ticket sales (gross) for this creator's raffles in the given statuses.
+ * Used for dashboard "all-time gross" (before platform fee).
+ */
+export async function getCreatorTicketSalesGrossByWallet(
+  walletAddress: string,
+  statuses: readonly string[] = ['live', 'ready_to_draw', 'completed']
+): Promise<{ totalGross: number; byCurrency: Record<string, number> }> {
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) return { totalGross: 0, byCurrency: {} }
+
+  const { data: raffles, error: rafflesError } = await getSupabaseForRead()
+    .from('raffles')
+    .select('id')
+    .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
+    .in('status', [...statuses])
+
+  if (rafflesError) {
+    console.error('Error fetching raffles for creator gross sales:', rafflesError)
+    return { totalGross: 0, byCurrency: {} }
+  }
+
+  if (!raffles || raffles.length === 0) {
+    return { totalGross: 0, byCurrency: {} }
+  }
+
+  const raffleIds = raffles.map((r) => r.id as string)
+
+  const { data: entries, error: entriesError } = await getSupabaseForRead()
+    .from('entries')
+    .select('amount_paid, currency')
+    .in('raffle_id', raffleIds)
+    .eq('status', 'confirmed')
+
+  if (entriesError) {
+    console.error('Error fetching entries for creator gross sales:', entriesError)
+    return { totalGross: 0, byCurrency: {} }
+  }
+
+  const byCurrency: Record<string, number> = {}
+  let totalGross = 0
+  for (const row of entries || []) {
+    const amount = Number((row as { amount_paid?: unknown }).amount_paid ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    const cur = String((row as { currency?: string }).currency || 'SOL').toUpperCase()
+    byCurrency[cur] = (byCurrency[cur] ?? 0) + amount
+    totalGross += amount
+  }
+
+  return { totalGross, byCurrency }
 }
 
 export async function getEntriesByRaffleId(raffleId: string) {
