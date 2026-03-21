@@ -73,7 +73,8 @@ export async function POST(request: NextRequest) {
         const verificationResult = await verifyTransaction(
           entry.transaction_signature!,
           entry,
-          raffle
+          raffle,
+          { allowExpired: true }
         )
 
         if (!verificationResult.valid) {

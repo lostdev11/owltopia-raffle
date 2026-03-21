@@ -506,6 +506,39 @@ export async function getPendingEntries(): Promise<Entry[]> {
   return (data || []) as Entry[]
 }
 
+/**
+ * Pending entries that already have a tx signature (candidates for bulk re-verification).
+ * Includes raffles in any status (e.g. completed) — unlike Owl Vision list.
+ */
+export async function getPendingEntriesWithTransactionSignature(options?: {
+  currency?: string
+  limit?: number
+}): Promise<Entry[]> {
+  const rawLimit = options?.limit ?? 60
+  const limit = Math.min(Math.max(rawLimit, 1), 200)
+
+  let query = getSupabaseAdmin()
+    .from('entries')
+    .select('*')
+    .eq('status', 'pending')
+    .not('transaction_signature', 'is', null)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+
+  const c = options?.currency?.trim().toUpperCase()
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL') {
+    query = query.eq('currency', c)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error fetching pending entries with tx:', error)
+    return []
+  }
+  return (data || []) as Entry[]
+}
+
 /** Minimal raffle fields needed for "my entries" list */
 export interface RaffleInfoForEntry {
   id: string

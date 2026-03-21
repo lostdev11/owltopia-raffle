@@ -106,6 +106,15 @@ export default function AdminDashboardPage() {
   const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
   const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
   const [removingEntryId, setRemovingEntryId] = useState<string | null>(null)
+  const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
+  const [bulkReverifyResult, setBulkReverifyResult] = useState<{
+    message?: string
+    verified?: number
+    processed?: number
+    skippedTemporary?: number
+    skippedFailed?: number
+    errors?: string[]
+  } | null>(null)
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
@@ -418,6 +427,42 @@ export default function AdminDashboardPage() {
       console.error('Error saving rev share schedule:', e)
     } finally {
       setRevShareScheduleSaving(false)
+    }
+  }
+
+  const handleBulkReverifyPending = async (currency?: 'USDC' | 'SOL' | 'OWL') => {
+    if (!publicKey) return
+    const label = currency ? `${currency} only` : 'all currencies'
+    if (
+      !confirm(
+        `Re-verify up to 60 pending entries (${label}) that already have a transaction signature? Finds stuck tickets including completed raffles. Safe to run again until the queue is empty.`
+      )
+    ) {
+      return
+    }
+    setBulkReverifyRunning(true)
+    setBulkReverifyResult(null)
+    try {
+      const response = await fetch('/api/admin/reverify-pending-entries', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 60, ...(currency ? { currency } : {}) }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setBulkReverifyResult({
+          message: typeof data.error === 'string' ? data.error : 'Request failed',
+          errors: [],
+        })
+      } else {
+        setBulkReverifyResult(data)
+        fetchEntriesToConfirm()
+      }
+    } catch {
+      setBulkReverifyResult({ message: 'Network error', errors: [] })
+    } finally {
+      setBulkReverifyRunning(false)
     }
   }
 
@@ -1097,6 +1142,78 @@ export default function AdminDashboardPage() {
                 </div>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5" />
+              Bulk re-verify stuck tickets
+            </CardTitle>
+            <CardDescription>
+              One click: re-run verification for pending entries that already have a tx signature (any raffle
+              status, including old USDC / pre-escrow). Uses up to 60 rows per run — repeat until no more confirm.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+              <Button
+                type="button"
+                className="min-h-11 touch-manipulation"
+                disabled={bulkReverifyRunning}
+                onClick={() => handleBulkReverifyPending()}
+              >
+                {bulkReverifyRunning ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Running…
+                  </>
+                ) : (
+                  'Re-verify pending (all, up to 60)'
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 touch-manipulation"
+                disabled={bulkReverifyRunning}
+                onClick={() => handleBulkReverifyPending('USDC')}
+              >
+                USDC only (up to 60)
+              </Button>
+            </div>
+            {bulkReverifyResult && (
+              <div
+                className={`rounded-lg border p-3 text-sm space-y-2 ${
+                  bulkReverifyResult.verified && bulkReverifyResult.verified > 0
+                    ? 'bg-green-500/10 border-green-500/20'
+                    : 'bg-muted/50 border-border'
+                }`}
+              >
+                {bulkReverifyResult.message && <p className="font-medium">{bulkReverifyResult.message}</p>}
+                {bulkReverifyResult.processed != null && (
+                  <p className="text-muted-foreground">
+                    Processed {bulkReverifyResult.processed} · Confirmed {bulkReverifyResult.verified ?? 0} · Skipped
+                    (temporary) {bulkReverifyResult.skippedTemporary ?? 0} · Skipped (failed){' '}
+                    {bulkReverifyResult.skippedFailed ?? 0}
+                  </p>
+                )}
+                {bulkReverifyResult.errors && bulkReverifyResult.errors.length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground py-1">Error details</summary>
+                    <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto font-mono break-all">
+                      {bulkReverifyResult.errors.slice(0, 40).map((e, i) => (
+                        <li key={i}>{e}</li>
+                      ))}
+                      {bulkReverifyResult.errors.length > 40 && (
+                        <li>… {bulkReverifyResult.errors.length - 40} more</li>
+                      )}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
