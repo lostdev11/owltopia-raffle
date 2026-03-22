@@ -57,6 +57,13 @@ import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 
+function solscanTransactionUrl(signature: string): string {
+  const cluster = /devnet/i.test(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? '')
+    ? '?cluster=devnet'
+    : ''
+  return `https://solscan.io/tx/${signature}${cluster}`
+}
+
 interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
@@ -107,7 +114,10 @@ export function RaffleDetailClient({
   const [returnPrizeSuccess, setReturnPrizeSuccess] = useState(false)
   const [claimPrizeLoading, setClaimPrizeLoading] = useState(false)
   const [claimPrizeError, setClaimPrizeError] = useState<string | null>(null)
-  const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
+  /** Full-screen claim flow: loading spinner then success + Solscan link */
+  const [claimPrizePhase, setClaimPrizePhase] = useState<'idle' | 'loading' | 'success'>('idle')
+  const [claimPrizeTxSignature, setClaimPrizeTxSignature] = useState<string | null>(null)
+  const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -1196,12 +1206,74 @@ export function RaffleDetailClient({
     }
     setClaimPrizeLoading(true)
     setClaimPrizeError(null)
-    setClaimPrizeSuccessTx(null)
+    setClaimPrizePhase('loading')
+    setClaimPrizeTxSignature(null)
+    setClaimPrizeAlreadyClaimed(false)
+
+    const signInForClaim = async (): Promise<boolean> => {
+      if (!publicKey || !signMessage) {
+        setClaimPrizeError('Sign in required. Connect your wallet and sign the message.')
+        return false
+      }
+      try {
+        const walletAddr = publicKey.toBase58()
+        const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
+          credentials: 'include',
+        })
+        if (!nonceRes.ok) {
+          const data = await nonceRes.json().catch(() => ({}))
+          const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
+          setClaimPrizeError(msg)
+          return false
+        }
+        const { message } = (await nonceRes.json()) as { message: string }
+        const messageBytes = new TextEncoder().encode(message)
+        const signature = await signMessage(messageBytes)
+        const signatureBase64 =
+          typeof signature === 'string'
+            ? btoa(signature)
+            : btoa(String.fromCharCode(...new Uint8Array(signature)))
+        const verifyRes = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            wallet: walletAddr,
+            message,
+            signature: signatureBase64,
+          }),
+        })
+        if (!verifyRes.ok) {
+          const data = await verifyRes.json().catch(() => ({}))
+          const msg =
+            typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
+          setClaimPrizeError(msg)
+          return false
+        }
+        return true
+      } catch (e) {
+        setClaimPrizeError(e instanceof Error ? e.message : 'Sign-in failed')
+        return false
+      }
+    }
+
     try {
-      const response = await fetch(`/api/raffles/${raffle.id}/claim-prize`, {
+      let response = await fetch(`/api/raffles/${raffle.id}/claim-prize`, {
         method: 'POST',
         credentials: 'include',
       })
+      if (response.status === 401) {
+        const signedIn = await signInForClaim()
+        if (!signedIn) {
+          setClaimPrizePhase('idle')
+          setClaimPrizeLoading(false)
+          return
+        }
+        response = await fetch(`/api/raffles/${raffle.id}/claim-prize`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+      }
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         const msg = typeof data?.error === 'string' ? data.error : 'Failed to claim prize'
@@ -1209,19 +1281,26 @@ export function RaffleDetailClient({
       }
       const signature =
         typeof data?.transactionSignature === 'string' ? data.transactionSignature : null
-      if (signature) {
-        setClaimPrizeSuccessTx(signature)
-      } else {
-        setClaimPrizeSuccessTx('success')
+      if (!signature) {
+        throw new Error('Missing transaction signature from server')
       }
-      setTimeout(() => {
-        router.refresh()
-      }, 1200)
+      setClaimPrizeTxSignature(signature)
+      setClaimPrizeAlreadyClaimed(data?.alreadyClaimed === true)
+      setClaimPrizePhase('success')
     } catch (err) {
+      setClaimPrizePhase('idle')
+      setClaimPrizeTxSignature(null)
       setClaimPrizeError(err instanceof Error ? err.message : 'Failed to claim prize')
     } finally {
       setClaimPrizeLoading(false)
     }
+  }
+
+  const closeClaimPrizeSuccess = () => {
+    setClaimPrizePhase('idle')
+    setClaimPrizeTxSignature(null)
+    setClaimPrizeAlreadyClaimed(false)
+    router.refresh()
   }
 
   const showDepositEscrow =
@@ -1657,7 +1736,9 @@ export function RaffleDetailClient({
 
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
-  const isWinnerDetail = hasEnded && !!raffle.winner_wallet && walletAddress === raffle.winner_wallet
+  const winnerWalletNorm = (raffle.winner_wallet ?? '').trim()
+  const walletNorm = walletAddress.trim()
+  const isWinnerDetail = hasEnded && !!winnerWalletNorm && walletNorm === winnerWalletNorm
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
 
   // Confetti: show once when opening the winner modal on a past raffle you won
@@ -1694,8 +1775,8 @@ export function RaffleDetailClient({
   const showClaimPrizeButton =
     hasEnded &&
     raffle.prize_type === 'nft' &&
-    !!raffle.winner_wallet &&
-    walletAddress === raffle.winner_wallet &&
+    !!winnerWalletNorm &&
+    walletNorm === winnerWalletNorm &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
@@ -2184,6 +2265,33 @@ export function RaffleDetailClient({
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="overview" className="mt-0">
+            {showClaimPrizeButton && (
+              <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <Trophy className="h-6 w-6 text-emerald-500 shrink-0 mt-0.5" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-foreground">You won this raffle</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      The prize NFT is in platform escrow (verified). Tap Claim prize and we&apos;ll send it to your connected wallet on Solana. If something fails, contact support — an admin can retry the escrow transfer.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="default"
+                  size="default"
+                  onClick={handleClaimPrize}
+                  disabled={claimPrizeLoading || claimPrizePhase === 'loading'}
+                  style={{ backgroundColor: themeColor, color: '#000' }}
+                  className="w-full touch-manipulation min-h-[44px] text-sm sm:text-base"
+                >
+                  <Send className="mr-2 h-4 w-4 shrink-0" />
+                  {!connected ? 'Connect wallet' : claimPrizePhase === 'loading' ? 'Claiming…' : 'Claim prize'}
+                </Button>
+                {claimPrizeError && (
+                  <p className="text-sm text-destructive">{claimPrizeError}</p>
+                )}
+              </div>
+            )}
             <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
@@ -2446,15 +2554,15 @@ export function RaffleDetailClient({
                   variant="default"
                   size="default"
                   onClick={handleClaimPrize}
-                  disabled={claimPrizeLoading}
+                  disabled={claimPrizeLoading || claimPrizePhase === 'loading'}
                   style={{ backgroundColor: themeColor, color: '#000' }}
                   className="w-full sm:flex-1 touch-manipulation min-h-[44px] text-sm sm:text-base"
                 >
                   <Send className="mr-2 h-4 w-4 shrink-0" />
                   {!connected
                     ? 'Connect Wallet'
-                    : claimPrizeLoading
-                    ? 'Claiming...'
+                    : claimPrizePhase === 'loading'
+                    ? 'Claiming…'
                     : 'Claim Prize'}
                 </Button>
               )}
@@ -2540,11 +2648,6 @@ export function RaffleDetailClient({
             {showClaimPrizeButton && claimPrizeError && (
               <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {claimPrizeError}
-              </div>
-            )}
-            {showClaimPrizeButton && claimPrizeSuccessTx && (
-              <div className="mt-3 rounded-md border border-green-500/50 bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
-                Prize claimed successfully. Refreshing details...
               </div>
             )}
           </CardContent>
@@ -2635,7 +2738,7 @@ export function RaffleDetailClient({
           <DialogHeader>
             <DialogTitle>Record NFT Transfer Transaction</DialogTitle>
             <DialogDescription>
-              Enter the transaction signature for the NFT transfer to the winner. This will be visible to all participants for transparency.
+              Prefer sending from escrow on the admin raffle page (&quot;Send prize from escrow&quot;). Use this form only when you already transferred the NFT manually and need to record the Solana signature for transparency.
             </DialogDescription>
           </DialogHeader>
           
@@ -2823,6 +2926,66 @@ export function RaffleDetailClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {(claimPrizePhase === 'loading' || claimPrizePhase === 'success') && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4"
+          role="alertdialog"
+          aria-modal="true"
+          aria-busy={claimPrizePhase === 'loading'}
+          aria-labelledby="claim-prize-overlay-title"
+        >
+          <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-lg space-y-4 text-center">
+            {claimPrizePhase === 'loading' ? (
+              <>
+                <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" aria-hidden />
+                <h2 id="claim-prize-overlay-title" className="text-lg font-semibold text-foreground">
+                  Claiming your prize…
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Stay on this screen. Your wallet may ask you to sign in first; after that we broadcast
+                  the NFT transfer from escrow. Solana usually confirms within a few seconds.
+                </p>
+              </>
+            ) : (
+              <>
+                <div
+                  className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden
+                >
+                  <Trophy className="h-8 w-8" />
+                </div>
+                <h2 id="claim-prize-overlay-title" className="text-lg font-semibold text-foreground">
+                  {claimPrizeAlreadyClaimed ? 'Prize already sent' : 'Prize sent!'}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {claimPrizeAlreadyClaimed
+                    ? 'This prize was already transferred to your wallet. Open Solscan below to verify the transaction.'
+                    : 'Your NFT prize has been sent to your connected wallet. You can confirm the transfer on Solscan.'}
+                </p>
+                {claimPrizeTxSignature ? (
+                  <a
+                    href={solscanTransactionUrl(claimPrizeTxSignature)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/15 w-full touch-manipulation"
+                  >
+                    View transaction on Solscan
+                    <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+                  </a>
+                ) : null}
+                <Button
+                  type="button"
+                  className="w-full min-h-[44px] touch-manipulation text-base"
+                  onClick={closeClaimPrizeSuccess}
+                >
+                  Done
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     </>
   )

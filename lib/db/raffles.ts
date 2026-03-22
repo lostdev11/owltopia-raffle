@@ -1050,6 +1050,18 @@ export async function acquireNftPrizeClaimLock(
   return { acquired: !!data }
 }
 
+/** Clears in-flight winner claim lock (e.g. admin retry or stuck state). */
+export async function clearNftPrizeClaimLock(raffleId: string): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+    .eq('id', raffleId)
+  if (error) {
+    console.error('clearNftPrizeClaimLock error:', error)
+    throw new Error(`Failed to clear NFT claim lock: ${error.message}`)
+  }
+}
+
 export async function deleteRaffle(id: string) {
   const { error, data } = await getSupabaseAdmin()
     .from('raffles')

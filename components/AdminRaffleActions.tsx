@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle } from 'lucide-react'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 
@@ -54,6 +54,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [fixMintDialogOpen, setFixMintDialogOpen] = useState(false)
   const [fixMintInput, setFixMintInput] = useState('')
   const [fixingMint, setFixingMint] = useState(false)
+  const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
@@ -104,6 +105,50 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const cancellationRequested = !!raffle.cancellation_requested_at
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const fullRefundEligible = raffle.created_at ? isWithinFullRefundWindow(raffle.created_at) : false
+
+  const canAdminSendPrizeFromEscrow =
+    isNftRaffle &&
+    !isCancelled &&
+    !!raffle.prize_deposited_at &&
+    !!(raffle.winner_wallet ?? '').trim() &&
+    !raffle.nft_transfer_transaction &&
+    !raffle.prize_returned_at
+
+  const handleSendPrizeFromEscrow = async () => {
+    setSendingPrizeToWinner(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/admin-send-prize-to-winner`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && (data.success || data.alreadySent)) {
+        setMessage({
+          type: 'success',
+          text:
+            typeof data.transactionSignature === 'string'
+              ? `Prize sent to winner from escrow. TX: ${data.transactionSignature}`
+              : data.alreadySent
+                ? 'Prize was already sent to the winner (signature on file).'
+                : 'Prize sent to winner from escrow.',
+        })
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to send prize from escrow',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to send prize from escrow',
+      })
+    } finally {
+      setSendingPrizeToWinner(false)
+    }
+  }
 
   const handleAcceptCancellation = async () => {
     setAcceptingCancel(true)
@@ -475,6 +520,25 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            )}
+            {canAdminSendPrizeFromEscrow && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                  Winner prize — escrow transfer
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  If the winner&apos;s &quot;Claim prize&quot; fails (RPC, wallet ATA, etc.), run this to sign the same transfer from the platform escrow key. Clears any stuck claim lock first.
+                </p>
+                <Button
+                  type="button"
+                  className="bg-emerald-600 hover:bg-emerald-700 touch-manipulation min-h-[44px]"
+                  disabled={sendingPrizeToWinner}
+                  onClick={handleSendPrizeFromEscrow}
+                >
+                  <Send className="h-4 w-4 mr-2 shrink-0" />
+                  {sendingPrizeToWinner ? 'Sending…' : 'Send prize from escrow to winner'}
+                </Button>
+              </div>
             )}
             {isCancelled && raffle.cancelled_at && (
               <p className="text-sm text-muted-foreground">
