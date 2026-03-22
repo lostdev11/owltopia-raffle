@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
@@ -39,6 +39,12 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
+import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
+
+/** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
+function raffleImageUnoptimized(src: string): boolean {
+  return src.startsWith('http://') || src.startsWith('/api/proxy-image')
+}
 
 type CardSize = 'small' | 'medium' | 'large'
 type SectionType = 'active' | 'future' | 'past'
@@ -80,6 +86,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const [success, setSuccess] = useState(false)
   const [imageError, setImageError] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
+  const displayImageSrc = getRaffleDisplayImageUrl(raffle.image_url)
+  const listThumbFallbackRaw = useMemo(
+    () => getRaffleImageFallbackRawUrl(displayImageSrc, raffle.image_url),
+    [displayImageSrc, raffle.image_url]
+  )
+  /** List layout (small): native img + proxy-then-raw fallback; avoids next/image quirks in horizontal cards. */
+  const [listThumbPhase, setListThumbPhase] = useState<0 | 1 | 2>(0)
   // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
@@ -108,6 +121,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
     setMounted(true)
     setNow(new Date())
   }, [])
+
+  useEffect(() => {
+    setImageError(false)
+    setListThumbPhase(0)
+  }, [raffle.id, raffle.image_url])
+
+  const listThumbSrc =
+    listThumbPhase === 1 && listThumbFallbackRaw ? listThumbFallbackRaw : (displayImageSrc ?? '')
+  const listThumbDead = listThumbPhase === 2
 
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const startTime = new Date(raffle.start_time)
@@ -799,7 +821,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               style={{ background: themeColor }}
               aria-hidden
             />
-            {raffle.image_url && !imageError && (
+            {raffle.image_url && !listThumbDead && (
               <div 
                 className="!relative w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1rem] sm:rounded-l-[1.25rem]"
                 onClick={(e) => {
@@ -808,19 +830,25 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   setImageModalOpen(true)
                 }}
               >
-                <Image
-                  src={raffle.image_url}
-                  alt={raffle.title}
-                  fill
-                  sizes="(max-width: 640px) 96px, (max-width: 768px) 160px, 192px"
-                  className="object-cover !w-full !h-full"
-                  priority={priority}
-                  onError={() => setImageError(true)}
-                  unoptimized={raffle.image_url.startsWith('http://')}
+                {/* eslint-disable-next-line @next/next/no-img-element -- list row: next/image often fails on proxy/GIF in tight layout */}
+                <img
+                  src={listThumbSrc}
+                  alt=""
+                  width={192}
+                  height={192}
+                  loading={priority ? 'eager' : 'lazy'}
+                  decoding="async"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  onError={() => {
+                    setListThumbPhase((p) => {
+                      if (p === 0) return listThumbFallbackRaw ? 1 : 2
+                      return 2
+                    })
+                  }}
                 />
               </div>
             )}
-            {imageError && (
+            {listThumbDead && (
               <div className="w-24 min-w-[96px] sm:w-40 md:w-48 h-full flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1rem] sm:rounded-l-[1.25rem] z-10 relative">
                 <span className="text-[10px] sm:text-xs text-muted-foreground text-center px-1.5">Image unavailable</span>
               </div>
@@ -939,14 +967,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               {raffle.image_url && !imageError && (
                 <div className="!relative w-full h-[80vh] min-h-[500px]">
                   <Image
-                    src={raffle.image_url}
+                    src={displayImageSrc ?? ''}
                     alt={raffle.title}
                     fill
                     sizes="100vw"
                     className="object-contain"
                     priority={priority}
                     onError={() => setImageError(true)}
-                    unoptimized={raffle.image_url.startsWith('http://')}
+                    unoptimized={raffleImageUnoptimized(displayImageSrc ?? '')}
                   />
                 </div>
               )}
@@ -1021,14 +1049,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           {raffle.image_url && !imageError && (
             <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
               <Image
-                src={raffle.image_url}
+                src={displayImageSrc ?? ''}
                 alt={raffle.title}
                 fill
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
                 className="object-cover !w-full !h-full"
                 priority={priority}
                 onError={() => setImageError(true)}
-                unoptimized={raffle.image_url.startsWith('http://')}
+                unoptimized={raffleImageUnoptimized(displayImageSrc ?? '')}
               />
               {/* Metadata overlay on image */}
               <div 
@@ -1328,14 +1356,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             {raffle.image_url && !imageError && (
               <div className="relative w-full h-[80vh] min-h-[500px]">
                 <Image
-                  src={raffle.image_url}
+                  src={displayImageSrc ?? ''}
                   alt={raffle.title}
                   fill
                   sizes="100vw"
                   className="object-contain"
                   priority={priority}
                   onError={() => setImageError(true)}
-                  unoptimized={raffle.image_url.startsWith('http://')}
+                  unoptimized={raffleImageUnoptimized(displayImageSrc ?? '')}
                 />
               </div>
             )}

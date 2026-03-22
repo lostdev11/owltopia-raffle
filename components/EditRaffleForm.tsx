@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { ImageUpload } from '@/components/ImageUpload'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
@@ -34,7 +33,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
-  const [imageUrl, setImageUrl] = useState<string | null>(raffle.image_url)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
@@ -118,7 +116,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
-      image_url: imageUrl || null,
       ticket_price: parseFloat(formData.get('ticket_price') as string),
       currency: formData.get('currency') as string,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
@@ -883,12 +880,24 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 />
               </div>
 
-              <ImageUpload
-                value={imageUrl}
-                onChange={setImageUrl}
-                label="NFT Image"
-                disabled={loading}
-              />
+              <div className="space-y-2">
+                <Label>Listing image</Label>
+                <p className="text-xs text-muted-foreground">
+                  Art comes from the prize NFT when the raffle is created. It cannot be changed here, so listings stay aligned with on-chain metadata and we avoid user-uploaded images.
+                </p>
+                {raffle.image_url ? (
+                  <div className="relative w-full max-w-md h-48 rounded-md overflow-hidden border border-input bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={raffle.image_url}
+                      alt=""
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No image stored for this raffle.</p>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

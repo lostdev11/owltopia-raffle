@@ -202,7 +202,6 @@ export async function PATCH(
     const updates: any = {
       title: body.title,
       description: body.description || null,
-      image_url: body.image_url || null,
       ticket_price: body.ticket_price,
       currency: body.currency,
       max_tickets: maxTickets,

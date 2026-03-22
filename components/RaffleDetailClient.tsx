@@ -31,6 +31,7 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
+import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import Image from 'next/image'
 import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
 import {
@@ -133,25 +134,7 @@ export function RaffleDetailClient({
   const [imageError, setImageError] = useState(false)
   const [fallbackImageError, setFallbackImageError] = useState(false)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  // Use proxy for external image URLs so they load on mobile (avoid Safe Web / CORS issues)
-  const displayImageUrl = (() => {
-    const url = raffle.image_url
-    if (!url) return null
-    try {
-      const siteOrigin =
-        typeof process.env.NEXT_PUBLIC_SITE_URL === 'string' && process.env.NEXT_PUBLIC_SITE_URL
-          ? new URL(process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')).origin
-          : typeof window !== 'undefined'
-            ? window.location.origin
-            : ''
-      const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://www.owltopia.xyz')
-      if ((u.protocol === 'http:' || u.protocol === 'https:') && siteOrigin && u.origin !== siteOrigin)
-        return `/api/proxy-image?url=${encodeURIComponent(url)}`
-    } catch {
-      // ignore invalid URLs
-    }
-    return url
-  })()
+  const displayImageUrl = getRaffleDisplayImageUrl(raffle.image_url)
   // When proxy fails, try raw URL (decoded from proxy param) as fallback
   const fallbackRawUrl = (() => {
     const url = displayImageUrl ?? raffle.image_url
