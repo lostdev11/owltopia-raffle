@@ -495,13 +495,28 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
     0 4px 6px -1px rgba(0, 0, 0, 0.25),
     0 10px 20px -10px rgba(0, 0, 0, 0.35),
     0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  transition: box-shadow 0.3s ease, transform 0.3s ease, filter 0.25s ease;
 }
 .raffle-card-modern:hover {
   box-shadow:
     0 20px 40px -15px rgba(0, 0, 0, 0.4),
     0 8px 16px -8px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+
+/* Theme/state accent: drop-shadow follows the card’s rounded alpha (box-shadow often mis-fits corners). */
+.raffle-card-rounded-halo {
+  --glow-rgb: 0, 255, 136;
+  filter: drop-shadow(0 0 1px rgb(var(--glow-rgb) / 0.55))
+    drop-shadow(0 0 10px rgb(var(--glow-rgb) / 0.42))
+    drop-shadow(0 0 22px rgb(var(--glow-rgb) / 0.22));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raffle-card-rounded-halo {
+    filter: drop-shadow(0 0 1px rgb(var(--glow-rgb) / 0.45))
+      drop-shadow(0 0 8px rgb(var(--glow-rgb) / 0.28));
+  }
 }
 
 /* Subtle gradient accent strip under card content (theme color applied inline) */

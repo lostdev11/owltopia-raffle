@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import type { ThemeAccent } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import { getThemeAccentClasses, getThemeAccentColor, getThemeAccentSurfaceStyle } from '@/lib/theme-accent'
 import { Trophy, ExternalLink } from 'lucide-react'
 import type { PrizeType } from '@/lib/types'
 import { useEffect, useState } from 'react'
@@ -40,7 +40,7 @@ export function WinnerModal({
   nftMintAddress,
   nftCollectionName,
 }: WinnerModalProps) {
-  const borderStyle = getThemeAccentBorderStyle(themeAccent)
+  const borderStyle = getThemeAccentSurfaceStyle(themeAccent)
   const [displayName, setDisplayName] = useState<string | null>(null)
 
   // Fetch display name for the winner wallet when the modal opens
@@ -150,7 +150,7 @@ export function WinnerModal({
             className="w-full"
             onClick={() => onOpenChange(false)}
             style={{
-              backgroundColor: getThemeAccentBorderStyle(themeAccent).borderColor,
+              backgroundColor: getThemeAccentColor(themeAccent),
             }}
           >
             Close

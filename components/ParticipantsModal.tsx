@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { Entry, ThemeAccent } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import { getThemeAccentClasses, getThemeAccentSurfaceStyle } from '@/lib/theme-accent'
 import { useMemo, useState, useEffect } from 'react'
 import { ExternalLink } from 'lucide-react'
 
@@ -67,7 +67,7 @@ export function ParticipantsModal({
     return `https://solscan.io/tx/${signature}`
   }
 
-  const borderStyle = getThemeAccentBorderStyle(themeAccent)
+  const borderStyle = getThemeAccentSurfaceStyle(themeAccent)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

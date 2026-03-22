@@ -15,6 +15,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { RafflesList } from '@/components/RafflesList'
 import { RaffleCard } from '@/components/RaffleCard'
+import { RafflesSwipeDeck } from '@/components/RafflesSwipeDeck'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
@@ -90,77 +91,27 @@ type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfi
 
 function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
   const list = items ?? []
-  const [index, setIndex] = useState(0)
-  const total = list.length
-
-  const clampIndex = (value: number) => {
-    if (total === 0) return 0
-    if (value < 0) return total - 1
-    if (value >= total) return 0
-    return value
-  }
-
-  // Auto-advance through past raffles when there is more than one. Must run unconditionally (Rules of Hooks).
-  useEffect(() => {
-    if (total <= 1) return
-    const id = setInterval(() => {
-      setIndex((prev) => clampIndex(prev + 1))
-    }, 6000)
-    return () => clearInterval(id)
-  }, [total])
-
-  if (total === 0) return null
-
-  const goPrev = () => {
-    setIndex((prev) => clampIndex(prev - 1))
-  }
-
-  const goNext = () => {
-    setIndex((prev) => clampIndex(prev + 1))
-  }
-
-  const current = list[clampIndex(index)]
+  if (list.length === 0) return null
 
   return (
-    <div className="w-full min-w-0">
-      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">Browse past raffles</span>
-          <span className="text-xs">
-            {clampIndex(index) + 1} of {total}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={goPrev}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
-            disabled={total <= 1}
-            aria-label="Previous past raffle"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
-            disabled={total <= 1}
-            aria-label="Next past raffle"
-          >
-            ›
-          </button>
-        </div>
-      </div>
-      <div className="w-full min-w-0">
+    <RafflesSwipeDeck
+      items={list}
+      getKey={(row) => row.raffle.id}
+      ariaLabel="Past raffles, swipe or use arrows to browse"
+      autoAdvanceMs={list.length > 1 ? 6000 : 0}
+      renderItem={(row, _slideIndex, opts) => (
         <RaffleCard
-          raffle={current.raffle}
-          entries={current.entries}
+          raffle={row.raffle}
+          entries={row.entries}
           size="small"
           section="past"
-          priority
+          priority={opts.isFocused}
+          deckPresentation
+          deckFillWidth={opts.fillDeckWidth}
+          deckIsFocused={opts.isFocused}
         />
-      </div>
-    </div>
+      )}
+    />
   )
 }
 

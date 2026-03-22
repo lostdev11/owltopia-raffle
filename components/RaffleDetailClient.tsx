@@ -26,7 +26,12 @@ import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
-import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
+import {
+  getThemeAccentClasses,
+  getThemeAccentColor,
+  getThemeAccentSurfaceStyle,
+  raffleStateSurfaceStyle,
+} from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
@@ -185,14 +190,13 @@ export function RaffleDetailClient({
     const t = setTimeout(() => setShowEnteredStyle(true), 200)
     return () => clearTimeout(t)
   }, [])
-  const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const borderStyle = isPendingDraft
-    ? { borderColor: '#f59e0b', boxShadow: '0 0 20px rgba(245, 158, 11, 0.45)' }
+    ? raffleStateSurfaceStyle('pending')
     : isFuture
-    ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
-    : !isActive
-      ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' }
-      : baseBorderStyle
+      ? raffleStateSurfaceStyle('future')
+      : !isActive
+        ? raffleStateSurfaceStyle('past')
+        : getThemeAccentSurfaceStyle(raffle.theme_accent)
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const isEndingSoon =
     isActive && endTimeMs - nowMs <= 60 * 60 * 1000 && new Date(raffle.end_time) > serverTime

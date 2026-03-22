@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ImageUpload } from '@/components/ImageUpload'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import { getThemeAccentClasses, getThemeAccentSurfaceStyle } from '@/lib/theme-accent'
 import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import { canSelectWinner, isRaffleEligibleToDraw, calculateTicketsSold } from '@/lib/db/raffles'
@@ -360,7 +360,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
-  const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
+  const borderStyle = getThemeAccentSurfaceStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
   if (isAdmin === null) {

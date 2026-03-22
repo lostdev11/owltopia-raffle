@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import { getThemeAccentClasses, getThemeAccentSurfaceStyle } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
@@ -389,7 +389,7 @@ export function CreateRaffleForm() {
     }
   }
 
-  const borderStyle = getThemeAccentBorderStyle(themeAccent)
+  const borderStyle = getThemeAccentSurfaceStyle(themeAccent)
 
   if (!connected || !publicKey) {
     return (

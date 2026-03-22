@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import type { ThemeAccent } from './types'
 import { cn } from '@/lib/utils'
 
@@ -24,43 +25,73 @@ export function getThemeAccentColor(theme: ThemeAccent): string {
 }
 
 /**
- * Get theme accent glow color (rgba)
+ * Comma-separated RGB for `rgb(var(--glow-rgb) / α)` (rounded drop-shadow halo).
  */
-export function getThemeAccentGlow(theme: ThemeAccent): string {
+export function getThemeAccentGlowRgb(theme: ThemeAccent): string {
   switch (theme) {
     case 'prime':
-      return 'rgba(0, 255, 136, 0.5)'
+      return '0, 255, 136'
     case 'midnight':
-      return 'rgba(0, 212, 255, 0.5)'
+      return '0, 212, 255'
     case 'dawn':
-      return 'rgba(168, 255, 0, 0.5)'
+      return '168, 255, 0'
     case 'ember':
-      return 'rgba(249, 115, 22, 0.5)'
+      return '249, 115, 22'
     case 'violet':
-      return 'rgba(168, 85, 247, 0.5)'
+      return '168, 85, 247'
     case 'coral':
-      return 'rgba(244, 63, 94, 0.5)'
+      return '244, 63, 94'
     default:
-      return 'rgba(0, 255, 136, 0.5)'
+      return '0, 255, 136'
   }
 }
 
 /**
- * Get theme accent border style object
+ * Border color + CSS variable for `.raffle-card-rounded-halo` (filter drop-shadow).
+ * Drop-shadow follows the painted rounded silhouette; box-shadow glow often gaps at corners.
  */
-export function getThemeAccentBorderStyle(theme: ThemeAccent): { borderColor: string; boxShadow: string } {
-  const color = getThemeAccentColor(theme)
-  const glow = getThemeAccentGlow(theme)
-  
+export function getThemeAccentSurfaceStyle(theme: ThemeAccent): CSSProperties {
   return {
-    borderColor: color,
-    boxShadow: `0 0 20px ${glow}`,
+    borderColor: getThemeAccentColor(theme),
+    ['--glow-rgb' as string]: getThemeAccentGlowRgb(theme),
+  }
+}
+
+/** Pending / future / ended raffle card surfaces (same halo pattern as theme). */
+export function raffleStateSurfaceStyle(
+  state: 'pending' | 'future' | 'past'
+): CSSProperties {
+  switch (state) {
+    case 'pending':
+      return {
+        borderColor: '#f59e0b',
+        ['--glow-rgb' as string]: '245, 158, 11',
+      }
+    case 'future':
+      return {
+        borderColor: '#ef4444',
+        ['--glow-rgb' as string]: '239, 68, 68',
+      }
+    case 'past':
+      return {
+        borderColor: '#3b82f6',
+        ['--glow-rgb' as string]: '59, 130, 246',
+      }
   }
 }
 
 /**
- * Get theme accent CSS classes (base classes only, use style for colors)
+ * Get theme accent CSS classes (base classes only; pair with getThemeAccentSurfaceStyle).
+ * @param withHalo — set false for winner / golden treatment so filter does not fight animations.
  */
-export function getThemeAccentClasses(theme: ThemeAccent, baseClasses?: string): string {
-  return cn(baseClasses, 'transition-all duration-300 border-2')
+export function getThemeAccentClasses(
+  theme: ThemeAccent,
+  baseClasses?: string,
+  options?: { withHalo?: boolean }
+): string {
+  return cn(
+    baseClasses,
+    'transition-all duration-300 border-2',
+    options?.withHalo === false ? null : 'raffle-card-rounded-halo'
+  )
 }

@@ -1,18 +1,35 @@
- 'use client'
- 
- import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+'use client'
+
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  useId,
+} from 'react'
 import { RaffleCard } from '@/components/RaffleCard'
 import { RaffleScrollReveal } from '@/components/RaffleScrollReveal'
-import { WalletConnectButton } from '@/components/WalletConnectButton'
- import type { Raffle, Entry } from '@/lib/types'
- import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+import { RafflesSwipeDeck } from '@/components/RafflesSwipeDeck'
+import type { Raffle, Entry } from '@/lib/types'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
-import { Flame } from 'lucide-react'
-import Link from 'next/link'
+import { GalleryHorizontal, LayoutList } from 'lucide-react'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
 type SectionType = 'active' | 'future' | 'past'
+
+type BrowseLayout = 'swipe' | 'list'
+
+const LAYOUT_STORAGE_KEY = 'owl-raffles-browse-layout'
+
+function swipeAriaLabel(section: SectionType | undefined): string {
+  if (section === 'active') return 'Active raffles, swipe or use arrows to browse'
+  if (section === 'future') return 'Upcoming raffles, swipe or use arrows to browse'
+  if (section === 'past') return 'Past raffles, swipe or use arrows to browse'
+  return 'Raffles, swipe or use arrows to browse'
+}
 
 interface RaffleWithEntriesItem {
   raffle: Raffle
@@ -74,10 +91,30 @@ export function RafflesList({
   serverNow,
   onTopProfitableChange,
 }: RafflesListProps) {
+  const sortFieldId = useId()
   // Defensive: coerce null/undefined to [] so we never read properties on null
   const list = rafflesWithEntries ?? []
   const [filteredRaffles, setFilteredRaffles] = useState(list)
   const [sortBy, setSortBy] = useState<SortOption>('days-left')
+  const [browseLayout, setBrowseLayout] = useState<BrowseLayout>('swipe')
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
+      if (raw === 'list' || raw === 'swipe') setBrowseLayout(raw)
+    } catch {
+      /* private mode */
+    }
+  }, [])
+
+  const persistBrowseLayout = useCallback((next: BrowseLayout) => {
+    setBrowseLayout(next)
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }, [])
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
 
@@ -355,33 +392,75 @@ export function RafflesList({
     return null
   }
 
+  const showSort = otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1
+  const useSwipeDeck = otherRaffles.length > 1 && browseLayout === 'swipe'
+
   return (
     <div className="w-full min-w-0">
       <div className="flex flex-wrap items-center justify-between mb-4 sm:mb-6 gap-4">
         {title && (
           <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
         )}
-        {otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1 && (
-          <div className="flex items-center gap-2 ml-auto">
-            <label htmlFor="sort-select" className="text-sm text-muted-foreground whitespace-nowrap">
-              Sort by:
-            </label>
-            <select
-              id="sort-select"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="px-3 py-1.5 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer"
+        <div className="flex flex-wrap items-center gap-3 ml-auto">
+          {otherRaffles.length > 1 && (
+            <div
+              className="inline-flex rounded-lg border border-border bg-muted/40 p-1"
+              role="group"
+              aria-label="Browse layout"
             >
-              <option value="days-left">Days Left</option>
-              <option value="date">Date</option>
-              <option value="ticket-price">Ticket Price</option>
-            </select>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => persistBrowseLayout('swipe')}
+                className={`inline-flex h-11 min-w-[44px] sm:h-9 sm:min-w-9 items-center justify-center rounded-md px-3 touch-manipulation transition-colors ${
+                  browseLayout === 'swipe'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                aria-pressed={browseLayout === 'swipe'}
+                aria-label="Swipe view"
+              >
+                <GalleryHorizontal className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => persistBrowseLayout('list')}
+                className={`inline-flex h-11 min-w-[44px] sm:h-9 sm:min-w-9 items-center justify-center rounded-md px-3 touch-manipulation transition-colors ${
+                  browseLayout === 'list'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                aria-pressed={browseLayout === 'list'}
+                aria-label="List view"
+              >
+                <LayoutList className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden />
+              </button>
+            </div>
+          )}
+          {showSort && (
+            <div className="flex items-center gap-2">
+              <label htmlFor={sortFieldId} className="text-sm text-muted-foreground whitespace-nowrap">
+                Sort by:
+              </label>
+              <select
+                id={sortFieldId}
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                className="min-h-[44px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer touch-manipulation"
+              >
+                <option value="days-left">Days Left</option>
+                <option value="date">Date</option>
+                <option value="ticket-price">Ticket Price</option>
+              </select>
+            </div>
+          )}
+        </div>
       </div>
-      <div className={`w-full min-w-0 ${gridClasses[size]}`}>
-        {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
-          <RaffleScrollReveal key={raffle.id}>
+      {useSwipeDeck ? (
+        <RafflesSwipeDeck
+          items={otherRaffles}
+          getKey={(row) => row.raffle.id}
+          ariaLabel={swipeAriaLabel(section)}
+          renderItem={({ raffle, entries, profitInfo }, slideIndex, opts) => (
             <RaffleCard
               raffle={raffle}
               entries={entries}
@@ -389,12 +468,32 @@ export function RafflesList({
               section={section}
               profitInfo={profitInfo}
               onDeleted={handleRaffleDeleted}
-              priority={index < 6}
+              priority={opts.isFocused}
               serverNow={serverNow}
+              deckPresentation
+              deckFillWidth={opts.fillDeckWidth}
+              deckIsFocused={opts.isFocused}
             />
-          </RaffleScrollReveal>
-        ))}
-      </div>
+          )}
+        />
+      ) : (
+        <div className={`w-full min-w-0 ${gridClasses[size]}`}>
+          {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
+            <RaffleScrollReveal key={raffle.id}>
+              <RaffleCard
+                raffle={raffle}
+                entries={entries}
+                size={size}
+                section={section}
+                profitInfo={profitInfo}
+                onDeleted={handleRaffleDeleted}
+                priority={index < 6}
+                serverNow={serverNow}
+              />
+            </RaffleScrollReveal>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
