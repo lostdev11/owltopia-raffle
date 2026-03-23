@@ -35,46 +35,6 @@ function getHeliusRpcUrl(): string | null {
 }
 
 /**
- * Get mint addresses of NFTs that have a delegate set (e.g. staked) via RPC.
- * No external API needed – uses on-chain token account data.
- */
-async function getDelegatedMints(wallet: string): Promise<Set<string>> {
-  const rpcUrl = process.env.SOLANA_RPC_URL?.trim() || getHeliusRpcUrl()
-  if (!rpcUrl) return new Set<string>()
-  try {
-    const res = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'parsed-token-accounts',
-        method: 'getParsedTokenAccountsByOwner',
-        params: [wallet, { programId: TOKEN_PROGRAM_ID.toBase58() }],
-      }),
-      cache: 'no-store',
-    })
-    if (!res.ok) return new Set<string>()
-    const json = await res.json().catch(() => null)
-    const value = json?.result?.value as Array<{ account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } } }> | undefined
-    if (!Array.isArray(value)) return new Set<string>()
-    const delegated = new Set<string>()
-    for (const item of value) {
-      const info = item.account?.data?.parsed?.info
-      if (!info?.mint) continue
-      const decimals = Number(info.tokenAmount?.decimals ?? 9)
-      const amount = String(info.tokenAmount?.amount ?? '0')
-      const isNft = amount !== '0' && (decimals === 0 || parseFloat(amount) === 1)
-      if (!isNft) continue
-      const delegate = info.delegate
-      if (delegate && typeof delegate === 'string' && delegate !== '') delegated.add(info.mint)
-    }
-    return delegated
-  } catch {
-    return new Set<string>()
-  }
-}
-
-/**
  * Optional: fetch staked mint list from external API when STAKED_NFTS_API_URL is set.
  * URL may contain {wallet} placeholder. Response may be string[] or { mints?: string[] }.
  */
@@ -97,13 +57,13 @@ async function getStakedMintsFromApi(wallet: string): Promise<Set<string>> {
 /** Parse one page of getParsedTokenAccountsByOwner into WalletNft list. */
 function parseTokenAccountsToNfts(
   value: Array<{ pubkey?: string; account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } } }>,
-  delegatedMints: Set<string>
+  stakedMints: Set<string>
 ): WalletNft[] {
   const nfts: WalletNft[] = []
   for (const item of value) {
     const info = item.account?.data?.parsed?.info
     if (!info?.mint) continue
-    if (delegatedMints.has(info.mint)) continue
+    if (stakedMints.has(info.mint)) continue
     const decimals = Number(info.tokenAmount?.decimals ?? 9)
     const amount = String(info.tokenAmount?.amount ?? '0')
     const isNft =
@@ -131,7 +91,7 @@ function parseTokenAccountsToNfts(
 async function getNftsViaRpcFallback(
   rpcUrl: string,
   wallet: string,
-  delegatedMints: Set<string>
+  stakedMints: Set<string>
 ): Promise<WalletNft[]> {
   const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
   const seenMints = new Set<string>()
@@ -156,7 +116,7 @@ async function getNftsViaRpcFallback(
         account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } }
       }> | undefined
       if (!Array.isArray(value)) continue
-      for (const nft of parseTokenAccountsToNfts(value, delegatedMints)) {
+      for (const nft of parseTokenAccountsToNfts(value, stakedMints)) {
         if (seenMints.has(nft.mint)) continue
         seenMints.add(nft.mint)
         nfts.push(nft)
@@ -247,12 +207,11 @@ export async function GET(request: NextRequest) {
     }
 
     const items = allItems
-    const [delegatedMints, stakedMintsFromApi, scamBlocklist] = await Promise.all([
-      getDelegatedMints(wallet),
+    const [stakedMintsFromApi, scamBlocklist] = await Promise.all([
       getStakedMintsFromApi(wallet),
       getScamBlocklist(),
     ])
-    const excludeMints = new Set([...delegatedMints, ...stakedMintsFromApi])
+    const excludeMints = new Set(stakedMintsFromApi)
     const isScam = (item: HeliusAsset) => {
       if (!item.id) return true
       if (excludeMints.has(item.id)) return true

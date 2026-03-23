@@ -301,14 +301,6 @@ export function CreateRaffleForm() {
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
-            if ('delegated' in holder && holder.delegated) {
-              alert(
-                'Your raffle was created as a draft, but this NFT is currently staked or delegated. ' +
-                  'Unstake it in your wallet or staking app, then complete the prize deposit from the raffle page.'
-              )
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
             if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
