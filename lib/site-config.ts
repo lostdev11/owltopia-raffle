@@ -17,7 +17,7 @@ export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`
 export const DEFAULT_OG_IMAGE_PATH = '/opengraph-image'
 
 /** Bump when the default OG asset or path changes so social caches refresh. */
-export const OG_IMAGE_CACHE_VERSION = '2'
+export const OG_IMAGE_CACHE_VERSION = '3'
 
 /** Canonical site origin for metadata, OG URLs, and canonical links (no trailing slash). */
 export function getSiteBaseUrl(): string {

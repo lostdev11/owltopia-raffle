@@ -118,16 +118,15 @@ const nextConfig = {
     ]
   },
   webpack: (config, { isServer }) => {
-    // Force a single React instance so wallet adapter's useContext works (avoids "Invalid hook call" / useContext null)
-    // Use package directory (not index.js) so subpaths like react/jsx-runtime resolve correctly
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      react: path.dirname(require.resolve('react/package.json')),
-      'react-dom': path.dirname(require.resolve('react-dom/package.json')),
-    }
-
-    // Suppress warnings about optional dependencies
+    // Force a single React instance in the *client* bundle only. Aliasing React on the server
+    // breaks Next.js RSC/SSR (hooks run with a null dispatcher → 500); crawlers then get errors
+    // and Discord/Open Graph previews fail even when meta tags appear in the streamed HTML.
     if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        react: path.dirname(require.resolve('react/package.json')),
+        'react-dom': path.dirname(require.resolve('react-dom/package.json')),
+      }
       config.resolve.fallback = {
         ...config.resolve.fallback,
         'pino-pretty': false,
