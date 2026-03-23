@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
-import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
 import { WalletContextProvider } from '@/components/WalletProvider'
 import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
@@ -35,13 +35,8 @@ export const viewport = {
   interactiveWidget: 'resizes-content' as const,
 }
 
-// Absolute base URL (X and others require absolute HTTPS URLs for card images)
-const SITE_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-// OG image: NEXT_PUBLIC_OG_IMAGE overrides; default /og-image.png (custom image in public/) so it works in production without env
-const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
-// Cache-bust so Discord and other platforms re-fetch after updates (bump when you change the image)
-const OG_IMAGE_VERSION = '1'
-const OG_IMAGE_URL = `${SITE_BASE}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}${OG_IMAGE_PATH.includes('?') ? '&' : '?'}v=${OG_IMAGE_VERSION}`
+const SITE_BASE = getSiteBaseUrl()
+const OG_IMAGE_URL = getDefaultOgImageAbsoluteUrl()
 const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
 
 // Default to production URL so link previews (OG/Twitter/Discord) work when sharing any page

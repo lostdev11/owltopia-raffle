@@ -1,10 +1,9 @@
 import type { Metadata } from 'next'
 import { EnterOwlTopia } from '@/components/EnterOwlTopia'
-import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
-const OG_IMAGE_URL = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
+const SITE_URL = getSiteBaseUrl()
+const OG_IMAGE_URL = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: PLATFORM_NAME,

@@ -9,7 +9,7 @@ import { cookies } from 'next/headers'
 import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
-import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
 import { getAdminRole } from '@/lib/db/admins'
@@ -21,9 +21,8 @@ export const revalidate = 0
 /** Stay within Vercel serverless limit (10s on Hobby) so we don't get 500/502 from platform timeout */
 export const maxDuration = 10
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
-const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
+const SITE_URL = getSiteBaseUrl()
+const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 const OG_DESCRIPTION = `Browse and enter trusted raffles. Every entry verified on-chain. ${SITE_URL}/raffles`
 
 export const metadata: Metadata = {

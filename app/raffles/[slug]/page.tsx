@@ -5,7 +5,7 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
-import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl } from '@/lib/site-config'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
@@ -14,8 +14,7 @@ import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const DEFAULT_OG_IMAGE = `${SITE_URL}/api/og`
+const SITE_URL = getSiteBaseUrl()
 
 /** Per-raffle OG image URL (generated when raffle has no image_url). */
 function raffleOgImageUrl(slug: string) {

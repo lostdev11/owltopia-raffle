@@ -2,11 +2,10 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Eye, Ticket, Users, Shield, Percent } from 'lucide-react'
-import { PLATFORM_NAME, OG_ALT } from '@/lib/site-config'
+import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.owltopia.xyz').replace(/\/$/, '')
-const OG_IMAGE_PATH = (process.env.NEXT_PUBLIC_OG_IMAGE || '').trim() || '/og-image.png'
-const OG_IMAGE = `${SITE_URL}${OG_IMAGE_PATH.startsWith('/') ? OG_IMAGE_PATH : `/${OG_IMAGE_PATH}`}?v=1`
+const SITE_URL = getSiteBaseUrl()
+const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: `How It Works | ${PLATFORM_NAME}`,

@@ -54,6 +54,12 @@ const nextConfig = {
         ],
       },
       {
+        source: '/opengraph-image',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
+        ],
+      },
+      {
         // Cache per-raffle OG images (generated for each slug)
         source: '/raffles/:slug/opengraph-image',
         headers: [
