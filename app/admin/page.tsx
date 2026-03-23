@@ -6,13 +6,14 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
+import type { CreatorHealthRow } from '@/lib/db/creator-health'
 
 interface DeletedEntry {
   id: string
@@ -123,6 +124,9 @@ export default function AdminDashboardPage() {
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
   const [loadingRevenue, setLoadingRevenue] = useState(false)
   const [autoRefreshTick, setAutoRefreshTick] = useState(0)
+
+  const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
+  const [loadingCreatorHealth, setLoadingCreatorHealth] = useState(false)
 
   // Keep dashboard data live while open and force a refresh each new day.
   useEffect(() => {
@@ -380,6 +384,27 @@ export default function AdminDashboardPage() {
     }
     if (isAdmin && sessionReady) fetchRevenue()
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    let cancelled = false
+    setLoadingCreatorHealth(true)
+    fetch('/api/admin/creator-health', { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load creator health')
+        return res.json() as Promise<{ creators: CreatorHealthRow[] }>
+      })
+      .then((data) => {
+        if (!cancelled) setCreatorHealth(data.creators || [])
+      })
+      .catch((e) => console.error('Error fetching creator health:', e))
+      .finally(() => {
+        if (!cancelled) setLoadingCreatorHealth(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -952,6 +977,108 @@ export default function AdminDashboardPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {adminRole === 'full' && (
+          <Card className="mb-8 border-amber-500/20 bg-amber-500/[0.03]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Radar className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                Creator Radar
+              </CardTitle>
+              <CardDescription>
+                Per-creator signals to spot raffles that may struggle to sell out or clash with platform rules: min-ticket extensions (deadline extended because the minimum was not met at least once), edits after entries, cancellation requests, blocked purchases, weak sell-through on completed raffles, and pending ticket rows that still need verification.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingCreatorHealth ? (
+                <p className="text-muted-foreground flex items-center gap-2 touch-manipulation min-h-[44px]">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Loading creator metrics…
+                </p>
+              ) : creatorHealth.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No creator data yet.</p>
+              ) : (
+                <div className="overflow-x-auto -mx-1 px-1 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-sm border-collapse min-w-[720px]">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-3 font-medium">Creator</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums">Health</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Total raffles">Raffles</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Completed">
+                          Done
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Min-ticket extensions (threshold not met at end; deadline extended)">
+                          Ext
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Edited after entries">
+                          Edit+
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Cancellation requested">
+                          Canc req
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Purchases blocked by admin">
+                          Block
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Cancelled raffles">
+                          Xl
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Completed but sold under half of max tickets">
+                          Weak
+                        </th>
+                        <th className="py-2 font-medium tabular-nums" title="Pending entries (unverified tickets)">
+                          Pend
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {creatorHealth.map((row) => {
+                        const h = row.healthScore
+                        const healthClass =
+                          h >= 70
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : h >= 40
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-red-600 dark:text-red-400'
+                        return (
+                          <tr key={row.wallet} className="border-b border-border/60">
+                            <td className="py-2.5 pr-3 align-top">
+                              <a
+                                href={`https://solscan.io/account/${encodeURIComponent(row.wallet)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-mono text-xs break-all text-primary underline-offset-2 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
+                              >
+                                {row.wallet.length > 12
+                                  ? `${row.wallet.slice(0, 6)}…${row.wallet.slice(-6)}`
+                                  : row.wallet}
+                              </a>
+                            </td>
+                            <td className={`py-2.5 pr-2 tabular-nums font-semibold ${healthClass}`}>{row.healthScore}</td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">{row.rafflesTotal}</td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">{row.completed}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.minTicketExtensions > 0 ? row.minTicketExtensions : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.editedAfterEntries > 0 ? row.editedAfterEntries : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.cancellationRequested > 0 ? row.cancellationRequested : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.purchasesBlocked > 0 ? row.purchasesBlocked : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.cancelled > 0 ? row.cancelled : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.weakSellthrough > 0 ? row.weakSellthrough : '—'}</td>
+                            <td className="py-2.5 tabular-nums">{row.pendingEntries > 0 ? row.pendingEntries : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!loadingCreatorHealth && creatorHealth.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  <strong className="text-foreground">Health</strong> is a 0–100 heuristic (higher is better): it down-weights extensions, post-entry edits, moderation flags, cancellations, weak sell-through, and pending verifications. Use it for triage, not as proof of bad behavior.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <Card className="hover:border-primary transition-colors cursor-pointer">
