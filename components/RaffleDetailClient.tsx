@@ -87,6 +87,7 @@ export function RaffleDetailClient({
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
   const [showManualEscrowFallback, setShowManualEscrowFallback] = useState(false)
+  const [manualDepositTx, setManualDepositTx] = useState('')
   const [depositVerifyLoading, setDepositVerifyLoading] = useState(false)
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
   /** Explorer links: prize mint (identity) vs escrow token account (SPL custody), or single URL for Core. */
@@ -1537,6 +1538,13 @@ export function RaffleDetailClient({
         setShowManualEscrowFallback(true)
         return
       }
+      if ('delegated' in holder && holder.delegated) {
+        setDepositEscrowError(
+          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then tap Verify deposit.'
+        )
+        setShowManualEscrowFallback(true)
+        return
+      }
       if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
         setDepositEscrowError('NFT holder data incomplete. Try again.')
         return
@@ -1606,6 +1614,7 @@ export function RaffleDetailClient({
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
     setDepositVerifyLoading(true)
+    const manualTx = manualDepositTx.trim()
     try {
       const signInForSession = async (): Promise<boolean> => {
         if (!publicKey || !signMessage) {
@@ -1654,8 +1663,11 @@ export function RaffleDetailClient({
         }
       }
 
+      const verifyBody = manualTx ? JSON.stringify({ deposit_tx: manualTx }) : undefined
       let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
         method: 'POST',
+        headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
+        body: verifyBody,
         credentials: 'include',
       })
       if (res.status === 401) {
@@ -1663,21 +1675,26 @@ export function RaffleDetailClient({
         if (!signedIn) return
         res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
           method: 'POST',
+          headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
+          body: verifyBody,
           credentials: 'include',
         })
       }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setDepositEscrowError(data?.error ?? 'Verification failed')
+        setShowManualEscrowFallback(true)
         return
       }
+      setManualDepositTx('')
       router.refresh()
     } catch (e) {
       setDepositEscrowError(e instanceof Error ? e.message : 'Verification failed')
+      setShowManualEscrowFallback(true)
     } finally {
       setDepositVerifyLoading(false)
     }
-  }, [raffle.id, router, publicKey, signMessage])
+  }, [raffle.id, router, publicKey, signMessage, manualDepositTx])
 
   const handleReturnPrizeToCreator = useCallback(async () => {
     const reason = returnPrizeReason as 'cancelled' | 'wrong_nft' | 'dispute' | 'platform_error' | 'testing'
@@ -1970,6 +1987,21 @@ export function RaffleDetailClient({
                         >
                           Copy escrow address
                         </Button>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="manual-deposit-tx" className="text-xs">
+                          Deposit transaction signature (optional fallback)
+                        </Label>
+                        <Input
+                          id="manual-deposit-tx"
+                          value={manualDepositTx}
+                          onChange={(e) => setManualDepositTx(e.target.value)}
+                          placeholder="Paste Solana tx signature if auto-verify fails"
+                          className="text-xs sm:text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          If auto-verify fails after manual transfer, paste the transfer signature and tap Verify deposit again.
+                        </p>
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">

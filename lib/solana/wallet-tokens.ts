@@ -18,21 +18,25 @@ export const NFT_TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] a
 export interface NftHolderInWallet {
   tokenProgram: typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID
   tokenAccount: PublicKey
-  delegated?: boolean
+}
+
+/** Returned when the mint is in the wallet but only in a delegated (staked) account. */
+export interface NftHolderDelegated {
+  delegated: true
 }
 
 /**
  * Find the token account that holds this mint in the given wallet (SPL Token or Token-2022).
  * Checks mint-filtered RPC first (no truncation), then ATA, then full scan.
- * Delegated accounts are still returned because delegation alone does not always block owner transfers.
+ * If the only holding is delegated (staked), returns { delegated: true } so the UI can ask the user to unstake.
  */
 export async function getNftHolderInWallet(
   connection: Connection,
   mint: PublicKey,
   owner: PublicKey
-): Promise<NftHolderInWallet | null> {
+): Promise<NftHolderInWallet | NftHolderDelegated | null> {
   const mintStr = mint.toBase58()
-  let delegatedCandidate: NftHolderInWallet | null = null
+  let foundDelegated = false
 
   // 1) Mint-filtered lookup: returns only accounts holding this mint (avoids truncation when user has many tokens)
   try {
@@ -55,7 +59,7 @@ export async function getNftHolderInWallet(
       if (!Number.isFinite(amountNum) || amountNum < 1) continue
       const delegate = info.delegate
       if (delegate && typeof delegate === 'string' && delegate !== '') {
-        if (!delegatedCandidate) delegatedCandidate = { tokenProgram, tokenAccount: pubkey, delegated: true }
+        foundDelegated = true
         continue
       }
       return { tokenProgram, tokenAccount: pubkey }
@@ -76,9 +80,7 @@ export async function getNftHolderInWallet(
       )
       const account = await getAccount(connection, ata, 'confirmed', programId)
       if (account.amount >= 1n) {
-        if (account.delegate) {
-          if (!delegatedCandidate) delegatedCandidate = { tokenProgram: programId, tokenAccount: ata, delegated: true }
-        }
+        if (account.delegate) foundDelegated = true
         else return { tokenProgram: programId, tokenAccount: ata }
       }
     } catch {
@@ -103,7 +105,7 @@ export async function getNftHolderInWallet(
         if (!Number.isFinite(amountNum) || amountNum < 1) continue
         const delegate = info.delegate
         if (delegate && typeof delegate === 'string' && delegate !== '') {
-          if (!delegatedCandidate) delegatedCandidate = { tokenProgram: programId, tokenAccount: pubkey, delegated: true }
+          foundDelegated = true
           continue
         }
         return { tokenProgram: programId, tokenAccount: pubkey }
@@ -112,7 +114,8 @@ export async function getNftHolderInWallet(
       // RPC error; continue to next program or return null
     }
   }
-  return delegatedCandidate
+  if (foundDelegated) return { delegated: true }
+  return null
 }
 
 /**
