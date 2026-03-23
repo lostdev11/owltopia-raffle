@@ -1999,6 +1999,16 @@ export function RaffleDetailClient({
                           placeholder="Paste Solana tx signature if auto-verify fails"
                           className="text-xs sm:text-sm"
                         />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full sm:w-auto touch-manipulation min-h-[44px] sm:min-h-0"
+                          onClick={handleVerifyPrizeDeposit}
+                          disabled={depositVerifyLoading || manualDepositTx.trim().length === 0}
+                          title="Submit pasted transfer signature and verify escrow deposit"
+                        >
+                          {depositVerifyLoading ? 'Submitting…' : 'Submit signature'}
+                        </Button>
                         <p className="text-xs text-muted-foreground">
                           If auto-verify fails after manual transfer, paste the transfer signature and tap Verify deposit again.
                         </p>
