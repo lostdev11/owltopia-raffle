@@ -10,14 +10,14 @@ export const OG_TAGLINE = 'Trusted raffles with full transparency. Every entry v
 export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`
 
 /**
- * Default link-preview image path. Next serves `app/opengraph-image.tsx` here as PNG.
- * Prefer this over `public/og-image.png` so previews do not depend on a static file that
- * can 404/500 in some deployments; override with NEXT_PUBLIC_OG_IMAGE if needed.
+ * Default link-preview image path.
+ * Use a static image for maximum social-crawler compatibility.
+ * Override with NEXT_PUBLIC_OG_IMAGE if needed.
  */
-export const DEFAULT_OG_IMAGE_PATH = '/opengraph-image'
+export const DEFAULT_OG_IMAGE_PATH = '/og-image.png'
 
 /** Bump when the default OG asset or path changes so social caches refresh. */
-export const OG_IMAGE_CACHE_VERSION = '3'
+export const OG_IMAGE_CACHE_VERSION = '4'
 
 /** Canonical site origin for metadata, OG URLs, and canonical links (no trailing slash). */
 export function getSiteBaseUrl(): string {
