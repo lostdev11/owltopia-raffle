@@ -20,12 +20,36 @@ import {
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
+import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
+import {
+  getAssetWithProof,
+  getCompressionProgramsForV1Ixs,
+  mplBubblegum,
+  transfer as bubblegumTransfer,
+} from '@metaplex-foundation/mpl-bubblegum'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Raffle } from '@/lib/types'
 
 const NFT_AMOUNT = 1n
+
+/** SPL Token custom error 0x11 = account frozen; simulation logs often say "Account is frozen". */
+function humanizeSplPrizeTransferError(message: string): string {
+  const m = message.toLowerCase()
+  if (
+    m.includes('account is frozen') ||
+    m.includes('custom program error: 0x11') ||
+    /\b0x11\b/.test(m)
+  ) {
+    return (
+      'This prize is blocked on-chain: the NFT sits in a frozen SPL token account, so Solana rejects the transfer. ' +
+      'The collection’s freeze authority may need to thaw the escrow token account first, or the asset may use rules that block normal transfers. ' +
+      'Contact support with this raffle link. On mobile, wait for one attempt to finish before retrying.'
+    )
+  }
+  return message
+}
 
 function parseEscrowKeypair(): Keypair | null {
   const raw = process.env.PRIZE_ESCROW_SECRET_KEY?.trim()
@@ -116,6 +140,74 @@ export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<Pub
     }
   }
   return null
+}
+
+const FROZEN_ESCROW_PRIZE_MSG =
+  'This NFT cannot be accepted as a prize while its token account in escrow is frozen. The collection freeze authority must thaw the escrow token account for this mint, or use a different NFT.'
+
+const FROZEN_CREATOR_HOLDING_MSG =
+  'This NFT cannot be used as a prize while it is frozen in your wallet. Thaw it first, or choose another NFT.'
+
+/**
+ * If escrow holds this mint as SPL/Token-2022 with balance ≥ 1, reject when that token account is frozen.
+ * No-op when not held as SPL (e.g. not yet deposited, or Core/compressed only).
+ */
+export async function assertEscrowSplPrizeNotFrozen(
+  mint: PublicKey
+): Promise<{ blocked: false } | { blocked: true; error: string }> {
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) return { blocked: false }
+
+  const tokenProgram = await getEscrowTokenProgramForMint(mint, keypair.publicKey)
+  if (!tokenProgram) return { blocked: false }
+
+  const connection = getSolanaConnection()
+  const ata = await getAssociatedTokenAddress(
+    mint,
+    keypair.publicKey,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  try {
+    const acc = await getAccount(connection, ata, 'confirmed', tokenProgram)
+    if (acc.amount < NFT_AMOUNT) return { blocked: false }
+    if (acc.isFrozen) {
+      return { blocked: true, error: FROZEN_ESCROW_PRIZE_MSG }
+    }
+  } catch {
+    return { blocked: false }
+  }
+  return { blocked: false }
+}
+
+/**
+ * If the creator wallet holds this mint as SPL/Token-2022 with balance ≥ 1, reject when that token account is frozen.
+ * No-op when not holding (e.g. mint not yet acquired).
+ */
+export async function assertCreatorSplHoldingNotFrozen(
+  creatorWallet: PublicKey,
+  mint: PublicKey
+): Promise<{ blocked: false } | { blocked: true; error: string }> {
+  const connection = getSolanaConnection()
+  for (const programId of TOKEN_PROGRAM_IDS) {
+    try {
+      const ata = await getAssociatedTokenAddress(
+        mint,
+        creatorWallet,
+        false,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      const acc = await getAccount(connection, ata, 'confirmed', programId)
+      if (acc.amount >= NFT_AMOUNT && acc.isFrozen) {
+        return { blocked: true, error: FROZEN_CREATOR_HOLDING_MSG }
+      }
+    } catch {
+      // no account or wrong program
+    }
+  }
+  return { blocked: false }
 }
 
 /** One NFT held in escrow: mint address and which token program it uses. */
@@ -281,6 +373,117 @@ export async function transferMplCorePrizeToWinner(raffleId: string): Promise<{
 }
 
 /**
+ * Transfer a compressed (Bubblegum) NFT from escrow to the winner.
+ * Idempotent when nft_transfer_transaction is already set.
+ */
+export async function transferCompressedPrizeToWinner(raffleId: string): Promise<{
+  ok: boolean
+  signature?: string
+  error?: string
+}> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+  if (raffle.prize_type !== 'nft' || !raffle.winner_wallet) {
+    return { ok: false, error: 'Raffle is not an NFT raffle or has no winner' }
+  }
+  if (raffle.nft_transfer_transaction) {
+    return { ok: true, signature: raffle.nft_transfer_transaction }
+  }
+
+  const assetId = (raffle.nft_mint_address || raffle.nft_token_id || '').trim()
+  if (!assetId) {
+    return { ok: false, error: 'Missing compressed NFT asset id' }
+  }
+
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  const escrowBase58 = keypair.publicKey.toBase58()
+  const endpoint =
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC_URL ||
+    'https://solana.drpc.org'
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
+
+  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
+  const signer = createSignerFromKeypair(umi, umiKeypair)
+  umi.use(signerIdentity(signer))
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
+    const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
+    if (leafOwnerStr !== escrowBase58) {
+      return {
+        ok: false,
+        error:
+          'Prize compressed NFT is not in escrow under this asset id, or the asset is not compressed.',
+      }
+    }
+
+    const { compressionProgram, logWrapper } = await getCompressionProgramsForV1Ixs(umi)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const builder: any = bubblegumTransfer(umi, {
+      leafOwner: umiPublicKey(escrowBase58),
+      leafDelegate: asset.leafDelegate,
+      newLeafOwner: umiPublicKey(raffle.winner_wallet.trim()),
+      merkleTree: asset.merkleTree,
+      root: asset.root,
+      dataHash: asset.dataHash,
+      creatorHash: asset.creatorHash,
+      nonce: BigInt(asset.nonce),
+      index: asset.index,
+      proof: asset.proof,
+      compressionProgram,
+      logWrapper,
+    } as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await builder.sendAndConfirm(umi)
+    const sig = String(result.signature ?? result)
+
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({
+          nft_transfer_transaction: sig,
+          nft_claim_locked_at: null,
+          nft_claim_locked_wallet: null,
+        })
+        .eq('id', raffleId)
+    } catch (dbErr) {
+      console.error(`Failed to persist compressed prize transfer for raffle ${raffleId}:`, dbErr)
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // swallow
+      }
+    }
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`Compressed prize transfer failed for raffle ${raffleId}:`, err)
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+        .eq('id', raffleId)
+    } catch {
+      // ignore
+    }
+    return { ok: false, error: message }
+  }
+}
+
+/**
  * Transfer the NFT prize from the platform escrow to the winner.
  * Call after selectWinner for NFT raffles. Idempotent if nft_transfer_transaction already set.
  */
@@ -329,10 +532,34 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     ASSOCIATED_TOKEN_PROGRAM_ID
   )
 
+  let sourceTokenAccount
+  try {
+    sourceTokenAccount = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+  } catch {
+    return {
+      ok: false,
+      error: 'Could not read the escrow token account for this NFT on-chain.',
+    }
+  }
+  if (sourceTokenAccount.isFrozen) {
+    return {
+      ok: false,
+      error: humanizeSplPrizeTransferError('Account is frozen'),
+    }
+  }
+
   let destAccountExists = false
   try {
-    await getAccount(connection, destAta)
+    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
     destAccountExists = true
+    if (destAcc.isFrozen) {
+      return {
+        ok: false,
+        error:
+          'Your wallet already has a token account for this NFT that is frozen, so the prize cannot be sent there. ' +
+          'Thaw that account if you can, or contact support.',
+      }
+    }
   } catch {
     destAccountExists = false
   }
@@ -408,7 +635,7 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     } catch {
       // ignore
     }
-    return { ok: false, error: message }
+    return { ok: false, error: humanizeSplPrizeTransferError(message) }
   }
 }
 

@@ -310,7 +310,7 @@ export function RaffleDetailClient({
         const mint = raffle.nft_mint_address.trim()
         const cluster = /devnet/i.test(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? '') ? '?cluster=devnet' : ''
         const fallbackUrl =
-          raffle.prize_standard === 'mpl_core'
+          raffle.prize_standard === 'mpl_core' || raffle.prize_standard === 'compressed'
             ? `https://solscan.io/account/${mint}${cluster}`
             : `https://solscan.io/token/${mint}${cluster}`
         const prizeMintUrl = data.prizeMintUrl ?? fallbackUrl
@@ -1460,6 +1460,24 @@ export function RaffleDetailClient({
           return
         }
         const sig = await transferMplCoreToEscrow({
+          connection,
+          wallet: walletAdapter,
+          assetId: transferAssetId,
+          escrowAddress,
+        })
+        await confirmAndAssertSuccess(sig)
+        await finalizeAfterTransfer(sig)
+        return
+      }
+
+      if (standard === 'compressed') {
+        if (!walletAdapter) {
+          setDepositEscrowError(
+            'Wallet adapter not ready for compressed NFT transfer. Refresh and try again.'
+          )
+          return
+        }
+        const sig = await transferCompressedNftToEscrow({
           connection,
           wallet: walletAdapter,
           assetId: transferAssetId,

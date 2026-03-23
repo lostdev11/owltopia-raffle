@@ -4,6 +4,8 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
+import { assertCreatorSplHoldingNotFrozen } from '@/lib/raffles/prize-escrow'
+import { PublicKey } from '@solana/web3.js'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -216,6 +218,19 @@ export async function POST(request: NextRequest) {
         { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
         { status: 400 }
       )
+    }
+
+    if (prizeType === 'nft' && nftMintAddress) {
+      try {
+        const mintPk = new PublicKey(nftMintAddress.trim())
+        const creatorPk = new PublicKey(walletAddress.trim())
+        const frozen = await assertCreatorSplHoldingNotFrozen(creatorPk, mintPk)
+        if (frozen.blocked) {
+          return NextResponse.json({ error: frozen.error }, { status: 400 })
+        }
+      } catch {
+        // Invalid mint or wallet — let later persistence fail if needed
+      }
     }
 
     // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist

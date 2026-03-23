@@ -5,7 +5,7 @@ export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 export type PrizeType = 'crypto' | 'nft'
 
 /** How the NFT prize is represented on-chain (used for escrow logic). */
-export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core'
+export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core' | 'compressed'
 
 export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | 'cancelled' | null
 

@@ -47,7 +47,7 @@ export async function GET(
     // SPL/Token-2022 use /token/ for the mint page.
     const prizeStandard = (raffle as { prize_standard?: string | null }).prize_standard
     const prizeMintUrl =
-      prizeStandard === 'mpl_core'
+      prizeStandard === 'mpl_core' || prizeStandard === 'compressed'
         ? `https://solscan.io/account/${mintStr}${cluster}`
         : `https://solscan.io/token/${mintStr}${cluster}`
 

@@ -3,6 +3,7 @@ import { acquireNftPrizeClaimLock, getRaffleById } from '@/lib/db/raffles'
 import { requireSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
+  transferCompressedPrizeToWinner,
   transferMplCorePrizeToWinner,
   transferNftPrizeToWinner,
 } from '@/lib/raffles/prize-escrow'
@@ -91,10 +92,23 @@ export async function POST(
       )
     }
 
-    const transferResult =
+    let transferResult =
       raffle.prize_standard === 'mpl_core'
         ? await transferMplCorePrizeToWinner(raffleId)
-        : await transferNftPrizeToWinner(raffleId)
+        : raffle.prize_standard === 'compressed'
+          ? await transferCompressedPrizeToWinner(raffleId)
+          : await transferNftPrizeToWinner(raffleId)
+
+    // Legacy rows: cNFT prizes were verified in escrow but prize_standard stayed `spl`.
+    if (
+      raffle.prize_standard !== 'mpl_core' &&
+      raffle.prize_standard !== 'compressed' &&
+      (!transferResult.ok || !transferResult.signature) &&
+      typeof transferResult.error === 'string' &&
+      transferResult.error.includes('Escrow does not hold this NFT')
+    ) {
+      transferResult = await transferCompressedPrizeToWinner(raffleId)
+    }
 
     if (!transferResult.ok || !transferResult.signature) {
       return NextResponse.json(

@@ -1027,6 +1027,16 @@ export async function acquireNftPrizeClaimLock(
   const wallet = walletAddress.trim()
   const lockAt = new Date().toISOString()
 
+  // Release stale locks (e.g. server crash after lock, before transfer) so winners can retry.
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+  await getSupabaseAdmin()
+    .from('raffles')
+    .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+    .eq('id', raffleId)
+    .is('nft_transfer_transaction', null)
+    .not('nft_claim_locked_at', 'is', null)
+    .lt('nft_claim_locked_at', staleBefore)
+
   // Service role client: bypasses RLS, so this is safe for server-side enforcement.
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')

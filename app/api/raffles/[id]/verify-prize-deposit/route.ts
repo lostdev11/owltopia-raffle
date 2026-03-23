@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import {
+  assertEscrowSplPrizeNotFrozen,
   getEscrowHeldNftMints,
   getPrizeEscrowPublicKey,
   getEscrowTokenAccountForMint,
@@ -114,6 +115,12 @@ export async function POST(
           const ata = await getEscrowTokenAccountForMint(new PublicKey(mintFromTx))
           const inCoreEscrow = ata ? true : await isMplCoreAssetInEscrow(mintFromTx).catch(() => false)
           if (ata || inCoreEscrow) {
+            if (ata) {
+              const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(mintFromTx))
+              if (frozen.blocked) {
+                return NextResponse.json({ error: frozen.error }, { status: 400 })
+              }
+            }
             const now = new Date().toISOString()
             const update: Record<string, unknown> = {
               prize_deposited_at: now,
@@ -169,7 +176,9 @@ export async function POST(
                   await updateRaffle(id, {
                     prize_deposited_at: now,
                     is_active: true,
+                    nft_mint_address: assetId,
                     nft_token_id: assetId,
+                    prize_standard: 'compressed' as any,
                   } as any)
                   return NextResponse.json({
                     success: true,
@@ -304,11 +313,13 @@ export async function POST(
                     is_active: true,
                     nft_mint_address: assetId,
                     nft_token_id: assetId,
+                    prize_standard: 'compressed' as any,
                   } as any)
                   return NextResponse.json({
                     success: true,
                     prizeDepositedAt: now,
                     nftMintAddress: assetId,
+                    prizeStandard: 'compressed',
                   })
                 }
               } catch {
@@ -327,6 +338,11 @@ export async function POST(
           { status: 400 }
         )
       }
+    }
+
+    const frozenEscrow = await assertEscrowSplPrizeNotFrozen(new PublicKey(mintToSet))
+    if (frozenEscrow.blocked) {
+      return NextResponse.json({ error: frozenEscrow.error }, { status: 400 })
     }
 
     const now = new Date().toISOString()
