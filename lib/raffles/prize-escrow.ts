@@ -826,8 +826,9 @@ export async function transferNftPrizeToCreator(
 }
 
 /**
- * Check if the escrow holds at least one token of the given mint (for this raffle).
- * Checks both SPL Token and Token-2022 ATAs.
+ * Check if the escrow still holds this raffle's NFT prize.
+ * SPL / Token-2022: ATA balance; MPL Core: asset owner; compressed: Bubblegum leaf owner (DAS).
+ * Legacy rows may omit `prize_standard` — after SPL fails, tries Core then compressed (same as verify-prize-deposit).
  */
 export async function checkEscrowHoldsNft(raffle: Raffle): Promise<{ holds: boolean; error?: string }> {
   if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address) {
@@ -838,21 +839,98 @@ export async function checkEscrowHoldsNft(raffle: Raffle): Promise<{ holds: bool
     return { holds: false, error: 'Prize escrow not configured' }
   }
   const connection = getSolanaConnection()
-  const mint = new PublicKey(raffle.nft_mint_address)
-  for (const programId of TOKEN_PROGRAM_IDS) {
+  const standard = raffle.prize_standard ?? null
+  const escrowPk = keypair.publicKey
+
+  const splEscrowHoldsMint = async (mintStr: string): Promise<boolean> => {
+    const mint = new PublicKey(mintStr)
+    for (const programId of TOKEN_PROGRAM_IDS) {
+      try {
+        const ata = await getAssociatedTokenAddress(
+          mint,
+          escrowPk,
+          false,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        const account = await getAccount(connection, ata)
+        if (account.amount >= NFT_AMOUNT) return true
+      } catch {
+        // no account or wrong program
+      }
+    }
+    return false
+  }
+
+  const mplCoreEscrowHolds = async (assetId: string): Promise<boolean> => {
     try {
-      const ata = await getAssociatedTokenAddress(
-        mint,
-        keypair.publicKey,
-        false,
-        programId,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
-      const account = await getAccount(connection, ata)
-      if (account.amount >= NFT_AMOUNT) return { holds: true }
+      return await isMplCoreAssetInEscrow(assetId)
     } catch {
-      // no account or wrong program
+      return false
     }
   }
-  return { holds: false, error: 'NFT not found in escrow (tried SPL Token and Token-2022)' }
+
+  const compressedEscrowHolds = async (): Promise<boolean> => {
+    const escrowBase58 = escrowPk.toBase58()
+    const endpoint =
+      process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
+      process.env.SOLANA_RPC_URL ||
+      'https://solana.drpc.org'
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
+      const assetIdCandidates = Array.from(
+        new Set(
+          [raffle.nft_token_id, raffle.nft_mint_address]
+            .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+            .map((v) => v.trim())
+        )
+      )
+      for (const assetId of assetIdCandidates) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
+          const leafOwner = asset?.leafOwner
+          if (leafOwner && String(leafOwner) === escrowBase58) return true
+        } catch {
+          // try next id
+        }
+      }
+    } catch {
+      return false
+    }
+    return false
+  }
+
+  const notFoundMsg =
+    'NFT not found in escrow (tried SPL Token, Token-2022, MPL Core, and compressed)'
+
+  if (standard === 'mpl_core') {
+    const id = raffle.nft_mint_address.trim()
+    if (await mplCoreEscrowHolds(id)) return { holds: true }
+    return { holds: false, error: 'MPL Core NFT not found in escrow (owner check failed)' }
+  }
+
+  if (standard === 'compressed') {
+    if (await compressedEscrowHolds()) return { holds: true }
+    return { holds: false, error: 'Compressed NFT not found in escrow (leaf owner check failed)' }
+  }
+
+  const preferredMint = raffle.nft_mint_address.trim()
+  if (await splEscrowHoldsMint(preferredMint)) return { holds: true }
+
+  const coreCandidates = Array.from(
+    new Set(
+      [raffle.nft_token_id, raffle.nft_mint_address]
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    )
+  )
+  for (const assetId of coreCandidates) {
+    if (await mplCoreEscrowHolds(assetId)) return { holds: true }
+  }
+  if (await compressedEscrowHolds()) return { holds: true }
+
+  return { holds: false, error: notFoundMsg }
 }

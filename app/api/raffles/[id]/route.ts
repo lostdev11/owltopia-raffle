@@ -322,9 +322,14 @@ export async function DELETE(
 
     let escrowCurrentlyHoldsPrize = false
     if (existingRaffle.prize_type === 'nft') {
-      // Always check live escrow wallet state before deletion; DB flags can be stale.
+      // Live chain check; DB flags can be stale. Empty escrow is OK if the prize was never
+      // verified deposited, or was already returned / claimed (no longer expected in escrow).
       const escrowCheck = await checkEscrowHoldsNft(existingRaffle)
-      if (!escrowCheck.holds && escrowCheck.error) {
+      const deposited = Boolean(existingRaffle.prize_deposited_at)
+      const released =
+        Boolean(existingRaffle.prize_returned_at) ||
+        Boolean(existingRaffle.nft_transfer_transaction)
+      if (!escrowCheck.holds && deposited && !released && escrowCheck.error) {
         return NextResponse.json(
           {
             error: `Escrow wallet check failed. Verify escrow state before deleting: ${escrowCheck.error}`,
