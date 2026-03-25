@@ -69,22 +69,82 @@ async function checkNftMigrationApplied(): Promise<boolean> {
   }
 }
 
+/** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
+const RAFFLE_TAIL_MINIMAL =
+  ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
+
+const RAFFLE_TAIL_EXTENDED =
+  RAFFLE_TAIL_MINIMAL +
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
+
+const NFT_COLUMN_SUFFIX =
+  ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
+
+function raffleSelectPrefix(includeImageFallback: boolean): string {
+  const fb = includeImageFallback ? ',image_fallback_url' : ''
+  return `id,slug,title,description,image_url${fb}`
+}
+
 /** Base columns including prize return, cancellation, and purchases_blocked (migrations 036, 038, 040). */
+function getBaseRaffleColumnsCore(includeImageFallback: boolean): string {
+  return raffleSelectPrefix(includeImageFallback) + RAFFLE_TAIL_EXTENDED
+}
+
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
+  return getBaseRaffleColumnsCore(true)
 }
 
 /** Minimal columns when prize return / cancellation migrations (036, 038) are not yet applied. */
+function getMinimalBaseRaffleColumnsCore(includeImageFallback: boolean): string {
+  return raffleSelectPrefix(includeImageFallback) + RAFFLE_TAIL_MINIMAL
+}
+
 function getMinimalBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
+  return getMinimalBaseRaffleColumnsCore(true)
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
 let raffleColumnsCache: string | null = null
 
-const FULL_RAFFLE_COLUMNS =
-  getBaseRaffleColumns() +
-  ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
+let imageFallbackColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+/**
+ * Whether migration 044 (`image_fallback_url`) exists — avoids 42703 when the column was never applied.
+ */
+async function checkImageFallbackColumnApplied(): Promise<boolean> {
+  if (imageFallbackColumnCache.checked) {
+    return imageFallbackColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,image_fallback_url')
+      .limit(1)
+    let applied = true
+    if (error) {
+      const msg = (error.message ?? '').toLowerCase()
+      const code = String(error.code ?? '').toLowerCase()
+      if (
+        code === '42703' ||
+        msg.includes('does not exist') ||
+        msg.includes('image_fallback_url')
+      ) {
+        applied = false
+      }
+    }
+    imageFallbackColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check image_fallback_url column:', err)
+    imageFallbackColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
+const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
  * Get all columns including NFT columns if migration is applied.
@@ -95,8 +155,9 @@ async function getRaffleColumns(): Promise<string> {
     return raffleColumnsCache
   }
   const hasNftSupport = await checkNftMigrationApplied()
-  raffleColumnsCache =
-    hasNftSupport ? FULL_RAFFLE_COLUMNS : getBaseRaffleColumns()
+  const hasImageFallback = await checkImageFallbackColumnApplied()
+  const base = getBaseRaffleColumnsCore(hasImageFallback)
+  raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
 
@@ -182,15 +243,16 @@ function getRafflesRestListLimit(): number {
 }
 
 /** REST select: full columns including NFT (matches Raffle type) */
-const RAFFLE_SELECT_FULL =
-  getBaseRaffleColumns() +
-  ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
-/** REST select: base only (when NFT migration not applied) */
-const RAFFLE_SELECT_BASE = getBaseRaffleColumns()
+const RAFFLE_SELECT_FULL = FULL_RAFFLE_COLUMNS
+/** REST: no image_fallback_url (migration 044 not applied) but NFT columns present */
+const RAFFLE_SELECT_NO_IMG_FB = getBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
+/** REST: base only, no NFT columns (when NFT migration not applied) */
+const RAFFLE_SELECT_FALLBACK_NO_NFT = getBaseRaffleColumnsCore(false)
 
 function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
   return {
     ...row,
+    image_fallback_url: (row.image_fallback_url as string | null | undefined) ?? null,
     prize_type: 'crypto' as const,
     nft_mint_address: null,
     nft_collection_name: null,
@@ -252,10 +314,11 @@ async function fetchRafflesViaRestRaw(
       throw new Error(`rest error: Supabase ${res.status} ${text.slice(0, 200)}`)
     }
     const data = await res.json()
-    if (select === RAFFLE_SELECT_BASE && Array.isArray(data)) {
-      return data.map((row: Record<string, unknown>) => normalizeBaseRowToRaffle(row))
+    const rows = Array.isArray(data) ? data : []
+    if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
+      return rows.map((row: Record<string, unknown>) => normalizeBaseRowToRaffle(row))
     }
-    return Array.isArray(data) ? data : []
+    return rows.map((row: Record<string, unknown>) => normalizeRaffleRow(row))
   } finally {
     clearTimeout(id)
   }
@@ -303,12 +366,30 @@ export async function getRafflesViaRest(
         { maxRetries, initialDelayMs: 600 }
       )
     } catch (fullErr) {
-      const msg = (fullErr as Error)?.message ?? ''
-      if (!isColumnOrSchemaError(msg)) throw fullErr
-      return await withRetry(
-        async () => fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_BASE, perAttemptMs, includeDraft),
-        { maxRetries, initialDelayMs: 600 }
-      )
+      const msg1 = (fullErr as Error)?.message ?? ''
+      if (!isColumnOrSchemaError(msg1)) throw fullErr
+      try {
+        return await withRetry(
+          async () =>
+            fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_NO_IMG_FB, perAttemptMs, includeDraft),
+          { maxRetries, initialDelayMs: 600 }
+        )
+      } catch (e2) {
+        const msg2 = (e2 as Error)?.message ?? ''
+        if (!isColumnOrSchemaError(msg2)) throw e2
+        return await withRetry(
+          async () =>
+            fetchRafflesViaRestRaw(
+              baseUrl,
+              apiKey,
+              activeOnly,
+              RAFFLE_SELECT_FALLBACK_NO_NFT,
+              perAttemptMs,
+              includeDraft
+            ),
+          { maxRetries, initialDelayMs: 600 }
+        )
+      }
     }
   }
 
@@ -355,7 +436,7 @@ export async function getRaffles(
   try {
     return await withRetry(async () => {
       const client = getSupabaseForRead()
-      const columns = raffleColumnsCache ?? FULL_RAFFLE_COLUMNS
+      const columns = await getRaffleColumns()
       const statuses = options?.includeDraft ? ALL_STATUSES : activeOnly ? ['live', 'ready_to_draw'] : PUBLIC_STATUSES
       let query = client
         .from('raffles')
@@ -366,8 +447,9 @@ export async function getRaffles(
 
       if (error) {
         if (isColumnError(error.message, error.code)) {
-          raffleColumnsCache = getBaseRaffleColumns()
+          imageFallbackColumnCache = { applied: false, checked: true }
           nftMigrationCache = { applied: false, checked: true }
+          raffleColumnsCache = getBaseRaffleColumnsCore(false)
           const retryStatuses = options?.includeDraft ? ALL_STATUSES : activeOnly ? ['live', 'ready_to_draw'] : PUBLIC_STATUSES
           let retryQuery = client
             .from('raffles')
@@ -387,14 +469,9 @@ export async function getRaffles(
               error: { message: toUserFriendlyMessage(msg), code: err?.code },
             }
           }
-          const raffles = (retry.data || []).map((r: any) => ({
-            ...r,
-            prize_type: 'crypto' as const,
-            nft_mint_address: null,
-            nft_collection_name: null,
-            nft_token_id: null,
-            nft_metadata_uri: null,
-          })) as Raffle[]
+          const raffles = ((retry.data || []) as unknown as Record<string, unknown>[]).map((r) =>
+            normalizeBaseRowToRaffle(r)
+          )
           return { data: raffles, error: null }
         }
         const err = error as { message?: string; code?: string; details?: string }
@@ -410,7 +487,11 @@ export async function getRaffles(
       }
 
       raffleColumnsCache = columns
-      nftMigrationCache = { applied: true, checked: true }
+      nftMigrationCache = { applied: columns.includes('prize_type'), checked: true }
+      imageFallbackColumnCache = {
+        applied: columns.includes('image_fallback_url'),
+        checked: true,
+      }
       const hasNftSupport = columns.includes('prize_type')
       let raffles = (data || []) as unknown as Raffle[]
       if (!hasNftSupport && data?.length) {
@@ -448,11 +529,12 @@ export async function getRaffleBySlug(slug: string) {
 
     if (error) {
       if (isColumnError(error.message, error.code)) {
-        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        imageFallbackColumnCache = { applied: false, checked: true }
+        raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
-          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
-          : getMinimalBaseRaffleColumns()
+          ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
+          : getMinimalBaseRaffleColumnsCore(false)
         const retry = await client
           .from('raffles')
           .select(minimalColumns)
@@ -498,11 +580,12 @@ export async function getRaffleById(id: string) {
 
     if (error) {
       if (isColumnError(error.message, error.code)) {
-        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        imageFallbackColumnCache = { applied: false, checked: true }
+        raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
-          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
-          : getMinimalBaseRaffleColumns()
+          ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
+          : getMinimalBaseRaffleColumnsCore(false)
         const retry = await client
           .from('raffles')
           .select(minimalColumns)
@@ -544,6 +627,7 @@ export async function getRaffleById(id: string) {
 function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
   return {
     ...row,
+    image_fallback_url: (row.image_fallback_url as string | null | undefined) ?? null,
     prize_returned_at: (row.prize_returned_at as string | null) ?? null,
     prize_return_reason: (row.prize_return_reason as string | null) ?? null,
     prize_return_tx: (row.prize_return_tx as string | null) ?? null,
@@ -577,11 +661,12 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
 
     if (error) {
       if (isColumnError(error.message, error.code)) {
-        raffleColumnsCache = getMinimalBaseRaffleColumns()
+        imageFallbackColumnCache = { applied: false, checked: true }
+        raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
-          ? getMinimalBaseRaffleColumns() + ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri'
-          : getMinimalBaseRaffleColumns()
+          ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
+          : getMinimalBaseRaffleColumnsCore(false)
         const retry = await client
           .from('raffles')
           .select(minimalColumns)
@@ -868,6 +953,7 @@ export async function getRaffleCreationCountForCreatorToday(creatorWallet: strin
 }
 
 export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>) {
+  const hasImageFallbackColumn = await checkImageFallbackColumnApplied()
   // Build insert object conditionally to handle cases where NFT columns might not exist
   // Only include NFT fields if prize_type is 'nft' or if they have values
   const insertData: any = {
@@ -894,6 +980,10 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     winner_selected_at: raffle.winner_selected_at,
     status: raffle.status ?? null,
     nft_transfer_transaction: raffle.nft_transfer_transaction,
+  }
+
+  if (hasImageFallbackColumn) {
+    insertData.image_fallback_url = raffle.image_fallback_url ?? null
   }
 
   // Only include NFT fields if prize_type is 'nft' or if NFT fields are provided
@@ -994,9 +1084,14 @@ export async function updateRaffle(
     updates.edited_after_entries = true
   }
 
+  const payload: Record<string, unknown> = { ...updates }
+  if (!(await checkImageFallbackColumnApplied()) && 'image_fallback_url' in payload) {
+    delete payload.image_fallback_url
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
-    .update(updates)
+    .update(payload)
     .eq('id', id)
     .select()
     .single()

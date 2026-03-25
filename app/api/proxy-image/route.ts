@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  ipfsUriToHttpsGatewayUrl,
+  IPFS_HTTPS_GATEWAY_PREFIXES,
+  ipfsGatewayCandidateUrls,
+} from '@/lib/ipfs-gateways'
+import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-uri'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const MAX_SIZE_BYTES = 15 * 1024 * 1024 // 15MB (many NFT images are 5–10MB)
+/** Max bytes we buffer and return from this route. Vercel Hobby limits response bodies (~4.5MB); stay under to avoid platform 413. */
+const DEFAULT_MAX_INLINE_BYTES = 4 * 1024 * 1024
+const MAX_INLINE_BYTES = (() => {
+  const raw = process.env.IMAGE_PROXY_MAX_INLINE_BYTES?.trim()
+  if (!raw) return DEFAULT_MAX_INLINE_BYTES
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_INLINE_BYTES
+})()
+
 const FETCH_TIMEOUT_MS = 15_000
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
@@ -14,11 +28,81 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/svg+xml',
 ])
 
-const IPFS_GATEWAYS = [
-  'https://cloudflare-ipfs.com/ipfs/',
-  'https://ipfs.io/ipfs/',
-  'https://dweb.link/ipfs/',
-] as const
+/** IPFS gateways often return application/octet-stream for images. */
+function sniffImageContentType(buffer: ArrayBuffer): string | null {
+  const u8 = new Uint8Array(buffer)
+  if (u8.length < 12) return null
+  if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'image/jpeg'
+  if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'image/png'
+  if (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38) return 'image/gif'
+  if (
+    u8[0] === 0x52 &&
+    u8[1] === 0x49 &&
+    u8[2] === 0x46 &&
+    u8[3] === 0x46 &&
+    u8[8] === 0x57 &&
+    u8[9] === 0x45 &&
+    u8[10] === 0x42 &&
+    u8[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  const textHead = new TextDecoder('utf-8', { fatal: false }).decode(
+    u8.slice(0, Math.min(2048, u8.length))
+  )
+  const trimmedText = textHead.trimStart()
+  if (/<svg[\s/>]/i.test(trimmedText) || trimmedText.startsWith('<?xml')) {
+    return 'image/svg+xml'
+  }
+  return null
+}
+
+function effectiveImageContentType(headerValue: string, buffer: ArrayBuffer): string | null {
+  const t = (headerValue ?? '').split(';')[0].trim().toLowerCase()
+  if (ALLOWED_IMAGE_TYPES.has(t) || t.startsWith('image/')) return t
+  return sniffImageContentType(buffer)
+}
+
+/**
+ * Read response body up to maxBytes. Beyond that (or missing body), signals so caller can redirect to upstream.
+ * Avoids buffering huge files and keeps responses under serverless body limits.
+ */
+async function readBodyUpTo(
+  res: Response,
+  maxBytes: number
+): Promise<ArrayBuffer | 'too_large'> {
+  const reader = res.body?.getReader()
+  if (!reader) {
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength > maxBytes) return 'too_large'
+    return buf
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value?.length) continue
+      total += value.length
+      if (total > maxBytes) {
+        await reader.cancel()
+        return 'too_large'
+      }
+      chunks.push(value)
+    }
+  } catch {
+    await reader.cancel().catch(() => {})
+    return 'too_large'
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.length
+  }
+  return out.buffer
+}
 
 /** Arweave gateways (some block server requests without Referer; we retry with Referer on 403). */
 const ARWEAVE_GATEWAYS = [
@@ -26,40 +110,25 @@ const ARWEAVE_GATEWAYS = [
   'https://arweave.dev/',
 ] as const
 
-/**
- * Convert ipfs:// or IPFS CID to an HTTPS gateway URL (primary: Cloudflare).
- */
+/** Convert ar://, ipfs://, bare CID, or pass through https for fetching. */
 function toHttpsImageUrl(url: string): string {
   const trimmed = url.trim()
+  const ar = arweaveUriToHttps(trimmed)
+  if (ar) return ar
   if (trimmed.startsWith('ipfs://')) {
-    const cid = trimmed.slice(7).replace(/^\/+/, '')
-    return `${IPFS_GATEWAYS[0]}${cid}`
+    return ipfsUriToHttpsGatewayUrl(trimmed) ?? trimmed
   }
   if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
     return trimmed
   }
-  // Could be a bare CID (bafy...); treat as IPFS
   if (/^[a-zA-Z0-9]+$/.test(trimmed) && trimmed.length >= 32) {
-    return `${IPFS_GATEWAYS[0]}${trimmed}`
+    return `${IPFS_HTTPS_GATEWAY_PREFIXES[0]}${trimmed}`
   }
   return trimmed
 }
 
-/** Get alternate IPFS gateway URLs for the same CID (for retries). */
 function getIpfsGatewayUrls(normalizedUrl: string): string[] {
-  const urls: string[] = [normalizedUrl]
-  for (const base of IPFS_GATEWAYS) {
-    if (normalizedUrl.startsWith(base)) {
-      const cid = normalizedUrl.slice(base.length).split('/')[0]
-      if (cid) {
-        for (const g of IPFS_GATEWAYS) {
-          if (g !== base) urls.push(`${g}${cid}`)
-        }
-      }
-      break
-    }
-  }
-  return urls
+  return ipfsGatewayCandidateUrls(normalizedUrl)
 }
 
 /** Get URLs to try for Arweave (multiple gateways in case one returns 403). */
@@ -96,7 +165,8 @@ function isArweaveUrl(url: string): boolean {
  *
  * - Only allows http/https (or ipfs:// converted to HTTPS).
  * - Returns only image/* content types.
- * - Enforces size and timeout limits.
+ * - Bodies larger than ~4MB (see IMAGE_PROXY_MAX_INLINE_BYTES) return 307 to the upstream URL
+ *   so the browser loads directly (avoids Vercel response-size 413 and huge buffers).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -109,7 +179,7 @@ export async function GET(request: NextRequest) {
 
     let targetUrl: URL
     try {
-      const decoded = decodeURIComponent(rawUrl.trim())
+      const decoded = fullyDecodeURIComponentSafe(rawUrl)
       const normalized = toHttpsImageUrl(decoded)
       targetUrl = new URL(normalized)
     } catch {
@@ -159,28 +229,29 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-        if (!ALLOWED_IMAGE_TYPES.has(contentType) && !contentType.startsWith('image/')) {
-          lastError = NextResponse.json({ error: 'Not an image' }, { status: 400 })
-          continue
-        }
-
         const contentLength = res.headers.get('content-length')
-        if (contentLength && parseInt(contentLength, 10) > MAX_SIZE_BYTES) {
-          lastError = NextResponse.json({ error: 'Image too large' }, { status: 413 })
-          continue
+        const declaredLen = contentLength ? parseInt(contentLength, 10) : NaN
+        if (Number.isFinite(declaredLen) && declaredLen > MAX_INLINE_BYTES) {
+          await res.body?.cancel().catch(() => {})
+          return NextResponse.redirect(tryUrl, 307)
         }
 
-        const buffer = await res.arrayBuffer()
-        if (buffer.byteLength > MAX_SIZE_BYTES) {
-          lastError = NextResponse.json({ error: 'Image too large' }, { status: 413 })
+        const buffer = await readBodyUpTo(res, MAX_INLINE_BYTES)
+        if (buffer === 'too_large') {
+          return NextResponse.redirect(tryUrl, 307)
+        }
+
+        const headerCt = res.headers.get('content-type') ?? ''
+        const contentType = effectiveImageContentType(headerCt, buffer)
+        if (!contentType) {
+          lastError = NextResponse.json({ error: 'Not an image' }, { status: 400 })
           continue
         }
 
         return new NextResponse(buffer, {
           status: 200,
           headers: {
-            'Content-Type': contentType || 'application/octet-stream',
+            'Content-Type': contentType,
             'Cache-Control': 'public, max-age=86400, s-maxage=86400',
           },
         })

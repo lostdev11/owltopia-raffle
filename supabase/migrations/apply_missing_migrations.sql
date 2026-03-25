@@ -156,13 +156,16 @@ ALTER TABLE raffles
 ALTER TABLE raffles
   ADD COLUMN IF NOT EXISTS status TEXT;
 
--- Add CHECK constraint for status enum
+-- Add CHECK constraint for status enum (must match 038_add_raffle_cancellation.sql — not the old 012-only list,
+-- or ADD CONSTRAINT fails when rows already use draft/live/ready_to_draw/cancelled)
 ALTER TABLE raffles
   DROP CONSTRAINT IF EXISTS raffles_status_enum_check;
 
 ALTER TABLE raffles
-  ADD CONSTRAINT raffles_status_enum_check 
-  CHECK (status IS NULL OR status IN ('pending_min_not_met', 'completed'));
+  ADD CONSTRAINT raffles_status_enum_check
+  CHECK (status IS NULL OR status IN (
+    'draft', 'live', 'ready_to_draw', 'completed', 'pending_min_not_met', 'cancelled'
+  ));
 
 -- Create index for status lookups
 CREATE INDEX IF NOT EXISTS idx_raffles_status ON raffles(status) 
@@ -201,3 +204,10 @@ ALTER TABLE raffles
 -- Create index for original_end_time lookups
 CREATE INDEX IF NOT EXISTS idx_raffles_original_end_time ON raffles(original_end_time) 
 WHERE original_end_time IS NOT NULL;
+
+-- ============================================================================
+-- Migration 044: Admin fallback listing image URL (optional)
+-- ============================================================================
+ALTER TABLE raffles ADD COLUMN IF NOT EXISTS image_fallback_url TEXT;
+
+COMMENT ON COLUMN raffles.image_fallback_url IS 'Admin-only fallback artwork URL when image_url fails or is empty.';

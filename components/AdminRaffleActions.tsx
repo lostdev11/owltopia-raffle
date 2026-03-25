@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -55,6 +55,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [fixMintInput, setFixMintInput] = useState('')
   const [fixingMint, setFixingMint] = useState(false)
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
+  const [imageFallbackInput, setImageFallbackInput] = useState(raffle.image_fallback_url ?? '')
+  const [savingImageFallback, setSavingImageFallback] = useState(false)
+
+  useEffect(() => {
+    setImageFallbackInput(raffle.image_fallback_url ?? '')
+  }, [raffle.id, raffle.image_fallback_url])
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
@@ -243,6 +249,35 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleSaveImageFallback = async () => {
+    setSavingImageFallback(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          image_fallback_url: imageFallbackInput.trim() ? imageFallbackInput.trim() : null,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'Fallback listing image saved.' })
+        router.refresh()
+      } else {
+        setMessage({ type: 'error', text: typeof data?.error === 'string' ? data.error : 'Failed to save' })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to save',
+      })
+    } finally {
+      setSavingImageFallback(false)
+    }
+  }
+
   const handleDelete = async () => {
     if (!connected || !publicKey) {
       setMessage({ type: 'error', text: 'Please connect your wallet' })
@@ -331,6 +366,35 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             <p className="text-sm">{message.text}</p>
           </div>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Listing artwork fallback</CardTitle>
+            <CardDescription>
+              If the prize NFT image fails to load (broken IPFS, etc.), this URL is shown on raffle cards and the detail page after normal fallbacks. Use HTTPS or ipfs://. Clear the field and save to remove.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Label htmlFor="admin-image-fallback">Image URL</Label>
+            <Input
+              id="admin-image-fallback"
+              value={imageFallbackInput}
+              onChange={(e) => setImageFallbackInput(e.target.value)}
+              placeholder="https://… or ipfs://…"
+              className="font-mono text-sm touch-manipulation min-h-[44px]"
+              autoComplete="off"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleSaveImageFallback}
+              disabled={savingImageFallback}
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+            >
+              {savingImageFallback ? 'Saving…' : 'Save fallback image'}
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardHeader>

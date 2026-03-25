@@ -47,7 +47,7 @@ export async function generateMetadata({
   const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
   // Absolute URL required so Discord/X and other crawlers can fetch the image for link previews.
   // Use raffle image when set; otherwise use per-raffle generated OG image (title + prize).
-  const imageUrl = absoluteImageUrl(raffle.image_url)
+  const imageUrl = absoluteImageUrl(raffle.image_url ?? raffle.image_fallback_url)
   const ogImage = imageUrl
     ? { url: imageUrl, width: 1200, height: 630, alt: raffle.title }
     : { url: raffleOgImageUrl(raffle.slug), width: 1200, height: 630, alt: raffle.title, type: 'image/png' as const }

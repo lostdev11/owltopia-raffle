@@ -33,6 +33,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
+  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
@@ -55,13 +56,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
+      setAdminRole(null)
       return
     }
     const addr = publicKey.toBase58()
     const cached = getCachedAdmin(addr)
     if (cached !== null) {
       setIsAdmin(cached)
-      return
     }
     let cancelled = false
     fetch(`/api/admin/check?wallet=${addr}`)
@@ -69,11 +70,18 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
+        const roleRaw = data?.role
+        const role: 'full' | 'raffle_creator' | null =
+          roleRaw === 'full' || roleRaw === 'raffle_creator' ? roleRaw : null
         setCachedAdmin(addr, admin)
         setIsAdmin(admin)
+        setAdminRole(admin ? role : null)
       })
       .catch(() => {
-        if (!cancelled) setIsAdmin(false)
+        if (!cancelled) {
+          setIsAdmin(false)
+          setAdminRole(null)
+        }
       })
     return () => { cancelled = true }
   }, [connected, publicKey])
@@ -113,7 +121,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     const minTicketsValue = formData.get('min_tickets') as string
     const rankValue = formData.get('rank') as string
     const floorPriceValue = formData.get('floor_price') as string
-    const data = {
+    const data: Record<string, unknown> = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
       ticket_price: parseFloat(formData.get('ticket_price') as string),
@@ -127,6 +135,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       theme_accent: formData.get('theme_accent') as string,
       status: formData.get('status') as string,
       wallet_address: publicKey.toBase58(),
+    }
+    if (adminRole === 'full') {
+      const fb = (formData.get('image_fallback_url') as string)?.trim()
+      data.image_fallback_url = fb ? fb : null
     }
 
     try {
@@ -896,6 +908,23 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No image stored for this raffle.</p>
+                )}
+                {adminRole === 'full' && (
+                  <div className="space-y-2 pt-2 border-t border-border mt-2">
+                    <Label htmlFor="image_fallback_url">Fallback listing image (optional)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      If the NFT image fails to load (e.g. dead gateway), this URL is shown instead. HTTPS or ipfs://. Leave empty and save to clear.
+                    </p>
+                    <Input
+                      id="image_fallback_url"
+                      name="image_fallback_url"
+                      type="url"
+                      defaultValue={raffle.image_fallback_url ?? ''}
+                      placeholder="https://… or ipfs://…"
+                      className="font-mono text-sm touch-manipulation min-h-[44px]"
+                      autoComplete="off"
+                    />
+                  </div>
                 )}
               </div>
 

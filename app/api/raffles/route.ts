@@ -267,6 +267,7 @@ export async function POST(request: NextRequest) {
       title: body.title,
       description: body.description || null,
       image_url: body.image_url || null,
+      image_fallback_url: null,
       prize_type: prizeType,
       prize_amount: prizeAmount,
       prize_currency: prizeCurrency,

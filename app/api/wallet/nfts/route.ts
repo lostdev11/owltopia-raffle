@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
+import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -22,16 +23,6 @@ interface ParsedTokenAccountInfo {
   mint?: string
   delegate?: string
   tokenAmount?: { decimals?: number; amount?: string }
-}
-
-/** Return Helius RPC URL for the current network (mainnet or devnet from env). */
-function getHeliusRpcUrl(): string | null {
-  const heliusKey = process.env.HELIUS_API_KEY?.trim()
-  if (!heliusKey) return null
-  const solanaUrl = (process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || '').trim()
-  const isDevnet = /devnet/i.test(solanaUrl)
-  const base = isDevnet ? 'https://devnet.helius-rpc.com' : 'https://mainnet.helius-rpc.com'
-  return `${base}/?api-key=${encodeURIComponent(heliusKey)}`
 }
 
 /**

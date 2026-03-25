@@ -18,6 +18,8 @@ export interface Raffle {
   title: string
   description: string | null
   image_url: string | null
+  /** Full-admin fallback when primary listing art fails to load or is missing (HTTPS / IPFS / site paths). */
+  image_fallback_url: string | null
   prize_type: PrizeType
   prize_amount: number | null
   prize_currency: string | null

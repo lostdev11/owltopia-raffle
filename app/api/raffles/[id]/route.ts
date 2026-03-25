@@ -55,6 +55,42 @@ export async function PATCH(
       )
     }
 
+    const bodyKeys = Object.keys(body).filter(
+      (k) => k !== 'wallet_address' && (body as Record<string, unknown>)[k] !== undefined
+    )
+    const isImageFallbackOnlyPatch =
+      bodyKeys.length === 1 && bodyKeys[0] === 'image_fallback_url'
+
+    if (isImageFallbackOnlyPatch) {
+      const raw = body.image_fallback_url
+      let image_fallback_url: string | null
+      if (raw === null || raw === '') {
+        image_fallback_url = null
+      } else if (typeof raw === 'string') {
+        const t = raw.trim()
+        if (!t) {
+          image_fallback_url = null
+        } else if (t.length > 2048) {
+          return NextResponse.json(
+            { error: 'image_fallback_url must be at most 2048 characters' },
+            { status: 400 }
+          )
+        } else {
+          image_fallback_url = t
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'image_fallback_url must be a string, null, or empty' },
+          { status: 400 }
+        )
+      }
+      const raffle = await updateRaffle(raffleId, { image_fallback_url })
+      if (!raffle) {
+        return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
+      }
+      return NextResponse.json(raffle)
+    }
+
     const role = await getAdminRole(session.wallet)
     const status = (existingRaffle.status ?? '').toLowerCase()
     const isDraft = status === 'draft'
@@ -209,6 +245,30 @@ export async function PATCH(
       start_time: body.start_time,
       end_time: body.end_time,
       theme_accent: body.theme_accent,
+    }
+
+    if (isDraft && body.image_fallback_url !== undefined) {
+      const rawFb = body.image_fallback_url
+      if (rawFb === null || rawFb === '') {
+        updates.image_fallback_url = null
+      } else if (typeof rawFb === 'string') {
+        const t = rawFb.trim()
+        if (!t) {
+          updates.image_fallback_url = null
+        } else if (t.length > 2048) {
+          return NextResponse.json(
+            { error: 'image_fallback_url must be at most 2048 characters' },
+            { status: 400 }
+          )
+        } else {
+          updates.image_fallback_url = t
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'image_fallback_url must be a string, null, or empty' },
+          { status: 400 }
+        )
+      }
     }
 
     // Only update rank and floor_price if explicitly provided

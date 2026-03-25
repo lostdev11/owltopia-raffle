@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -31,8 +31,7 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
-import Image from 'next/image'
+import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
 import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
 import {
   Transaction,
@@ -132,26 +131,89 @@ export function RaffleDetailClient({
   )
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
-  const [imageError, setImageError] = useState(false)
-  const [fallbackImageError, setFallbackImageError] = useState(false)
+  type HeroImgPhase =
+    | 'primary'
+    | 'fallback'
+    | 'mint_loading'
+    | 'mint'
+    | 'admin'
+    | 'admin_raw'
+    | 'dead'
+  const [heroImgPhase, setHeroImgPhase] = useState<HeroImgPhase>('primary')
+  const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const displayImageUrl = getRaffleDisplayImageUrl(raffle.image_url)
-  // When proxy fails, try raw URL (decoded from proxy param) as fallback
-  const fallbackRawUrl = (() => {
-    const url = displayImageUrl ?? raffle.image_url
-    if (!url || !url.startsWith('/api/proxy-image')) return null
-    try {
-      const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://www.owltopia.xyz')
-      const raw = parsed.searchParams.get('url')
-      if (!raw) return null
-      const decoded = decodeURIComponent(raw)
-      const u = new URL(decoded)
-      if (u.protocol === 'http:' || u.protocol === 'https:') return decoded
-    } catch {
-      // ignore
+  const displayAdminDisp = useMemo(
+    () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
+    [raffle.image_fallback_url]
+  )
+  const adminHeroRaw = useMemo(
+    () => getRaffleImageFallbackRawUrl(displayAdminDisp, raffle.image_fallback_url),
+    [displayAdminDisp, raffle.image_fallback_url]
+  )
+  const fallbackRawUrl = useMemo(
+    () => getRaffleImageFallbackRawUrl(displayImageUrl, raffle.image_url),
+    [displayImageUrl, raffle.image_url]
+  )
+  const canMintImageFallback =
+    raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())
+  const hasHeroImageSection =
+    !!(displayImageUrl ?? raffle.image_url) || !!displayAdminDisp || canMintImageFallback
+
+  useEffect(() => {
+    setMintHeroSrc(null)
+    if (raffle.image_url?.trim()) {
+      setHeroImgPhase('primary')
+    } else if (displayAdminDisp) {
+      setHeroImgPhase('admin')
+    } else if (canMintImageFallback) {
+      setHeroImgPhase('mint_loading')
+    } else {
+      setHeroImgPhase('dead')
     }
-    return null
-  })()
+  }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+
+  useEffect(() => {
+    if (heroImgPhase !== 'mint_loading') return
+    const mint = raffle.nft_mint_address?.trim()
+    if (!mint) {
+      setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+      return
+    }
+    let cancelled = false
+    fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { image?: string | null } | null) => {
+        if (cancelled) return
+        const raw = typeof data?.image === 'string' ? data.image.trim() : ''
+        if (!raw) {
+          setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+          return
+        }
+        const proxied = getRaffleDisplayImageUrl(raw) ?? raw
+        setMintHeroSrc(proxied)
+        setHeroImgPhase('mint')
+      })
+      .catch(() => {
+        if (!cancelled) setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [heroImgPhase, raffle.nft_mint_address, displayAdminDisp])
+
+  const heroImageSrc =
+    heroImgPhase === 'fallback' && fallbackRawUrl
+      ? fallbackRawUrl
+      : heroImgPhase === 'mint' && mintHeroSrc
+        ? mintHeroSrc
+        : heroImgPhase === 'admin_raw'
+          ? (adminHeroRaw ?? displayAdminDisp ?? '')
+          : heroImgPhase === 'admin'
+            ? (displayAdminDisp ?? '')
+            : displayImageUrl ?? raffle.image_url ?? ''
+  const heroImageDead = heroImgPhase === 'dead'
+  const heroImageMintLoading = heroImgPhase === 'mint_loading'
   const { serverNow: serverTime } = useServerTime()
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
@@ -2181,9 +2243,9 @@ export function RaffleDetailClient({
             </div>
           </CardHeader>
 
-          {(displayImageUrl ?? raffle.image_url) && (
+          {hasHeroImageSection && (
             <>
-              {!imageError && (
+              {!heroImageDead && !heroImageMintLoading && (
                 <div className={`flex items-center justify-end gap-2 ${classes.headerPadding} pt-0 pb-2`}>
                   <span className="text-sm text-muted-foreground mr-2">Image size:</span>
                   <div className="flex gap-1 border rounded-md p-1">
@@ -2217,31 +2279,56 @@ export function RaffleDetailClient({
                   </div>
                 </div>
               )}
-              {!imageError ? (
-                <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
-                  <Image
-                    src={displayImageUrl ?? raffle.image_url ?? ''}
-                    alt={raffle.title}
-                    fill
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"
-                    priority
-                    loading="eager"
-                    className="object-contain"
-                    onError={() => setImageError(true)}
-                    unoptimized={
-                      (displayImageUrl ?? raffle.image_url)?.startsWith('http://') === true ||
-                      (displayImageUrl ?? raffle.image_url)?.startsWith('/api/proxy-image') === true
-                    }
-                  />
+              {heroImageMintLoading ? (
+                <div
+                  className={`w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} flex flex-col items-center justify-center gap-3 bg-muted/50 border rounded`}
+                  role="status"
+                  aria-live="polite"
+                  aria-label="Loading artwork"
+                >
+                  <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" aria-hidden />
+                  <span className="text-sm text-muted-foreground">Loading artwork…</span>
                 </div>
-              ) : fallbackRawUrl && !fallbackImageError ? (
-                <div className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
+              ) : !heroImageDead ? (
+                <div
+                  className={`!relative w-full ${imageSize === 'small' ? 'aspect-[4/3]' : imageSize === 'medium' ? 'aspect-[4/3]' : 'aspect-[4/3]'} overflow-hidden`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- proxy + IPFS: native img matches RaffleCard */}
                   <img
-                    src={fallbackRawUrl}
+                    key={`${heroImgPhase}-${heroImageSrc}`}
+                    src={heroImageSrc}
                     alt={raffle.title}
-                    className="w-full h-full object-contain"
-                    onError={() => setFallbackImageError(true)}
+                    width={1200}
+                    height={900}
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    className="h-full w-full object-contain"
+                    onError={() => {
+                      setHeroImgPhase((phase) => {
+                        if (phase === 'primary') {
+                          if (fallbackRawUrl) return 'fallback'
+                          if (canMintImageFallback) return 'mint_loading'
+                          if (displayAdminDisp) return 'admin'
+                          return 'dead'
+                        }
+                        if (phase === 'fallback') {
+                          if (canMintImageFallback) return 'mint_loading'
+                          if (displayAdminDisp) return 'admin'
+                          return 'dead'
+                        }
+                        if (phase === 'mint') {
+                          if (displayAdminDisp) return 'admin'
+                          return 'dead'
+                        }
+                        if (phase === 'admin') {
+                          if (adminHeroRaw && adminHeroRaw !== displayAdminDisp) return 'admin_raw'
+                          return 'dead'
+                        }
+                        if (phase === 'admin_raw') return 'dead'
+                        return phase
+                      })
+                    }}
                   />
                 </div>
               ) : (
@@ -2252,7 +2339,7 @@ export function RaffleDetailClient({
             </>
           )}
 
-          {!(displayImageUrl ?? raffle.image_url) && (
+          {!hasHeroImageSection && (
             <div className={`w-full aspect-[4/3] flex flex-col items-center justify-center gap-3 bg-muted border rounded p-4 ${classes.headerPadding}`}>
               <span className="text-muted-foreground">Image unavailable</span>
             </div>
