@@ -51,8 +51,8 @@ export function CreateRaffleForm() {
   })
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
-  /** idle → creating (verify NFT + POST) → signing (wallet transfer to escrow) */
-  const [createStep, setCreateStep] = useState<'idle' | 'creating' | 'signing'>('idle')
+  /** verifying = NFT holder check (no API yet); saving = POST only; signing = wallet escrow tx */
+  const [createStep, setCreateStep] = useState<'idle' | 'verifying' | 'saving' | 'signing'>('idle')
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const prizeType = 'nft' as const
@@ -234,7 +234,7 @@ export function CreateRaffleForm() {
       }
     }
 
-    setCreateStep('creating')
+    setCreateStep('verifying')
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
@@ -275,7 +275,7 @@ export function CreateRaffleForm() {
         const h = await getNftHolderInWallet(connection, mintPk, publicKey)
         if (h && 'delegated' in h && h.delegated) {
           alert(
-            'This NFT is staked or delegated. Unstake it first, then create again — your wallet will ask you to send the prize to escrow.'
+            'This NFT is staked or delegated. Unstake it first, then try again. Nothing was saved — no raffle draft was created.'
           )
           return
         }
@@ -288,11 +288,13 @@ export function CreateRaffleForm() {
       if (!resolvedHolder) {
         alert(
           'We could not find this NFT in your wallet (SPL Token and Token-2022). ' +
-            'On mobile, try Wi‑Fi or a stable connection, confirm the NFT is still in this wallet, then try again.'
+            'On mobile, try Wi‑Fi or a stable connection, confirm the NFT is still in this wallet, then try again.\n\n' +
+            'Nothing was saved — no raffle draft was created.'
         )
         return
       }
 
+      setCreateStep('saving')
       const response = await fetch('/api/raffles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -799,7 +801,11 @@ export function CreateRaffleForm() {
               {loading
                 ? createStep === 'signing'
                   ? 'Approve in wallet…'
-                  : 'Creating raffle…'
+                  : createStep === 'saving'
+                    ? 'Saving raffle…'
+                    : createStep === 'verifying'
+                      ? 'Checking NFT in wallet…'
+                      : 'Working…'
                 : 'Create raffle — send prize to escrow'}
             </Button>
             <Button
