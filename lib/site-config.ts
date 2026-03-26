@@ -14,10 +14,14 @@ export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`
  * Use a static image for maximum social-crawler compatibility.
  * Override with NEXT_PUBLIC_OG_IMAGE if needed.
  */
-export const DEFAULT_OG_IMAGE_PATH = '/og-image.png'
+export const DEFAULT_OG_IMAGE_PATH = '/og-image.jpg'
+
+/** Width/height of `public/og-image.jpg` (update if the asset changes). */
+export const DEFAULT_OG_IMAGE_DIMS = { width: 986, height: 647 } as const
+export const DEFAULT_OG_IMAGE_TYPE = 'image/jpeg' as const
 
 /** Bump when the default OG asset or path changes so social caches refresh. */
-export const OG_IMAGE_CACHE_VERSION = '4'
+export const OG_IMAGE_CACHE_VERSION = '5'
 
 /** Canonical site origin for metadata, OG URLs, and canonical links (no trailing slash). */
 export function getSiteBaseUrl(): string {

@@ -2,7 +2,14 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
-import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
+import {
+  PLATFORM_NAME,
+  OG_ALT,
+  DEFAULT_OG_IMAGE_DIMS,
+  DEFAULT_OG_IMAGE_TYPE,
+  getSiteBaseUrl,
+  getDefaultOgImageAbsoluteUrl,
+} from '@/lib/site-config'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -17,13 +24,13 @@ export const metadata: Metadata = {
     siteName: PLATFORM_NAME,
     title: `Terms of Service | ${PLATFORM_NAME}`,
     description: `Terms of Service for ${PLATFORM_NAME} platform.`,
-    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
+    images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Terms of Service | ${PLATFORM_NAME}`,
     description: `Terms of Service for ${PLATFORM_NAME} platform.`,
-    images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
+    images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
 

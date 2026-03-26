@@ -2,7 +2,14 @@ import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
-import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
+import {
+  PLATFORM_NAME,
+  OG_ALT,
+  DEFAULT_OG_IMAGE_DIMS,
+  DEFAULT_OG_IMAGE_TYPE,
+  getSiteBaseUrl,
+  getDefaultOgImageAbsoluteUrl,
+} from '@/lib/site-config'
 import { WalletContextProvider } from '@/components/WalletProvider'
 import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
@@ -72,10 +79,9 @@ export const metadata: Metadata = {
     images: [
       {
         url: OG_IMAGE_URL,
-        width: 1200,
-        height: 630,
+        ...DEFAULT_OG_IMAGE_DIMS,
         alt: OG_ALT,
-        type: 'image/png',
+        type: DEFAULT_OG_IMAGE_TYPE,
       },
     ],
   },
@@ -83,7 +89,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
-    images: [{ url: OG_IMAGE_URL, alt: OG_ALT, width: 1200, height: 630 }],
+    images: [{ url: OG_IMAGE_URL, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
   other: {
     'mobile-web-app-capable': 'yes',

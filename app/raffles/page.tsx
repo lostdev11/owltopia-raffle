@@ -9,7 +9,14 @@ import { cookies } from 'next/headers'
 import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
-import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl, getDefaultOgImageAbsoluteUrl } from '@/lib/site-config'
+import {
+  PLATFORM_NAME,
+  OG_ALT,
+  DEFAULT_OG_IMAGE_DIMS,
+  DEFAULT_OG_IMAGE_TYPE,
+  getSiteBaseUrl,
+  getDefaultOgImageAbsoluteUrl,
+} from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
 import type { Raffle, Entry } from '@/lib/types'
 import { getAdminRole } from '@/lib/db/admins'
@@ -35,13 +42,13 @@ export const metadata: Metadata = {
     siteName: PLATFORM_NAME,
     title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
-    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: OG_ALT, type: 'image/png' }],
+    images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: PLATFORM_NAME,
     description: OG_DESCRIPTION,
-    images: [{ url: OG_IMAGE, alt: OG_ALT, width: 1200, height: 630 }],
+    images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
 
