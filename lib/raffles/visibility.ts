@@ -1,8 +1,27 @@
+import { PublicKey } from '@solana/web3.js'
 import type { Raffle } from '@/lib/types'
 
 function getCreatorWallet(raffle: Raffle): string | null {
   // Creator is duplicated in a couple columns in different parts of the codebase.
   return raffle.created_by ?? raffle.creator_wallet ?? null
+}
+
+/** Canonical base58 for comparisons (session vs DB vs wallet adapter). */
+function normalizeSolanaAddress(addr: string | null | undefined): string | null {
+  if (!addr?.trim()) return null
+  const s = addr.trim()
+  try {
+    return new PublicKey(s).toBase58()
+  } catch {
+    return s
+  }
+}
+
+function addressesEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = normalizeSolanaAddress(a)
+  const nb = normalizeSolanaAddress(b)
+  if (na == null || nb == null) return false
+  return na === nb
 }
 
 let cachedEscrowRequiredSinceMs: number | null | undefined
@@ -74,7 +93,7 @@ export function canViewerSeeRafflePending(raffle: Raffle, viewerWallet: string |
   const creatorWallet = getCreatorWallet(raffle)
   if (!viewerWallet || !creatorWallet) return false
 
-  return viewerWallet === creatorWallet
+  return addressesEqual(viewerWallet, creatorWallet)
 }
 
 /**

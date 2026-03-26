@@ -1,5 +1,7 @@
 /**
- * Raffle creation fee: charged to non-admins when creating a raffle. Admins are exempt.
+ * Optional per-raffle listing fee (SOL) at create time — off by default. Owltopia does not charge a
+ * platform fee to create raffles; revenue is from ticket sales. Only enable via env if you need it.
+ * Admins are exempt when enabled.
  *
  * Env (optional):
  * - RAFFLE_CREATION_FEE_LAMPORTS: amount in lamports (e.g. 100000000 = 0.1 SOL). Omit or 0 = no fee.

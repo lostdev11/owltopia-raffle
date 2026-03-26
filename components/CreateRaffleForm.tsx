@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -12,7 +12,6 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
-import { Transaction } from '@solana/web3.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,7 +21,7 @@ import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
-import type { WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
+import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
 
 /** Use proxy for external NFT image URLs (e.g. IPFS) so the browser never hits flagged gateways (Safe Web). */
 function getProxiedImageUrl(url: string | null): string | null {
@@ -52,6 +51,8 @@ export function CreateRaffleForm() {
   })
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
+  /** idle → creating (verify NFT + POST) → signing (wallet transfer to escrow) */
+  const [createStep, setCreateStep] = useState<'idle' | 'creating' | 'signing'>('idle')
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const prizeType = 'nft' as const
@@ -215,6 +216,11 @@ export function CreateRaffleForm() {
       return
     }
 
+    if (!selectedNft) {
+      alert('Please select an NFT from your wallet for an NFT raffle.')
+      return
+    }
+
     // Validate 7-day maximum duration
     if (startTime && endTime) {
       const startDate = new Date(localDateTimeToUtc(startTime))
@@ -228,6 +234,7 @@ export function CreateRaffleForm() {
       }
     }
 
+    setCreateStep('creating')
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
@@ -257,20 +264,40 @@ export function CreateRaffleForm() {
       wallet_address: publicKey.toBase58(),
       prize_type: prizeType,
     }
-    if (!selectedNft) {
-      alert('Please select an NFT from your wallet for an NFT raffle.')
-      setLoading(false)
-      return
-    }
     data.nft_mint_address = selectedNft.mint
     data.nft_token_id = selectedNft.mint
     data.nft_metadata_uri = selectedNft.metadataUri ?? undefined
     data.nft_collection_name = selectedNft.collectionName ?? undefined
     try {
+      const mintPk = new PublicKey(selectedNft.mint)
+      let resolvedHolder: NftHolderInWallet | null = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const h = await getNftHolderInWallet(connection, mintPk, publicKey)
+        if (h && 'delegated' in h && h.delegated) {
+          alert(
+            'This NFT is staked or delegated. Unstake it first, then create again — your wallet will ask you to send the prize to escrow.'
+          )
+          return
+        }
+        if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+          resolvedHolder = h
+          break
+        }
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 600))
+      }
+      if (!resolvedHolder) {
+        alert(
+          'We could not find this NFT in your wallet (SPL Token and Token-2022). ' +
+            'On mobile, try Wi‑Fi or a stable connection, confirm the NFT is still in this wallet, then try again.'
+        )
+        return
+      }
+
       const response = await fetch('/api/raffles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
+        credentials: 'include',
       })
 
       if (response.ok) {
@@ -278,6 +305,7 @@ export function CreateRaffleForm() {
         // NFT raffles: transfer to escrow right away, then verify, then redirect
         if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && sendTransaction) {
           try {
+            setCreateStep('signing')
             const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
             const escrowData = await escrowRes.json().catch(() => ({}))
             const escrowAddress = escrowData?.address
@@ -285,42 +313,16 @@ export function CreateRaffleForm() {
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }
-            const mint = new PublicKey(raffle.nft_mint_address)
             const escrowPubkey = new PublicKey(escrowAddress)
-            // Retry: RPC can be slow or flaky on mobile; NFT list may come from API (e.g. Helius) while this uses client RPC
-            let holder = await getNftHolderInWallet(connection, mint, publicKey)
-            for (let attempt = 0; attempt < 2 && holder === null; attempt++) {
-              await new Promise((r) => setTimeout(r, 600))
-              holder = await getNftHolderInWallet(connection, mint, publicKey)
-            }
-            if (!holder) {
-              alert(
-                'Your raffle was created as a draft, but we could not find this NFT in your wallet (supports SPL Token and Token-2022). ' +
-                  'If you still have the NFT, try again or use Wi‑Fi, then complete the deposit on the raffle page.'
-              )
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
-            if ('delegated' in holder && holder.delegated) {
-              alert(
-                'Your raffle was created as a draft, but this NFT is currently staked or delegated. ' +
-                  'You can either unstake it and retry in-app, or send it manually to escrow from your wallet app and verify deposit on the raffle page.'
-              )
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
-            if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
-            const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
+            const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
             const escrowAta = await getAssociatedTokenAddress(
-              mint,
+              mintPk,
               escrowPubkey,
               false,
               tokenProgram,
               ASSOCIATED_TOKEN_PROGRAM_ID
             )
+
             const tx = new Transaction()
             try {
               await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
@@ -330,7 +332,7 @@ export function CreateRaffleForm() {
                   publicKey,
                   escrowAta,
                   escrowPubkey,
-                  mint,
+                  mintPk,
                   tokenProgram,
                   ASSOCIATED_TOKEN_PROGRAM_ID
                 )
@@ -386,6 +388,7 @@ export function CreateRaffleForm() {
       alert('Error creating raffle')
     } finally {
       setLoading(false)
+      setCreateStep('idle')
     }
   }
 
@@ -408,7 +411,10 @@ export function CreateRaffleForm() {
     <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
       <CardHeader>
         <CardTitle>Raffle Details</CardTitle>
-        <CardDescription>Fill in the details for your new raffle</CardDescription>
+        <CardDescription>
+          Choose your prize NFT and fill in pricing and times. When you create, we save the raffle, then your wallet
+          asks you to approve one transaction that sends the NFT to platform escrow.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -539,12 +545,11 @@ export function CreateRaffleForm() {
                     Selected: {selectedNft.name ?? selectedNft.mint}
                   </p>
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
-                    <p className="font-medium text-foreground">Flow &amp; fees</p>
+                    <p className="font-medium text-foreground">What happens when you tap Create</p>
                     <p className="text-muted-foreground mt-0.5">
-                      <strong>1.</strong> Create raffle — it is saved as a draft and linked to this NFT.{' '}
-                      <strong>2.</strong> Deposit the NFT to escrow from the raffle page (your wallet will prompt a transfer; the NFT is then locked for the duration of the raffle).{' '}
-                      <strong>3.</strong> When the raffle ends and a winner is selected, the winner claims the prize from escrow. You can view the NFT in escrow anytime from your dashboard (Solscan link). Listing fee:{' '}
-                      <strong>0 SOL</strong> — only network (gas) fees when you deposit and when the winner is paid out.
+                      <strong>1.</strong> Your raffle is saved (draft until escrow is confirmed).{' '}
+                      <strong>2.</strong> Your wallet opens <strong>once</strong> — one transaction covers Solana network fees, escrow token-account rent if needed, and transfers this NFT to escrow. There is <strong>no separate platform fee to create</strong> a raffle.{' '}
+                      <strong>3.</strong> Platform revenue is from ticket sales only (see fee note above). After the raffle ends, the winner claims the NFT from escrow.
                     </p>
                   </div>
                 </>
@@ -676,7 +681,7 @@ export function CreateRaffleForm() {
               <option value="completed">Completed</option>
             </select>
             <p className="text-xs text-muted-foreground">
-              NFT raffles are created as draft. They go live only after escrow deposit is verified.
+              Starts as draft until your wallet approves sending the prize to escrow; then the raffle can go live once verified.
             </p>
           </div>
 
@@ -791,7 +796,11 @@ export function CreateRaffleForm() {
 
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <Button type="submit" disabled={loading} className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm">
-              {loading ? 'Creating...' : 'Create Raffle'}
+              {loading
+                ? createStep === 'signing'
+                  ? 'Approve in wallet…'
+                  : 'Creating raffle…'
+                : 'Create raffle — send prize to escrow'}
             </Button>
             <Button
               type="button"

@@ -229,6 +229,8 @@ export function RafflesPageClient({
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false)
   const debug = searchParams.get('debug') === '1'
   const { serverNow: serverTime, isSynced: serverTimeSynced } = useServerTime()
+  const serverTimeRef = useRef(serverTime)
+  serverTimeRef.current = serverTime
 
   // Used to gate visibility of pending NFT raffles in client-side fallback flows.
   useEffect(() => {
@@ -258,6 +260,50 @@ export function RafflesPageClient({
       cancelled = true
     }
   }, [connected, publicKey])
+
+  /**
+   * Pending NFT raffles (draft/paused escrow) are filtered server-side using the signed session cookie.
+   * Many users connect their wallet without a session (or session expired), so SSR/API hide their own drafts.
+   * When a wallet is connected, re-fetch via Supabase (same source as the empty-state fallback) and re-apply
+   * visibility using the adapter address so creators see their pending raffles on mobile and desktop.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!connected || !wallet || !isSupabaseConfigured()) {
+      setClientBuckets(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('raffles')
+          .select('*')
+          .in('status', ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'])
+          .order('created_at', { ascending: false })
+        if (cancelled) return
+        if (error) throw new Error(error.message)
+        const list = (data || []) as Partial<Raffle>[]
+        const normalized = list.map((r: Partial<Raffle>) => ({
+          ...r,
+          prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
+          nft_mint_address: r.nft_mint_address ?? null,
+          nft_collection_name: r.nft_collection_name ?? null,
+          nft_token_id: r.nft_token_id ?? null,
+          nft_metadata_uri: r.nft_metadata_uri ?? null,
+        })) as Raffle[]
+        const filtered = filterRafflesByPendingVisibility(normalized, wallet, viewerIsAdmin)
+        if (cancelled) return
+        setClientBuckets(bucketRaffles(filtered, serverTimeRef.current))
+        setClientFetchError(null)
+      } catch {
+        // Keep server-rendered buckets; avoid blanking the list on transient errors.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [connected, wallet, viewerIsAdmin])
 
   type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
@@ -361,6 +407,8 @@ export function RafflesPageClient({
   // Use serverTime (always a Date; may be client time until /api/time syncs) so we don't block on sync
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Connected wallet: visibility merge effect loads the list with the adapter address.
+    if (connected && wallet) return
     if (!isEmptyFromServer && !initialError) return
     let cancelled = false
     setClientFetchError(null)
@@ -453,13 +501,29 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet])
+  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected])
 
-  const active = serverActive.length > 0 ? serverActive : (clientBuckets?.active ?? [])
-  const pausedPending =
-    serverPausedPending.length > 0 ? serverPausedPending : (clientBuckets?.pausedPending ?? [])
-  const future = serverFuture.length > 0 ? serverFuture : (clientBuckets?.future ?? [])
-  const past = serverPast.length > 0 ? serverPast : (clientBuckets?.past ?? [])
+  const useWalletVisibilityBuckets = Boolean(connected && wallet && clientBuckets)
+  const active = useWalletVisibilityBuckets
+    ? (clientBuckets!.active)
+    : serverActive.length > 0
+      ? serverActive
+      : (clientBuckets?.active ?? [])
+  const pausedPending = useWalletVisibilityBuckets
+    ? clientBuckets!.pausedPending
+    : serverPausedPending.length > 0
+      ? serverPausedPending
+      : (clientBuckets?.pausedPending ?? [])
+  const future = useWalletVisibilityBuckets
+    ? clientBuckets!.future
+    : serverFuture.length > 0
+      ? serverFuture
+      : (clientBuckets?.future ?? [])
+  const past = useWalletVisibilityBuckets
+    ? clientBuckets!.past
+    : serverPast.length > 0
+      ? serverPast
+      : (clientBuckets?.past ?? [])
   const allRafflesFlat: Raffle[] = [
     ...active.map((item) => item.raffle),
     ...pausedPending.map((item) => item.raffle),
