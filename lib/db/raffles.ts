@@ -10,6 +10,16 @@ function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
 }
 
+function normalizeEntryRow(row: Entry): Entry {
+  const ticketQuantity = Number((row as any)?.ticket_quantity ?? 0)
+  const amountPaid = Number((row as any)?.amount_paid ?? 0)
+  return {
+    ...row,
+    ticket_quantity: Number.isFinite(ticketQuantity) ? ticketQuantity : 0,
+    amount_paid: Number.isFinite(amountPaid) ? amountPaid : 0,
+  }
+}
+
 // Cache for migration status to avoid repeated checks
 let nftMigrationCache: { applied: boolean; checked: boolean } = {
   applied: false,
@@ -871,7 +881,7 @@ export async function getEntriesByRaffleId(raffleId: string) {
     if (!data || data.length === 0) {
       hasMore = false
     } else {
-      allEntries.push(...(data as Entry[]))
+      allEntries.push(...(data as Entry[]).map(normalizeEntryRow))
       // If we got fewer than pageSize results, we've reached the end
       if (data.length < pageSize) {
         hasMore = false
@@ -1236,7 +1246,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
   const walletTickets = new Map<string, number>()
   for (const entry of confirmedEntries) {
     const current = walletTickets.get(entry.wallet_address) || 0
-    walletTickets.set(entry.wallet_address, current + entry.ticket_quantity)
+    walletTickets.set(entry.wallet_address, current + Number(entry.ticket_quantity ?? 0))
   }
 
   // Convert to arrays for weighted random selection
@@ -1414,7 +1424,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
 export function calculateTicketsSold(entries: Entry[]): number {
   return entries
     .filter(e => e.status === 'confirmed')
-    .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+    .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
 }
 
 /**

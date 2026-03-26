@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
                 ticketsSold: entries.filter(e => e.status === 'confirmed')
-                  .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
+                  .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
                 extended: true,
                 newEndTime: newEndTime.toISOString()
               },
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
                 ticketsSold: entries.filter(e => e.status === 'confirmed')
-                  .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
+                  .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
               },
               { status: 400 }
             )

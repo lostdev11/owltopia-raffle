@@ -67,7 +67,7 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
               raffle.min_tickets ?? 'N/A'
             }, sold: ${entries
               .filter((e) => e.status === 'confirmed')
-              .reduce((sum, entry) => sum + entry.ticket_quantity, 0)}). Extended by ${
+              .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
               durationMs / (24 * 60 * 60 * 1000)
             } days.`,
             extended: true,

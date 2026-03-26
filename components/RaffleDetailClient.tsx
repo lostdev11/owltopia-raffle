@@ -409,7 +409,7 @@ export function RaffleDetailClient({
   const userTickets = connected && publicKey
     ? entries
         .filter(e => e.status === 'confirmed' && e.wallet_address === publicKey.toBase58())
-        .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+        .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
 
   // Pending entries for this wallet that have a tx signature (confirming on-chain)
@@ -421,7 +421,7 @@ export function RaffleDetailClient({
             e.wallet_address === publicKey.toBase58() &&
             e.transaction_signature
         )
-        .reduce((sum, entry) => sum + entry.ticket_quantity, 0)
+        .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
 
   // Determine max tickets user can purchase in one transaction
