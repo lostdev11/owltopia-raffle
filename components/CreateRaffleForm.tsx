@@ -51,8 +51,8 @@ export function CreateRaffleForm() {
   })
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
-  /** verifying = NFT holder check (no API yet); saving = POST only; signing = wallet escrow tx */
-  const [createStep, setCreateStep] = useState<'idle' | 'verifying' | 'saving' | 'signing'>('idle')
+  /** saving = POST raffle; signing = resolve NFT on RPC + wallet sends prize to escrow */
+  const [createStep, setCreateStep] = useState<'idle' | 'saving' | 'signing'>('idle')
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const prizeType = 'nft' as const
@@ -234,7 +234,7 @@ export function CreateRaffleForm() {
       }
     }
 
-    setCreateStep('verifying')
+    setCreateStep('saving')
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
@@ -269,32 +269,6 @@ export function CreateRaffleForm() {
     data.nft_metadata_uri = selectedNft.metadataUri ?? undefined
     data.nft_collection_name = selectedNft.collectionName ?? undefined
     try {
-      const mintPk = new PublicKey(selectedNft.mint)
-      let resolvedHolder: NftHolderInWallet | null = null
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const h = await getNftHolderInWallet(connection, mintPk, publicKey)
-        if (h && 'delegated' in h && h.delegated) {
-          alert(
-            'This NFT is staked or delegated. Unstake it first, then try again. Nothing was saved — no raffle draft was created.'
-          )
-          return
-        }
-        if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
-          resolvedHolder = h
-          break
-        }
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 600))
-      }
-      if (!resolvedHolder) {
-        alert(
-          'We could not find this NFT in your wallet (SPL Token and Token-2022). ' +
-            'On mobile, try Wi‑Fi or a stable connection, confirm the NFT is still in this wallet, then try again.\n\n' +
-            'Nothing was saved — no raffle draft was created.'
-        )
-        return
-      }
-
-      setCreateStep('saving')
       const response = await fetch('/api/raffles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -308,6 +282,36 @@ export function CreateRaffleForm() {
         if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && sendTransaction) {
           try {
             setCreateStep('signing')
+            const mintPk = new PublicKey(raffle.nft_mint_address)
+            // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
+            let resolvedHolder: NftHolderInWallet | null = null
+            const maxHolderAttempts = 6
+            for (let attempt = 0; attempt < maxHolderAttempts; attempt++) {
+              const h = await getNftHolderInWallet(connection, mintPk, publicKey)
+              if (h && 'delegated' in h && h.delegated) {
+                alert(
+                  'This NFT is staked or delegated. Unstake it, then complete the deposit from the raffle page (your draft is saved).'
+                )
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+              if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+                resolvedHolder = h
+                break
+              }
+              if (attempt < maxHolderAttempts - 1) {
+                await new Promise((r) => setTimeout(r, 800))
+              }
+            }
+            if (!resolvedHolder) {
+              alert(
+                'We could not confirm this NFT in your wallet yet (SPL Token and Token-2022). ' +
+                  'Your raffle is saved as a draft — open it and tap deposit when the network sees the NFT, or try Wi‑Fi.'
+              )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
+
             const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
             const escrowData = await escrowRes.json().catch(() => ({}))
             const escrowAddress = escrowData?.address
@@ -414,8 +418,8 @@ export function CreateRaffleForm() {
       <CardHeader>
         <CardTitle>Raffle Details</CardTitle>
         <CardDescription>
-          Choose your prize NFT and fill in pricing and times. When you create, we save the raffle, then your wallet
-          asks you to approve one transaction that sends the NFT to platform escrow.
+          Pick your prize NFT and details, tap create — we save your raffle, then your wallet opens so you can sign
+          one transaction to send the NFT to escrow. After that, the raffle can go live (or on your start date).
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -549,9 +553,9 @@ export function CreateRaffleForm() {
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
                     <p className="font-medium text-foreground">What happens when you tap Create</p>
                     <p className="text-muted-foreground mt-0.5">
-                      <strong>1.</strong> Your raffle is saved (draft until escrow is confirmed).{' '}
-                      <strong>2.</strong> Your wallet opens <strong>once</strong> — one transaction covers Solana network fees, escrow token-account rent if needed, and transfers this NFT to escrow. There is <strong>no separate platform fee to create</strong> a raffle.{' '}
-                      <strong>3.</strong> Platform revenue is from ticket sales only (see fee note above). After the raffle ends, the winner claims the NFT from escrow.
+                      <strong>1.</strong> Your raffle is saved first, then your wallet asks you to sign (same as before).{' '}
+                      <strong>2.</strong> That signature sends the NFT to escrow — network fee + rent for the escrow account are included in that one transaction. No listing fee; platform only earns from ticket sales.{' '}
+                      <strong>3.</strong> Once escrow is verified, your raffle can go live on the schedule you set. Winner claims the NFT from escrow when the raffle ends.
                     </p>
                   </div>
                 </>
@@ -803,9 +807,7 @@ export function CreateRaffleForm() {
                   ? 'Approve in wallet…'
                   : createStep === 'saving'
                     ? 'Saving raffle…'
-                    : createStep === 'verifying'
-                      ? 'Checking NFT in wallet…'
-                      : 'Working…'
+                    : 'Working…'
                 : 'Create raffle — send prize to escrow'}
             </Button>
             <Button
