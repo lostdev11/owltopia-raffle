@@ -349,12 +349,27 @@ export function RaffleDetailClient({
   useEffect(() => {
     if (raffle.prize_type !== 'nft' || raffle.prize_deposited_at) return
     let cancelled = false
-    fetch('/api/config/prize-escrow')
-      .then((r) => (cancelled ? undefined : r.ok ? r.json() : undefined))
-      .then((data: { address?: string } | undefined) => {
-        if (!cancelled && data?.address) setEscrowAddress(data.address)
+    fetch('/api/config/prize-escrow', { credentials: 'include' })
+      .then(async (r) => {
+        if (cancelled) return
+        if (r.ok) {
+          const data = (await r.json().catch(() => ({}))) as { address?: string }
+          if (data?.address) setEscrowAddress(data.address)
+          return
+        }
+        const data = (await r.json().catch(() => ({}))) as { error?: string }
+        const msg =
+          typeof data?.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : 'Prize escrow is not configured.'
+        setEscrowAddress(null)
+        setDepositEscrowError(msg)
       })
-      .catch(() => {})
+      .catch((e) => {
+        if (cancelled) return
+        setEscrowAddress(null)
+        setDepositEscrowError(e instanceof Error ? e.message : 'Failed to load prize escrow address.')
+      })
     return () => { cancelled = true }
   }, [raffle.prize_type, raffle.prize_deposited_at])
 

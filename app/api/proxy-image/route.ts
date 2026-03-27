@@ -205,7 +205,6 @@ export async function GET(request: NextRequest) {
           headers: { 'User-Agent': 'OwlRaffle/1.0 (Image Proxy)' },
           cache: 'no-store',
         })
-        clearTimeout(timeoutId)
         // Arweave sometimes returns 403 when no Referer; retry once with Referer
         if (!res.ok && res.status === 403 && isArweaveUrl(tryUrl)) {
           const c2 = new AbortController()
@@ -222,6 +221,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (!res.ok) {
+          clearTimeout(timeoutId)
           lastError = NextResponse.json(
             { error: 'Image fetch failed' },
             { status: res.status >= 500 ? 502 : 404 }
@@ -232,22 +232,26 @@ export async function GET(request: NextRequest) {
         const contentLength = res.headers.get('content-length')
         const declaredLen = contentLength ? parseInt(contentLength, 10) : NaN
         if (Number.isFinite(declaredLen) && declaredLen > MAX_INLINE_BYTES) {
+          clearTimeout(timeoutId)
           await res.body?.cancel().catch(() => {})
           return NextResponse.redirect(tryUrl, 307)
         }
 
         const buffer = await readBodyUpTo(res, MAX_INLINE_BYTES)
         if (buffer === 'too_large') {
+          clearTimeout(timeoutId)
           return NextResponse.redirect(tryUrl, 307)
         }
 
         const headerCt = res.headers.get('content-type') ?? ''
         const contentType = effectiveImageContentType(headerCt, buffer)
         if (!contentType) {
+          clearTimeout(timeoutId)
           lastError = NextResponse.json({ error: 'Not an image' }, { status: 400 })
           continue
         }
 
+        clearTimeout(timeoutId)
         return new NextResponse(buffer, {
           status: 200,
           headers: {

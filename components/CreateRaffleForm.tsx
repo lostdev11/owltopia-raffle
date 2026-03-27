@@ -315,7 +315,15 @@ export function CreateRaffleForm() {
             const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
             const escrowData = await escrowRes.json().catch(() => ({}))
             const escrowAddress = escrowData?.address
-            if (!escrowAddress) {
+            if (!escrowRes.ok || !escrowAddress) {
+              const errMsg =
+                typeof escrowData?.error === 'string' && escrowData.error.trim()
+                  ? escrowData.error.trim()
+                  : 'Prize escrow is not configured on this server.'
+              alert(
+                `${errMsg} Your raffle is saved as a draft. ` +
+                  'Please contact an admin, or try again once escrow is configured.'
+              )
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }

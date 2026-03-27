@@ -279,20 +279,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }
 
   const handleDelete = async () => {
-    if (!connected || !publicKey) {
-      setMessage({ type: 'error', text: 'Please connect your wallet' })
-      return
-    }
     setDeleting(true)
     setMessage(null)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-wallet-address': publicKey.toBase58(),
-        },
-        body: JSON.stringify({ wallet_address: publicKey.toBase58() }),
         credentials: 'include',
       })
       const data = await res.json()

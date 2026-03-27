@@ -6,6 +6,7 @@ import { ContentErrorBoundary } from '@/components/ContentErrorBoundary'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import {
+  SolflareWalletAdapter,
   CoinbaseWalletAdapter,
   TrustWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
@@ -34,6 +35,7 @@ interface WalletContextProviderProps {
 /** Inner provider; mounts only when page/extensions are ready, with autoConnect true from the start. */
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const network = WalletAdapterNetwork.Mainnet
+  const shouldAutoConnect = typeof window !== 'undefined' && isMobileDevice()
   const endpoint = useMemo(() => {
     const customRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
     if (customRpc && (customRpc.startsWith('http://') || customRpc.startsWith('https://'))) {
@@ -67,9 +69,13 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
           })
         )
       }
-      // Solflare: use adapter that passes redirect_link so mobile returns to this page and connection completes.
+      // Use mobile-specific Solflare adapter only on mobile; desktop should use standard adapter.
+      if (typeof window !== 'undefined' && isMobileDevice()) {
+        walletAdapters.push(new SolflareWalletAdapterMobile({ network }))
+      } else {
+        walletAdapters.push(new SolflareWalletAdapter({ network }))
+      }
       walletAdapters.push(
-        new SolflareWalletAdapterMobile({ network }),
         new CoinbaseWalletAdapter({ network }),
         new TrustWalletAdapter({ network })
       )
@@ -86,7 +92,7 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
       <ContentErrorBoundary>
         <WalletProvider 
           wallets={wallets} 
-          autoConnect
+          autoConnect={shouldAutoConnect}
           onError={(error) => {
           // Log all errors in development for debugging
           if (process.env.NODE_ENV === 'development') {

@@ -143,6 +143,10 @@ export function WalletConnectButton() {
 
   useEffect(() => {
     setMounted(true)
+    // Desktop: clear stale wallet selection from prior sessions to avoid stuck "Connecting..." loops.
+    if (!isMobileDevice()) {
+      clearWalletSelectionStorage()
+    }
     
     // Check on mount if we're on a blank page from a previous mobile wallet connection attempt (Android fix)
     // This handles all mobile wallets: Solflare, Phantom, Coinbase, Trust, etc.
