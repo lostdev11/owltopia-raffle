@@ -620,6 +620,7 @@ export function WalletConnectButton() {
   const handleWrapperClick = useCallback(
     (e: React.MouseEvent) => {
       if (!mounted || connected || connecting) return
+      if (!isMobileDevice()) return
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
         if (currentUrl) {
@@ -641,6 +642,7 @@ export function WalletConnectButton() {
   // Solflare in-app browser (mobile) often doesn't fire click from touch; pointerup fires reliably
   const handleWrapperPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (!isMobileDevice()) return
       if (e.button !== 0 && e.button !== undefined) return
       if (!mounted || connected || connecting) return
       if (isMobileDevice()) {
@@ -663,6 +665,7 @@ export function WalletConnectButton() {
   // Backup for mobile WebViews (e.g. Solflare) where click/pointerUp sometimes don't fire; touchEnd opens modal
   const handleWrapperTouchEnd = useCallback(
     (e: React.TouchEvent) => {
+      if (!isMobileDevice()) return
       if (!mounted || connected || connecting) return
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''

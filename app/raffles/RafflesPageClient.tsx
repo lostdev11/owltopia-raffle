@@ -91,6 +91,8 @@ type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfi
 function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
   const list = items ?? []
   const [index, setIndex] = useState(0)
+  const [rotationVersion, setRotationVersion] = useState(0)
+  const lastNavAtRef = useRef(0)
   const total = list.length
 
   const clampIndex = (value: number) => {
@@ -107,16 +109,24 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
       setIndex((prev) => clampIndex(prev + 1))
     }, 6000)
     return () => clearInterval(id)
-  }, [total])
+  }, [total, rotationVersion])
 
   if (total === 0) return null
 
   const goPrev = () => {
+    const now = Date.now()
+    if (now - lastNavAtRef.current < 250) return
+    lastNavAtRef.current = now
     setIndex((prev) => clampIndex(prev - 1))
+    setRotationVersion((v) => v + 1)
   }
 
   const goNext = () => {
+    const now = Date.now()
+    if (now - lastNavAtRef.current < 250) return
+    lastNavAtRef.current = now
     setIndex((prev) => clampIndex(prev + 1))
+    setRotationVersion((v) => v + 1)
   }
 
   const current = list[clampIndex(index)]
@@ -134,7 +144,7 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
           <button
             type="button"
             onClick={goPrev}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            className="touch-manipulation inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background text-base font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
             disabled={total <= 1}
             aria-label="Previous past raffle"
           >
@@ -143,7 +153,7 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
           <button
             type="button"
             onClick={goNext}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-sm font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
+            className="touch-manipulation inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background text-base font-medium hover:bg-accent disabled:opacity-40 disabled:hover:bg-background"
             disabled={total <= 1}
             aria-label="Next past raffle"
           >

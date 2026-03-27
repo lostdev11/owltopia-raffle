@@ -82,6 +82,7 @@ export function RaffleDetailClient({
   const walletAdapter = wallet?.adapter ?? null
   const { connection } = useConnection()
   const [ticketQuantity, setTicketQuantity] = useState(1)
+  const [shareCopied, setShareCopied] = useState(false)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
@@ -1874,7 +1875,15 @@ export function RaffleDetailClient({
       url,
     }
 
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    const canUseNativeShare =
+      typeof navigator !== 'undefined' &&
+      typeof navigator.share === 'function' &&
+      // Prefer native share sheet on mobile/tablet; desktop UX is more reliable with copy.
+      ((typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
+        (typeof window.matchMedia === 'function' &&
+          window.matchMedia('(hover: none), (pointer: coarse)').matches))
+
+    if (canUseNativeShare) {
       try {
         await navigator.share(shareData)
         return
@@ -1886,6 +1895,8 @@ export function RaffleDetailClient({
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       try {
         await navigator.clipboard.writeText(url)
+        setShareCopied(true)
+        window.setTimeout(() => setShareCopied(false), 1800)
         return
       } catch {
         // If clipboard fails (permissions/unsupported), use prompt fallback.
@@ -1962,7 +1973,7 @@ export function RaffleDetailClient({
             title="Share this raffle or copy the raffle link."
           >
             <Share2 className="mr-2 h-4 w-4" />
-            Share
+            {shareCopied ? 'Copied!' : 'Share'}
           </Button>
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
