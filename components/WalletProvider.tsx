@@ -20,6 +20,7 @@ import {
 
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
+import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -83,6 +84,10 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
     },
     [network]
   )
+
+  useEffect(() => {
+    warnIfWalletRpcIsHeliusDevOnce()
+  }, [])
 
   // Mount with autoConnect true from the start so the adapter's effect runs once and restores session.
   // ContentErrorBoundary catches render errors from the wallet adapter (e.g. on mobile) so we show

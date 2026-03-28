@@ -10,6 +10,8 @@ import { entriesCreateBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -151,6 +153,12 @@ export async function POST(request: NextRequest) {
 
     const tokenInfo = getTokenInfo(raffle.currency as 'SOL' | 'USDC' | 'OWL')
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+    const payToFundsEscrow = raffleUsesFundsEscrow(raffle)
+    const fundsEscrowAddr =
+      (raffle.funds_escrow_address_snapshot?.trim() || getFundsEscrowPublicKey()) ?? ''
+    if (payToFundsEscrow && !fundsEscrowAddr) {
+      return NextResponse.json(ERROR_BODY, { status: 500 })
+    }
 
     let paymentDetails: {
       recipient: string
@@ -162,7 +170,16 @@ export async function POST(request: NextRequest) {
       split?: { recipient: string; amount: number }[]
     }
 
-    if (creatorWallet) {
+    if (payToFundsEscrow) {
+      paymentDetails = {
+        recipient: fundsEscrowAddr,
+        amount: finalAmountPaid,
+        currency: raffle.currency,
+        usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        owlMint: tokenInfo.mintAddress,
+        tokenDecimals: tokenInfo.decimals,
+      }
+    } else if (creatorWallet) {
       const { toCreator, toTreasury } = await getPaymentSplit(finalAmountPaid, creatorWallet)
       paymentDetails = {
         recipient: creatorWallet,

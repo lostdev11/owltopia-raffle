@@ -9,6 +9,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { Flame } from 'lucide-react'
 import Link from 'next/link'
+import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
@@ -310,9 +311,8 @@ export function RafflesList({
         // Initial check
         checkAndPoll()
         
-        // Poll every 3 seconds to get fresh entry data (consistent with detail page)
-        // Note: Real-time subscriptions would be more efficient but complex for multiple raffles
-        pollInterval = setInterval(checkAndPoll, 3000)
+        // Poll for fresh entry data (detail page uses similar cadence; dev uses slower default — lib/dev-budget)
+        pollInterval = setInterval(checkAndPoll, RAFFLES_LIST_ENTRIES_POLL_MS)
       }
     }
 

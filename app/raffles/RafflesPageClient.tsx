@@ -27,6 +27,7 @@ import { MarkdownContent } from '@/components/MarkdownContent'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
+import { RAFFLES_PAGE_SERVER_REFRESH_MS } from '@/lib/dev-budget'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -562,7 +563,7 @@ export function RafflesPageClient({
     if (tab !== 'all') return
     const interval = setInterval(() => {
       router.refresh()
-    }, 60_000)
+    }, RAFFLES_PAGE_SERVER_REFRESH_MS)
     return () => clearInterval(interval)
   }, [tab, router])
 

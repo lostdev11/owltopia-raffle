@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LiveActivityPopups } from '@/components/LiveActivityPopups'
 import type { Raffle } from '@/lib/types'
+import { LIVE_ACTIVITY_REFETCH_MS } from '@/lib/dev-budget'
 
-const REFETCH_INTERVAL_MS = 90_000 // 90s so new/updated raffles get into the map
+const REFETCH_INTERVAL_MS = LIVE_ACTIVITY_REFETCH_MS
 const RETRY_DELAY_MS = 2000
 const MAX_RETRIES = 3
 
 /**
  * Renders live activity popups for every raffle site-wide.
  * Fetches all raffles (with retry + periodic refetch) so popups show the correct raffle title for any entry event.
+ * In local dev, refetch is slower by default to save API credits (see lib/dev-budget.ts).
  */
 export function GlobalLiveActivity() {
   const [raffles, setRaffles] = useState<Raffle[]>([])

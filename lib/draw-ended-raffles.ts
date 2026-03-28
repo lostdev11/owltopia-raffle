@@ -14,6 +14,7 @@ import {
   selectWinner,
   updateRaffle,
 } from '@/lib/db/raffles'
+import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
 
 export type DrawResult = {
   raffleId: string
@@ -41,37 +42,49 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
 
       if (!canDraw) {
         if (!meetsMinTickets) {
-          // Threshold not met: extend raffle by its original duration (or 7 days fallback)
-          const originalEndTime = raffle.original_end_time || raffle.end_time
-          const startTimeMs = new Date(raffle.start_time).getTime()
-          const originalEndMs = new Date(originalEndTime).getTime()
-          const baseDurationMs = originalEndMs - startTimeMs
-          const durationMs =
-            baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+          if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
+            await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+            results.push({
+              raffleId: raffle.id,
+              raffleTitle: raffle.title,
+              success: false,
+              winnerWallet: null,
+              error:
+                'Minimum was not met after the extension window. Ticket buyers can claim refunds from their dashboard; NFT host flows use support if the prize was in escrow.',
+            })
+          } else {
+            // Threshold not met: extend raffle by its original duration (or 7 days fallback)
+            const originalEndTime = raffle.original_end_time || raffle.end_time
+            const startTimeMs = new Date(raffle.start_time).getTime()
+            const originalEndMs = new Date(originalEndTime).getTime()
+            const baseDurationMs = originalEndMs - startTimeMs
+            const durationMs =
+              baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
 
-          const currentEndMs = new Date(raffle.end_time).getTime()
-          const newEndTime = new Date(currentEndMs + durationMs)
+            const currentEndMs = new Date(raffle.end_time).getTime()
+            const newEndTime = new Date(currentEndMs + durationMs)
 
-          await updateRaffle(raffle.id, {
-            original_end_time: originalEndTime,
-            end_time: newEndTime.toISOString(),
-            status: 'live',
-          })
+            await updateRaffle(raffle.id, {
+              original_end_time: originalEndTime,
+              end_time: newEndTime.toISOString(),
+              status: 'live',
+            })
 
-          results.push({
-            raffleId: raffle.id,
-            raffleTitle: raffle.title,
-            success: false,
-            winnerWallet: null,
-            error: `Minimum requirements not met (min: ${
-              raffle.min_tickets ?? 'N/A'
-            }, sold: ${entries
-              .filter((e) => e.status === 'confirmed')
-              .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
-              durationMs / (24 * 60 * 60 * 1000)
-            } days.`,
-            extended: true,
-          })
+            results.push({
+              raffleId: raffle.id,
+              raffleTitle: raffle.title,
+              success: false,
+              winnerWallet: null,
+              error: `Minimum requirements not met (min: ${
+                raffle.min_tickets ?? 'N/A'
+              }, sold: ${entries
+                .filter((e) => e.status === 'confirmed')
+                .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
+                durationMs / (24 * 60 * 60 * 1000)
+              } days.`,
+              extended: true,
+            })
+          }
         } else {
           // Threshold met but caller decided not to draw yet – mark as ready_to_draw
           if (raffle.status !== 'ready_to_draw') {

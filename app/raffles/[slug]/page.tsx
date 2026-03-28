@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
+import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
@@ -128,27 +129,33 @@ export default async function RaffleDetailPage({
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (hasMinTickets && !meetsMinTickets) {
-          // Min tickets not met - extend raffle by its original duration (or 7 days fallback)
-          const originalEndTime = raffle.original_end_time || raffle.end_time
-          const startTimeMs = new Date(raffle.start_time).getTime()
-          const originalEndMs = new Date(originalEndTime).getTime()
-          const baseDurationMs = originalEndMs - startTimeMs
-          const durationMs =
-            baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+          if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
+            await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+            raffle = await getRaffleBySlug(slug)
+            if (!raffle) {
+              notFound()
+            }
+          } else {
+            const originalEndTime = raffle.original_end_time || raffle.end_time
+            const startTimeMs = new Date(raffle.start_time).getTime()
+            const originalEndMs = new Date(originalEndTime).getTime()
+            const baseDurationMs = originalEndMs - startTimeMs
+            const durationMs =
+              baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
 
-          const currentEndMs = new Date(raffle.end_time).getTime()
-          const newEndTime = new Date(currentEndMs + durationMs)
+            const currentEndMs = new Date(raffle.end_time).getTime()
+            const newEndTime = new Date(currentEndMs + durationMs)
 
-          await updateRaffle(raffle.id, {
-            original_end_time: originalEndTime,
-            end_time: newEndTime.toISOString(),
-            status: 'live',
-          })
+            await updateRaffle(raffle.id, {
+              original_end_time: originalEndTime,
+              end_time: newEndTime.toISOString(),
+              status: 'live',
+            })
 
-          // Refresh raffle data
-          raffle = await getRaffleBySlug(slug)
-          if (!raffle) {
-            notFound()
+            raffle = await getRaffleBySlug(slug)
+            if (!raffle) {
+              notFound()
+            }
           }
         } else if (!hasMinTickets) {
           // No minimum configured and either zero tickets or some other non-drawable state:

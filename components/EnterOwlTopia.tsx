@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Coins } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
+import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
 
 /** Repeated "owltopia" lines for matrix-style scroll (duplicated for seamless loop) */
 const MATRIX_LINES = Array.from({ length: 80 }, () => 'owltopia')
@@ -66,7 +67,7 @@ export function EnterOwlTopia() {
         .catch(() => setSchedule(null))
     }
     fetchSchedule()
-    const interval = setInterval(fetchSchedule, 30_000) // refresh every 30s
+    const interval = setInterval(fetchSchedule, ENTER_OWLTOPIA_REVSHARE_POLL_MS)
     return () => clearInterval(interval)
   }, [])
 

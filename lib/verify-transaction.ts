@@ -3,6 +3,8 @@ import { getAssociatedTokenAddress } from '@solana/spl-token'
 import type { Entry, Raffle } from '@/lib/types'
 import { getTokenInfo } from '@/lib/tokens'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 
 function asPublicKey(k: PublicKey | string): PublicKey {
   return k instanceof PublicKey ? k : new PublicKey(k)
@@ -75,14 +77,26 @@ export async function verifyTransaction(
     
     // Treasury/recipient wallet (same for SOL, USDC, OWL). Verification ensures
     // funds were sent to this wallet (native SOL) or its token accounts (USDC/OWL).
-    const recipientWallet = process.env.RAFFLE_RECIPIENT_WALLET || 
-                           process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
-    
-    if (!recipientWallet) {
+    const treasuryWallet = process.env.RAFFLE_RECIPIENT_WALLET ||
+      process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET
+
+    if (!treasuryWallet) {
       console.error('Recipient wallet not configured for verification')
       return { valid: false, error: 'Recipient wallet not configured. Set RAFFLE_RECIPIENT_WALLET.' }
     }
-    
+
+    const useFundsEscrow = raffleUsesFundsEscrow(raffle)
+    const fundsEscrowConfigured =
+      (raffle.funds_escrow_address_snapshot?.trim() || getFundsEscrowPublicKey()) ?? ''
+    if (useFundsEscrow && !fundsEscrowConfigured) {
+      return {
+        valid: false,
+        error:
+          'Funds escrow is not configured. Set FUNDS_ESCROW_SECRET_KEY or apply migration 044.',
+      }
+    }
+
+    const recipientWallet = useFundsEscrow ? fundsEscrowConfigured : treasuryWallet
     const recipientPubkey = new PublicKey(recipientWallet)
     
     // Wait a moment for transaction to be fully confirmed on RPC
@@ -171,9 +185,9 @@ export async function verifyTransaction(
     const expectedAmount = entry.amount_paid
     const expectedCurrency = entry.currency
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-    const useSplit = !!creatorWallet && !!recipientWallet
+    const useSplit = !useFundsEscrow && !!creatorWallet && !!treasuryWallet
 
-    // When split at purchase: expect two recipients (creator + treasury)
+    // When split at purchase: expect two recipients (creator + treasury). Funds-escrow raffles: full gross to escrow.
     let expectedCreatorAmount: number
     let expectedTreasuryAmount: number
     if (useSplit) {
