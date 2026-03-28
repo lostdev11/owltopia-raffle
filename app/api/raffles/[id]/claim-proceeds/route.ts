@@ -50,6 +50,16 @@ export async function POST(
       )
     }
 
+    if (!raffle.settled_at?.trim()) {
+      return NextResponse.json(
+        {
+          error:
+            'Proceeds can only be claimed after the raffle has settled (winner drawn and payout amounts recorded).',
+        },
+        { status: 400 }
+      )
+    }
+
     const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
     if (!creator || creator !== session.wallet.trim()) {
       return NextResponse.json({ error: 'Only the raffle creator can claim proceeds.' }, { status: 403 })

@@ -2061,7 +2061,8 @@ export function RaffleDetailClient({
           {isCreator &&
             raffle.status === 'successful_pending_claims' &&
             raffleUsesFundsEscrow(raffle) &&
-            !raffle.creator_claimed_at && (
+            !raffle.creator_claimed_at &&
+            !!raffle.settled_at?.trim() && (
               <Button
                 variant="default"
                 size="default"

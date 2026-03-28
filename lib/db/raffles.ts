@@ -6,6 +6,7 @@ import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
 import { getRaffleRevenue } from '@/lib/raffle-profit'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import { notifyRaffleWinnerDrawn } from '@/lib/discord-raffle-webhooks'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -1418,6 +1419,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       }
 
       console.log(`Winner selected for raffle ${raffleId}: ${winnerWallet} (${weights[i]} tickets)`)
+      void notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
       return winnerWallet
     }
   }
@@ -1463,6 +1465,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     throw new Error(`Failed to update raffle with winner: ${error.message}`)
   }
 
+  void notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
   return winnerWallet
 }
 

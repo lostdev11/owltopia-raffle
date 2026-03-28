@@ -13,6 +13,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
 import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -327,6 +328,8 @@ export async function POST(request: NextRequest) {
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
+
+    void notifyRaffleCreated(raffle)
 
     return NextResponse.json(raffle, { status: 201 })
   } catch (error) {
