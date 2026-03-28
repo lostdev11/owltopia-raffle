@@ -18,6 +18,7 @@ import {
 import { PublicKey } from '@solana/web3.js'
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare'
 import type { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
+import { isMobileDevice } from '@/lib/utils'
 
 export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
   override async connect(): Promise<void> {
@@ -46,14 +47,23 @@ export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
         throw new WalletLoadError((error as Error)?.message, error as Error)
       }
       const network = (this as unknown as { _config: { network?: WalletAdapterNetwork } })._config?.network
-      // Pass full URL as redirect_link so Solflare app redirects back to this page with callback params
+      // Extension / desktop: same as base adapter — only `network`. Passing redirect_link here makes the
+      // SDK use app/deeplink flow and breaks the browser extension connect path on desktop.
+      // Mobile web without extension (Loadable): redirect_link so the app can return with callback params.
       const params: Record<string, string> = {}
-      if (typeof window !== 'undefined') {
+      if (
+        typeof window !== 'undefined' &&
+        this.readyState === WalletReadyState.Loadable &&
+        isMobileDevice()
+      ) {
         params.redirect_link = window.location.href
       }
       let wallet
       try {
-        wallet = new SolflareClass({ network, params })
+        wallet =
+          Object.keys(params).length > 0
+            ? new SolflareClass({ network, params })
+            : new SolflareClass({ network })
       } catch (error) {
         throw new WalletConfigError((error as Error)?.message, error as Error)
       }

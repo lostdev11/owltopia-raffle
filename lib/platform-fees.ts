@@ -1,10 +1,24 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 import { getTokenInfo } from '@/lib/tokens'
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
-
-const OWNS_OWLTOPIA_CACHE_TTL_MS = 45_000
+import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
 
 const ownsOwltopiaCache = new Map<string, { value: boolean; expiresAt: number }>()
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Parse Retry-After from a 429 response (seconds or HTTP-date). Cap to avoid long stalls. */
+function retryAfterMsFromResponse(res: Response): number {
+  const h = res.headers.get('retry-after')
+  if (!h) return 1_000
+  const sec = parseInt(h, 10)
+  if (!Number.isNaN(sec)) return Math.min(Math.max(sec, 1) * 1_000, 30_000)
+  const date = Date.parse(h)
+  if (!Number.isNaN(date)) return Math.min(Math.max(date - Date.now(), 500), 30_000)
+  return 1_000
+}
 
 /** True if DAS asset belongs to the Owltopia collection (grouping and/or on-chain metadata). */
 function assetMatchesOwltopiaCollection(item: unknown, collectionAddress: string): boolean {
@@ -111,11 +125,8 @@ export async function ownsOwltopia(
     }
 
     try {
-      // Prefer searchAssets(owner + collection): indexed query (works for very large wallets).
-      const searchRes = await fetch(heliusUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const searchBody = () =>
+        JSON.stringify({
           jsonrpc: '2.0',
           id: 'owltopia-ownership-search',
           method: 'searchAssets',
@@ -130,9 +141,24 @@ export async function ownsOwltopia(
               showUnverifiedCollections: true,
             },
           },
-        }),
-      })
+        })
 
+      // Prefer searchAssets(owner + collection): indexed query (works for very large wallets).
+      let searchRes = await fetch(heliusUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: searchBody(),
+      })
+      if (searchRes.status === 429) {
+        await sleep(retryAfterMsFromResponse(searchRes))
+        searchRes = await fetch(heliusUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: searchBody(),
+        })
+      }
+
+      let skipOwnerScan = false
       if (searchRes.ok) {
         const searchJson: { error?: unknown; result?: { items?: unknown[] } } = await searchRes.json().catch(() => ({}))
         if (!searchJson.error) {
@@ -140,12 +166,17 @@ export async function ownsOwltopia(
           if (Array.isArray(searchItems) && searchItems.length > 0) {
             ownsOwltopiaCache.set(normalized, {
               value: true,
-              expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+              expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
             })
             return true
           }
           // Empty array: fall through — DAS can lag vs getAssetsByOwner; full scan may still find the NFT.
         }
+      } else if (searchRes.status === 429) {
+        skipOwnerScan = true
+        console.warn(
+          'Helius searchAssets rate limited after retry; skipping DAS owner scan (SPL fallback may still apply)'
+        )
       } else {
         console.error('Helius searchAssets returned non-OK status', searchRes.status)
       }
@@ -156,7 +187,8 @@ export async function ownsOwltopia(
       let after: string | undefined
       let ownerScanAborted = false
 
-      for (let batch = 0; batch < maxBatches; batch++) {
+      if (!skipOwnerScan)
+        for (let batch = 0; batch < maxBatches; batch++) {
         const params: Record<string, unknown> = {
           ownerAddress: normalized,
           limit,
@@ -165,7 +197,7 @@ export async function ownsOwltopia(
         }
         if (after) params.after = after
 
-        const res = await fetch(heliusUrl, {
+        let res = await fetch(heliusUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -175,6 +207,20 @@ export async function ownsOwltopia(
             params,
           }),
         })
+
+        if (res.status === 429) {
+          await sleep(retryAfterMsFromResponse(res))
+          res = await fetch(heliusUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: `owltopia-ownership-${batch}-retry`,
+              method: 'getAssetsByOwner',
+              params,
+            }),
+          })
+        }
 
         if (!res.ok) {
           console.error('Helius getAssetsByOwner returned non-OK status', res.status)
@@ -192,7 +238,7 @@ export async function ownsOwltopia(
         if (!Array.isArray(items) || items.length === 0) {
           ownsOwltopiaCache.set(normalized, {
             value: false,
-            expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
           return false
         }
@@ -201,7 +247,7 @@ export async function ownsOwltopia(
           if (assetMatchesOwltopiaCollection(item, collectionAddress)) {
             ownsOwltopiaCache.set(normalized, {
               value: true,
-              expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+              expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
             })
             return true
           }
@@ -210,7 +256,7 @@ export async function ownsOwltopia(
         if (items.length < limit) {
           ownsOwltopiaCache.set(normalized, {
             value: false,
-            expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
           return false
         }
@@ -223,10 +269,10 @@ export async function ownsOwltopia(
         after = last.id
       }
 
-      if (!ownerScanAborted) {
+      if (!skipOwnerScan && !ownerScanAborted) {
         ownsOwltopiaCache.set(normalized, {
           value: false,
-          expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+          expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
         })
         return false
       }
@@ -239,7 +285,7 @@ export async function ownsOwltopia(
   if (isDevnetRpc) {
     ownsOwltopiaCache.set(normalized, {
       value: false,
-      expiresAt: Date.now() + OWNS_OWLTOPIA_CACHE_TTL_MS,
+      expiresAt: Date.now() + OWLTOPIA_DAS_CACHE_TTL_MS,
     })
     return false
   }
@@ -264,7 +310,7 @@ export async function ownsOwltopia(
           const value = true
           ownsOwltopiaCache.set(normalized, {
             value,
-            expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
           return value
         }
@@ -276,7 +322,7 @@ export async function ownsOwltopia(
     const value = false
     ownsOwltopiaCache.set(normalized, {
       value,
-      expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+      expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
     })
     return value
   } catch (err) {
@@ -285,7 +331,7 @@ export async function ownsOwltopia(
     const value = false
     ownsOwltopiaCache.set(normalized, {
       value,
-      expiresAt: now + OWNS_OWLTOPIA_CACHE_TTL_MS,
+      expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
     })
     return value
   }

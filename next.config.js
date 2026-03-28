@@ -39,6 +39,18 @@ const nextConfig = {
         hostname: 'image2url.com',
       },
       {
+        protocol: 'https',
+        hostname: 'firebasestorage.googleapis.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.firebasestorage.app',
+      },
+      {
+        protocol: 'https',
+        hostname: 'storage.googleapis.com',
+      },
+      {
         protocol: 'http',
         hostname: 'localhost',
       },

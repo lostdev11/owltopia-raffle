@@ -7,7 +7,16 @@ export type PrizeType = 'crypto' | 'nft'
 /** How the NFT prize is represented on-chain (used for escrow logic). */
 export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core' | 'compressed'
 
-export type RaffleStatus = 'draft' | 'live' | 'ready_to_draw' | 'completed' | 'cancelled' | null
+export type RaffleStatus =
+  | 'draft'
+  | 'live'
+  | 'ready_to_draw'
+  | 'completed'
+  | 'cancelled'
+  | 'pending_min_not_met'
+  | 'successful_pending_claims'
+  | 'failed_refund_available'
+  | null
 
 /** Supported raffle ticket currencies */
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
@@ -18,6 +27,8 @@ export interface Raffle {
   title: string
   description: string | null
   image_url: string | null
+  /** Optional admin / CDN fallback when primary `image_url` is stale or blocked */
+  image_fallback_url: string | null
   prize_type: PrizeType
   prize_amount: number | null
   prize_currency: string | null
@@ -81,6 +92,16 @@ export interface Raffle {
   prize_standard?: PrizeStandard | null
   /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */
   purchases_blocked_at?: string | null
+  /** When true, ticket gross is paid to funds escrow; creator claims net after draw. */
+  ticket_payments_to_funds_escrow?: boolean | null
+  /** Prize escrow pubkey at creation (verification / support). */
+  nft_escrow_address_snapshot?: string | null
+  /** Funds escrow pubkey at creation. */
+  funds_escrow_address_snapshot?: string | null
+  /** Creator claimed net proceeds from funds escrow. */
+  creator_claimed_at?: string | null
+  creator_claim_tx?: string | null
+  creator_funds_claim_locked_at?: string | null
 }
 
 export interface Entry {
@@ -96,6 +117,9 @@ export interface Entry {
   verified_at: string | null
   restored_at: string | null
   restored_by: string | null
+  refunded_at?: string | null
+  refund_transaction_signature?: string | null
+  refund_lock_started_at?: string | null
 }
 
 export interface OwlVisionScore {

@@ -643,17 +643,17 @@ export function WalletConnectButton() {
     (e: React.PointerEvent) => {
       if (e.button !== 0 && e.button !== undefined) return
       if (!mounted || connected || connecting) return
-      if (isMobileDevice()) {
-        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
-        if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
-          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
-          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
-        }
-        if (!isSolflareBrowser() && !isPhantomBrowser()) {
-          setShowMobileInAppDialog(true)
-          return
-        }
+      // Desktop: WalletMultiButton click opens the modal; pointerup here can duplicate work or confuse ordering.
+      if (!isMobileDevice()) return
+      const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+      if (currentUrl) {
+        const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+        keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+        sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+      }
+      if (!isSolflareBrowser() && !isPhantomBrowser()) {
+        setShowMobileInAppDialog(true)
+        return
       }
       setVisible(true)
     },

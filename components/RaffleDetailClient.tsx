@@ -26,6 +26,7 @@ import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -33,7 +34,7 @@ import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import Image from 'next/image'
-import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2 } from 'lucide-react'
+import { Users, Trophy, ArrowLeft, Edit, Grid3x3, LayoutGrid, Square, Send, Eye, Share2, BadgeCheck, ExternalLink, XCircle, Loader2, Coins } from 'lucide-react'
 import {
   Transaction,
   SystemProgram,
@@ -54,6 +55,7 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
+import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
@@ -120,6 +122,8 @@ export function RaffleDetailClient({
   const [claimPrizePhase, setClaimPrizePhase] = useState<'idle' | 'loading' | 'success'>('idle')
   const [claimPrizeTxSignature, setClaimPrizeTxSignature] = useState<string | null>(null)
   const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
+  const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
+  const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -224,7 +228,7 @@ export function RaffleDetailClient({
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
     raffleId: raffle.id,
     enabled: isActive, // Only enable real-time updates for active raffles
-    pollingInterval: 3000, // 3 second polling fallback
+    pollingInterval: RAFFLE_DETAIL_ENTRIES_POLL_MS,
     initialEntries, // Initialize with server-side entries
   })
 
@@ -1748,6 +1752,31 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const handleClaimProceeds = useCallback(async () => {
+    setClaimProceedsError(null)
+    setClaimProceedsLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setClaimProceedsError(
+          typeof (data as { error?: string }).error === 'string'
+            ? (data as { error: string }).error
+            : 'Could not claim proceeds. Sign in on My Dashboard if you are not signed in yet.'
+        )
+        return
+      }
+      router.refresh()
+    } catch (e) {
+      setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setClaimProceedsLoading(false)
+    }
+  }, [raffle.id, router])
+
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
   const winnerWalletNorm = (raffle.winner_wallet ?? '').trim()
@@ -1924,7 +1953,32 @@ export function RaffleDetailClient({
               Cancellation requested — waiting for admin
             </span>
           )}
+          {isCreator &&
+            raffle.status === 'successful_pending_claims' &&
+            raffleUsesFundsEscrow(raffle) &&
+            !raffle.creator_claimed_at && (
+              <Button
+                variant="default"
+                size="default"
+                onClick={handleClaimProceeds}
+                disabled={claimProceedsLoading}
+                className="touch-manipulation min-h-[44px] text-sm sm:text-base"
+                title="Claim your net ticket proceeds from funds escrow (platform fee goes to treasury in the same transaction)."
+              >
+                {claimProceedsLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Coins className="mr-2 h-4 w-4" />
+                )}
+                Claim proceeds
+              </Button>
+            )}
         </div>
+        {claimProceedsError && (
+          <p className="text-sm text-destructive mb-2" role="alert">
+            {claimProceedsError}
+          </p>
+        )}
         {/* Mobile: raffle name in the empty space below nav buttons */}
         <div className="md:hidden mb-3">
           <h1 className="text-lg font-semibold truncate text-foreground" title={raffle.title}>

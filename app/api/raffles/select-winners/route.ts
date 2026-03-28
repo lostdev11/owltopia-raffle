@@ -9,6 +9,7 @@ import {
   updateRaffle
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
+import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -71,8 +72,25 @@ export async function POST(request: NextRequest) {
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
         
         if (!canDraw) {
-          // If a minimum is configured but not met, extend the raffle by its original duration (or 7 days fallback)
+          // If a minimum is configured but not met, extend once; after that mark failed_refund_available.
           if (hasMinTickets && !meetsMinTickets) {
+            if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
+              await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+              return NextResponse.json(
+                {
+                  error:
+                    'Minimum still not met after extension. Raffle set to refund-available for ticket buyers.',
+                  raffleId: raffle.id,
+                  minTickets: raffle.min_tickets,
+                  ticketsSold: entries
+                    .filter((e) => e.status === 'confirmed')
+                    .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
+                  failedRefundAvailable: true,
+                },
+                { status: 400 }
+              )
+            }
+
             const originalEndTime = raffle.original_end_time || raffle.end_time
             const startTimeMs = new Date(raffle.start_time).getTime()
             const originalEndMs = new Date(originalEndTime).getTime()
@@ -82,22 +100,23 @@ export async function POST(request: NextRequest) {
 
             const currentEndMs = new Date(raffle.end_time).getTime()
             const newEndTime = new Date(currentEndMs + durationMs)
-            
+
             await updateRaffle(raffle.id, {
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
-              status: 'live'
+              status: 'live',
             })
-            
+
             return NextResponse.json(
-              { 
+              {
                 error: 'Raffle does not meet minimum ticket requirements. Extended by another period.',
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
-                ticketsSold: entries.filter(e => e.status === 'confirmed')
+                ticketsSold: entries
+                  .filter((e) => e.status === 'confirmed')
                   .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
                 extended: true,
-                newEndTime: newEndTime.toISOString()
+                newEndTime: newEndTime.toISOString(),
               },
               { status: 400 }
             )

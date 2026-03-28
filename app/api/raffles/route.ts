@@ -11,6 +11,8 @@ import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getAdminRole } from '@/lib/db/admins'
 import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
+import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
+import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -267,6 +269,10 @@ export async function POST(request: NextRequest) {
       title: body.title,
       description: body.description || null,
       image_url: body.image_url || null,
+      image_fallback_url:
+        typeof body.image_fallback_url === 'string' && body.image_fallback_url.trim()
+          ? body.image_fallback_url.trim()
+          : null,
       prize_type: prizeType,
       prize_amount: prizeAmount,
       prize_currency: prizeCurrency,
@@ -309,6 +315,12 @@ export async function POST(request: NextRequest) {
       prize_returned_at: null,
       prize_return_reason: null,
       prize_return_tx: null,
+      ticket_payments_to_funds_escrow: true,
+      nft_escrow_address_snapshot: getPrizeEscrowPublicKey(),
+      funds_escrow_address_snapshot: getFundsEscrowPublicKey(),
+      creator_claimed_at: null,
+      creator_claim_tx: null,
+      creator_funds_claim_locked_at: null,
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')

@@ -5,6 +5,7 @@ import { withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
 import { getRaffleRevenue } from '@/lib/raffle-profit'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -71,12 +72,12 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** Base columns including prize return, cancellation, and purchases_blocked (migrations 036, 038, 040). */
 function getBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
+  return 'id,slug,title,description,image_url,image_fallback_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx,prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at,ticket_payments_to_funds_escrow,nft_escrow_address_snapshot,funds_escrow_address_snapshot,creator_claimed_at,creator_claim_tx,creator_funds_claim_locked_at'
 }
 
 /** Minimal columns when prize return / cancellation migrations (036, 038) are not yet applied. */
 function getMinimalBaseRaffleColumns(): string {
-  return 'id,slug,title,description,image_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
+  return 'id,slug,title,description,image_url,image_fallback_url,prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at'
 }
 
 // Cache column list so we only run migration check once per process (faster subsequent loads)
@@ -161,10 +162,25 @@ function isRetryableMessage(rawMessage: string): boolean {
 }
 
 /** Status values for public raffle listing (excludes draft and cancelled) */
-const PUBLIC_STATUSES = ['live', 'ready_to_draw', 'completed'] as const
+const PUBLIC_STATUSES = [
+  'live',
+  'ready_to_draw',
+  'completed',
+  'successful_pending_claims',
+  'failed_refund_available',
+] as const
 
 /** Status values when admin needs to see drafts and cancelled */
-const ALL_STATUSES = ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'] as const
+const ALL_STATUSES = [
+  'draft',
+  'live',
+  'ready_to_draw',
+  'completed',
+  'cancelled',
+  'pending_min_not_met',
+  'successful_pending_claims',
+  'failed_refund_available',
+] as const
 
 /**
  * Public list uses direct REST for cold-start resilience. Must be high enough that older **live**
@@ -544,6 +560,7 @@ export async function getRaffleById(id: string) {
 function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
   return {
     ...row,
+    image_fallback_url: (row.image_fallback_url as string | null | undefined) ?? null,
     prize_returned_at: (row.prize_returned_at as string | null) ?? null,
     prize_return_reason: (row.prize_return_reason as string | null) ?? null,
     prize_return_tx: (row.prize_return_tx as string | null) ?? null,
@@ -629,8 +646,9 @@ export async function getCreatorRevenueByWallet(walletAddress: string): Promise<
 
   const { data, error } = await getSupabaseForRead()
     .from('raffles')
-    .select('creator_payout_amount, currency')
-    .eq('status', 'completed')
+    .select(
+      'creator_payout_amount, currency, status, ticket_payments_to_funds_escrow, creator_claimed_at'
+    )
     .not('creator_payout_amount', 'is', null)
     .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
 
@@ -642,6 +660,12 @@ export async function getCreatorRevenueByWallet(walletAddress: string): Promise<
   const byCurrency: Record<string, number> = {}
   let total = 0
   for (const row of data || []) {
+    const usesFundsEscrow = row.ticket_payments_to_funds_escrow === true
+    const claimed = row.creator_claimed_at != null
+    const completedOk = row.status === 'completed'
+    if (usesFundsEscrow && !claimed) continue
+    if (!usesFundsEscrow && !completedOk) continue
+
     const amount = Number(row.creator_payout_amount ?? 0)
     if (!Number.isFinite(amount) || amount <= 0) continue
     const cur = (row.currency as string) || 'SOL'
@@ -875,6 +899,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     title: raffle.title,
     description: raffle.description,
     image_url: raffle.image_url,
+    image_fallback_url: raffle.image_fallback_url ?? null,
     prize_type: raffle.prize_type,
     prize_amount: raffle.prize_amount,
     prize_currency: raffle.prize_currency,
@@ -920,6 +945,16 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.cancellation_fee_amount = raffle.cancellation_fee_amount ?? null
   insertData.cancellation_fee_currency = raffle.cancellation_fee_currency ?? null
   insertData.cancellation_refund_policy = raffle.cancellation_refund_policy ?? null
+  if (raffle.ticket_payments_to_funds_escrow != null) {
+    insertData.ticket_payments_to_funds_escrow = raffle.ticket_payments_to_funds_escrow
+  }
+  if (raffle.nft_escrow_address_snapshot != null) {
+    insertData.nft_escrow_address_snapshot = raffle.nft_escrow_address_snapshot
+  }
+  if (raffle.funds_escrow_address_snapshot != null) {
+    insertData.funds_escrow_address_snapshot = raffle.funds_escrow_address_snapshot
+  }
+  insertData.prize_deposit_tx = raffle.prize_deposit_tx ?? null
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
@@ -1072,6 +1107,78 @@ export async function clearNftPrizeClaimLock(raffleId: string): Promise<void> {
   }
 }
 
+/**
+ * Mutex for creator proceeds claim (funds escrow payout).
+ */
+export async function acquireCreatorFundsClaimLock(
+  raffleId: string,
+  _walletAddress: string
+): Promise<{ acquired: boolean }> {
+  const lockAt = new Date().toISOString()
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+
+  await getSupabaseAdmin()
+    .from('raffles')
+    .update({ creator_funds_claim_locked_at: null })
+    .eq('id', raffleId)
+    .is('creator_claimed_at', null)
+    .not('creator_funds_claim_locked_at', 'is', null)
+    .lt('creator_funds_claim_locked_at', staleBefore)
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({ creator_funds_claim_locked_at: lockAt })
+    .eq('id', raffleId)
+    .is('creator_claimed_at', null)
+    .is('creator_funds_claim_locked_at', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error('acquireCreatorFundsClaimLock error:', error)
+    throw new Error(`Failed to acquire creator funds claim lock: ${error.message}`)
+  }
+
+  return { acquired: !!data }
+}
+
+export async function clearCreatorFundsClaimLock(raffleId: string): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({ creator_funds_claim_locked_at: null })
+    .eq('id', raffleId)
+  if (error) {
+    console.error('clearCreatorFundsClaimLock error:', error)
+    throw new Error(`Failed to clear creator funds claim lock: ${error.message}`)
+  }
+}
+
+/**
+ * After creator claims funds and (if NFT) winner claims prize, move raffle to `completed`.
+ */
+export async function maybeCompleteRaffleAfterClaims(raffleId: string): Promise<void> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle || raffle.status !== 'successful_pending_claims') return
+  if (!raffle.creator_claimed_at) return
+
+  const needsWinnerNftClaim =
+    raffle.prize_type === 'nft' &&
+    !!raffle.nft_mint_address?.trim() &&
+    !raffle.prize_returned_at
+  if (needsWinnerNftClaim && !raffle.nft_transfer_transaction) return
+
+  const now = new Date().toISOString()
+  const { error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update({ status: 'completed', updated_at: now })
+    .eq('id', raffleId)
+    .eq('status', 'successful_pending_claims')
+
+  if (error) {
+    console.error('maybeCompleteRaffleAfterClaims error:', error)
+  }
+}
+
 export async function deleteRaffle(id: string) {
   const { error, data } = await getSupabaseAdmin()
     .from('raffles')
@@ -1180,6 +1287,10 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
       const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
 
+      const drawStatus = raffleUsesFundsEscrow(raffle)
+        ? 'successful_pending_claims'
+        : 'completed'
+
       // Update the raffle with the winner and settlement info
       const now = new Date().toISOString()
       const { error } = await getSupabaseAdmin()
@@ -1187,7 +1298,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
         .update({
           winner_wallet: winnerWallet,
           winner_selected_at: now,
-          status: 'completed',
+          status: drawStatus,
           creator_wallet: creatorWallet || null,
           fee_bps_applied: feeBps,
           fee_tier_reason: reason,
@@ -1223,13 +1334,17 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
   const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
   const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
 
+  const drawStatus = raffleUsesFundsEscrow(raffle)
+    ? 'successful_pending_claims'
+    : 'completed'
+
   const now = new Date().toISOString()
   const { error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
       winner_wallet: winnerWallet,
       winner_selected_at: now,
-      status: 'completed',
+      status: drawStatus,
       creator_wallet: creatorWallet || null,
       fee_bps_applied: feeBps,
       fee_tier_reason: reason,

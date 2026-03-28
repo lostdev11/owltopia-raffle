@@ -13,6 +13,10 @@ export const entriesVerifyBody = z.object({
   transactionSignature: z.string().min(80).max(120),
 })
 
+export const claimRefundEntryBody = z.object({
+  entryId: z.string().uuid(),
+})
+
 export const rafflesPostBody = z.object({
   wallet_address: z.string().optional(),
   title: z.string().min(1).max(200),

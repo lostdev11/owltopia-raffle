@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { acquireNftPrizeClaimLock, getRaffleById } from '@/lib/db/raffles'
+import {
+  acquireNftPrizeClaimLock,
+  getRaffleById,
+  maybeCompleteRaffleAfterClaims,
+} from '@/lib/db/raffles'
 import { requireSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
@@ -116,6 +120,8 @@ export async function POST(
         { status: 400 }
       )
     }
+
+    await maybeCompleteRaffleAfterClaims(raffleId)
 
     return NextResponse.json({
       success: true,

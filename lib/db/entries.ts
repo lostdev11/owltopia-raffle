@@ -539,7 +539,7 @@ export async function getPendingEntriesWithTransactionSignature(options?: {
   return (data || []) as Entry[]
 }
 
-/** Minimal raffle fields needed for "my entries" list */
+/** Minimal raffle fields needed for "my entries" list + winner NFT claim on dashboard */
 export interface RaffleInfoForEntry {
   id: string
   slug: string
@@ -548,6 +548,13 @@ export interface RaffleInfoForEntry {
   status: string | null
   winner_wallet: string | null
   winner_selected_at: string | null
+  ticket_payments_to_funds_escrow?: boolean | null
+  prize_type?: string | null
+  nft_mint_address?: string | null
+  nft_transfer_transaction?: string | null
+  prize_deposited_at?: string | null
+  prize_returned_at?: string | null
+  prize_standard?: string | null
 }
 
 export interface EntryWithRaffle {
@@ -566,7 +573,7 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
     .from('entries')
     .select(`
       *,
-      raffles (id, slug, title, end_time, status, winner_wallet, winner_selected_at)
+      raffles (id, slug, title, end_time, status, winner_wallet, winner_selected_at, ticket_payments_to_funds_escrow, prize_type, nft_mint_address, nft_transfer_transaction, prize_deposited_at, prize_returned_at, prize_standard)
     `)
     .eq('wallet_address', walletAddress)
     .order('created_at', { ascending: false })
@@ -589,4 +596,63 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
     })
   }
   return result
+}
+
+/** Short mutex so two refund requests for the same entry cannot double-pay. */
+export async function acquireEntryRefundLock(entryId: string): Promise<{ acquired: boolean }> {
+  const lockAt = new Date().toISOString()
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+
+  await getSupabaseAdmin()
+    .from('entries')
+    .update({ refund_lock_started_at: null })
+    .eq('id', entryId)
+    .is('refunded_at', null)
+    .not('refund_lock_started_at', 'is', null)
+    .lt('refund_lock_started_at', staleBefore)
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({ refund_lock_started_at: lockAt })
+    .eq('id', entryId)
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+    .is('refund_lock_started_at', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error('acquireEntryRefundLock error:', error)
+    throw new Error(`Failed to acquire refund lock: ${error.message}`)
+  }
+
+  return { acquired: !!data }
+}
+
+export async function clearEntryRefundLock(entryId: string): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({ refund_lock_started_at: null })
+    .eq('id', entryId)
+  if (error) {
+    console.error('clearEntryRefundLock error:', error)
+    throw new Error(`Failed to clear refund lock: ${error.message}`)
+  }
+}
+
+export async function markEntryRefunded(entryId: string, transactionSignature: string): Promise<void> {
+  const now = new Date().toISOString()
+  const { error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({
+      refunded_at: now,
+      refund_transaction_signature: transactionSignature,
+      refund_lock_started_at: null,
+    })
+    .eq('id', entryId)
+
+  if (error) {
+    console.error('markEntryRefunded error:', error)
+    throw new Error(`Failed to mark entry refunded: ${error.message}`)
+  }
 }
