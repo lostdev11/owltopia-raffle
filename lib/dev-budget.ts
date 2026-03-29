@@ -24,5 +24,10 @@ export const RAFFLES_LIST_ENTRIES_POLL_MS = devSaveApiCredits() ? 30_000 : 3_000
 /** Raffle detail: entries when Realtime is off */
 export const RAFFLE_DETAIL_ENTRIES_POLL_MS = devSaveApiCredits() ? 20_000 : 3_000
 
+/** While Realtime is connected, still refetch occasionally (missed postgres_changes, sleeping tab, flaky network). */
+export const RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS = devSaveApiCredits()
+  ? 120_000
+  : 20_000
+
 /** Enter Owltopia page: GET /api/rev-share (runs ownsOwltopia per creator) */
 export const ENTER_OWLTOPIA_REVSHARE_POLL_MS = devSaveApiCredits() ? 180_000 : 30_000

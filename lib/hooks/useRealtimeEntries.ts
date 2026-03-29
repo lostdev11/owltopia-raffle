@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Entry } from '@/lib/types'
 import { RealtimeChannel } from '@supabase/supabase-js'
+import { RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS } from '@/lib/dev-budget'
 
 interface UseRealtimeEntriesOptions {
   raffleId: string
@@ -29,10 +30,10 @@ export function useRealtimeEntries({
   const [isUsingRealtime, setIsUsingRealtime] = useState(false)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const realtimeSafetyPollRef = useRef<NodeJS.Timeout | null>(null)
   const isRealtimeActiveRef = useRef(false) // Track subscription status synchronously
 
-  // When server supplies initialEntries and we have no entries yet, use them so "Your tickets"
-  // and participant counts are correct on first paint (before refetch or when realtime is disabled)
+  // Seed from SSR on first paint; ongoing truth comes from fetch + Realtime (see safety poll).
   useEffect(() => {
     if (initialEntries.length === 0) return
     setEntries((prev) => (prev.length === 0 ? initialEntries : prev))
@@ -41,6 +42,13 @@ export function useRealtimeEntries({
   // Fetch entries from API (absolute URL to avoid "Failed to fetch" with Turbopack/relative URLs).
   // Use AbortSignal + timeout so a stuck server or Supabase connection cannot hold the request for minutes.
   const ENTRY_FETCH_TIMEOUT_MS = 15_000
+
+  const clearRealtimeSafetyPoll = useCallback(() => {
+    if (realtimeSafetyPollRef.current) {
+      clearInterval(realtimeSafetyPollRef.current)
+      realtimeSafetyPollRef.current = null
+    }
+  }, [])
 
   const fetchEntries = useCallback(async () => {
     if (typeof window === 'undefined') return null
@@ -81,6 +89,7 @@ export function useRealtimeEntries({
         clearInterval(pollIntervalRef.current)
         pollIntervalRef.current = null
       }
+      clearRealtimeSafetyPoll()
       isRealtimeActiveRef.current = false
       return
     }
@@ -117,12 +126,18 @@ export function useRealtimeEntries({
               console.debug('Realtime subscription active for raffle:', raffleId)
               isRealtimeActiveRef.current = true
               setIsUsingRealtime(true)
+              clearRealtimeSafetyPoll()
+              realtimeSafetyPollRef.current = setInterval(
+                fetchEntries,
+                RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS
+              )
               // Initial fetch
               fetchEntries().then(() => setIsLoading(false))
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
               console.debug('Realtime subscription closed, falling back to polling')
               isRealtimeActiveRef.current = false
               setIsUsingRealtime(false)
+              clearRealtimeSafetyPoll()
               // Only fall back to polling if still enabled
               if (enabled && !pollIntervalRef.current) {
                 pollIntervalRef.current = setInterval(fetchEntries, pollingInterval)
@@ -142,6 +157,7 @@ export function useRealtimeEntries({
             channelRef.current = null
             isRealtimeActiveRef.current = false
             setIsUsingRealtime(false)
+            clearRealtimeSafetyPoll()
             if (!pollIntervalRef.current) {
               pollIntervalRef.current = setInterval(fetchEntries, pollingInterval)
             }
@@ -151,9 +167,14 @@ export function useRealtimeEntries({
 
         return () => {
           clearTimeout(fallbackTimeout)
+          clearRealtimeSafetyPoll()
           if (channelRef.current) {
             supabase.removeChannel(channelRef.current)
             channelRef.current = null
+          }
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
           }
         }
       } catch (error) {
@@ -177,6 +198,7 @@ export function useRealtimeEntries({
 
     // Cleanup function
     return () => {
+      clearRealtimeSafetyPoll()
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
         channelRef.current = null
@@ -187,7 +209,7 @@ export function useRealtimeEntries({
       }
       isRealtimeActiveRef.current = false
     }
-  }, [enabled, raffleId, fetchEntries, pollingInterval])
+  }, [enabled, raffleId, fetchEntries, pollingInterval, clearRealtimeSafetyPoll])
 
   return {
     entries,

@@ -1,7 +1,11 @@
 /**
  * Public leaderboard: top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
  */
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+
+/** PostgREST page size; must paginate — a hard .limit() undercounts once row count exceeds the cap. */
+const LEADERBOARD_PAGE_SIZE = 2500
 
 export type LeaderboardEntry = {
   rank: number
@@ -29,37 +33,72 @@ function takeTopTen<T>(items: { wallet: string; value: number }[]): LeaderboardE
     .map((item, i) => ({ rank: i + 1, wallet: item.wallet, value: item.value }))
 }
 
-/**
- * Returns top 10 users for each category. Uses the same data limits as admin users
- * for consistency; for very large datasets consider a materialized view or RPC.
- */
-export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
-  const db = getSupabaseAdmin()
-
-  const [rafflesRes, entriesRes] = await Promise.all([
-    db
-      .from('raffles')
-      .select('id, created_by, creator_wallet, winner_wallet, status')
-      .limit(5000),
-    db
-      .from('entries')
-      .select('raffle_id, wallet_address, ticket_quantity')
-      .eq('status', 'confirmed')
-      .limit(20000),
-  ])
-
-  const raffles = (rafflesRes.data || []) as {
+async function fetchAllLeaderboardRaffles(
+  db: SupabaseClient
+): Promise<
+  {
     id: string
     created_by: string | null
     creator_wallet: string | null
     winner_wallet: string | null
     status: string | null
   }[]
-  const entries = (entriesRes.data || []) as {
-    raffle_id: string
-    wallet_address: string
-    ticket_quantity: number
-  }[]
+> {
+  const rows: {
+    id: string
+    created_by: string | null
+    creator_wallet: string | null
+    winner_wallet: string | null
+    status: string | null
+  }[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('raffles')
+      .select('id, created_by, creator_wallet, winner_wallet, status')
+      .order('id', { ascending: true })
+      .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as typeof rows
+    rows.push(...chunk)
+    if (chunk.length < LEADERBOARD_PAGE_SIZE) break
+    from += LEADERBOARD_PAGE_SIZE
+  }
+  return rows
+}
+
+async function fetchAllConfirmedEntriesForLeaderboard(
+  db: SupabaseClient
+): Promise<{ raffle_id: string; wallet_address: string; ticket_quantity: number }[]> {
+  const rows: { raffle_id: string; wallet_address: string; ticket_quantity: number }[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('entries')
+      .select('raffle_id, wallet_address, ticket_quantity')
+      .eq('status', 'confirmed')
+      .order('id', { ascending: true })
+      .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as typeof rows
+    rows.push(...chunk)
+    if (chunk.length < LEADERBOARD_PAGE_SIZE) break
+    from += LEADERBOARD_PAGE_SIZE
+  }
+  return rows
+}
+
+/**
+ * Returns top 10 users for each category. Loads all confirmed entries and raffles via
+ * keyset-stable pagination so totals stay correct as the dataset grows.
+ */
+export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
+  const db = getSupabaseAdmin()
+
+  const [raffles, entries] = await Promise.all([
+    fetchAllLeaderboardRaffles(db),
+    fetchAllConfirmedEntriesForLeaderboard(db),
+  ])
 
   // Raffles entered: distinct raffle count per wallet
   const enteredByWallet = new Map<string, Set<string>>()

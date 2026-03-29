@@ -421,12 +421,6 @@ export function RaffleDetailClient({
     return () => { cancelled = true }
   }, [raffle.id, raffle.prize_type, raffle.nft_mint_address, raffle.prize_deposited_at])
 
-  // Refresh entries when wallet connection status changes
-  // This ensures user tickets are recalculated when user connects/disconnects
-  useEffect(() => {
-    fetchEntries()
-  }, [connected, publicKey, fetchEntries])
-
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
 
@@ -460,6 +454,10 @@ export function RaffleDetailClient({
         )
         .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
+
+  /** Large headline count: include pending so users do not see "0 tickets" while Solana verification runs. */
+  const userTicketsHeadline =
+    userPendingTickets > 0 ? userTickets + userPendingTickets : userTickets
 
   // Determine max tickets user can purchase in one transaction
   const maxPurchaseQuantity = availableTickets !== null 
@@ -2686,11 +2684,13 @@ export function RaffleDetailClient({
                   <div>
                     <p className={classes.labelText + ' text-muted-foreground'}>Your Tickets</p>
                     <p className={`${imageSize === 'small' ? 'text-lg' : imageSize === 'medium' ? 'text-xl' : 'text-2xl'} font-bold`} style={{ color: themeColor }}>
-                      {userTickets} {userTickets === 1 ? 'ticket' : 'tickets'}
+                      {userTicketsHeadline} {userTicketsHeadline === 1 ? 'ticket' : 'tickets'}
                     </p>
                     {userPendingTickets > 0 && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        We&apos;re confirming {userPendingTickets} recent {userPendingTickets === 1 ? 'entry' : 'entries'} on Solana. Your total will update automatically.
+                        {userTickets > 0
+                          ? `${userTickets} confirmed · ${userPendingTickets} still confirming on Solana`
+                          : `We&apos;re confirming ${userPendingTickets} recent ${userPendingTickets === 1 ? 'entry' : 'entries'} on Solana. Confirmed total updates automatically.`}
                       </p>
                     )}
                   </div>

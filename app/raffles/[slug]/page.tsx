@@ -186,6 +186,7 @@ export default async function RaffleDetailPage({
 
   return (
     <RaffleDetailClient
+      key={enrichedRaffle.id}
       raffle={enrichedRaffle}
       entries={entries}
       owlVisionScore={owlVisionScore}

@@ -1,7 +1,11 @@
 /**
  * Admin-only: aggregate user (wallet) stats for the admin dashboard.
  */
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+
+/** Same as leaderboard: paginate instead of .limit() so aggregates stay correct at scale. */
+const ADMIN_AGG_PAGE_SIZE = 2500
 
 export type AdminUserRow = {
   wallet: string
@@ -18,38 +22,75 @@ function normalizeWallet(v: string | null | undefined): string {
   return s || ''
 }
 
-/**
- * Returns aggregated stats per wallet (creators + entrants).
- * Uses reasonable limits; for large datasets consider pagination or a materialized view.
- */
-export async function getAdminUsersAggregate(): Promise<AdminUserRow[]> {
-  const db = getSupabaseAdmin()
-
-  const [rafflesRes, entriesRes] = await Promise.all([
-    db
-      .from('raffles')
-      .select('created_by, creator_wallet, status, creator_payout_amount, currency')
-      .limit(3000),
-    db
-      .from('entries')
-      .select('wallet_address, amount_paid, currency, status')
-      .eq('status', 'confirmed')
-      .limit(15000),
-  ])
-
-  const raffles = (rafflesRes.data || []) as {
+async function fetchAllRafflesForAdminAgg(
+  db: SupabaseClient
+): Promise<
+  {
     created_by: string | null
     creator_wallet: string | null
     status: string | null
     creator_payout_amount: number | null
     currency: string | null
   }[]
-  const entries = (entriesRes.data || []) as {
-    wallet_address: string
-    amount_paid: number
+> {
+  const rows: {
+    created_by: string | null
+    creator_wallet: string | null
+    status: string | null
+    creator_payout_amount: number | null
     currency: string | null
-    status: string
-  }[]
+  }[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('raffles')
+      .select('created_by, creator_wallet, status, creator_payout_amount, currency')
+      .order('id', { ascending: true })
+      .range(from, from + ADMIN_AGG_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as typeof rows
+    rows.push(...chunk)
+    if (chunk.length < ADMIN_AGG_PAGE_SIZE) break
+    from += ADMIN_AGG_PAGE_SIZE
+  }
+  return rows
+}
+
+async function fetchAllConfirmedEntriesForAdminAgg(
+  db: SupabaseClient
+): Promise<
+  { wallet_address: string; amount_paid: number; currency: string | null; status: string }[]
+> {
+  const rows: { wallet_address: string; amount_paid: number; currency: string | null; status: string }[] =
+    []
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('entries')
+      .select('wallet_address, amount_paid, currency, status')
+      .eq('status', 'confirmed')
+      .order('id', { ascending: true })
+      .range(from, from + ADMIN_AGG_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as typeof rows
+    rows.push(...chunk)
+    if (chunk.length < ADMIN_AGG_PAGE_SIZE) break
+    from += ADMIN_AGG_PAGE_SIZE
+  }
+  return rows
+}
+
+/**
+ * Returns aggregated stats per wallet (creators + entrants).
+ * Loads all raffles and confirmed entries via stable pagination (aligned with public leaderboard).
+ */
+export async function getAdminUsersAggregate(): Promise<AdminUserRow[]> {
+  const db = getSupabaseAdmin()
+
+  const [raffles, entries] = await Promise.all([
+    fetchAllRafflesForAdminAgg(db),
+    fetchAllConfirmedEntriesForAdminAgg(db),
+  ])
 
   const map = new Map<
     string,
