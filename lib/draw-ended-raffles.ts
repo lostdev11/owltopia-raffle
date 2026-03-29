@@ -1,10 +1,10 @@
 /**
- * Process all ended raffles without winners: draw winner when eligible, or extend by 7 days when min not met.
+ * Process all ended raffles without winners: draw winner when eligible, or extend the deadline when min_tickets not met.
  * Used by admin select-winners API and by cron job so winner selection runs on a schedule.
  *
  * Works for any raffle duration (1 day, 2 days, 3 days, etc.): each raffle has its own start_time/end_time.
- * When end_time has passed and threshold (min_tickets) is met, a winner is selected; otherwise the raffle
- * is extended or set to ready_to_draw as per the 7-day extension rules.
+ * When end_time has passed and the ticket threshold (min_tickets) is met, a winner is selected; otherwise
+ * the raffle may be extended up to two times, then set to failed_refund_available (NFT returned when possible).
  */
 import {
   getEndedRafflesWithoutWinner,
@@ -14,7 +14,8 @@ import {
   selectWinner,
   updateRaffle,
 } from '@/lib/db/raffles'
-import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
+import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 
 export type DrawResult = {
   raffleId: string
@@ -42,15 +43,15 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
 
       if (!canDraw) {
         if (!meetsMinTickets) {
-          if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
-            await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+            await finalizeMinThresholdTerminalFailure(raffle.id)
             results.push({
               raffleId: raffle.id,
               raffleTitle: raffle.title,
               success: false,
               winnerWallet: null,
               error:
-                'Minimum was not met after the extension window. Ticket buyers can claim refunds from their dashboard; NFT host flows use support if the prize was in escrow.',
+                'Minimum was not met after two deadline extensions. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
             })
           } else {
             // Threshold not met: extend raffle by its original duration (or 7 days fallback)
@@ -68,6 +69,7 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
               status: 'live',
+              time_extension_count: (raffle.time_extension_count ?? 0) + 1,
             })
 
             results.push({
@@ -75,7 +77,7 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
               raffleTitle: raffle.title,
               success: false,
               winnerWallet: null,
-              error: `Minimum requirements not met (min: ${
+              error: `Minimum ticket threshold not met (min: ${
                 raffle.min_tickets ?? 'N/A'
               }, sold: ${entries
                 .filter((e) => e.status === 'confirmed')

@@ -630,77 +630,160 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
   }
 }
 
-/** Allowed reasons for returning the NFT prize to the creator (admin-only). */
+/** Allowed reasons for returning the NFT prize to the creator (admin or automation). */
 export const PRIZE_RETURN_REASONS = [
   'cancelled',
   'wrong_nft',
   'dispute',
   'platform_error',
   'testing',
+  'min_threshold_not_met',
 ] as const
 export type PrizeReturnReason = (typeof PRIZE_RETURN_REASONS)[number]
 
-/**
- * Transfer the NFT prize from the platform escrow back to the raffle creator.
- * Determines which NFT to send from what the escrow actually holds (deposited by the creator).
- * Idempotent if prize_returned_at already set. Admin must call with a valid reason.
- */
-export async function transferNftPrizeToCreator(
+async function persistPrizeReturnToCreator(
   raffleId: string,
-  reason: PrizeReturnReason
-): Promise<{ ok: boolean; signature?: string; error?: string }> {
-  const raffle = await getRaffleById(raffleId)
-  if (!raffle) {
-    return { ok: false, error: 'Raffle not found' }
-  }
-  if (raffle.prize_type !== 'nft') {
-    return { ok: false, error: 'Raffle is not an NFT raffle' }
-  }
-  if (!raffle.prize_deposited_at) {
-    return {
-      ok: false,
-      error:
-        'Prize deposit is not verified for this raffle. Cannot return from escrow before a verified deposit.',
+  reason: PrizeReturnReason,
+  signature: string
+): Promise<void> {
+  const now = new Date().toISOString()
+  await updateRaffle(raffleId, {
+    prize_returned_at: now,
+    prize_return_reason: reason,
+    prize_return_tx: signature,
+    nft_claim_locked_at: null,
+    nft_claim_locked_wallet: null,
+  })
+}
+
+/**
+ * How the prize is held in escrow for return routing (matches checkEscrowHoldsNft probe order for legacy rows).
+ */
+async function detectPrizeReturnKind(
+  raffle: Raffle
+): Promise<'spl' | 'mpl_core' | 'compressed' | null> {
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) return null
+  const standard = raffle.prize_standard ?? null
+  const preferredMint = (raffle.nft_mint_address || '').trim()
+  const escrowPk = keypair.publicKey
+
+  if (standard === 'mpl_core') return 'mpl_core'
+  if (standard === 'compressed') return 'compressed'
+
+  if (standard === 'spl' || standard === 'token2022') {
+    if (!preferredMint) return null
+    try {
+      const mint = new PublicKey(preferredMint)
+      const tp = await getEscrowTokenProgramForMint(mint, escrowPk)
+      if (tp) return 'spl'
+    } catch {
+      return null
     }
-  }
-  const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-  if (!creatorWallet) {
-    return { ok: false, error: 'Raffle has no creator wallet to return the prize to' }
-  }
-  if (raffle.nft_transfer_transaction) {
-    return { ok: false, error: 'Prize was already sent to winner; cannot return to creator' }
-  }
-  if (raffle.prize_returned_at) {
-    return { ok: true, signature: raffle.prize_return_tx ?? undefined }
+    return null
   }
 
+  // Legacy / unknown: SPL Token or Token-2022 ATA first
+  const connection = getSolanaConnection()
+  if (preferredMint) {
+    try {
+      const mint = new PublicKey(preferredMint)
+      for (const programId of TOKEN_PROGRAM_IDS) {
+        try {
+          const ata = await getAssociatedTokenAddress(
+            mint,
+            escrowPk,
+            false,
+            programId,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+          const account = await getAccount(connection, ata, 'confirmed', programId)
+          if (account.amount >= NFT_AMOUNT) return 'spl'
+        } catch {
+          // try next program
+        }
+      }
+    } catch {
+      // bad mint
+    }
+  }
+
+  const coreCandidates = Array.from(
+    new Set(
+      [raffle.nft_token_id, raffle.nft_mint_address]
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    )
+  )
+  for (const assetId of coreCandidates) {
+    try {
+      if (await isMplCoreAssetInEscrow(assetId)) return 'mpl_core'
+    } catch {
+      // try next
+    }
+  }
+
+  const escrowBase58 = escrowPk.toBase58()
+  const endpoint = resolveServerSolanaRpcUrl()
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
+    const assetIdCandidates = Array.from(
+      new Set(
+        [raffle.nft_token_id, raffle.nft_mint_address]
+          .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          .map((v) => v.trim())
+      )
+    )
+    for (const assetId of assetIdCandidates) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
+        const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
+        if (leafOwnerStr === escrowBase58) return 'compressed'
+      } catch {
+        // try next id
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+/** SPL / Token-2022: return verified mint from escrow list to creator. */
+async function transferSplPrizeToCreatorFromEscrow(
+  raffleId: string,
+  raffle: Raffle,
+  reason: PrizeReturnReason,
+  creatorWallet: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) {
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
-  // Determine which NFT to return from what the escrow actually holds.
-  // Safety: only allow returning the exact raffle mint once deposit was verified.
   const held = await getEscrowHeldNftMints()
   if (held.length === 0) {
     return {
       ok: false,
-      error: `Escrow has no NFTs to return. Escrow: ${keypair.publicKey.toBase58()}.`,
+      error: `Escrow has no SPL NFTs to return. Escrow: ${keypair.publicKey.toBase58()}.`,
     }
   }
   const preferredMint = (raffle.nft_mint_address || '').trim()
   if (!preferredMint) {
     return {
       ok: false,
-      error:
-        'Raffle NFT mint is missing. Re-verify prize deposit before attempting return.',
+      error: 'Raffle NFT mint is missing. Re-verify prize deposit before attempting return.',
     }
   }
   const chosen = held.find((h) => h.mint === preferredMint)
   if (!chosen) {
     return {
       ok: false,
-      error: `Escrow does not hold this raffle's verified mint (${preferredMint}). Return blocked.`,
+      error: `Escrow does not hold this raffle's verified mint (${preferredMint}) as SPL/Token-2022.`,
     }
   }
 
@@ -708,12 +791,11 @@ export async function transferNftPrizeToCreator(
   const mint = new PublicKey(chosen.mint)
   const creatorPubkey = new PublicKey(creatorWallet)
 
-  // Resolve which token program actually holds this mint (getAccount is authoritative; parsed list can be stale/wrong)
   const tokenProgram = await getEscrowTokenProgramForMint(mint, keypair.publicKey)
   if (!tokenProgram) {
     return {
       ok: false,
-      error: `Escrow reports no balance for mint ${chosen.mint}. It may have been transferred out, or the RPC list was stale. Try again; if it persists, check the escrow on Solscan: ${keypair.publicKey.toBase58()}.`,
+      error: `Escrow reports no SPL balance for mint ${chosen.mint}. Escrow: ${keypair.publicKey.toBase58()}.`,
     }
   }
 
@@ -731,7 +813,7 @@ export async function transferNftPrizeToCreator(
     if (sourceAccount.amount < NFT_AMOUNT) {
       return {
         ok: false,
-        error: `Escrow token account has no balance for mint ${chosen.mint}. Check escrow on Solscan: ${keypair.publicKey.toBase58()}.`,
+        error: `Escrow token account has no balance for mint ${chosen.mint}. Escrow: ${keypair.publicKey.toBase58()}.`,
       }
     }
   } catch (err) {
@@ -788,32 +870,214 @@ export async function transferNftPrizeToCreator(
     tx.feePayer = keypair.publicKey
     tx.sign(keypair)
 
-    // skipPreflight: true — see file-level doc; we verified balance with getAccount(..., 'confirmed')
     const sig = await connection.sendRawTransaction(tx.serialize(), {
       skipPreflight: true,
       preflightCommitment: 'confirmed',
     })
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
 
-    const now = new Date().toISOString()
-    await updateRaffle(raffleId, {
-      prize_returned_at: now,
-      prize_return_reason: reason,
-      prize_return_tx: sig,
-    })
+    await persistPrizeReturnToCreator(raffleId, reason, sig)
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`Prize return to creator failed for raffle ${raffleId}:`, err)
-    // Surface a clearer message for the common "debit with no credit" simulation failure
     if (message.includes('Attempt to debit') || message.includes('debit an account')) {
       return {
         ok: false,
         error: `Transfer failed: escrow token account has no balance. Mint used: ${chosen.mint}. Escrow: ${keypair.publicKey.toBase58()}.`,
       }
     }
+    return { ok: false, error: humanizeSplPrizeTransferError(message) }
+  }
+}
+
+/** MPL Core: transfer asset from escrow to creator (mirror winner flow). */
+async function transferMplCorePrizeToCreatorFromEscrow(
+  raffleId: string,
+  raffle: Raffle,
+  reason: PrizeReturnReason,
+  creatorWallet: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const mintStr = (raffle.nft_mint_address || '').trim()
+  if (!mintStr) {
+    return { ok: false, error: 'Raffle NFT (Core asset) address is missing' }
+  }
+
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  try {
+    if (!(await isMplCoreAssetInEscrow(mintStr))) {
+      return {
+        ok: false,
+        error:
+          'MPL Core asset is not owned by the prize escrow, or the asset id does not match this raffle.',
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `MPL Core escrow check failed: ${message}` }
+  }
+
+  const endpoint = resolveServerSolanaRpcUrl()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const umi: any = (createUmi as any)(endpoint as any)
+  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
+  const signer = createSignerFromKeypair(umi, umiKeypair)
+  umi.use(signerIdentity(signer))
+
+  const asset = umiPublicKey(mintStr)
+  const newOwner = umiPublicKey(creatorWallet.trim())
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assetAccount: any = await fetchAsset(umi as any, asset)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const maybeCollection: any =
+    assetAccount?.updateAuthority?.type === 'Collection'
+      ? assetAccount.updateAuthority.address
+      : undefined
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const builder: any = transferV1(umi as any, {
+      asset,
+      newOwner,
+      ...(maybeCollection ? { collection: maybeCollection } : {}),
+    } as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await builder.sendAndConfirm(umi as any)
+    const sig = String(result.signature ?? result)
+    await persistPrizeReturnToCreator(raffleId, reason, sig)
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`MPL Core prize return to creator failed for raffle ${raffleId}:`, err)
     return { ok: false, error: message }
   }
+}
+
+/** Compressed (Bubblegum): transfer from escrow leaf to creator. */
+async function transferCompressedPrizeToCreatorFromEscrow(
+  raffleId: string,
+  raffle: Raffle,
+  reason: PrizeReturnReason,
+  creatorWallet: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const assetId = (raffle.nft_mint_address || raffle.nft_token_id || '').trim()
+  if (!assetId) {
+    return { ok: false, error: 'Missing compressed NFT asset id' }
+  }
+
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  const escrowBase58 = keypair.publicKey.toBase58()
+  const endpoint = resolveServerSolanaRpcUrl()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
+  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
+  const signer = createSignerFromKeypair(umi, umiKeypair)
+  umi.use(signerIdentity(signer))
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
+    const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
+    if (leafOwnerStr !== escrowBase58) {
+      return {
+        ok: false,
+        error:
+          'Compressed NFT is not in the prize escrow under this asset id, or the asset is not compressed.',
+      }
+    }
+
+    const { compressionProgram, logWrapper } = await getCompressionProgramsForV1Ixs(umi)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const builder: any = bubblegumTransfer(umi, {
+      leafOwner: umiPublicKey(escrowBase58),
+      leafDelegate: asset.leafDelegate,
+      newLeafOwner: umiPublicKey(creatorWallet.trim()),
+      merkleTree: asset.merkleTree,
+      root: asset.root,
+      dataHash: asset.dataHash,
+      creatorHash: asset.creatorHash,
+      nonce: BigInt(asset.nonce),
+      index: asset.index,
+      proof: asset.proof,
+      compressionProgram,
+      logWrapper,
+    } as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await builder.sendAndConfirm(umi)
+    const sig = String(result.signature ?? result)
+    await persistPrizeReturnToCreator(raffleId, reason, sig)
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`Compressed prize return to creator failed for raffle ${raffleId}:`, err)
+    return { ok: false, error: message }
+  }
+}
+
+/**
+ * Transfer the NFT prize from the platform escrow back to the raffle creator.
+ * Supports SPL Token, Token-2022, MPL Core, and compressed (Bubblegum) prizes.
+ * Idempotent if prize_returned_at already set. Call with a valid reason (admin or terminal min-threshold flow).
+ */
+export async function transferNftPrizeToCreator(
+  raffleId: string,
+  reason: PrizeReturnReason
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+  if (raffle.prize_type !== 'nft') {
+    return { ok: false, error: 'Raffle is not an NFT raffle' }
+  }
+  if (!raffle.prize_deposited_at) {
+    return {
+      ok: false,
+      error:
+        'Prize deposit is not verified for this raffle. Cannot return from escrow before a verified deposit.',
+    }
+  }
+  const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  if (!creatorWallet) {
+    return { ok: false, error: 'Raffle has no creator wallet to return the prize to' }
+  }
+  if (raffle.nft_transfer_transaction) {
+    return { ok: false, error: 'Prize was already sent to winner; cannot return to creator' }
+  }
+  if (raffle.prize_returned_at) {
+    return { ok: true, signature: raffle.prize_return_tx ?? undefined }
+  }
+
+  if (!getPrizeEscrowKeypair()) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  const kind = await detectPrizeReturnKind(raffle)
+  if (!kind) {
+    const holdCheck = await checkEscrowHoldsNft(raffle)
+    return {
+      ok: false,
+      error:
+        holdCheck.error ??
+        'Could not determine how this NFT is held in escrow (SPL, MPL Core, or compressed).',
+    }
+  }
+
+  if (kind === 'spl') {
+    return transferSplPrizeToCreatorFromEscrow(raffleId, raffle, reason, creatorWallet)
+  }
+  if (kind === 'mpl_core') {
+    return transferMplCorePrizeToCreatorFromEscrow(raffleId, raffle, reason, creatorWallet)
+  }
+  return transferCompressedPrizeToCreatorFromEscrow(raffleId, raffle, reason, creatorWallet)
 }
 
 /**

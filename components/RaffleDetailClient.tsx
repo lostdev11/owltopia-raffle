@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
+import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { WinnerModal } from '@/components/WinnerModal'
@@ -2578,6 +2579,7 @@ export function RaffleDetailClient({
                         Draw Threshold: {minTickets}
                       </Badge>
                     )}
+                    <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} />
                     {raffle.prize_type === 'nft' && (
                       <Badge
                         variant="outline"

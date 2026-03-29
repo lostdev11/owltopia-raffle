@@ -9,7 +9,8 @@ import {
   updateRaffle,
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
-import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
+import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -70,16 +71,16 @@ export async function POST(request: NextRequest) {
         const canDraw = canSelectWinner(raffle, entries)
         const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
-        
+
         if (!canDraw) {
-          // If a minimum is configured but not met, extend once; after that mark failed_refund_available.
+          // Ticket threshold (min_tickets) not met: extend up to two times; then refunds + NFT return.
           if (hasMinTickets && !meetsMinTickets) {
-            if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
-              await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+            if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+              await finalizeMinThresholdTerminalFailure(raffle.id)
               return NextResponse.json(
                 {
                   error:
-                    'Minimum still not met after extension. Raffle set to refund-available for ticket buyers.',
+                    'Minimum still not met after two extensions. Raffle set to refund-available; NFT returned to creator when possible.',
                   raffleId: raffle.id,
                   minTickets: raffle.min_tickets,
                   ticketsSold: entries
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
               status: 'live',
+              time_extension_count: (raffle.time_extension_count ?? 0) + 1,
             })
 
             return NextResponse.json(
@@ -121,13 +123,14 @@ export async function POST(request: NextRequest) {
               { status: 400 }
             )
           } else if (!hasMinTickets) {
-            // No minimum configured and either zero tickets or some other non-drawable state
             return NextResponse.json(
-              { 
-                error: 'Raffle has no minimum threshold and cannot draw a winner (no confirmed tickets).',
+              {
+                error:
+                  'Raffle has no minimum ticket threshold and cannot draw a winner (no confirmed tickets).',
                 raffleId: raffle.id,
                 minTickets: raffle.min_tickets,
-                ticketsSold: entries.filter(e => e.status === 'confirmed')
+                ticketsSold: entries
+                  .filter((e) => e.status === 'confirmed')
                   .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
               },
               { status: 400 }

@@ -10,8 +10,7 @@ export type CreatorHealthRow = {
   completed: number
   cancelled: number
   /**
-   * Raffles whose end was reached without min tickets sold at least once — proxied by
-   * end_time extended past original_end_time (same mechanism as draw-ended-raffles).
+   * Raffles whose end_time was extended past original_end_time (min-threshold extension at least once).
    */
   minTicketExtensions: number
   /** Raffle had edited_after_entries = true. */

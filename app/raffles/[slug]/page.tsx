@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
-import { hasRaffleAlreadyBeenTimeExtended } from '@/lib/raffles/ticket-escrow-policy'
+import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
@@ -124,13 +124,16 @@ export default async function RaffleDetailPage({
           }
         }
       } else {
-        // Threshold not met: only extend when a minimum is configured and not reached yet
+        // Ticket threshold (min_tickets) not met: up to two extensions, then failed_refund + NFT return
         const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (hasMinTickets && !meetsMinTickets) {
-          if (hasRaffleAlreadyBeenTimeExtended(raffle)) {
-            await updateRaffle(raffle.id, { status: 'failed_refund_available' })
+          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+            const { finalizeMinThresholdTerminalFailure } = await import(
+              '@/lib/raffles/min-threshold-terminal'
+            )
+            await finalizeMinThresholdTerminalFailure(raffle.id)
             raffle = await getRaffleBySlug(slug)
             if (!raffle) {
               notFound()
@@ -150,6 +153,7 @@ export default async function RaffleDetailPage({
               original_end_time: originalEndTime,
               end_time: newEndTime.toISOString(),
               status: 'live',
+              time_extension_count: (raffle.time_extension_count ?? 0) + 1,
             })
 
             raffle = await getRaffleBySlug(slug)
@@ -158,8 +162,6 @@ export default async function RaffleDetailPage({
             }
           }
         } else if (!hasMinTickets) {
-          // No minimum configured and either zero tickets or some other non-drawable state:
-          // mark as ready_to_draw so admins can decide how to handle it.
           if (raffle.status !== 'ready_to_draw') {
             await updateRaffle(raffle.id, { status: 'ready_to_draw' })
             raffle = await getRaffleBySlug(slug)

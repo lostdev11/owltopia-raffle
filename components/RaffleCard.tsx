@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
+import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import type { Raffle, Entry } from '@/lib/types'
@@ -1017,7 +1018,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </p>
             )}
               <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
-              <span className="text-[11px] sm:text-xs text-muted-foreground flex-1 min-w-0 truncate basis-0 sm:basis-auto">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1 basis-0 sm:basis-auto">
+                <span className="text-[11px] sm:text-xs text-muted-foreground min-w-0 truncate">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                     {serverNow && new Date(raffle.start_time) <= serverNow
@@ -1035,7 +1037,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 ) : (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                 )}
-              </span>
+                </span>
+                <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
+              </div>
               {/* Status badge only when not in active section (redundant under "Active raffles") */}
               {section !== 'active' && (
                 <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
@@ -1262,6 +1266,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       >
                         {statusLabel}
                       </Badge>
+                      <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact onImageOverlay />
+                    </div>
+                  )}
+                  {section === 'active' && (
+                    <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
+                      <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact onImageOverlay />
                     </div>
                   )}
                 </div>
@@ -1334,8 +1344,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </div>
               </CardContent>
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
-                <div className={`w-full flex items-center justify-between ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
-                  <span>
+                <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
+                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                    <span className="min-w-0">
                     {isFuture ? (
                       <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                         {serverNow && new Date(raffle.start_time) <= serverNow
@@ -1353,7 +1364,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     ) : (
                       <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                     )}
-                  </span>
+                    </span>
+                    <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
+                  </div>
                   {section !== 'active' && (
                     <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
                       <Badge 

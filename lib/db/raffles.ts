@@ -83,7 +83,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_MINIMAL =
-  ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
@@ -652,6 +652,11 @@ export async function getRaffleById(id: string) {
  */
 /** Ensure raffle row has prize return / cancellation fields (for minimal column select). */
 function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
+  const extRaw = row.time_extension_count
+  const time_extension_count =
+    typeof extRaw === 'number' && Number.isFinite(extRaw)
+      ? Math.max(0, Math.floor(extRaw))
+      : Math.max(0, Math.floor(Number(extRaw ?? 0)) || 0)
   return {
     ...row,
     image_fallback_url: (row.image_fallback_url as string | null | undefined) ?? null,
@@ -670,6 +675,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
+    time_extension_count,
   } as Raffle
 }
 
@@ -1006,6 +1012,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     start_time: raffle.start_time,
     end_time: raffle.end_time,
     original_end_time: raffle.original_end_time,
+    time_extension_count: raffle.time_extension_count ?? 0,
     theme_accent: raffle.theme_accent,
     edited_after_entries: raffle.edited_after_entries,
     created_by: raffle.created_by,
@@ -1588,10 +1595,9 @@ export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
  * Check if a raffle can have a winner selected.
  *
  * Behaviour:
- * - When a minimum ticket threshold is set (min_tickets > 0), the raffle becomes
- *   eligible to draw as soon as confirmed tickets >= min_tickets.
- * - When no minimum is set, the raffle is eligible to draw as long as there is
- *   at least one confirmed ticket.
+ * - When a minimum ticket threshold is set (min_tickets > 0), the raffle is eligible to draw once
+ *   confirmed tickets >= min_tickets (ticket count is the draw threshold).
+ * - When no minimum is set, require at least one confirmed ticket.
  *
  * NOTE: Callers are responsible for ensuring the raffle has actually ended
  * (end_time has passed) before calling this helper.
@@ -1599,7 +1605,7 @@ export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
 export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
   const confirmedTickets = calculateTicketsSold(entries)
 
-  // If a minimum is configured, require that threshold to be met
+  // If a minimum is configured, require that ticket threshold to be met
   if (raffle.min_tickets && raffle.min_tickets > 0) {
     return confirmedTickets >= raffle.min_tickets
   }

@@ -43,6 +43,8 @@ export interface Raffle {
   start_time: string
   end_time: string
   original_end_time: string | null
+  /** How many times end_time was extended because min_tickets was not met at deadline (max 2 before terminal). */
+  time_extension_count: number
   theme_accent: ThemeAccent
   edited_after_entries: boolean
   created_at: string
@@ -72,7 +74,7 @@ export interface Raffle {
   prize_deposit_tx: string | null
   /** Set when prize was returned from escrow to creator (admin-only, controlled reasons). */
   prize_returned_at: string | null
-  /** Reason for return: cancelled | wrong_nft | dispute | platform_error. */
+  /** Reason for return (includes min_threshold_not_met after terminal extension exhaustion). */
   prize_return_reason: string | null
   /** Solana tx signature for the return transfer to creator. */
   prize_return_tx: string | null

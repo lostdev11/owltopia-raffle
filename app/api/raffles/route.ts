@@ -292,6 +292,7 @@ export async function POST(request: NextRequest) {
       start_time: startTime,
       end_time: body.end_time,
       original_end_time: body.end_time, // Store original end time when raffle is created
+      time_extension_count: 0,
       theme_accent: body.theme_accent || 'prime',
       edited_after_entries: false,
       created_by: walletAddress,
