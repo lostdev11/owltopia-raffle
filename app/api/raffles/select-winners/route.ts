@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   getEndedRafflesWithoutWinner,
-  getRaffles,
   selectWinner,
   getRaffleById,
   getEntriesByRaffleId,
@@ -174,42 +173,14 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET /api/raffles/select-winners
- * Returns live/upcoming raffles (end time not reached) and ended raffles without winners. Admin only.
+ * Returns list of ended raffles without winners. Admin only (session required).
  */
 export async function GET(request: NextRequest) {
   try {
     const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
-    const [endedRaffles, { data: allRaffles, error: rafflesError }] = await Promise.all([
-      getEndedRafflesWithoutWinner(),
-      getRaffles(false, { includeDraft: true }),
-    ])
-
-    if (rafflesError) {
-      return NextResponse.json(
-        { error: rafflesError.message || 'Could not load raffles' },
-        { status: 502 }
-      )
-    }
-
-    const nowMs = Date.now()
-    const currentRaffles = (allRaffles ?? [])
-      .filter((r) => {
-        const st = (r.status ?? '').toLowerCase()
-        if (st === 'cancelled') return false
-        const end = new Date(r.end_time).getTime()
-        return Number.isFinite(end) && end > nowMs
-      })
-      .map((r) => ({
-        id: r.id,
-        title: r.title,
-        slug: r.slug,
-        startTime: r.start_time,
-        endTime: r.end_time,
-        status: r.status,
-      }))
-      .sort((a, b) => new Date(a.endTime).getTime() - new Date(b.endTime).getTime())
+    const endedRaffles = await getEndedRafflesWithoutWinner()
 
     return NextResponse.json({
       count: endedRaffles.length,
@@ -219,8 +190,6 @@ export async function GET(request: NextRequest) {
         slug: r.slug,
         endTime: r.end_time,
       })),
-      currentCount: currentRaffles.length,
-      currentRaffles,
     })
   } catch (error) {
     console.error('Error fetching ended raffles:', error)

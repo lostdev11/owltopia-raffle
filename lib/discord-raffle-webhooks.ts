@@ -1,9 +1,11 @@
 /**
  * Optional Discord webhook notifications for raffle lifecycle events.
- * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER, or DISCORD_WEBHOOK_URL for both.
+ * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER / DISCORD_WEBHOOK_LIVE_RAFFLES,
+ * or DISCORD_WEBHOOK_URL as fallback where noted.
  */
 import type { Raffle } from '@/lib/types'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -15,6 +17,12 @@ function webhookUrlCreated(): string | undefined {
 
 function webhookUrlWinner(): string | undefined {
   const specific = process.env.DISCORD_WEBHOOK_RAFFLE_WINNER?.trim()
+  if (specific) return specific
+  return process.env.DISCORD_WEBHOOK_URL?.trim() || undefined
+}
+
+function webhookUrlLiveShare(): string | undefined {
+  const specific = process.env.DISCORD_WEBHOOK_LIVE_RAFFLES?.trim()
   if (specific) return specific
   return process.env.DISCORD_WEBHOOK_URL?.trim() || undefined
 }
@@ -58,7 +66,13 @@ type DiscordEmbed = {
   timestamp?: string
 }
 
-async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Promise<void> {
+async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Promise<boolean> {
+  if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
+    console.error(
+      'Discord webhook URL rejected: must be https://discord.com/api/webhooks/{id}/{token} (or canary/ptb/discordapp host)'
+    )
+    return false
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
   try {
@@ -74,9 +88,12 @@ async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Prom
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       console.error(`Discord webhook failed: ${res.status} ${res.statusText}`, text.slice(0, 200))
+      return false
     }
+    return true
   } catch (e) {
     console.error('Discord webhook request error:', e)
+    return false
   } finally {
     clearTimeout(timer)
   }
@@ -148,4 +165,43 @@ export async function notifyRaffleWinnerDrawn(
     ],
     timestamp: new Date().toISOString(),
   })
+}
+
+/**
+ * Manual admin “post to Discord” for a live raffle. Uses DISCORD_WEBHOOK_LIVE_RAFFLES, or DISCORD_WEBHOOK_URL.
+ */
+export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boolean; error?: string }> {
+  const url = webhookUrlLiveShare()
+  if (!url) {
+    return { ok: false, error: 'DISCORD_WEBHOOK_LIVE_RAFFLES (or DISCORD_WEBHOOK_URL) is not set' }
+  }
+  if (!isAllowedDiscordIncomingWebhookUrl(url)) {
+    return {
+      ok: false,
+      error: 'Live webhook URL in env is not a valid Discord incoming webhook URL (https only, discord.com/api/webhooks/…)',
+    }
+  }
+
+  const pageUrl = rafflePageUrl(raffle)
+  const endTs = discordTimestampUnix(raffle.end_time)
+  const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
+
+  const sent = await postDiscordWebhook(url, {
+    title: 'Live raffle',
+    description: raffle.title,
+    url: pageUrl,
+    color: 0x5865f2,
+    fields: [
+      { name: 'Enter here', value: pageUrl, inline: false },
+      { name: 'Prize', value: prizeSummary(raffle), inline: true },
+      { name: 'Ticket price', value: `${raffle.ticket_price} ${raffle.currency}`, inline: true },
+      { name: 'Ends', value: endLine, inline: false },
+    ],
+    timestamp: new Date().toISOString(),
+  })
+
+  if (!sent) {
+    return { ok: false, error: 'Discord returned an error or the request failed' }
+  }
+  return { ok: true }
 }
