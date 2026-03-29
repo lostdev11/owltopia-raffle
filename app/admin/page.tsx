@@ -1054,7 +1054,7 @@ export default function AdminDashboardPage() {
                 Creator Radar
               </CardTitle>
               <CardDescription>
-                Per-creator signals to spot raffles that may struggle to sell out or clash with platform rules: min-ticket extensions (deadline extended up to twice when the ticket minimum was not met at end), edits after entries, cancellation requests, blocked purchases, weak sell-through on completed raffles, and pending ticket rows that still need verification.
+                Per-creator signals to spot raffles that may struggle to sell out or clash with platform rules: min-ticket extensions (deadline extended once when the ticket minimum was not met at end), edits after entries, cancellation requests, blocked purchases, weak sell-through on completed raffles, and pending ticket rows that still need verification.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1076,7 +1076,7 @@ export default function AdminDashboardPage() {
                         <th className="py-2 pr-2 font-medium tabular-nums" title="Completed">
                           Done
                         </th>
-                        <th className="py-2 pr-2 font-medium tabular-nums" title="Min-ticket extensions (threshold not met at end; up to two deadline extensions before refunds)">
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Min-ticket extensions (threshold not met at end; one deadline extension before refunds)">
                           Ext
                         </th>
                         <th className="py-2 pr-2 font-medium tabular-nums" title="Edited after entries">

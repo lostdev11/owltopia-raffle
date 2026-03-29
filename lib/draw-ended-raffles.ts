@@ -4,7 +4,7 @@
  *
  * Works for any raffle duration (1 day, 2 days, 3 days, etc.): each raffle has its own start_time/end_time.
  * When end_time has passed and the ticket threshold (min_tickets) is met, a winner is selected; otherwise
- * the raffle may be extended up to two times, then set to failed_refund_available (NFT returned when possible).
+ * the raffle may be extended once, then set to failed_refund_available (NFT returned when possible).
  */
 import {
   getEndedRafflesWithoutWinner,
@@ -51,7 +51,7 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
               success: false,
               winnerWallet: null,
               error:
-                'Minimum was not met after two deadline extensions. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
+                'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
             })
           } else {
             // Threshold not met: extend raffle by its original duration (or 7 days fallback)

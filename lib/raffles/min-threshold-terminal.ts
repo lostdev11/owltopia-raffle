@@ -2,7 +2,7 @@ import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
 
 /**
- * After min_tickets was not met at end and the raffle has used all allowed deadline extensions:
+ * After min_tickets was not met at end and the raffle has used its allowed deadline extension:
  * set status for ticket refunds, then attempt to return an escrowed NFT to the creator.
  * Refund claims work even if the on-chain return fails (admin can retry return).
  */

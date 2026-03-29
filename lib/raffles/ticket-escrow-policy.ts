@@ -1,7 +1,7 @@
 import type { Raffle } from '@/lib/types'
 
 /** Max automatic deadline extensions when min_tickets is not met at end; then refunds + NFT return. */
-export const MAX_MIN_THRESHOLD_TIME_EXTENSIONS = 2
+export const MAX_MIN_THRESHOLD_TIME_EXTENSIONS = 1
 
 /** True when ticket gross must be verified as paid into the funds escrow wallet. */
 export function raffleUsesFundsEscrow(raffle: {

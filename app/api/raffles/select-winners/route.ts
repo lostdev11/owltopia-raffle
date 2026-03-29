@@ -73,14 +73,14 @@ export async function POST(request: NextRequest) {
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (!canDraw) {
-          // Ticket threshold (min_tickets) not met: extend up to two times; then refunds + NFT return.
+          // Ticket threshold (min_tickets) not met: extend once; then refunds + NFT return.
           if (hasMinTickets && !meetsMinTickets) {
             if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
               await finalizeMinThresholdTerminalFailure(raffle.id)
               return NextResponse.json(
                 {
                   error:
-                    'Minimum still not met after two extensions. Raffle set to refund-available; NFT returned to creator when possible.',
+                    'Minimum still not met after the extension. Raffle set to refund-available; NFT returned to creator when possible.',
                   raffleId: raffle.id,
                   minTickets: raffle.min_tickets,
                   ticketsSold: entries

@@ -43,7 +43,7 @@ export interface Raffle {
   start_time: string
   end_time: string
   original_end_time: string | null
-  /** How many times end_time was extended because min_tickets was not met at deadline (max 2 before terminal). */
+  /** How many times end_time was extended because min_tickets was not met at deadline (max 1 before terminal). */
   time_extension_count: number
   theme_accent: ThemeAccent
   edited_after_entries: boolean

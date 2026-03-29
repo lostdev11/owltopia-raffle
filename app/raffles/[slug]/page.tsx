@@ -124,7 +124,7 @@ export default async function RaffleDetailPage({
           }
         }
       } else {
-        // Ticket threshold (min_tickets) not met: up to two extensions, then failed_refund + NFT return
+        // Ticket threshold (min_tickets) not met: one extension, then failed_refund + NFT return
         const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 

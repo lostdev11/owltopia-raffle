@@ -32,7 +32,7 @@ const PRIZE_RETURN_REASONS = [
   { value: 'dispute', label: 'Dispute resolution' },
   { value: 'platform_error', label: 'Platform error' },
   { value: 'testing', label: 'Testing' },
-  { value: 'min_threshold_not_met', label: 'Min tickets not met (after extensions)' },
+  { value: 'min_threshold_not_met', label: 'Min tickets not met (after extension)' },
 ] as const
 
 interface AdminRaffleActionsProps {
