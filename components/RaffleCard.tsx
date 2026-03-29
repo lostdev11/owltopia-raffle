@@ -461,7 +461,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 'Network connection failed. This may be a network issue or CORS restriction on mobile. ' +
                 'Please check your internet connection and try again. ' +
                 'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
               )
             } else {
               throw new Error('Failed to get blockhash. Please try again.')
@@ -566,13 +566,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     'Network connection failed while fetching OWL mint information. This may be a network issue or CORS restriction on mobile. ' +
                     'Please check your internet connection and try again. ' +
                     'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                   )
                 } else {
                   throw new Error(
                     'Failed to fetch OWL mint information after retries. This may be a temporary RPC issue. ' +
                     'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC).'
                   )
                 }
               }

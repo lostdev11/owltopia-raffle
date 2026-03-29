@@ -5,6 +5,7 @@ import { getTokenInfo } from '@/lib/tokens'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 function asPublicKey(k: PublicKey | string): PublicKey {
   return k instanceof PublicKey ? k : new PublicKey(k)
@@ -52,27 +53,7 @@ export async function verifyTransaction(
   options?: { allowExpired?: boolean }
 ): Promise<{ valid: boolean; error?: string }> {
   try {
-    // Get Solana RPC URL from environment
-    let rpcUrl = process.env.SOLANA_RPC_URL?.trim() || 
-                 process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
-                 'https://api.mainnet-beta.solana.com'
-    
-    // Validate and sanitize RPC URL
-    if (rpcUrl && !rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://')) {
-      if (rpcUrl && !rpcUrl.includes('://')) {
-        rpcUrl = `https://${rpcUrl}`
-      } else {
-        console.warn(`Invalid RPC URL format: ${rpcUrl}. Using fallback.`)
-        rpcUrl = 'https://api.mainnet-beta.solana.com'
-      }
-    }
-    
-    if (!rpcUrl || (!rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://'))) {
-      const error = `Invalid RPC URL configuration. Endpoint URL must start with 'http:' or 'https:'. Current value: ${rpcUrl || 'undefined'}`
-      console.error(error)
-      return { valid: false, error }
-    }
-    
+    const rpcUrl = resolveServerSolanaRpcUrl()
     const connection = new Connection(rpcUrl, 'confirmed')
     
     // Treasury/recipient wallet (same for SOL, USDC, OWL). Verification ensures

@@ -2,14 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById } from '@/lib/db/raffles'
 import { getEscrowTokenAccountForMint, isMplCoreAssetInEscrow } from '@/lib/raffles/prize-escrow'
 import { PublicKey } from '@solana/web3.js'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
-
-const rpcUrl =
-  process.env.SOLANA_RPC_URL?.trim() ||
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
-  ''
-const isDevnet = /devnet/i.test(rpcUrl)
 
 /**
  * GET /api/raffles/[id]/escrow-check-url
@@ -42,7 +37,7 @@ export async function GET(
 
     const mintStr = raffle.nft_mint_address.trim()
     const mint = new PublicKey(mintStr)
-    const cluster = isDevnet ? '?cluster=devnet' : ''
+    const cluster = /devnet/i.test(resolveServerSolanaRpcUrl()) ? '?cluster=devnet' : ''
     // Mpl Core assets use an asset account (not SPL mint); /account/ is the correct Solscan URL.
     // SPL/Token-2022 use /token/ for the mint page.
     const prizeStandard = (raffle as { prize_standard?: string | null }).prize_standard

@@ -28,7 +28,7 @@ When an NFT raffle uses the **prize escrow**, the creator sends the NFT to a pla
    Do **not** commit this value. Use your hosting provider’s env (e.g. Vercel) or a secrets manager.
 
 4. **RPC**  
-   Server-side transfer uses `SOLANA_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL`. Prefer a private RPC (Helius, QuickNode, etc.) for reliability.
+   Server-side transfer uses `SOLANA_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL` (see `lib/solana-rpc-url.ts` for dev overrides). Prefer a reliable private RPC in production.
 
 **Devnet:** For testing, set both RPC vars to `https://api.devnet.solana.com` (or your devnet RPC), use a devnet-only escrow keypair, and fund it with devnet SOL. See [ESCROW_DEVNET_TESTING.md](./ESCROW_DEVNET_TESTING.md) for a full devnet checklist.
 

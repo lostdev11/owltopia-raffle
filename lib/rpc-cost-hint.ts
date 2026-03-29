@@ -1,19 +1,21 @@
 /**
  * Helius bills standard RPC methods (e.g. getParsedTokenAccountsByOwner) on the same URL as DAS.
- * Wallet adapter + client fallbacks use NEXT_PUBLIC_SOLANA_RPC_URL — if that is Helius, credits burn fast.
+ * Wallet adapter + client fallbacks use the resolved public RPC — if that is Helius, credits burn fast.
  */
+
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 let warnedWalletRpcHelius = false
 
 export function warnIfWalletRpcIsHeliusDevOnce(): void {
   if (process.env.NODE_ENV !== 'development') return
   if (warnedWalletRpcHelius) return
-  const url = process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ?? ''
+  const url = resolvePublicSolanaRpcUrl()
   if (!url || !/helius-rpc\.com/i.test(url)) return
   warnedWalletRpcHelius = true
   console.info(
-    '[OwlRaffle] NEXT_PUBLIC_SOLANA_RPC_URL uses Helius. Browser wallet code calls getParsedTokenAccountsByOwner often; ' +
-      'that uses RPC credits. To ease off paid tiers: point this at a public/free RPC and keep HELIUS_API_KEY for server DAS only. ' +
-      'See .env.example (Helius / free tier).'
+    '[OwlRaffle] Public Solana RPC (NEXT_PUBLIC_* / dev override) points at Helius. Browser wallet code calls getParsedTokenAccountsByOwner often; ' +
+      'that uses RPC credits. For local dev, set NEXT_PUBLIC_DEV_SOLANA_RPC_URL to a free endpoint (e.g. https://solana.drpc.org or https://api.mainnet-beta.solana.com) and keep HELIUS_API_KEY for server DAS only. ' +
+      'See .env.example (Dev RPC / Helius).'
   )
 }

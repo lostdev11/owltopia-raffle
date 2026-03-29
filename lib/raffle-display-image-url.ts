@@ -26,7 +26,30 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
   if (!imageUrl?.trim()) return null
   const url = imageUrl.trim()
 
-  if (url.startsWith('/api/proxy-image')) return url
+  // Create flow used to persist `/api/proxy-image?url=...`; server fetch often 404s on Firebase/GCS.
+  if (url.startsWith('/api/proxy-image')) {
+    try {
+      const parsed = new URL(url, 'https://placeholder.local')
+      const inner = parsed.searchParams.get('url')
+      if (inner) {
+        const decoded = fullyDecodeURIComponentSafe(inner)
+        try {
+          const u = new URL(decoded)
+          if (
+            (u.protocol === 'http:' || u.protocol === 'https:') &&
+            isDirectRaffleImageHost(u.hostname)
+          ) {
+            return decoded
+          }
+        } catch {
+          /* keep proxy */
+        }
+      }
+    } catch {
+      /* keep proxy */
+    }
+    return url
+  }
   if (url.startsWith('/') && !url.startsWith('//')) return url
 
   if (/^ipfs:\/\//i.test(url)) {

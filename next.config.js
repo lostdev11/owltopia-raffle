@@ -117,7 +117,8 @@ const nextConfig = {
               // Allow RPC connections - includes common providers and HTTPS connections for custom endpoints
               // This allows any HTTPS RPC endpoint to work (required for custom RPC providers)
               "connect-src 'self' https: wss: https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
-              "frame-src 'self'",
+              // Solflare (desktop) embeds https://connect.solflare.com — 'self' alone blocks the iframe and breaks connect.
+              "frame-src 'self' https://connect.solflare.com https://solflare.com https://*.solflare.com https://pay.coinbase.com https://keys.coinbase.com https://www.coinbase.com https://wallet.coinbase.com",
               "frame-ancestors 'self'",
               "object-src 'none'",
               "base-uri 'self'",

@@ -75,11 +75,10 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 function solscanTransactionUrl(signature: string): string {
-  const cluster = /devnet/i.test(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? '')
-    ? '?cluster=devnet'
-    : ''
+  const cluster = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
   return `https://solscan.io/tx/${signature}${cluster}`
 }
 
@@ -408,7 +407,7 @@ export function RaffleDetailClient({
       .then((data: { url?: string; prizeMintUrl?: string; custodyUrl?: string } | undefined) => {
         if (cancelled || !data?.url || !raffle.nft_mint_address) return
         const mint = raffle.nft_mint_address.trim()
-        const cluster = /devnet/i.test(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? '') ? '?cluster=devnet' : ''
+        const cluster = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
         const fallbackUrl =
           raffle.prize_standard === 'mpl_core' || raffle.prize_standard === 'compressed'
             ? `https://solscan.io/account/${mint}${cluster}`
@@ -659,19 +658,19 @@ export function RaffleDetailClient({
                   'Network connection failed. This may be a network issue or CORS restriction on mobile. ' +
                   'Please check your internet connection and try again. ' +
                   'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                  'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                  'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                 )
               } else if (errorMessage.includes('403') || errorMessage.includes('Access forbidden')) {
                 throw new Error(
                   'RPC endpoint is rate-limited or requires authentication. ' +
                   'Please set NEXT_PUBLIC_SOLANA_RPC_URL in your .env.local file to a private RPC endpoint ' +
-                  '(e.g., Helius, QuickNode, or Alchemy). Public RPC endpoints are rate-limited.'
+                  '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
                 )
               } else {
                 throw new Error(
                   'Failed to get blockhash after retries. This may be a temporary RPC issue. ' +
                   'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                  'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                  'to a private RPC endpoint (Helius, Alchemy, or another private RPC).'
                 )
               }
             }
@@ -756,13 +755,13 @@ export function RaffleDetailClient({
                     'Network connection failed while fetching USDC mint information. This may be a network issue or CORS restriction on mobile. ' +
                     'Please check your internet connection and try again. ' +
                     'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                   )
                 } else {
                   throw new Error(
                     'Failed to fetch USDC mint information after retries. This may be a temporary RPC issue. ' +
                     'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC).'
                   )
                 }
               }
@@ -861,13 +860,13 @@ export function RaffleDetailClient({
                     'Network connection failed while fetching OWL mint information. This may be a network issue or CORS restriction on mobile. ' +
                     'Please check your internet connection and try again. ' +
                     'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy) that supports mobile access.'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                   )
                 } else {
                   throw new Error(
                     'Failed to fetch OWL mint information after retries. This may be a temporary RPC issue. ' +
                     'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, QuickNode, or Alchemy).'
+                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC).'
                   )
                 }
               }

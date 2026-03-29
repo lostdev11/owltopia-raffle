@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Trophy } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,6 +49,23 @@ interface RestoredEntry {
     slug: string
     title: string
   } | null
+}
+
+interface PendingDrawRaffle {
+  id: string
+  title: string
+  slug: string
+  endTime: string
+}
+
+/** Live / upcoming raffles (end time not reached); from GET /api/raffles/select-winners */
+interface LiveRaffleRow {
+  id: string
+  title: string
+  slug: string
+  startTime: string
+  endTime: string
+  status: string | null
 }
 
 interface RafflePendingSummary {
@@ -127,6 +144,15 @@ export default function AdminDashboardPage() {
 
   const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
   const [loadingCreatorHealth, setLoadingCreatorHealth] = useState(false)
+
+  const [pendingDrawQueue, setPendingDrawQueue] = useState<PendingDrawRaffle[] | null>(null)
+  const [liveRafflesQueue, setLiveRafflesQueue] = useState<LiveRaffleRow[] | null>(null)
+  const [loadingPendingDraws, setLoadingPendingDraws] = useState(false)
+  const [drawQueueLoadError, setDrawQueueLoadError] = useState<string | null>(null)
+  const [singleDrawLoadingId, setSingleDrawLoadingId] = useState<string | null>(null)
+  const [batchDrawLoading, setBatchDrawLoading] = useState(false)
+  const [drawActionMessage, setDrawActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [forceOverrideDraw, setForceOverrideDraw] = useState<Record<string, boolean>>({})
 
   // Keep dashboard data live while open and force a refresh each new day.
   useEffect(() => {
@@ -405,6 +431,122 @@ export default function AdminDashboardPage() {
       cancelled = true
     }
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
+
+  const fetchPendingDraws = useCallback(async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    setLoadingPendingDraws(true)
+    setDrawQueueLoadError(null)
+    try {
+      const res = await fetch('/api/raffles/select-winners', { credentials: 'include', cache: 'no-store' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || 'Failed to load draw queue')
+      }
+      const data = (await res.json()) as {
+        count?: number
+        raffles?: PendingDrawRaffle[]
+        currentRaffles?: LiveRaffleRow[]
+      }
+      setPendingDrawQueue(data.raffles ?? [])
+      setLiveRafflesQueue(data.currentRaffles ?? [])
+    } catch (e) {
+      console.error('fetchPendingDraws:', e)
+      setPendingDrawQueue(null)
+      setLiveRafflesQueue(null)
+      setDrawQueueLoadError(e instanceof Error ? e.message : 'Failed to load')
+    } finally {
+      setLoadingPendingDraws(false)
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    void fetchPendingDraws()
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchPendingDraws])
+
+  const handleDrawOneRaffle = async (raffle: PendingDrawRaffle) => {
+    const force = !!forceOverrideDraw[raffle.id]
+    if (force) {
+      const ok = confirm(
+        `Force draw for "${raffle.title}"? This bypasses minimum ticket and timing rules. Use only when you intend to override policy.`
+      )
+      if (!ok) return
+    }
+    setSingleDrawLoadingId(raffle.id)
+    setDrawActionMessage(null)
+    try {
+      const res = await fetch('/api/raffles/select-winners', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raffleId: raffle.id, forceOverride: force }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDrawActionMessage({
+          type: 'error',
+          text: (data as { error?: string }).error || 'Draw failed',
+        })
+        return
+      }
+      if ((data as { success?: boolean }).success && (data as { winnerWallet?: string }).winnerWallet) {
+        const w = (data as { winnerWallet: string }).winnerWallet
+        setDrawActionMessage({
+          type: 'success',
+          text: `Winner selected: ${w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w}`,
+        })
+      } else {
+        setDrawActionMessage({ type: 'success', text: 'Request completed.' })
+      }
+      await fetchPendingDraws()
+    } catch (e) {
+      console.error('handleDrawOneRaffle:', e)
+      setDrawActionMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setSingleDrawLoadingId(null)
+    }
+  }
+
+  const handleBatchDrawProcess = async () => {
+    const ok = confirm(
+      'Run the full draw process for every ended raffle without a winner? This extends raffles that still need min tickets, may mark failed refunds, and draws winners where rules allow. Same as the scheduled cron job.'
+    )
+    if (!ok) return
+    setBatchDrawLoading(true)
+    setDrawActionMessage(null)
+    try {
+      const res = await fetch('/api/raffles/select-winners', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDrawActionMessage({
+          type: 'error',
+          text: (data as { error?: string }).error || 'Batch process failed',
+        })
+        return
+      }
+      const processed = (data as { processedCount?: number }).processedCount ?? 0
+      const results = (data as { results?: { success: boolean; raffleTitle: string; error?: string | null }[] }).results
+      const won = results?.filter((r) => r.success).length ?? 0
+      setDrawActionMessage({
+        type: 'success',
+        text:
+          processed === 0
+            ? 'No ended raffles in the queue.'
+            : `Processed ${processed} raffle(s). ${won} winner(s) selected (others may have been extended or skipped).`,
+      })
+      await fetchPendingDraws()
+    } catch (e) {
+      console.error('handleBatchDrawProcess:', e)
+      setDrawActionMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setBatchDrawLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -1076,6 +1218,231 @@ export default function AdminDashboardPage() {
                   <strong className="text-foreground">Health</strong> is a 0–100 heuristic (higher is better): it down-weights extensions, post-entry edits, moderation flags, cancellations, weak sell-through, and pending verifications. Use it for triage, not as proof of bad behavior.
                 </p>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {adminRole === 'full' && (
+          <Card className="mb-8 border-violet-500/20 bg-violet-500/[0.03]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Trophy className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                Live raffles & pending draws
+              </CardTitle>
+              <CardDescription>
+                Raffles that have not reached their end time yet, then ended raffles still waiting for a winner. Draw runs
+                selection for one ended raffle; Process all runs the same job as the scheduled cron.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void fetchPendingDraws()}
+                  disabled={loadingPendingDraws}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {loadingPendingDraws ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Refreshing…
+                    </>
+                  ) : (
+                    'Refresh queue'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleBatchDrawProcess()}
+                  disabled={batchDrawLoading || loadingPendingDraws}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {batchDrawLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Processing…
+                    </>
+                  ) : (
+                    'Process all (cron logic)'
+                  )}
+                </Button>
+              </div>
+              {drawQueueLoadError && pendingDrawQueue === null && (
+                <p className="text-sm text-destructive">{drawQueueLoadError}</p>
+              )}
+              {drawActionMessage && (
+                <p
+                  className={
+                    drawActionMessage.type === 'success'
+                      ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                      : 'text-sm text-destructive'
+                  }
+                >
+                  {drawActionMessage.text}
+                </p>
+              )}
+              {!drawQueueLoadError &&
+                (loadingPendingDraws || pendingDrawQueue === null || liveRafflesQueue === null ? (
+                  <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    Loading queue…
+                  </p>
+                ) : (
+                  <div className="space-y-10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                        <Ticket className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
+                        Live & upcoming
+                      </h3>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        End time is still in the future (includes draft / pending escrow where applicable). No draw until
+                        the raffle has ended.
+                      </p>
+                      {liveRafflesQueue.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No live or upcoming raffles.</p>
+                      ) : (
+                        <div
+                          className="overflow-x-auto -mx-1 px-1 touch-pan-x"
+                          style={{ WebkitOverflowScrolling: 'touch' }}
+                        >
+                          <table className="w-full text-sm border-collapse min-w-[560px]">
+                            <thead>
+                              <tr className="border-b text-left text-muted-foreground">
+                                <th className="py-2 pr-3 font-medium">Raffle</th>
+                                <th className="py-2 pr-3 font-medium">Status</th>
+                                <th className="py-2 pr-3 font-medium">Ends</th>
+                                <th className="py-2 font-medium min-w-[180px]">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {liveRafflesQueue.map((r) => (
+                                <tr key={r.id} className="border-b border-border/60">
+                                  <td className="py-2.5 pr-3 align-top">
+                                    <div className="font-medium text-foreground">{r.title}</div>
+                                    <div className="text-xs text-muted-foreground font-mono mt-0.5 break-all">{r.slug}</div>
+                                  </td>
+                                  <td className="py-2.5 pr-3 align-top text-muted-foreground whitespace-nowrap">
+                                    {r.status ?? '—'}
+                                  </td>
+                                  <td className="py-2.5 pr-3 align-top text-muted-foreground whitespace-nowrap">
+                                    {(() => {
+                                      const d = new Date(r.endTime)
+                                      return Number.isNaN(d.getTime()) ? r.endTime : d.toLocaleString()
+                                    })()}
+                                  </td>
+                                  <td className="py-2.5 align-top">
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        asChild
+                                        className="touch-manipulation min-h-[44px]"
+                                      >
+                                        <Link href={`/raffles/${encodeURIComponent(r.slug)}`}>View</Link>
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        asChild
+                                        className="touch-manipulation min-h-[44px]"
+                                      >
+                                        <Link href={`/admin/raffles/${r.id}`}>Edit</Link>
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-6 border-t border-border/60">
+                      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                        <Trophy className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
+                        Ended — needs winner
+                      </h3>
+                      {pendingDrawQueue.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No ended raffles waiting for a draw.</p>
+                      ) : (
+                        <div
+                          className="overflow-x-auto -mx-1 px-1 touch-pan-x"
+                          style={{ WebkitOverflowScrolling: 'touch' }}
+                        >
+                          <table className="w-full text-sm border-collapse min-w-[640px]">
+                            <thead>
+                              <tr className="border-b text-left text-muted-foreground">
+                                <th className="py-2 pr-3 font-medium">Raffle</th>
+                                <th className="py-2 pr-3 font-medium">Ended</th>
+                                <th className="py-2 pr-2 font-medium">Override</th>
+                                <th className="py-2 font-medium min-w-[200px]">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pendingDrawQueue.map((r) => (
+                                <tr key={r.id} className="border-b border-border/60">
+                                  <td className="py-2.5 pr-3 align-top">
+                                    <div className="font-medium text-foreground">{r.title}</div>
+                                    <div className="text-xs text-muted-foreground font-mono mt-0.5 break-all">{r.slug}</div>
+                                  </td>
+                                  <td className="py-2.5 pr-3 align-top text-muted-foreground whitespace-nowrap">
+                                    {(() => {
+                                      const d = new Date(r.endTime)
+                                      return Number.isNaN(d.getTime()) ? r.endTime : d.toLocaleString()
+                                    })()}
+                                  </td>
+                                  <td className="py-2.5 pr-2 align-top">
+                                    <label className="flex items-center gap-2 cursor-pointer touch-manipulation min-h-[44px]">
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-border shrink-0"
+                                        checked={!!forceOverrideDraw[r.id]}
+                                        onChange={(e) =>
+                                          setForceOverrideDraw((prev) => ({ ...prev, [r.id]: e.target.checked }))
+                                        }
+                                      />
+                                      <span className="text-xs text-muted-foreground">Force rules</span>
+                                    </label>
+                                  </td>
+                                  <td className="py-2.5 align-top">
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => void handleDrawOneRaffle(r)}
+                                        disabled={singleDrawLoadingId === r.id || batchDrawLoading}
+                                        className="touch-manipulation min-h-[44px]"
+                                      >
+                                        {singleDrawLoadingId === r.id ? (
+                                          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                        ) : (
+                                          'Draw'
+                                        )}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        asChild
+                                        className="touch-manipulation min-h-[44px]"
+                                      >
+                                        <Link href={`/admin/raffles/${r.id}`}>Edit</Link>
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
             </CardContent>
           </Card>
         )}

@@ -21,6 +21,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -85,8 +86,7 @@ function canClaimNftPrize(raffle: EntryWithRaffle['raffle'], wallet: string): bo
 }
 
 function solscanTxUrl(signature: string): string {
-  const rpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? ''
-  const dev = /devnet/i.test(rpc)
+  const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
   return `https://solscan.io/tx/${encodeURIComponent(signature)}${dev ? '?cluster=devnet' : ''}`
 }
 

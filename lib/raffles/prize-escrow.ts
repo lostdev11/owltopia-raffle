@@ -18,6 +18,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
@@ -249,11 +250,7 @@ export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
 export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return false
-  // Use configured RPC URL or fall back to a public mainnet endpoint for Core checks.
-  const endpoint =
-    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    // Fallback: same default as WalletProvider for consistency
-    'https://solana.drpc.org'
+  const endpoint = resolveServerSolanaRpcUrl()
 
   // createUmi has multiple overloads; use any to avoid version-specific type issues.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -297,10 +294,7 @@ export async function transferMplCorePrizeToWinner(raffleId: string): Promise<{
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
-  // Use configured RPC URL or fall back to a public mainnet endpoint for Core transfers.
-  const endpoint =
-    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    'https://solana.drpc.org'
+  const endpoint = resolveServerSolanaRpcUrl()
 
   // createUmi has multiple overloads; use any to avoid version-specific type issues.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -403,10 +397,7 @@ export async function transferCompressedPrizeToWinner(raffleId: string): Promise
   }
 
   const escrowBase58 = keypair.publicKey.toBase58()
-  const endpoint =
-    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    process.env.SOLANA_RPC_URL ||
-    'https://solana.drpc.org'
+  const endpoint = resolveServerSolanaRpcUrl()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
@@ -872,10 +863,7 @@ export async function checkEscrowHoldsNft(raffle: Raffle): Promise<{ holds: bool
 
   const compressedEscrowHolds = async (): Promise<boolean> => {
     const escrowBase58 = escrowPk.toBase58()
-    const endpoint =
-      process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-      process.env.SOLANA_RPC_URL ||
-      'https://solana.drpc.org'
+    const endpoint = resolveServerSolanaRpcUrl()
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())

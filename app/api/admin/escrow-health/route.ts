@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getPrizeEscrowKeypair, getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,8 +35,8 @@ export async function GET(request: NextRequest) {
     const keypair = getPrizeEscrowKeypair()
     const address = getPrizeEscrowPublicKey()
 
-    const rpcUrl = process.env.SOLANA_RPC_URL?.trim() || process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() || null
-    const cluster = rpcUrl && /devnet/i.test(rpcUrl) ? 'devnet' : 'mainnet'
+    const rpcUrl = resolveServerSolanaRpcUrl()
+    const cluster = /devnet/i.test(rpcUrl) ? 'devnet' : 'mainnet'
 
     return NextResponse.json({
       ok: true,
@@ -53,6 +54,10 @@ export async function GET(request: NextRequest) {
         rpcUrl: redactUrl(rpcUrl),
         hasSolanaRpcUrl: Boolean(process.env.SOLANA_RPC_URL?.trim()),
         hasNextPublicSolanaRpcUrl: Boolean(process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim()),
+        hasDevSolanaRpcOverride: Boolean(
+          process.env.NODE_ENV === 'development' &&
+            (process.env.SOLANA_RPC_DEV_URL?.trim() || process.env.NEXT_PUBLIC_DEV_SOLANA_RPC_URL?.trim())
+        ),
       },
     })
   } catch (e) {

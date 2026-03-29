@@ -2,6 +2,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import { getTokenInfo } from '@/lib/tokens'
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
 import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 const ownsOwltopiaCache = new Map<string, { value: boolean; expiresAt: number }>()
 
@@ -48,23 +49,6 @@ function assetMatchesOwltopiaCollection(item: unknown, collectionAddress: string
   return false
 }
 
-function getSolanaRpcUrl(): string {
-  let rpcUrl =
-    process.env.SOLANA_RPC_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
-    'https://api.mainnet-beta.solana.com'
-
-  if (rpcUrl && !rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://')) {
-    if (!rpcUrl.includes('://')) {
-      rpcUrl = `https://${rpcUrl}`
-    } else {
-      rpcUrl = 'https://api.mainnet-beta.solana.com'
-    }
-  }
-
-  return rpcUrl
-}
-
 export type OwnsOwltopiaOptions = {
   /** When true, always verify against chain/DAS and do not use cache. Use for dashboard and when setting raffle fee. */
   skipCache?: boolean
@@ -97,7 +81,7 @@ export async function ownsOwltopia(
     }
   }
 
-  const rpcUrl = getSolanaRpcUrl()
+  const rpcUrl = resolveServerSolanaRpcUrl()
   const isDevnetRpc = /devnet/i.test(rpcUrl)
 
   // Validate wallet address format up front

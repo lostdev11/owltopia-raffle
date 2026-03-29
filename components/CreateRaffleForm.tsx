@@ -22,14 +22,7 @@ import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-ac
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
-
-/** Use proxy for external NFT image URLs (e.g. IPFS) so the browser never hits flagged gateways (Safe Web). */
-function getProxiedImageUrl(url: string | null): string | null {
-  if (!url?.trim()) return null
-  const u = url.trim()
-  if (u.startsWith('/') && !u.startsWith('//')) return u
-  return `/api/proxy-image?url=${encodeURIComponent(u)}`
-}
+import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 
 export function CreateRaffleForm() {
   const router = useRouter()
@@ -513,9 +506,7 @@ export function CreateRaffleForm() {
                       type="button"
                       onClick={() => {
                         setSelectedNft(nft)
-                        setImageUrl(
-                          nft.image ? (getProxiedImageUrl(nft.image) ?? nft.image) : null
-                        )
+                        setImageUrl(nft.image?.trim() ? nft.image.trim() : null)
                       }}
                       className={`rounded-lg border-2 p-2 text-left transition-colors ${
                         selectedNft?.mint === nft.mint
@@ -526,7 +517,7 @@ export function CreateRaffleForm() {
                       <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
                         {nft.image ? (
                           <img
-                            src={getProxiedImageUrl(nft.image) ?? nft.image}
+                            src={getRaffleDisplayImageUrl(nft.image) ?? nft.image}
                             alt={nft.name ?? nft.mint}
                             className="w-full h-full object-cover"
                             onError={(e) => {

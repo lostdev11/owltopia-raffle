@@ -6,6 +6,7 @@ import { verifyTransaction } from '@/lib/verify-transaction'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -427,18 +428,7 @@ type TxDetailsResult =
  */
 async function getTransactionDetails(transactionSignature: string): Promise<TxDetailsResult> {
   try {
-    let rpcUrl = process.env.SOLANA_RPC_URL?.trim() || 
-                 process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
-                 'https://api.mainnet-beta.solana.com'
-    
-    if (rpcUrl && !rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://')) {
-      if (rpcUrl && !rpcUrl.includes('://')) {
-        rpcUrl = `https://${rpcUrl}`
-      } else {
-        rpcUrl = 'https://api.mainnet-beta.solana.com'
-      }
-    }
-    
+    const rpcUrl = resolveServerSolanaRpcUrl()
     const connection = new Connection(rpcUrl, 'confirmed')
     
     // Get recipient wallet from environment

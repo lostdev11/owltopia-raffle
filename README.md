@@ -54,7 +54,7 @@ npm install
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key  # Required for server-side writes (API). Get from Supabase Dashboard → Settings → API. Never expose to the client.
-NEXT_PUBLIC_SOLANA_RPC_URL=your_solana_rpc_url  # REQUIRED: Use a private RPC endpoint (Helius, QuickNode, or Alchemy). Public endpoints are rate-limited and will cause 403 errors.
+NEXT_PUBLIC_SOLANA_RPC_URL=your_solana_rpc_url  # Recommended: private RPC (Helius, Alchemy, etc.) for production. For local dev you can use https://solana.drpc.org or set NEXT_PUBLIC_DEV_SOLANA_RPC_URL (see .env.example).
 NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET=your_wallet_address  # Required: Wallet address that receives ticket payments
 ```
 
@@ -236,10 +236,10 @@ If you encounter a `403: Access forbidden` error when trying to purchase tickets
 
 **Solution**: Set up a private RPC endpoint:
 
-1. **Get a free RPC endpoint** from one of these providers:
-   - [Helius](https://www.helius.dev/) - Free tier available
-   - [QuickNode](https://www.quicknode.com/) - Free tier available
-   - [Alchemy](https://www.alchemy.com/) - Free tier available
+1. **Get an RPC endpoint** (paid providers for production, or free public tiers for light / dev use):
+   - [Helius](https://www.helius.dev/) — free tier; reserve `HELIUS_API_KEY` for DAS and use a cheaper browser RPC if you want to save credits (see `.env.example`).
+   - [Alchemy](https://www.alchemy.com/) — Solana RPC
+   - Free public options (rate-limited): `https://solana.drpc.org`, `https://api.mainnet-beta.solana.com` — fine for `next dev` via `NEXT_PUBLIC_DEV_SOLANA_RPC_URL`
 
 2. **Add the RPC URL to your `.env.local` file**:
    ```bash

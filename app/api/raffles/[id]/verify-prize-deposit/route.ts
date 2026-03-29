@@ -16,6 +16,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey as umiPublicKey } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -152,10 +153,7 @@ export async function POST(
             )
           )
           if (assetIdCandidates.length > 0) {
-            const endpoint =
-              process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-              process.env.SOLANA_RPC_URL ||
-              'https://solana.drpc.org'
+            const endpoint = resolveServerSolanaRpcUrl()
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
@@ -287,10 +285,7 @@ export async function POST(
                   .map((v) => v.trim())
               )
             )
-            const endpoint =
-              process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-              process.env.SOLANA_RPC_URL ||
-              'https://solana.drpc.org'
+            const endpoint = resolveServerSolanaRpcUrl()
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())

@@ -21,6 +21,7 @@ import {
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -37,13 +38,7 @@ interface WalletContextProviderProps {
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const network = WalletAdapterNetwork.Mainnet
   const shouldAutoConnect = typeof window !== 'undefined' && isMobileDevice()
-  const endpoint = useMemo(() => {
-    const customRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
-    if (customRpc && (customRpc.startsWith('http://') || customRpc.startsWith('https://'))) {
-      return customRpc
-    }
-    return 'https://solana.drpc.org'
-  }, [])
+  const endpoint = useMemo(() => resolvePublicSolanaRpcUrl(), [])
 
   // Build wallets only on client so extension/Standard Wallet is available and no SSR mismatch
   const wallets = useMemo(
@@ -213,8 +208,8 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
 }
 
 // Delay (ms) before showing wallet provider so extensions (Phantom, Standard Wallet) can inject.
-// Avoids "wallet only connects after refresh" on desktop and mobile.
-const WALLET_READY_DELAY_MS = 700
+// Avoids "wallet only connects after refresh" on desktop and mobile. Edge/slow machines may need ~1s+.
+const WALLET_READY_DELAY_MS = 1100
 
 /**
  * Renders the wallet provider only after client mount and a short delay (or load event) so that:
