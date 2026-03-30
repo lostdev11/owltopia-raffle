@@ -459,6 +459,67 @@ export function RaffleDetailClient({
   const userTicketsHeadline =
     userPendingTickets > 0 ? userTickets + userPendingTickets : userTickets
 
+  const showCreatorRefundCandidates =
+    isCreator &&
+    (raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met')
+
+  const creatorRefundCandidates = useMemo(() => {
+    if (!showCreatorRefundCandidates) return []
+    const byWallet = new Map<
+      string,
+      { wallet: string; totalAmount: number; refundedAmount: number; confirmedEntries: number; refundedEntries: number }
+    >()
+    for (const entry of entries) {
+      if (entry.status !== 'confirmed') continue
+      const wallet = (entry.wallet_address || '').trim()
+      if (!wallet) continue
+      const amount = Number(entry.amount_paid ?? 0)
+      const isRefunded = !!entry.refunded_at
+      const row = byWallet.get(wallet) ?? {
+        wallet,
+        totalAmount: 0,
+        refundedAmount: 0,
+        confirmedEntries: 0,
+        refundedEntries: 0,
+      }
+      row.totalAmount += Number.isFinite(amount) ? amount : 0
+      row.confirmedEntries += 1
+      if (isRefunded) {
+        row.refundedAmount += Number.isFinite(amount) ? amount : 0
+        row.refundedEntries += 1
+      }
+      byWallet.set(wallet, row)
+    }
+    return Array.from(byWallet.values()).sort((a, b) => b.totalAmount - a.totalAmount)
+  }, [entries, showCreatorRefundCandidates])
+
+  const creatorRefundTotalPending = useMemo(() => {
+    return creatorRefundCandidates.reduce((sum, row) => {
+      const pending = Math.max(0, row.totalAmount - row.refundedAmount)
+      return sum + pending
+    }, 0)
+  }, [creatorRefundCandidates])
+
+  const creatorRefundCsv = useMemo(() => {
+    if (creatorRefundCandidates.length === 0) return ''
+    const lines = creatorRefundCandidates.map((row) => {
+      const pending = Math.max(0, row.totalAmount - row.refundedAmount)
+      return `${row.wallet},${pending.toFixed(raffle.currency === 'USDC' ? 2 : 6)},${raffle.currency}`
+    })
+    return `wallet,amount_to_refund,currency\n${lines.join('\n')}`
+  }, [creatorRefundCandidates, raffle.currency])
+
+  const creatorRefundPayoutScript = useMemo(() => {
+    if (creatorRefundCandidates.length === 0) return ''
+    return creatorRefundCandidates
+      .map((row, i) => {
+        const pending = Math.max(0, row.totalAmount - row.refundedAmount)
+        const amount = pending.toFixed(raffle.currency === 'USDC' ? 2 : 6)
+        return `${i + 1}. Send ${amount} ${raffle.currency} to ${row.wallet}`
+      })
+      .join('\n')
+  }, [creatorRefundCandidates, raffle.currency])
+
   // Determine max tickets user can purchase in one transaction
   const maxPurchaseQuantity = availableTickets !== null 
     ? Math.max(0, availableTickets) 
@@ -2082,6 +2143,88 @@ export function RaffleDetailClient({
           <p className="text-sm text-destructive mb-2" role="alert">
             {claimProceedsError}
           </p>
+        )}
+        {showCreatorRefundCandidates && creatorRefundCandidates.length > 0 && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Users to refund</CardTitle>
+              <CardDescription>
+                This raffle did not meet the minimum draw threshold. These confirmed buyers should be refunded from
+                funds escrow.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Total pending refunds:</span>{' '}
+                  <span className="font-semibold">
+                    {raffle.currency === 'USDC'
+                      ? creatorRefundTotalPending.toFixed(2)
+                      : creatorRefundTotalPending.toFixed(6)}{' '}
+                    {raffle.currency}
+                  </span>
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                  onClick={async () => {
+                    if (!creatorRefundCsv) return
+                    try {
+                      await navigator.clipboard.writeText(creatorRefundCsv)
+                    } catch {
+                      // no-op: copy is best-effort
+                    }
+                  }}
+                >
+                  Copy addresses + amounts
+                </Button>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                onClick={async () => {
+                  if (!creatorRefundPayoutScript) return
+                  try {
+                    await navigator.clipboard.writeText(creatorRefundPayoutScript)
+                  } catch {
+                    // no-op: copy is best-effort
+                  }
+                }}
+              >
+                Copy payout script
+              </Button>
+              <div className="max-h-72 overflow-auto space-y-2">
+                {creatorRefundCandidates.map((row, i) => {
+                  const pendingAmount = Math.max(0, row.totalAmount - row.refundedAmount)
+                  const fullyRefunded = pendingAmount <= 0
+                  return (
+                    <div key={row.wallet} className="rounded border border-border/60 bg-muted/30 p-2">
+                      <p className="text-xs text-muted-foreground mb-1">User #{i + 1}</p>
+                      <p className="text-xs font-mono break-all">{row.wallet}</p>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+                        <span className="text-muted-foreground">Amount to refund</span>
+                        <span className="font-semibold font-mono whitespace-nowrap">
+                          {raffle.currency === 'USDC' ? pendingAmount.toFixed(2) : pendingAmount.toFixed(6)}{' '}
+                          {raffle.currency}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs">
+                        {fullyRefunded ? (
+                          <span className="text-emerald-600 dark:text-emerald-400">Refunded</span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400">Refund pending</span>
+                        )}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
         )}
         {/* Mobile: raffle name in the empty space below nav buttons */}
         <div className="md:hidden mb-3">

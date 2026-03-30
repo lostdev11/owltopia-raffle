@@ -6,7 +6,7 @@ import {
   getCreatorLiveEarningsByWallet,
   getCreatorTicketSalesGrossByWallet,
 } from '@/lib/db/raffles'
-import { getEntriesByWallet } from '@/lib/db/entries'
+import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
 
@@ -54,6 +54,25 @@ export async function GET(request: NextRequest) {
     }
     const creatorRevenueTotal = Object.values(creatorRevenueByCurrency).reduce((a, b) => a + b, 0)
 
+    const refundEligibleRaffles = raffles.filter(
+      (r) => r.status === 'failed_refund_available' || r.status === 'pending_min_not_met'
+    )
+    const refundCandidatesByRaffle = await getRefundCandidatesByRaffleIds(
+      refundEligibleRaffles.map((r) => r.id)
+    )
+    const creatorRefundRaffles = refundEligibleRaffles.map((r) => {
+      const candidates = refundCandidatesByRaffle[r.id] ?? []
+      const totalPending = candidates.reduce((sum, c) => sum + c.pendingAmount, 0)
+      return {
+        raffleId: r.id,
+        raffleSlug: r.slug,
+        raffleTitle: r.title,
+        currency: r.currency,
+        candidates,
+        totalPending,
+      }
+    })
+
     return NextResponse.json({
       wallet,
       displayName: profiles[wallet] ?? null,
@@ -63,6 +82,7 @@ export async function GET(request: NextRequest) {
       creatorRevenueByCurrency,
       creatorLiveEarningsByCurrency: liveEarnings.byCurrency,
       creatorAllTimeGrossByCurrency: grossSales.byCurrency,
+      creatorRefundRaffles,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
     })
   } catch (error) {

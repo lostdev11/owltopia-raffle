@@ -562,6 +562,15 @@ export interface EntryWithRaffle {
   raffle: RaffleInfoForEntry
 }
 
+export interface RefundCandidateByWallet {
+  wallet: string
+  totalAmount: number
+  refundedAmount: number
+  pendingAmount: number
+  confirmedEntries: number
+  refundedEntries: number
+}
+
 /**
  * Get all entries for a wallet with raffle info.
  * Used so users can see only their own raffles entered (e.g. dashboard).
@@ -596,6 +605,63 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
     })
   }
   return result
+}
+
+/**
+ * For creator dashboard: aggregated refund candidates per raffle.
+ * Includes confirmed entries only; groups by wallet and computes pending amount.
+ */
+export async function getRefundCandidatesByRaffleIds(
+  raffleIds: string[]
+): Promise<Record<string, RefundCandidateByWallet[]>> {
+  const ids = Array.from(new Set(raffleIds.map((x) => x.trim()).filter(Boolean)))
+  if (ids.length === 0) return {}
+
+  const { data, error } = await getSupabaseForServerRead(supabase)
+    .from('entries')
+    .select('raffle_id, wallet_address, amount_paid, status, refunded_at')
+    .in('raffle_id', ids)
+    .eq('status', 'confirmed')
+
+  if (error) {
+    console.error('Error fetching refund candidates by raffle IDs:', error)
+    return {}
+  }
+
+  const byRaffle = new Map<string, Map<string, RefundCandidateByWallet>>()
+  for (const row of data || []) {
+    const raffleId = String((row as { raffle_id?: string }).raffle_id || '').trim()
+    const wallet = String((row as { wallet_address?: string }).wallet_address || '').trim()
+    if (!raffleId || !wallet) continue
+    const amount = Number((row as { amount_paid?: unknown }).amount_paid ?? 0)
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    const refunded = !!(row as { refunded_at?: string | null }).refunded_at
+
+    const walletMap = byRaffle.get(raffleId) ?? new Map<string, RefundCandidateByWallet>()
+    const existing = walletMap.get(wallet) ?? {
+      wallet,
+      totalAmount: 0,
+      refundedAmount: 0,
+      pendingAmount: 0,
+      confirmedEntries: 0,
+      refundedEntries: 0,
+    }
+    existing.totalAmount += safeAmount
+    existing.confirmedEntries += 1
+    if (refunded) {
+      existing.refundedAmount += safeAmount
+      existing.refundedEntries += 1
+    }
+    existing.pendingAmount = Math.max(0, existing.totalAmount - existing.refundedAmount)
+    walletMap.set(wallet, existing)
+    byRaffle.set(raffleId, walletMap)
+  }
+
+  const out: Record<string, RefundCandidateByWallet[]> = {}
+  for (const [raffleId, walletMap] of byRaffle.entries()) {
+    out[raffleId] = Array.from(walletMap.values()).sort((a, b) => b.pendingAmount - a.pendingAmount)
+  }
+  return out
 }
 
 /** Short mutex so two refund requests for the same entry cannot double-pay. */

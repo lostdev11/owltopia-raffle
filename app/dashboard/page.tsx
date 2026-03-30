@@ -99,6 +99,21 @@ type DashboardData = {
   creatorRevenueByCurrency: Record<string, number>
   creatorLiveEarningsByCurrency?: Record<string, number>
   creatorAllTimeGrossByCurrency?: Record<string, number>
+  creatorRefundRaffles?: Array<{
+    raffleId: string
+    raffleSlug: string
+    raffleTitle: string
+    currency: string
+    totalPending: number
+    candidates: Array<{
+      wallet: string
+      totalAmount: number
+      refundedAmount: number
+      pendingAmount: number
+      confirmedEntries: number
+      refundedEntries: number
+    }>
+  }>
   feeTier: FeeTier
 }
 
@@ -537,6 +552,7 @@ export default function DashboardPage() {
       : { feeBps: 600, reason: 'standard' as const }
   const wallet = walletForMemo
   const displayName = data.displayName != null ? String(data.displayName) : null
+  const creatorRefundRaffles = Array.isArray(data.creatorRefundRaffles) ? data.creatorRefundRaffles : []
 
   const sourceEntries =
     entriesFilter === 'won'
@@ -1126,6 +1142,71 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {creatorRefundRaffles.length > 0 && (
+        <Card className="mb-8 border-amber-500/30 bg-amber-500/5">
+          <CardHeader>
+            <CardTitle className="text-base sm:text-lg">Users to refund (my raffles)</CardTitle>
+            <CardDescription>
+              Raffles that did not meet minimum threshold. Share these exact payout lines with users or use them to send manual refunds.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {creatorRefundRaffles.map((rr) => {
+              const payoutScript = rr.candidates
+                .filter((c) => c.pendingAmount > 0)
+                .map(
+                  (c, i) =>
+                    `${i + 1}. Send ${c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} ${rr.currency} to ${c.wallet}`
+                )
+                .join('\n')
+              return (
+                <div key={rr.raffleId} className="rounded-lg border border-border/60 bg-background/50 p-3 space-y-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <Link href={`/raffles/${rr.raffleSlug}`} className="font-medium hover:underline truncate">
+                      {rr.raffleTitle}
+                    </Link>
+                    <span className="text-sm font-semibold">
+                      Pending:{' '}
+                      {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    onClick={async () => {
+                      if (!payoutScript) return
+                      try {
+                        await navigator.clipboard.writeText(payoutScript)
+                      } catch {
+                        // best-effort only
+                      }
+                    }}
+                  >
+                    Copy payout script
+                  </Button>
+                  <div className="max-h-56 overflow-auto space-y-2">
+                    {rr.candidates.map((c, idx) => (
+                      <div key={`${rr.raffleId}-${c.wallet}`} className="rounded border border-border/50 bg-muted/30 p-2">
+                        <p className="text-xs text-muted-foreground">User #{idx + 1}</p>
+                        <p className="text-xs font-mono break-all">{c.wallet}</p>
+                        <p className="text-sm mt-1">
+                          <span className="text-muted-foreground">Amount to refund: </span>
+                          <span className="font-mono font-semibold">
+                            {c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                          </span>
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
