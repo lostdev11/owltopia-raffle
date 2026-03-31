@@ -62,8 +62,72 @@ type DiscordEmbed = {
   description?: string
   url?: string
   color: number
+  image?: { url: string }
   fields?: { name: string; value: string; inline?: boolean }[]
   timestamp?: string
+}
+
+export type XShareTemplate = {
+  id: string
+  label: string
+  text: string
+  intentUrl: string
+}
+
+function resolveDiscordEmbedImageUrl(raffle: Raffle): string | undefined {
+  const raw = (raffle.image_url || raffle.image_fallback_url || '').trim()
+  if (!raw) return undefined
+
+  try {
+    const asAbsolute = new URL(raw)
+    if (asAbsolute.protocol !== 'http:' && asAbsolute.protocol !== 'https:') return undefined
+    return asAbsolute.toString()
+  } catch {
+    // Support site-relative media paths by converting to an absolute URL for Discord.
+    const base = getSiteBaseUrl()
+    try {
+      const resolved = new URL(raw, `${base}/`)
+      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return undefined
+      return resolved.toString()
+    } catch {
+      return undefined
+    }
+  }
+}
+
+function buildXIntentUrl(text: string): string {
+  const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`
+  return url
+}
+
+export function buildLiveRaffleXShareTemplates(raffle: Raffle): XShareTemplate[] {
+  const pageUrl = rafflePageUrl(raffle)
+  const prize = prizeSummary(raffle)
+  const title = raffle.title.trim()
+  const compactTitle = title.length > 72 ? `${title.slice(0, 69)}...` : title
+
+  const templates: Array<Omit<XShareTemplate, 'intentUrl'>> = [
+    {
+      id: 'launch',
+      label: 'Launch',
+      text: `New raffle is LIVE on ${PLATFORM_NAME}: "${compactTitle}"\nPrize: ${prize}\nEnter now: ${pageUrl}\n#Solana #NFT #Raffle`,
+    },
+    {
+      id: 'hype',
+      label: 'Hype',
+      text: `Community fam, this one is heating up.\n"${compactTitle}" is live now on ${PLATFORM_NAME}.\nGrab your tickets before it closes: ${pageUrl}\n#Solana #Web3`,
+    },
+    {
+      id: 'last-call',
+      label: 'Last call',
+      text: `Last call for "${compactTitle}" on ${PLATFORM_NAME}.\nPrize: ${prize}\nFinal entries: ${pageUrl}\n#Solana #Crypto`,
+    },
+  ]
+
+  return templates.map((template) => ({
+    ...template,
+    intentUrl: buildXIntentUrl(template.text),
+  }))
 }
 
 async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Promise<boolean> {
@@ -106,6 +170,7 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
 
   const endTs = discordTimestampUnix(raffle.end_time)
   const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
+  const image = resolveDiscordEmbedImageUrl(raffle)
 
   await postDiscordWebhook(url, {
     title: 'New raffle created',
@@ -131,6 +196,7 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
       },
       { name: 'Status', value: raffle.status ?? 'draft', inline: true },
     ],
+    image: image ? { url: image } : undefined,
     timestamp: new Date().toISOString(),
   })
 }
@@ -148,6 +214,7 @@ export async function notifyRaffleWinnerDrawn(
     statusAfterDraw === 'successful_pending_claims'
       ? `${statusAfterDraw} (winner/creator claims may be pending)`
       : statusAfterDraw
+  const image = resolveDiscordEmbedImageUrl(raffle)
 
   await postDiscordWebhook(url, {
     title: 'Raffle ended — winner drawn',
@@ -163,6 +230,7 @@ export async function notifyRaffleWinnerDrawn(
         inline: false,
       },
     ],
+    image: image ? { url: image } : undefined,
     timestamp: new Date().toISOString(),
   })
 }
@@ -185,6 +253,7 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
   const pageUrl = rafflePageUrl(raffle)
   const endTs = discordTimestampUnix(raffle.end_time)
   const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
+  const image = resolveDiscordEmbedImageUrl(raffle)
 
   const sent = await postDiscordWebhook(url, {
     title: 'Live raffle',
@@ -197,6 +266,7 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
       { name: 'Ticket price', value: `${raffle.ticket_price} ${raffle.currency}`, inline: true },
       { name: 'Ends', value: endLine, inline: false },
     ],
+    image: image ? { url: image } : undefined,
     timestamp: new Date().toISOString(),
   })
 

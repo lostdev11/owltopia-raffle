@@ -13,6 +13,19 @@ interface MyRafflesListProps {
   deletedOnly?: boolean
 }
 
+function buildXIntentUrl(text: string): string {
+  return `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`
+}
+
+function buildLaunchXTemplate(raffle: Raffle): string {
+  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://www.owltopia.xyz').replace(/\/$/, '')
+  const raffleUrl = `${siteBase}/raffles/${encodeURIComponent(raffle.slug)}`
+  const platformName = (process.env.NEXT_PUBLIC_PLATFORM_NAME || 'Owl Raffle').trim()
+  const title = raffle.title.trim()
+  const compactTitle = title.length > 72 ? `${title.slice(0, 69)}...` : title
+  return `New raffle is LIVE on ${platformName}: "${compactTitle}"\nEnter now: ${raffleUrl}\n#Solana #NFT #Raffle`
+}
+
 export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
   const { publicKey } = useWallet()
   const [raffles, setRaffles] = useState<Raffle[]>([])
@@ -209,11 +222,28 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
                   </Button>
                 </Link>
               ) : (
-                <Link href={`/raffles/${raffle.slug}`}>
-                  <Button variant="ghost" size="sm">
-                    View
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    <a
+                      href={buildXIntentUrl(buildLaunchXTemplate(raffle))}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Post to X
+                    </a>
                   </Button>
-                </Link>
+                  <Link href={`/raffles/${raffle.slug}`}>
+                    <Button variant="ghost" size="sm" className="touch-manipulation min-h-[44px]">
+                      View
+                    </Button>
+                  </Link>
+                </div>
               )}
             </li>
             ))}

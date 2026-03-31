@@ -3,7 +3,7 @@ import { getRaffleById } from '@/lib/db/raffles'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { isRaffleLiveForManualDiscordShare } from '@/lib/raffles/discord-live-share'
-import { pushLiveRaffleToDiscord } from '@/lib/discord-raffle-webhooks'
+import { buildLiveRaffleXShareTemplates, pushLiveRaffleToDiscord } from '@/lib/discord-raffle-webhooks'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { isRaffleIdUuid } from '@/lib/raffle-id'
 
@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error ?? 'Discord post failed' }, { status: 502 })
     }
 
-    return NextResponse.json({ success: true, raffleId: raffle.id })
+    const xTemplates = buildLiveRaffleXShareTemplates(raffle)
+    return NextResponse.json({ success: true, raffleId: raffle.id, xTemplates })
   } catch (error) {
     console.error('POST /api/admin/live-raffles/discord:', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })

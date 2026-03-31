@@ -60,6 +60,13 @@ interface LiveRaffleDiscordRow {
   status: string | null
 }
 
+interface LiveRaffleXTemplate {
+  id: string
+  label: string
+  text: string
+  intentUrl: string
+}
+
 interface RafflePendingSummary {
   raffleId: string
   raffle: { id: string; slug: string; title: string }
@@ -141,7 +148,12 @@ export default function AdminDashboardPage() {
   const [loadingLiveDiscord, setLoadingLiveDiscord] = useState(false)
   const [liveDiscordLoadError, setLiveDiscordLoadError] = useState<string | null>(null)
   const [pushingDiscordRaffleId, setPushingDiscordRaffleId] = useState<string | null>(null)
-  const [liveDiscordMessage, setLiveDiscordMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [liveDiscordMessage, setLiveDiscordMessage] = useState<{
+    type: 'success' | 'error'
+    text: string
+    raffleTitle?: string
+    xTemplates?: LiveRaffleXTemplate[]
+  } | null>(null)
 
   // Keep dashboard data live while open and force a refresh each new day.
   useEffect(() => {
@@ -465,7 +477,25 @@ export default function AdminDashboardPage() {
         })
         return
       }
-      setLiveDiscordMessage({ type: 'success', text: `Posted “${r.title}” to Discord.` })
+      const rawTemplates = Array.isArray((data as { xTemplates?: unknown }).xTemplates)
+        ? ((data as { xTemplates: unknown[] }).xTemplates as LiveRaffleXTemplate[])
+        : []
+      const xTemplates = rawTemplates.filter((item) => {
+        if (!item || typeof item !== 'object') return false
+        const candidate = item as Partial<LiveRaffleXTemplate>
+        return (
+          typeof candidate.id === 'string' &&
+          typeof candidate.label === 'string' &&
+          typeof candidate.text === 'string' &&
+          typeof candidate.intentUrl === 'string'
+        )
+      })
+      setLiveDiscordMessage({
+        type: 'success',
+        text: `Posted "${r.title}" to Discord.`,
+        raffleTitle: r.title,
+        xTemplates,
+      })
     } catch (e) {
       console.error('handlePushLiveToDiscord:', e)
       setLiveDiscordMessage({ type: 'error', text: 'Network error. Try again.' })
@@ -1183,15 +1213,42 @@ export default function AdminDashboardPage() {
                 <p className="text-sm text-destructive">{liveDiscordLoadError}</p>
               )}
               {liveDiscordMessage && (
-                <p
-                  className={
-                    liveDiscordMessage.type === 'success'
-                      ? 'text-sm text-emerald-600 dark:text-emerald-400'
-                      : 'text-sm text-destructive'
-                  }
-                >
-                  {liveDiscordMessage.text}
-                </p>
+                <div className="space-y-2">
+                  <p
+                    className={
+                      liveDiscordMessage.type === 'success'
+                        ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                        : 'text-sm text-destructive'
+                    }
+                  >
+                    {liveDiscordMessage.text}
+                  </p>
+                  {liveDiscordMessage.type === 'success' &&
+                    Array.isArray(liveDiscordMessage.xTemplates) &&
+                    liveDiscordMessage.xTemplates.length > 0 && (
+                      <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          One-click X templates for "{liveDiscordMessage.raffleTitle ?? 'this raffle'}":
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {liveDiscordMessage.xTemplates.map((template) => (
+                            <Button
+                              key={template.id}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              <a href={template.intentUrl} target="_blank" rel="noopener noreferrer">
+                                Post to X: {template.label}
+                              </a>
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                </div>
               )}
               {!liveDiscordLoadError &&
                 (loadingLiveDiscord || liveDiscordRaffles === null ? (

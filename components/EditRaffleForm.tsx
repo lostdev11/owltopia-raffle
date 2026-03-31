@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,30 @@ interface EditRaffleFormProps {
   raffle: Raffle
   entries: Entry[]
   owlVisionScore: OwlVisionScore
+}
+
+interface LiveRaffleXTemplate {
+  id: string
+  label: string
+  text: string
+  intentUrl: string
+}
+
+function prizeSummary(raffle: Raffle): string {
+  if (raffle.prize_type === 'nft') {
+    const name = raffle.nft_collection_name?.trim()
+    return name ? `NFT - ${name}` : 'NFT prize'
+  }
+  const amount = raffle.prize_amount
+  const currency = raffle.prize_currency?.trim() || 'SOL'
+  if (amount != null && Number.isFinite(Number(amount))) {
+    return `${amount} ${currency}`
+  }
+  return `${currency} prize`
+}
+
+function buildXIntentUrl(text: string): string {
+  return `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`
 }
 
 export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFormProps) {
@@ -52,6 +76,38 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     raffle.creator_payout_amount != null &&
     raffle.fee_bps_applied != null &&
     typeof raffle.fee_tier_reason === 'string'
+  const xTemplates = useMemo<LiveRaffleXTemplate[]>(() => {
+    const siteBase = (
+      process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+      (typeof window !== 'undefined' ? window.location.origin : 'https://www.owltopia.xyz')
+    ).replace(/\/$/, '')
+    const raffleUrl = `${siteBase}/raffles/${encodeURIComponent(raffle.slug)}`
+    const title = raffle.title.trim()
+    const compactTitle = title.length > 72 ? `${title.slice(0, 69)}...` : title
+    const prize = prizeSummary(raffle)
+    const platformName = (process.env.NEXT_PUBLIC_PLATFORM_NAME || 'Owl Raffle').trim()
+    const templates: Array<Omit<LiveRaffleXTemplate, 'intentUrl'>> = [
+      {
+        id: 'launch',
+        label: 'Launch',
+        text: `New raffle is LIVE on ${platformName}: "${compactTitle}"\nPrize: ${prize}\nEnter now: ${raffleUrl}\n#Solana #NFT #Raffle`,
+      },
+      {
+        id: 'hype',
+        label: 'Hype',
+        text: `Community fam, this one is heating up.\n"${compactTitle}" is live now on ${platformName}.\nGrab your tickets before it closes: ${raffleUrl}\n#Solana #Web3`,
+      },
+      {
+        id: 'last-call',
+        label: 'Last call',
+        text: `Last call for "${compactTitle}" on ${platformName}.\nPrize: ${prize}\nFinal entries: ${raffleUrl}\n#Solana #Crypto`,
+      },
+    ]
+    return templates.map((template) => ({
+      ...template,
+      intentUrl: buildXIntentUrl(template.text),
+    }))
+  }, [raffle])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -445,6 +501,36 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
             </CardContent>
           </Card>
         )}
+
+        <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+          <CardHeader>
+            <CardTitle>Share this raffle on X</CardTitle>
+            <CardDescription>
+              One-click templates to market this raffle. Opens X with prefilled text and your raffle link.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {xTemplates.map((template) => (
+                <Button
+                  key={template.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  asChild
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  <a href={template.intentUrl} target="_blank" rel="noopener noreferrer">
+                    Post to X: {template.label}
+                  </a>
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Tip: use Launch when a raffle goes live, Hype mid-way, and Last call near close.
+            </p>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
