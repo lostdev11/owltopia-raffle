@@ -10,6 +10,8 @@ import {
   getAccount,
   createAssociatedTokenAccountInstruction,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { Button } from '@/components/ui/button'
@@ -278,9 +280,42 @@ export function CreateRaffleForm() {
             const mintPk = new PublicKey(raffle.nft_mint_address)
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
             let resolvedHolder: NftHolderInWallet | null = null
-            const maxHolderAttempts = 6
+            // If selected NFT already has a valid token account, prefer it to avoid RPC race conditions.
+            if (selectedNft?.tokenAccount) {
+              try {
+                const selectedTokenAccount = new PublicKey(selectedNft.tokenAccount)
+                const selectedInfo = await connection.getParsedAccountInfo(selectedTokenAccount, 'processed')
+                const ownerProgram = selectedInfo.value?.owner
+                const isSplProgram = ownerProgram?.equals(TOKEN_PROGRAM_ID) ?? false
+                const isToken2022 = ownerProgram?.equals(TOKEN_2022_PROGRAM_ID) ?? false
+                const info = (selectedInfo.value?.data as { parsed?: { info?: Record<string, unknown> } } | undefined)?.parsed?.info
+                const selectedMint = typeof info?.mint === 'string' ? info.mint : null
+                const amountRaw =
+                  typeof info?.tokenAmount === 'object' && info?.tokenAmount
+                    ? (info.tokenAmount as { amount?: unknown }).amount
+                    : undefined
+                const amount =
+                  typeof amountRaw === 'string'
+                    ? Number(amountRaw)
+                    : typeof amountRaw === 'number'
+                      ? amountRaw
+                      : 0
+                const delegate = typeof info?.delegate === 'string' ? info.delegate : null
+                if (selectedMint === mintPk.toBase58() && amount >= 1 && !delegate) {
+                  if (isSplProgram) {
+                    resolvedHolder = { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+                  } else if (isToken2022) {
+                    resolvedHolder = { tokenProgram: TOKEN_2022_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+                  }
+                }
+              } catch {
+                // Fall through to holder lookup retries.
+              }
+            }
+            const maxHolderAttempts = 10
             for (let attempt = 0; attempt < maxHolderAttempts; attempt++) {
-              const h = await getNftHolderInWallet(connection, mintPk, publicKey)
+              if (resolvedHolder) break
+              const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
               if (h && 'delegated' in h && h.delegated) {
                 alert(
                   'This NFT is staked or delegated. Unstake it, then complete the deposit from the raffle page (your draft is saved).'
@@ -293,7 +328,7 @@ export function CreateRaffleForm() {
                 break
               }
               if (attempt < maxHolderAttempts - 1) {
-                await new Promise((r) => setTimeout(r, 800))
+                await new Promise((r) => setTimeout(r, 700))
               }
             }
             if (!resolvedHolder) {

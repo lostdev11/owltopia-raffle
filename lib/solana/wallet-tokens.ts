@@ -33,7 +33,8 @@ export interface NftHolderDelegated {
 export async function getNftHolderInWallet(
   connection: Connection,
   mint: PublicKey,
-  owner: PublicKey
+  owner: PublicKey,
+  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
 ): Promise<NftHolderInWallet | NftHolderDelegated | null> {
   const mintStr = mint.toBase58()
   let foundDelegated = false
@@ -43,7 +44,7 @@ export async function getNftHolderInWallet(
     const mintFilterResponse = await connection.getParsedTokenAccountsByOwner(
       owner,
       { mint },
-      'confirmed'
+      commitment
     )
     for (const { pubkey, account } of mintFilterResponse.value) {
       const info = account.data?.parsed?.info
@@ -78,7 +79,7 @@ export async function getNftHolderInWallet(
         programId,
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
-      const account = await getAccount(connection, ata, 'confirmed', programId)
+      const account = await getAccount(connection, ata, commitment, programId)
       if (account.amount >= 1n) {
         if (account.delegate) foundDelegated = true
         else return { tokenProgram: programId, tokenAccount: ata }
@@ -94,7 +95,7 @@ export async function getNftHolderInWallet(
       const response = await connection.getParsedTokenAccountsByOwner(
         owner,
         { programId },
-        'confirmed'
+        commitment
       )
       for (const { pubkey, account } of response.value) {
         const info = account.data?.parsed?.info
