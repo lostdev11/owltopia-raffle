@@ -15,6 +15,10 @@ import {
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
+import {
+  isMplCoreNoApprovalsError,
+  mplCoreNoApprovalsEscrowMessage,
+} from '@/lib/solana/mpl-core-transfer-errors'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -377,6 +381,7 @@ export function CreateRaffleForm() {
             }
 
             let depositSig: string | null = null
+            let lastMplCoreEscrowError: string | null = null
 
             if (resolvedHolder) {
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
@@ -476,18 +481,31 @@ export function CreateRaffleForm() {
                   })
                   logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
                 } catch (coreErr) {
+                  const coreMsg = coreErr instanceof Error ? coreErr.message : String(coreErr)
+                  lastMplCoreEscrowError = coreMsg
                   logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
-                    detail: coreErr instanceof Error ? coreErr.message : String(coreErr),
+                    detail: coreMsg,
                   })
                   depositSig = null
                 }
               }
               if (!depositSig) {
                 logEscrowDepositAbort(depositLogCtx, 'no_path_create_form')
-                alert(
-                  'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +
-                    'Your raffle is saved — open it to deposit or verify, or try Wi‑Fi / another network.'
-                )
+                const mintShort =
+                  selectedNft.mint.length > 16
+                    ? `${selectedNft.mint.slice(0, 4)}…${selectedNft.mint.slice(-4)}`
+                    : selectedNft.mint
+                if (
+                  lastMplCoreEscrowError &&
+                  isMplCoreNoApprovalsError(lastMplCoreEscrowError)
+                ) {
+                  alert(mplCoreNoApprovalsEscrowMessage(mintShort))
+                } else {
+                  alert(
+                    'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +
+                      'Your raffle is saved — open it to deposit or verify, or try Wi‑Fi / another network.'
+                  )
+                }
                 router.push(`/raffles/${raffle.slug}?deposit=1`)
                 return
               }

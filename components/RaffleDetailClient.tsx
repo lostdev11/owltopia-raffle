@@ -69,6 +69,10 @@ import {
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
+import {
+  isMplCoreNoApprovalsError,
+  mplCoreNoApprovalsEscrowMessage,
+} from '@/lib/solana/mpl-core-transfer-errors'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -1674,10 +1678,18 @@ export function RaffleDetailClient({
           mintShort,
           details: detailsSuffix || undefined,
         })
-        setDepositEscrowError(
-          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
-        )
-        setShowManualEscrowFallback(true)
+        if (
+          transferFallbackDetails &&
+          isMplCoreNoApprovalsError(transferFallbackDetails)
+        ) {
+          setDepositEscrowError(mplCoreNoApprovalsEscrowMessage(mintShort))
+          setShowManualEscrowFallback(false)
+        } else {
+          setDepositEscrowError(
+            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
+          )
+          setShowManualEscrowFallback(true)
+        }
         return
       }
       if ('delegated' in holder && holder.delegated) {
@@ -1763,8 +1775,17 @@ export function RaffleDetailClient({
     } catch (e) {
       logEscrowDepositError(depositLogCtx, e)
       const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
-      setDepositEscrowError(baseMessage)
-      setShowManualEscrowFallback(true)
+      const short =
+        transferAssetId.length > 16
+          ? `${transferAssetId.slice(0, 4)}…${transferAssetId.slice(-4)}`
+          : transferAssetId
+      if (isMplCoreNoApprovalsError(baseMessage)) {
+        setDepositEscrowError(mplCoreNoApprovalsEscrowMessage(short))
+        setShowManualEscrowFallback(false)
+      } else {
+        setDepositEscrowError(baseMessage)
+        setShowManualEscrowFallback(true)
+      }
     } finally {
       setDepositEscrowLoading(false)
     }

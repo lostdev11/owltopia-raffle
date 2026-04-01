@@ -27,7 +27,13 @@ function emit(
   phase: 'start' | 'path' | 'signed' | 'verify_ok' | 'verify_fail' | 'abort' | 'error',
   payload: Record<string, unknown>
 ) {
-  console.info(TAG, { phase, ts: new Date().toISOString(), ...payload })
+  const line = { phase, ts: new Date().toISOString(), ...payload }
+  try {
+    // One string so DevTools / Edge don’t collapse the payload as a generic "Object" in the console stream.
+    console.info(`${TAG} ${JSON.stringify(line)}`)
+  } catch {
+    console.info(TAG, line)
+  }
 }
 
 export function logEscrowDepositStart(

@@ -268,11 +268,17 @@ export async function verifyTransaction(
             treasuryIncrease >= expectedTreasuryRaw - toleranceRaw && treasuryIncrease <= expectedTreasuryRaw + toleranceRaw) {
           return { valid: true }
         }
-        // Gross paid matches creator + treasury (rounding across two transfers)
+        // Sum matches gross but each leg must still hit minimum expected (prevents "100% to creator" passing)
         if (creatorIncrease != null && treasuryIncrease != null) {
           const sum = creatorIncrease + treasuryIncrease
           if (sum >= expectedTotalRaw - sumToleranceRaw && sum <= expectedTotalRaw + sumToleranceRaw) {
-            return { valid: true }
+            const minTreasury =
+              expectedTreasuryRaw > 0n ? expectedTreasuryRaw - toleranceRaw : 0n
+            const minCreator =
+              expectedCreatorRaw > 0n ? expectedCreatorRaw - toleranceRaw : 0n
+            if (treasuryIncrease >= minTreasury && creatorIncrease >= minCreator) {
+              return { valid: true }
+            }
           }
         }
         // Same as SOL: fall through so legacy "full USDC to treasury only" still verifies
@@ -332,7 +338,13 @@ export async function verifyTransaction(
         if (creatorIncrease != null && treasuryIncrease != null) {
           const sum = creatorIncrease + treasuryIncrease
           if (sum >= expectedTotalRaw - sumToleranceRaw && sum <= expectedTotalRaw + sumToleranceRaw) {
-            return { valid: true }
+            const minTreasury =
+              expectedTreasuryRaw > 0n ? expectedTreasuryRaw - toleranceRaw : 0n
+            const minCreator =
+              expectedCreatorRaw > 0n ? expectedCreatorRaw - toleranceRaw : 0n
+            if (treasuryIncrease >= minTreasury && creatorIncrease >= minCreator) {
+              return { valid: true }
+            }
           }
         }
       }

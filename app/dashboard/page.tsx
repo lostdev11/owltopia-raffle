@@ -19,6 +19,7 @@ import {
   Gift,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
@@ -41,6 +42,7 @@ type Raffle = {
   creator_claimed_at?: string | null
   creator_claim_tx?: string | null
   settled_at?: string | null
+  fee_bps_applied?: number | null
 }
 type EntryWithRaffle = {
   entry: {
@@ -131,6 +133,41 @@ const MOBILE_WALLET_STABILIZE_MS = 450
 const MOBILE_401_RETRY_DELAY_MS = 800
 
 const MY_ENTRIES_PAGE_SIZE = 20
+/** Background refresh for claim tracker + dashboard numbers while tab is open */
+const CLAIM_TRACKER_POLL_MS = 18_000
+
+function formatRelativeUpdated(updatedAt: number): string {
+  const s = Math.floor((Date.now() - updatedAt) / 1000)
+  if (s < 8) return 'just now'
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  return `${h}h ago`
+}
+
+function aggregateClaimTotalsByCurrency(
+  raffles: Raffle[],
+  field: 'creator_payout_amount' | 'platform_fee_amount'
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of raffles) {
+    const cur = (r.currency || 'SOL').toUpperCase()
+    const raw = field === 'creator_payout_amount' ? r.creator_payout_amount : r.platform_fee_amount
+    const v = Number(raw ?? 0)
+    if (!Number.isFinite(v) || v <= 0) continue
+    out[cur] = (out[cur] ?? 0) + v
+  }
+  return out
+}
+
+function formatMultiCurrencyTotals(by: Record<string, number>): string {
+  const keys = Object.keys(by)
+  if (keys.length === 0) return '—'
+  return keys
+    .map((cur) => `${by[cur]!.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
+    .join(' · ')
+}
 
 type RaffleEntrySummary = {
   raffle: EntryWithRaffle['raffle']
@@ -160,23 +197,34 @@ export default function DashboardPage() {
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
+  const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
+  const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<number | null>(null)
+  const [relativeTimeTick, setRelativeTimeTick] = useState(0)
   const hasRetried401OnMobile = useRef(false)
+  const dashboardHydratedRef = useRef(false)
+  const hasDashboardDataRef = useRef(false)
   const visibilityTick = useVisibilityTick()
 
   // Use wallet address string in deps so callback identity is stable (publicKey object ref can change every render and cause infinite loop).
   const walletAddr = publicKey?.toBase58() ?? ''
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true
     if (!connected || !publicKey) {
       setData(null)
       setLoading(false)
       setNeedsSignIn(false)
       setError(null)
+      setClaimTrackerRefreshing(false)
       return
     }
-    setLoading(true)
-    setError(null)
-    setNeedsSignIn(false)
+    if (silent) {
+      setClaimTrackerRefreshing(true)
+    } else {
+      setLoading(true)
+      setError(null)
+      setNeedsSignIn(false)
+    }
     const addr = publicKey.toBase58()
     let skipLoadingFalse = false
     try {
@@ -185,7 +233,7 @@ export default function DashboardPage() {
         headers: { 'X-Connected-Wallet': addr },
       })
       if (res.status === 401) {
-        if (typeof window !== 'undefined' && isMobileDevice() && !hasRetried401OnMobile.current) {
+        if (typeof window !== 'undefined' && isMobileDevice() && !hasRetried401OnMobile.current && !silent) {
           hasRetried401OnMobile.current = true
           skipLoadingFalse = true
           setTimeout(() => loadDashboard(), MOBILE_401_RETRY_DELAY_MS)
@@ -197,8 +245,10 @@ export default function DashboardPage() {
       }
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const msg = typeof json?.error === 'string' ? json.error : 'Failed to load dashboard'
-        setError(msg)
+        if (!silent) {
+          const msg = typeof json?.error === 'string' ? json.error : 'Failed to load dashboard'
+          setError(msg)
+        }
         return
       }
       if (json.wallet && json.wallet !== addr) {
@@ -207,10 +257,18 @@ export default function DashboardPage() {
         return
       }
       setData(json)
+      setDashboardUpdatedAt(Date.now())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Something went wrong')
+      }
     } finally {
-      if (!skipLoadingFalse) setLoading(false)
+      if (silent) {
+        setClaimTrackerRefreshing(false)
+      }
+      if (!skipLoadingFalse && !silent) {
+        setLoading(false)
+      }
     }
   }, [connected, walletAddr])
 
@@ -218,6 +276,23 @@ export default function DashboardPage() {
   useEffect(() => {
     hasRetried401OnMobile.current = false
   }, [walletAddr, connected])
+
+  useEffect(() => {
+    dashboardHydratedRef.current = false
+  }, [walletAddr])
+
+  useEffect(() => {
+    hasDashboardDataRef.current = data != null
+    if (data) {
+      dashboardHydratedRef.current = true
+    }
+  }, [data])
+
+  useEffect(() => {
+    if (!data) return
+    const id = setInterval(() => setRelativeTimeTick((t) => t + 1), 15_000)
+    return () => clearInterval(id)
+  }, [data])
 
   // On mobile, delay first dashboard load so wallet has time to stabilize after nav/redirect.
   // If already connected on mount (e.g. returning from wallet), don't delay so connection feels instant.
@@ -235,11 +310,26 @@ export default function DashboardPage() {
     return () => clearTimeout(t)
   }, [connected, publicKey])
 
-  // Load dashboard when wallet is ready and when user returns to tab (visibility tick) so connection updates apply right away.
+  // Load dashboard when wallet is ready; on tab focus refresh silently if we already have data (no full-page spinner).
   useEffect(() => {
     if (!walletReady && isMobileDevice()) return
-    loadDashboard()
+    if (visibilityTick > 0 && dashboardHydratedRef.current) {
+      void loadDashboard({ silent: true })
+      return
+    }
+    void loadDashboard()
   }, [loadDashboard, walletReady, visibilityTick])
+
+  // Live poll while signed in so claim amounts and live sales update without refreshing the page.
+  useEffect(() => {
+    if (!connected || !publicKey || needsSignIn) return
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (!hasDashboardDataRef.current) return
+      void loadDashboard({ silent: true })
+    }, CLAIM_TRACKER_POLL_MS)
+    return () => clearInterval(id)
+  }, [connected, walletAddr, needsSignIn, loadDashboard])
 
   // Sync display name input when dashboard data loads (must be unconditional for Rules of Hooks)
   useEffect(() => {
@@ -330,7 +420,7 @@ export default function DashboardPage() {
           )
           return
         }
-        await loadDashboard()
+        await loadDashboard({ silent: true })
       } finally {
         setClaimProceedsLoadingId(null)
       }
@@ -356,7 +446,7 @@ export default function DashboardPage() {
           )
           return
         }
-        await loadDashboard()
+        await loadDashboard({ silent: true })
       } finally {
         setClaimPrizeLoadingId(null)
       }
@@ -384,7 +474,7 @@ export default function DashboardPage() {
           )
           return
         }
-        await loadDashboard()
+        await loadDashboard({ silent: true })
       } finally {
         setClaimRefundLoadingEntryId(null)
       }
@@ -406,7 +496,7 @@ export default function DashboardPage() {
           setRequestCancelError((json as { error?: string }).error ?? 'Failed to request cancellation')
           return
         }
-        loadDashboard()
+        void loadDashboard({ silent: true })
       } finally {
         setRequestCancelId(null)
       }
@@ -429,6 +519,51 @@ export default function DashboardPage() {
       ),
     [myRafflesForMemo]
   )
+
+  const awaitingSettlementEscrowClaims = useMemo(
+    () =>
+      myRafflesForMemo.filter(
+        (r) =>
+          r.status === 'successful_pending_claims' &&
+          r.ticket_payments_to_funds_escrow === true &&
+          !r.creator_claimed_at &&
+          !r.settled_at?.trim()
+      ),
+    [myRafflesForMemo]
+  )
+
+  const liveEscrowRaffles = useMemo(
+    () =>
+      myRafflesForMemo.filter(
+        (r) =>
+          r.ticket_payments_to_funds_escrow === true &&
+          (r.status === 'live' || r.status === 'ready_to_draw')
+      ),
+    [myRafflesForMemo]
+  )
+
+  const claimTrackerReadyNetByCurrency = useMemo(
+    () => aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'creator_payout_amount'),
+    [pendingCreatorFundClaims]
+  )
+  const claimTrackerReadyFeeByCurrency = useMemo(
+    () => aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'platform_fee_amount'),
+    [pendingCreatorFundClaims]
+  )
+
+  const claimTrackerReadyGrossByCurrency = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(claimTrackerReadyNetByCurrency),
+      ...Object.keys(claimTrackerReadyFeeByCurrency),
+    ])
+    const out: Record<string, number> = {}
+    for (const k of keys) {
+      const t =
+        (claimTrackerReadyNetByCurrency[k] ?? 0) + (claimTrackerReadyFeeByCurrency[k] ?? 0)
+      if (t > 0) out[k] = t
+    }
+    return out
+  }, [claimTrackerReadyNetByCurrency, claimTrackerReadyFeeByCurrency])
 
   const nftPrizeDashboardRows = useMemo(() => {
     const byId = new Map<string, NftWinnerDashboardRow>()
@@ -762,6 +897,129 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mb-8 border-emerald-500/25 bg-emerald-500/[0.04]">
+        <CardHeader className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="flex items-center gap-2.5 text-base sm:text-lg">
+                <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-35" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                </span>
+                Live claim tracker
+              </CardTitle>
+              <CardDescription>
+                Escrow claim totals and settlement status update about every{' '}
+                {Math.round(CLAIM_TRACKER_POLL_MS / 1000)} seconds while this tab is open, when you return to the tab,
+                or when you tap refresh. Creator revenue and gross sales above use the same refresh.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {dashboardUpdatedAt != null && (
+                <span
+                  className="text-xs text-muted-foreground tabular-nums"
+                  key={relativeTimeTick}
+                >
+                  Updated {formatRelativeUpdated(dashboardUpdatedAt)}
+                </span>
+              )}
+              {claimTrackerRefreshing && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="touch-manipulation min-h-[44px]"
+                disabled={claimTrackerRefreshing}
+                onClick={() => void loadDashboard({ silent: true })}
+              >
+                <RefreshCw className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Refresh now</span>
+                <span className="sm:hidden">Refresh</span>
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+              <p className="text-xs font-medium text-muted-foreground mb-1">Ready to claim (net to you)</p>
+              <p className="text-lg font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerReadyNetByCurrency)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {pendingCreatorFundClaims.length} raffle
+                {pendingCreatorFundClaims.length === 1 ? '' : 's'} settled — claim below
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+              <p className="text-xs font-medium text-muted-foreground mb-1">Platform fee (same claim tx)</p>
+              <p className="text-lg font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerReadyFeeByCurrency)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Goes to treasury when you claim</p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-background/60 p-3 sm:col-span-1">
+              <p className="text-xs font-medium text-muted-foreground mb-1">Gross in escrow (pre-claim)</p>
+              <p className="text-lg font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerReadyGrossByCurrency)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Net + fee for raffles ready to claim</p>
+            </div>
+          </div>
+
+          {awaitingSettlementEscrowClaims.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-foreground mb-2">
+                Waiting for settlement ({awaitingSettlementEscrowClaims.length})
+              </p>
+              <p className="text-xs text-muted-foreground mb-2">
+                Winner recorded; payout lines are being finalized. Amounts appear here when ready.
+              </p>
+              <ul className="space-y-1.5 text-sm">
+                {awaitingSettlementEscrowClaims.slice(0, 8).map((r) => (
+                  <li key={r.id}>
+                    <Link href={`/raffles/${r.slug}`} className="text-primary hover:underline font-medium">
+                      {r.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {awaitingSettlementEscrowClaims.length > 8 && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  +{awaitingSettlementEscrowClaims.length - 8} more in My raffles
+                </p>
+              )}
+            </div>
+          )}
+
+          {liveEscrowRaffles.length > 0 && (
+            <div className="rounded-lg border border-dashed border-border/70 p-3">
+              <p className="text-sm font-medium text-foreground">
+                Ticket sales still in funds escrow ({liveEscrowRaffles.length} raffle
+                {liveEscrowRaffles.length === 1 ? '' : 's'})
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Live and ready-to-draw raffles keep gross proceeds in escrow until the draw. Watch{' '}
+                <span className="font-medium text-foreground">Creator revenue</span> and{' '}
+                <span className="font-medium text-foreground">All-time gross ticket sales</span> above for numbers as
+                purchases confirm.
+              </p>
+            </div>
+          )}
+
+          {pendingCreatorFundClaims.length === 0 &&
+            awaitingSettlementEscrowClaims.length === 0 &&
+            liveEscrowRaffles.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No active escrow claim pipeline right now. When you host escrow raffles, live sales update the cards
+                above; after a draw you will see amounts here until you claim.
+              </p>
+            )}
+        </CardContent>
+      </Card>
 
       <Card className="mb-8 border-green-500/25 bg-green-500/[0.03]">
         <CardHeader>
