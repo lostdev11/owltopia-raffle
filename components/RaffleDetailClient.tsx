@@ -51,7 +51,7 @@ import {
   XCircle,
   Loader2,
   Coins,
-  CircleCheck,
+  CheckCircle,
 } from 'lucide-react'
 import {
   Transaction,
@@ -2446,7 +2446,7 @@ export function RaffleDetailClient({
                     className="rounded-lg border border-emerald-500/45 bg-emerald-500/[0.12] p-4 space-y-2"
                   >
                     <div className="flex items-start gap-2">
-                      <CircleCheck
+                      <CheckCircle
                         className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5"
                         aria-hidden
                       />
