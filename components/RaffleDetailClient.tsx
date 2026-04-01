@@ -71,6 +71,8 @@ import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -1458,56 +1460,6 @@ export function RaffleDetailClient({
     setShowManualEscrowFallback(false)
     setDepositEscrowLoading(true)
 
-    // Confirm signature robustly and ensure it actually landed successfully.
-    // Wallet adapters can return a signature even if the tx is dropped/failed; this makes the UI truthful.
-    const confirmAndAssertSuccess = async (signature: string) => {
-      const started = Date.now()
-      const timeoutMs = 45_000
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-      while (Date.now() - started < timeoutMs) {
-        // Prefer getTransaction so we can read meta.err (authoritative for success/failure)
-        try {
-          const tx = await connection.getTransaction(signature, {
-            commitment: 'confirmed',
-            maxSupportedTransactionVersion: 0,
-          })
-          if (tx?.meta) {
-            if (tx.meta.err) {
-              throw new Error(`Transaction failed: ${JSON.stringify(tx.meta.err)}`)
-            }
-            return
-          }
-        } catch (e) {
-          // If RPC errors here, still fall back to signature status below.
-          const msg = e instanceof Error ? e.message : String(e)
-          // If we already know it failed, don't keep retrying.
-          if (msg.toLowerCase().includes('transaction failed')) throw e
-        }
-
-        try {
-          const st = await connection.getSignatureStatuses([signature], {
-            searchTransactionHistory: true,
-          })
-          const s = st?.value?.[0]
-          if (s?.err) {
-            throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`)
-          }
-          if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') {
-            return
-          }
-        } catch (e) {
-          // ignore and retry; RPC can be flaky on mobile networks
-        }
-
-        await sleep(900)
-      }
-
-      throw new Error(
-        'Transaction signature was returned, but it was not confirmed on-chain in time. Please check your wallet activity and retry.'
-      )
-    }
-
     const signInForSession = async (): Promise<boolean> => {
       if (!publicKey || !signMessage) {
         setDepositEscrowError('Sign in required. Connect your wallet and sign in.')
@@ -1558,27 +1510,14 @@ export function RaffleDetailClient({
 
     const verifyDepositAfterTransfer = async (depositTx?: string) => {
       try {
-        const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
-        let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
-          method: 'POST',
-          headers: body ? { 'Content-Type': 'application/json' } : undefined,
-          body,
-          credentials: 'include',
-        })
-        if (res.status === 401) {
+        let result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx })
+        if (!result.ok && result.status === 401) {
           const signedIn = await signInForSession()
           if (!signedIn) return false
-          res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
-            method: 'POST',
-            headers: body ? { 'Content-Type': 'application/json' } : undefined,
-            body,
-            credentials: 'include',
-          })
+          result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx })
         }
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          const msg = typeof data?.error === 'string' ? data.error : 'Verification failed'
-          setDepositEscrowError(msg)
+        if (!result.ok) {
+          setDepositEscrowError(result.error)
           return false
         }
         return true
@@ -1624,7 +1563,7 @@ export function RaffleDetailClient({
           assetId: transferAssetId,
           escrowAddress,
         })
-        await confirmAndAssertSuccess(sig)
+        await confirmSignatureSuccessOnChain(connection, sig)
         await finalizeAfterTransfer(sig)
         return
       }
@@ -1642,7 +1581,7 @@ export function RaffleDetailClient({
           assetId: transferAssetId,
           escrowAddress,
         })
-        await confirmAndAssertSuccess(sig)
+        await confirmSignatureSuccessOnChain(connection, sig)
         await finalizeAfterTransfer(sig)
         return
       }
@@ -1665,7 +1604,7 @@ export function RaffleDetailClient({
               assetId: transferAssetId,
               escrowAddress,
             })
-            await confirmAndAssertSuccess(sig)
+            await confirmSignatureSuccessOnChain(connection, sig)
             await finalizeAfterTransfer(sig)
             return
           } catch (e) {
@@ -1679,7 +1618,7 @@ export function RaffleDetailClient({
               assetId: transferAssetId,
               escrowAddress,
             })
-            await confirmAndAssertSuccess(sig)
+            await confirmSignatureSuccessOnChain(connection, sig)
             await finalizeAfterTransfer(sig)
             return
           } catch (e) {
@@ -1719,7 +1658,7 @@ export function RaffleDetailClient({
             mintAddress: raffle.nft_mint_address,
             escrowAddress,
           })
-          await confirmAndAssertSuccess(sig)
+          await confirmSignatureSuccessOnChain(connection, sig)
           await finalizeAfterTransfer(sig)
           return
         } catch {}
@@ -1758,7 +1697,7 @@ export function RaffleDetailClient({
         )
       )
       const sig = await sendTransaction(tx, connection)
-      await confirmAndAssertSuccess(sig)
+      await confirmSignatureSuccessOnChain(connection, sig)
       await finalizeAfterTransfer(sig)
     } catch (e) {
       const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
@@ -1821,26 +1760,18 @@ export function RaffleDetailClient({
         }
       }
 
-      const verifyBody = manualTx ? JSON.stringify({ deposit_tx: manualTx }) : undefined
-      let res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
-        method: 'POST',
-        headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
-        body: verifyBody,
-        credentials: 'include',
+      let result = await verifyPrizeDepositWithRetries(raffle.id, {
+        depositTx: manualTx || undefined,
       })
-      if (res.status === 401) {
+      if (!result.ok && result.status === 401) {
         const signedIn = await signInForSession()
         if (!signedIn) return
-        res = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
-          method: 'POST',
-          headers: verifyBody ? { 'Content-Type': 'application/json' } : undefined,
-          body: verifyBody,
-          credentials: 'include',
+        result = await verifyPrizeDepositWithRetries(raffle.id, {
+          depositTx: manualTx || undefined,
         })
       }
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setDepositEscrowError(data?.error ?? 'Verification failed')
+      if (!result.ok) {
+        setDepositEscrowError(result.error)
         setShowManualEscrowFallback(true)
         return
       }

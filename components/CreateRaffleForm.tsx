@@ -14,6 +14,11 @@ import {
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
+import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
+import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,9 +33,8 @@ import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 
 export function CreateRaffleForm() {
   const router = useRouter()
-  const { publicKey, connected, sendTransaction } = useWallet()
+  const { publicKey, connected, sendTransaction, wallet } = useWallet()
   const { connection } = useConnection()
-  const wallet = publicKey?.toBase58() ?? ''
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
   // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
@@ -273,14 +277,32 @@ export function CreateRaffleForm() {
 
       if (response.ok) {
         const raffle = await response.json()
-        // NFT raffles: transfer to escrow right away, then verify, then redirect
-        if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && sendTransaction) {
+        // NFT raffles: one flow — sign transfer to escrow, retry verify until RPC catches up, then redirect
+        if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && (sendTransaction || wallet?.adapter)) {
           try {
             setCreateStep('signing')
             const mintPk = new PublicKey(raffle.nft_mint_address)
+            const walletAdapter = wallet?.adapter ?? null
+
+            const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
+            const escrowData = await escrowRes.json().catch(() => ({}))
+            const escrowAddress = escrowData?.address
+            if (!escrowRes.ok || !escrowAddress) {
+              const errMsg =
+                typeof escrowData?.error === 'string' && escrowData.error.trim()
+                  ? escrowData.error.trim()
+                  : 'Prize escrow is not configured on this server.'
+              alert(
+                `${errMsg} Your raffle is saved as a draft. ` +
+                  'Please contact an admin, or try again once escrow is configured.'
+              )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
+            }
+            const escrowPubkey = new PublicKey(escrowAddress)
+
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
             let resolvedHolder: NftHolderInWallet | null = null
-            // If selected NFT already has a valid token account, prefer it to avoid RPC race conditions.
             if (selectedNft?.tokenAccount) {
               try {
                 const selectedTokenAccount = new PublicKey(selectedNft.tokenAccount)
@@ -331,76 +353,124 @@ export function CreateRaffleForm() {
                 await new Promise((r) => setTimeout(r, 700))
               }
             }
-            if (!resolvedHolder) {
-              alert(
-                'We could not confirm this NFT in your wallet yet (SPL Token and Token-2022). ' +
-                  'Your raffle is saved as a draft — open it and tap deposit when the network sees the NFT, or try Wi‑Fi.'
-              )
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
 
-            const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
-            const escrowData = await escrowRes.json().catch(() => ({}))
-            const escrowAddress = escrowData?.address
-            if (!escrowRes.ok || !escrowAddress) {
-              const errMsg =
-                typeof escrowData?.error === 'string' && escrowData.error.trim()
-                  ? escrowData.error.trim()
-                  : 'Prize escrow is not configured on this server.'
-              alert(
-                `${errMsg} Your raffle is saved as a draft. ` +
-                  'Please contact an admin, or try again once escrow is configured.'
-              )
-              router.push(`/raffles/${raffle.slug}?deposit=1`)
-              return
-            }
-            const escrowPubkey = new PublicKey(escrowAddress)
-            const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
-            const escrowAta = await getAssociatedTokenAddress(
-              mintPk,
-              escrowPubkey,
-              false,
-              tokenProgram,
-              ASSOCIATED_TOKEN_PROGRAM_ID
-            )
+            let depositSig: string | null = null
 
-            const tx = new Transaction()
-            try {
-              await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
-            } catch {
-              tx.add(
-                createAssociatedTokenAccountInstruction(
-                  publicKey,
-                  escrowAta,
-                  escrowPubkey,
+            if (resolvedHolder) {
+              const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
+              if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+                try {
+                  depositSig = await transferTokenMetadataNftToEscrow({
+                    connection,
+                    wallet: walletAdapter,
+                    mintAddress: raffle.nft_mint_address,
+                    escrowAddress,
+                  })
+                  await confirmSignatureSuccessOnChain(connection, depositSig)
+                } catch {
+                  depositSig = null
+                }
+              }
+              if (!depositSig) {
+                if (!sendTransaction) {
+                  alert(
+                    'Your wallet did not expose a transaction sender. Open your raffle and complete the deposit there, or try another wallet.'
+                  )
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
+                const escrowAta = await getAssociatedTokenAddress(
                   mintPk,
+                  escrowPubkey,
+                  false,
                   tokenProgram,
                   ASSOCIATED_TOKEN_PROGRAM_ID
                 )
+                const tx = new Transaction()
+                try {
+                  await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
+                } catch {
+                  tx.add(
+                    createAssociatedTokenAccountInstruction(
+                      publicKey,
+                      escrowAta,
+                      escrowPubkey,
+                      mintPk,
+                      tokenProgram,
+                      ASSOCIATED_TOKEN_PROGRAM_ID
+                    )
+                  )
+                }
+                tx.add(
+                  createTransferInstruction(
+                    sourceTokenAccount,
+                    escrowAta,
+                    publicKey,
+                    1n,
+                    [],
+                    tokenProgram
+                  )
+                )
+                depositSig = await sendTransaction(tx, connection)
+                await confirmSignatureSuccessOnChain(connection, depositSig)
+              }
+            } else if (walletAdapter) {
+              try {
+                depositSig = await transferCompressedNftToEscrow({
+                  connection,
+                  wallet: walletAdapter,
+                  assetId: selectedNft.mint,
+                  escrowAddress,
+                })
+                await confirmSignatureSuccessOnChain(connection, depositSig)
+              } catch {
+                depositSig = null
+              }
+              if (!depositSig) {
+                try {
+                  depositSig = await transferMplCoreToEscrow({
+                    connection,
+                    wallet: walletAdapter,
+                    assetId: selectedNft.mint,
+                    escrowAddress,
+                  })
+                  await confirmSignatureSuccessOnChain(connection, depositSig)
+                } catch {
+                  depositSig = null
+                }
+              }
+              if (!depositSig) {
+                alert(
+                  'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +
+                    'Your raffle is saved — open it to deposit or verify, or try Wi‑Fi / another network.'
+                )
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+            } else {
+              alert(
+                'We could not confirm this NFT as SPL in your wallet yet, and the wallet adapter is not ready for Core/compressed transfers. ' +
+                  'Open your raffle when ready and tap deposit.'
               )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
             }
-            tx.add(
-              createTransferInstruction(
-                sourceTokenAccount,
-                escrowAta,
-                publicKey,
-                1n,
-                [],
-                tokenProgram
+
+            const verifyResult = await verifyPrizeDepositWithRetries(raffle.id, { depositTx: depositSig })
+            if (!verifyResult.ok && verifyResult.status === 401) {
+              alert(
+                'Your session expired. Sign in from your dashboard, then open your raffle and tap Verify deposit if needed.'
               )
-            )
-            const sig = await sendTransaction(tx, connection)
-            await connection.confirmTransaction(sig, 'confirmed')
-            const verifyRes = await fetch(`/api/raffles/${raffle.id}/verify-prize-deposit`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ deposit_tx: sig }),
-              credentials: 'include',
-            })
-            if (!verifyRes.ok) {
-              const errData = await verifyRes.json().catch(() => ({}))
-              console.warn('Verify deposit failed:', errData?.error)
+              router.push('/dashboard')
+              return
+            }
+            if (!verifyResult.ok) {
+              alert(
+                'Your transfer may have succeeded, but the server has not confirmed escrow yet (common on mobile RPC). ' +
+                  'Open your raffle — tap Verify deposit once if it does not activate within a minute.'
+              )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+              return
             }
             router.push(`/raffles/${raffle.slug}`)
           } catch (transferErr) {
