@@ -4,6 +4,7 @@ import {
   getPrizeEscrowKeypair,
   getPrizeEscrowPublicKey,
   getPrizeNftFreezeAuthorityPublicKey,
+  isPrizeEscrowFrozenSplVerifyBypassEnabled,
 } from '@/lib/raffles/prize-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -62,6 +63,9 @@ export async function GET(request: NextRequest) {
         envPresent: rawFreeze.length > 0,
         envLooksJsonArray: rawFreeze.startsWith('[') && rawFreeze.endsWith(']'),
         envLength: rawFreeze.length,
+      },
+      frozenSplDepositVerifyBypass: {
+        enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),
       },
       solana: {
         clusterGuess: cluster,

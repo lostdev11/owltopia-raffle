@@ -30,7 +30,10 @@ import {
   logEscrowDepositStart,
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
-import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
+import {
+  verifyPrizeDepositWithRetries,
+  isEscrowSplPrizeFrozenVerifyError,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -537,10 +540,14 @@ export function CreateRaffleForm() {
               return
             }
             if (!verifyResult.ok) {
-              alert(
-                'Your transfer may have succeeded, but the server has not confirmed escrow yet (common on mobile RPC). ' +
-                  'Open your raffle — tap Verify deposit once if it does not activate within a minute.'
-              )
+              if (isEscrowSplPrizeFrozenVerifyError(verifyResult.error)) {
+                alert(verifyResult.error)
+              } else {
+                alert(
+                  'Your transfer may have succeeded, but the server has not confirmed escrow yet (common on mobile RPC). ' +
+                    'Open your raffle — tap Verify deposit once if it does not activate within a minute.'
+                )
+              }
               router.push(`/raffles/${raffle.slug}?deposit=1`)
               return
             }

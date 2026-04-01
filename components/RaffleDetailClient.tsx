@@ -85,7 +85,10 @@ import {
   logEscrowDepositStart,
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
-import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
+import {
+  verifyPrizeDepositWithRetries,
+  isEscrowSplPrizeFrozenVerifyError,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -2485,7 +2488,9 @@ export function RaffleDetailClient({
                     <p className="text-sm font-semibold text-destructive">
                       {isMplCoreNoApprovalsError(depositEscrowError)
                         ? 'This prize cannot be moved into escrow yet'
-                        : 'Transfer did not complete'}
+                        : isEscrowSplPrizeFrozenVerifyError(depositEscrowError)
+                          ? 'NFT is in escrow, but the prize account is frozen'
+                          : 'Transfer did not complete'}
                     </p>
                     <div className="text-sm text-foreground/90 leading-relaxed">
                       <LinkifiedText
@@ -2494,7 +2499,7 @@ export function RaffleDetailClient({
                         linkClassName="text-primary underline font-medium break-all"
                       />
                     </div>
-                    {showManualEscrowFallback && (
+                    {showManualEscrowFallback && !isEscrowSplPrizeFrozenVerifyError(depositEscrowError) && (
                       <p className="text-xs text-amber-800 dark:text-amber-200 border-t border-destructive/15 pt-3 leading-relaxed">
                         <strong>Try manually:</strong> send the NFT to the escrow address above, then tap{' '}
                         <strong>Verify deposit</strong>.

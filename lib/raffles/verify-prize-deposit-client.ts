@@ -11,6 +11,14 @@ export type VerifyPrizeDepositClientResult =
   | { ok: false; error: string; status?: number }
 
 /**
+ * Server `assertEscrowSplPrizeNotFrozen` rejects with copy containing this phrase when the
+ * escrow SPL token account for the mint is frozen (transfer to winner would fail on-chain).
+ */
+export function isEscrowSplPrizeFrozenVerifyError(message: string): boolean {
+  return message.toLowerCase().includes('token account in escrow is frozen')
+}
+
+/**
  * Retries on transient outcomes (400, 5xx, network). Stops immediately on 401/403/404.
  */
 export async function verifyPrizeDepositWithRetries(

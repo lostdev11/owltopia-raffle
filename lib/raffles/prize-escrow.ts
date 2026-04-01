@@ -7,6 +7,10 @@
  * in the same transaction as the transfer. The escrow wallet alone cannot move tokens out
  * of a frozen account; thaw always requires a signature from the mint's freeze authority.
  *
+ * Optional PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY=true (or 1/yes): verify-prize-deposit
+ * will not reject SPL prizes when the escrow token account is frozen (raffle can go live).
+ * Winner claim and return-to-creator still require an on-chain thaw or a matching freeze-authority key above.
+ *
  * Return-to-creator transfers are sent with skipPreflight: true because some RPC nodes
  * can fail simulation ("Attempt to debit") even when getAccount shows balance at
  * commitment 'confirmed'. We still verify balance before building the tx; if the tx
@@ -122,6 +126,19 @@ export function getPrizeNftFreezeAuthorityPublicKey(): string | null {
   return kp ? kp.publicKey.toBase58() : null
 }
 
+function envLooksTruthyFlag(raw: string | undefined): boolean {
+  const v = raw?.trim().toLowerCase()
+  return v === '1' || v === 'true' || v === 'yes'
+}
+
+/**
+ * When enabled, verify-prize-deposit allows SPL prizes in escrow even if the escrow token account is frozen.
+ * Claim/return still fail until thaw or PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY matches mint.freezeAuthority.
+ */
+export function isPrizeEscrowFrozenSplVerifyBypassEnabled(): boolean {
+  return envLooksTruthyFlag(process.env.PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY)
+}
+
 /**
  * If escrow source ATA is frozen, returns who must sign ThawAccount (always the mint freeze authority).
  * When not frozen, thawSigner is null.
@@ -215,6 +232,7 @@ export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<Pub
   return null
 }
 
+// If you change this text, update `isEscrowSplPrizeFrozenVerifyError` in verify-prize-deposit-client.ts.
 const FROZEN_ESCROW_PRIZE_MSG =
   'This prize cannot go live while its token account in escrow is frozen. Solana would not be able to send it to a winner. ' +
   'Collections often freeze accounts for holder safety; the freeze authority still needs to thaw only the escrow token account for this mint when you want this raffle to be claimable, or use a different prize.'
@@ -229,6 +247,15 @@ const FROZEN_CREATOR_HOLDING_MSG =
 export async function assertEscrowSplPrizeNotFrozen(
   mint: PublicKey
 ): Promise<{ blocked: false } | { blocked: true; error: string }> {
+  if (isPrizeEscrowFrozenSplVerifyBypassEnabled()) {
+    console.warn(
+      '[prize-escrow] PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY: skipping frozen escrow check for verify; ' +
+        'automatic claim/return may still fail until thaw or freeze-authority key is configured. Mint:',
+      mint.toBase58()
+    )
+    return { blocked: false }
+  }
+
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return { blocked: false }
 
