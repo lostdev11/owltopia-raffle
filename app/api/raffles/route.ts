@@ -17,9 +17,10 @@ import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 10  // Vercel Hobby plan limit
+/** Vercel Pro serverless cap (seconds). Hobby is 10s; keep routes deployable on either tier by not relying on >10s in critical paths without testing. */
+export const maxDuration = 60
 
-// Timeout must be less than maxDuration (10s on Vercel) so we can return JSON before platform kills request
+// POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
@@ -57,9 +58,9 @@ export async function GET(request: NextRequest) {
 
     const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
       includeDraft: true,
-      timeoutMs: 5_000,
+      timeoutMs: 12_000,
       maxRetries: 1,
-      perAttemptMs: 3_000,
+      perAttemptMs: 8_000,
     })
 
     if (error) {
@@ -81,8 +82,8 @@ export async function GET(request: NextRequest) {
     }
 
     const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
-    // Helius DAS per unique creator can exceed Vercel maxDuration if unbounded; cap enrichment time.
-    const enriched = await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 5_000 })
+    // Cap holder enrichment so a huge unique-creator count cannot run unbounded (Pro maxDuration is still finite).
+    const enriched = await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 45_000 })
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

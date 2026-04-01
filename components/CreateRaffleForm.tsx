@@ -18,6 +18,14 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import {
+  logEscrowDepositAbort,
+  logEscrowDepositError,
+  logEscrowDepositPath,
+  logEscrowDepositSigned,
+  logEscrowDepositStart,
+  logEscrowDepositVerify,
+} from '@/lib/solana/escrow-deposit-log'
 import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -301,6 +309,20 @@ export function CreateRaffleForm() {
             }
             const escrowPubkey = new PublicKey(escrowAddress)
 
+            const depositLogCtx = {
+              raffleId: raffle.id,
+              raffleSlug: raffle.slug,
+              nftMint: raffle.nft_mint_address,
+              transferAssetId: selectedNft.mint,
+              escrowAddress,
+              fromWallet: publicKey.toBase58(),
+            }
+            logEscrowDepositStart({
+              ...depositLogCtx,
+              dbPrizeStandard: raffle.prize_standard ?? null,
+              displayLabel: selectedNft.name,
+            })
+
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
             let resolvedHolder: NftHolderInWallet | null = null
             if (selectedNft?.tokenAccount) {
@@ -360,19 +382,24 @@ export function CreateRaffleForm() {
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
               if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
                 try {
+                  logEscrowDepositPath(depositLogCtx, 'token_metadata')
                   depositSig = await transferTokenMetadataNftToEscrow({
                     connection,
                     wallet: walletAdapter,
                     mintAddress: raffle.nft_mint_address,
                     escrowAddress,
                   })
-                  await confirmSignatureSuccessOnChain(connection, depositSig)
-                } catch {
+                  logEscrowDepositSigned(depositLogCtx, 'token_metadata', depositSig)
+                } catch (tmErr) {
+                  logEscrowDepositAbort(depositLogCtx, 'token_metadata_failed_trying_spl', {
+                    detail: tmErr instanceof Error ? tmErr.message : String(tmErr),
+                  })
                   depositSig = null
                 }
               }
               if (!depositSig) {
                 if (!sendTransaction) {
+                  logEscrowDepositAbort(depositLogCtx, 'no_send_transaction_after_token_metadata')
                   alert(
                     'Your wallet did not expose a transaction sender. Open your raffle and complete the deposit there, or try another wallet.'
                   )
@@ -411,35 +438,52 @@ export function CreateRaffleForm() {
                     tokenProgram
                   )
                 )
+                logEscrowDepositPath(depositLogCtx, 'spl_transfer', {
+                  tokenProgram: tokenProgram.toBase58(),
+                  sourceTokenAccount: sourceTokenAccount.toBase58(),
+                  escrowAta: escrowAta.toBase58(),
+                })
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
+                logEscrowDepositSigned(depositLogCtx, 'spl_transfer', depositSig)
               }
             } else if (walletAdapter) {
               try {
+                logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
+                  note: 'No SPL holder resolved; trying compressed',
+                })
                 depositSig = await transferCompressedNftToEscrow({
                   connection,
                   wallet: walletAdapter,
                   assetId: selectedNft.mint,
                   escrowAddress,
                 })
-                await confirmSignatureSuccessOnChain(connection, depositSig)
-              } catch {
+                logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', depositSig)
+              } catch (cErr) {
+                logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
+                  detail: cErr instanceof Error ? cErr.message : String(cErr),
+                })
                 depositSig = null
               }
               if (!depositSig) {
                 try {
+                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core')
                   depositSig = await transferMplCoreToEscrow({
                     connection,
                     wallet: walletAdapter,
                     assetId: selectedNft.mint,
                     escrowAddress,
                   })
-                  await confirmSignatureSuccessOnChain(connection, depositSig)
-                } catch {
+                  logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
+                } catch (coreErr) {
+                  logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
+                    detail: coreErr instanceof Error ? coreErr.message : String(coreErr),
+                  })
                   depositSig = null
                 }
               }
               if (!depositSig) {
+                logEscrowDepositAbort(depositLogCtx, 'no_path_create_form')
                 alert(
                   'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +
                     'Your raffle is saved — open it to deposit or verify, or try Wi‑Fi / another network.'
@@ -448,6 +492,7 @@ export function CreateRaffleForm() {
                 return
               }
             } else {
+              logEscrowDepositAbort(depositLogCtx, 'no_wallet_adapter_for_core_compressed')
               alert(
                 'We could not confirm this NFT as SPL in your wallet yet, and the wallet adapter is not ready for Core/compressed transfers. ' +
                   'Open your raffle when ready and tap deposit.'
@@ -457,6 +502,11 @@ export function CreateRaffleForm() {
             }
 
             const verifyResult = await verifyPrizeDepositWithRetries(raffle.id, { depositTx: depositSig })
+            logEscrowDepositVerify(
+              depositLogCtx,
+              verifyResult.ok,
+              verifyResult.ok ? undefined : verifyResult.error
+            )
             if (!verifyResult.ok && verifyResult.status === 401) {
               alert(
                 'Your session expired. Sign in from your dashboard, then open your raffle and tap Verify deposit if needed.'
@@ -474,6 +524,16 @@ export function CreateRaffleForm() {
             }
             router.push(`/raffles/${raffle.slug}`)
           } catch (transferErr) {
+            logEscrowDepositError(
+              {
+                raffleId: raffle.id,
+                raffleSlug: raffle.slug,
+                nftMint: raffle.nft_mint_address,
+                transferAssetId: selectedNft.mint,
+                fromWallet: publicKey.toBase58(),
+              },
+              transferErr
+            )
             console.error('NFT transfer to escrow failed:', transferErr)
             alert(
               transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed. You can complete it on the raffle page.'

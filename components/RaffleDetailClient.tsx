@@ -72,6 +72,14 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import {
+  logEscrowDepositAbort,
+  logEscrowDepositError,
+  logEscrowDepositPath,
+  logEscrowDepositSigned,
+  logEscrowDepositStart,
+  logEscrowDepositVerify,
+} from '@/lib/solana/escrow-deposit-log'
 import { verifyPrizeDepositWithRetries } from '@/lib/raffles/verify-prize-deposit-client'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
@@ -1455,6 +1463,23 @@ export function RaffleDetailClient({
 
   const handleTransferNftToEscrow = useCallback(async () => {
     if (!publicKey || !escrowAddress || !raffle.nft_mint_address) return
+    const transferAssetId =
+      typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
+        ? raffle.nft_token_id.trim()
+        : raffle.nft_mint_address
+    const depositLogCtx = {
+      raffleId: raffle.id,
+      raffleSlug: raffle.slug,
+      nftMint: raffle.nft_mint_address,
+      transferAssetId,
+      escrowAddress,
+      fromWallet: publicKey.toBase58(),
+    }
+    logEscrowDepositStart({
+      ...depositLogCtx,
+      dbPrizeStandard: raffle.prize_standard,
+      displayLabel: raffle.title,
+    })
     setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
     setShowManualEscrowFallback(false)
@@ -1528,6 +1553,11 @@ export function RaffleDetailClient({
     }
     const finalizeAfterTransfer = async (depositTx?: string) => {
       const verified = await verifyDepositAfterTransfer(depositTx)
+      logEscrowDepositVerify(
+        depositLogCtx,
+        verified,
+        verified ? undefined : 'Server verify did not confirm escrow yet (see UI message)'
+      )
       // Keep a clear user signal that the NFT left the wallet.
       setDepositEscrowSuccess(true)
       if (verified) {
@@ -1541,12 +1571,6 @@ export function RaffleDetailClient({
       const escrowPubkey = new PublicKey(escrowAddress)
       // Prefer DB value; otherwise default to SPL/Token-2022 path first and fall back to Mpl Core.
       const standard: PrizeStandard = raffle.prize_standard ?? 'spl'
-      // Compressed/Core transfers generally need the asset id (often stored as nft_token_id),
-      // while SPL/Token-2022 transfers use mint address.
-      const transferAssetId =
-        typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
-          ? raffle.nft_token_id.trim()
-          : raffle.nft_mint_address
 
       const mintShort =
         transferAssetId.length > 16
@@ -1554,34 +1578,39 @@ export function RaffleDetailClient({
           : transferAssetId
       if (standard === 'mpl_core') {
         if (!walletAdapter) {
+          logEscrowDepositAbort(depositLogCtx, 'wallet_adapter_not_ready', { path: 'mpl_core' })
           setDepositEscrowError('Wallet adapter not ready for Core transfer. Refresh and try again.')
           return
         }
+        logEscrowDepositPath(depositLogCtx, 'mpl_core')
         const sig = await transferMplCoreToEscrow({
           connection,
           wallet: walletAdapter,
           assetId: transferAssetId,
           escrowAddress,
         })
-        await confirmSignatureSuccessOnChain(connection, sig)
+        logEscrowDepositSigned(depositLogCtx, 'mpl_core', sig)
+        // Mpl Core path uses UMI sendAndConfirm — no second poll (avoids false timeouts on laggy RPC).
         await finalizeAfterTransfer(sig)
         return
       }
 
       if (standard === 'compressed') {
         if (!walletAdapter) {
+          logEscrowDepositAbort(depositLogCtx, 'wallet_adapter_not_ready', { path: 'compressed' })
           setDepositEscrowError(
             'Wallet adapter not ready for compressed NFT transfer. Refresh and try again.'
           )
           return
         }
+        logEscrowDepositPath(depositLogCtx, 'compressed')
         const sig = await transferCompressedNftToEscrow({
           connection,
           wallet: walletAdapter,
           assetId: transferAssetId,
           escrowAddress,
         })
-        await confirmSignatureSuccessOnChain(connection, sig)
+        logEscrowDepositSigned(depositLogCtx, 'compressed', sig)
         await finalizeAfterTransfer(sig)
         return
       }
@@ -1598,37 +1627,53 @@ export function RaffleDetailClient({
         // This keeps "transfer to escrow" wallet-sign flow working across common NFT standards.
         if (raffle.prize_standard !== 'mpl_core' && walletAdapter) {
           try {
+            logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
+              note: 'No SPL token account found; trying compressed transfer',
+            })
             const sig = await transferCompressedNftToEscrow({
               connection,
               wallet: walletAdapter,
               assetId: transferAssetId,
               escrowAddress,
             })
-            await confirmSignatureSuccessOnChain(connection, sig)
+            logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', sig)
             await finalizeAfterTransfer(sig)
             return
           } catch (e) {
             // Not a compressed NFT (or proof/build failed); continue to Core fallback.
             transferFallbackDetails = e instanceof Error ? e.message : String(e)
+            logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
+              detail: transferFallbackDetails,
+            })
           }
           try {
+            logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
+              note: 'Trying Metaplex Core transfer after compressed failed or N/A',
+            })
             const sig = await transferMplCoreToEscrow({
               connection,
               wallet: walletAdapter,
               assetId: transferAssetId,
               escrowAddress,
             })
-            await confirmSignatureSuccessOnChain(connection, sig)
+            logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', sig)
             await finalizeAfterTransfer(sig)
             return
           } catch (e) {
             // Fall through to the detailed not-found guidance below.
             transferFallbackDetails = e instanceof Error ? e.message : String(e)
+            logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
+              detail: transferFallbackDetails,
+            })
           }
         }
         const detailsSuffix = transferFallbackDetails
           ? ` Details: ${transferFallbackDetails}`
           : ''
+        logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', {
+          mintShort,
+          details: detailsSuffix || undefined,
+        })
         setDepositEscrowError(
           `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
         )
@@ -1636,6 +1681,7 @@ export function RaffleDetailClient({
         return
       }
       if ('delegated' in holder && holder.delegated) {
+        logEscrowDepositAbort(depositLogCtx, 'nft_delegated_or_staked')
         setDepositEscrowError(
           'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then tap Verify deposit.'
         )
@@ -1643,6 +1689,7 @@ export function RaffleDetailClient({
         return
       }
       if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
+        logEscrowDepositAbort(depositLogCtx, 'holder_data_incomplete')
         setDepositEscrowError('NFT holder data incomplete. Try again.')
         return
       }
@@ -1652,16 +1699,24 @@ export function RaffleDetailClient({
       // assets that can fail plain SPL transfer simulation in some wallets.
       if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
         try {
+          logEscrowDepositPath(depositLogCtx, 'token_metadata', {
+            tokenProgram: tokenProgram.toBase58(),
+            sourceTokenAccount: sourceTokenAccount.toBase58(),
+          })
           const sig = await transferTokenMetadataNftToEscrow({
             connection,
             wallet: walletAdapter,
             mintAddress: raffle.nft_mint_address,
             escrowAddress,
           })
-          await confirmSignatureSuccessOnChain(connection, sig)
+          logEscrowDepositSigned(depositLogCtx, 'token_metadata', sig)
           await finalizeAfterTransfer(sig)
           return
-        } catch {}
+        } catch (tmErr) {
+          logEscrowDepositAbort(depositLogCtx, 'token_metadata_failed_trying_spl', {
+            detail: tmErr instanceof Error ? tmErr.message : String(tmErr),
+          })
+        }
       }
 
       const escrowAta = await getAssociatedTokenAddress(
@@ -1696,17 +1751,38 @@ export function RaffleDetailClient({
           tokenProgram
         )
       )
+      logEscrowDepositPath(depositLogCtx, 'spl_transfer', {
+        tokenProgram: tokenProgram.toBase58(),
+        sourceTokenAccount: sourceTokenAccount.toBase58(),
+        escrowAta: escrowAta.toBase58(),
+      })
       const sig = await sendTransaction(tx, connection)
       await confirmSignatureSuccessOnChain(connection, sig)
+      logEscrowDepositSigned(depositLogCtx, 'spl_transfer', sig)
       await finalizeAfterTransfer(sig)
     } catch (e) {
+      logEscrowDepositError(depositLogCtx, e)
       const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
       setDepositEscrowError(baseMessage)
       setShowManualEscrowFallback(true)
     } finally {
       setDepositEscrowLoading(false)
     }
-  }, [publicKey, signMessage, escrowAddress, raffle.nft_mint_address, raffle.nft_token_id, raffle.prize_standard, connection, sendTransaction, router, walletAdapter])
+  }, [
+    publicKey,
+    signMessage,
+    escrowAddress,
+    raffle.id,
+    raffle.slug,
+    raffle.title,
+    raffle.nft_mint_address,
+    raffle.nft_token_id,
+    raffle.prize_standard,
+    connection,
+    sendTransaction,
+    router,
+    walletAdapter,
+  ])
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
@@ -2199,7 +2275,7 @@ export function RaffleDetailClient({
                     </div>
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                       <p className="text-xs text-muted-foreground">
-                        If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit.
+                        If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit. Phantom and similar wallets sometimes show &quot;No balance changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change; if you trust this site, confirming is still normal.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         <code className="text-xs break-all rounded bg-background/80 px-2 py-1">{escrowAddress}</code>

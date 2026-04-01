@@ -9,8 +9,8 @@ import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-/** Stay under Vercel serverless wall clock (10s Hobby); upstream fetch must finish first. */
-export const maxDuration = 10
+/** Vercel Pro (60s). Sequential gateway attempts must fit within this wall clock. */
+export const maxDuration = 60
 
 /** Max bytes we buffer and return from this route. Vercel Hobby limits response bodies (~4.5MB); stay under to avoid platform 413. */
 const DEFAULT_MAX_INLINE_BYTES = 4 * 1024 * 1024
@@ -21,8 +21,8 @@ const MAX_INLINE_BYTES = (() => {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_INLINE_BYTES
 })()
 
-/** Below maxDuration so the handler returns 504 JSON instead of the platform killing the invocation. */
-const FETCH_TIMEOUT_MS = 8_000
+/** Per upstream URL try; several gateways may be attempted in series. */
+const FETCH_TIMEOUT_MS = 14_000
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/jpg',

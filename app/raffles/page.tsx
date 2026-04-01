@@ -25,8 +25,8 @@ import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/li
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-/** Stay within Vercel serverless limit (10s on Hobby) so we don't get 500/502 from platform timeout */
-export const maxDuration = 10
+/** Vercel Pro: up to 60s per invocation (Hobby is 10s). */
+export const maxDuration = 60
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -92,16 +92,15 @@ export default async function RafflesPage() {
     await promoteDraftRafflesToLive()
 
     // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
-    // Timeout under maxDuration (10s) so we respond before Vercel kills the request.
-    const SERVER_FETCH_TIMEOUT_MS = 7_000
+    const SERVER_FETCH_TIMEOUT_MS = 15_000
     let result: GetRafflesResult
     try {
       result = await Promise.race([
         getRafflesViaRest(false, {
           includeDraft: true,
-          timeoutMs: 5_000,
+          timeoutMs: 12_000,
           maxRetries: 1,
-          perAttemptMs: 3_000,
+          perAttemptMs: 8_000,
         }),
         new Promise<GetRafflesResult>((_, reject) =>
           setTimeout(
@@ -140,8 +139,8 @@ export default async function RafflesPage() {
     // Pending NFT raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
-    // Enrich with creator Owl holder status — bound time so total request stays under maxDuration (10s).
-    const holderBudgetMs = Math.max(2_000, 9_200 - (Date.now() - requestStartedAt))
+    // Enrich with creator Owl holder status — reserve wall clock under maxDuration.
+    const holderBudgetMs = Math.max(8_000, 58_000 - (Date.now() - requestStartedAt))
     allRaffles = await enrichRafflesWithCreatorHolder(allRaffles, { budgetMs: holderBudgetMs })
 
     const now = new Date()

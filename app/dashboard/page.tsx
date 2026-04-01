@@ -17,6 +17,8 @@ import {
   XCircle,
   Check,
   Gift,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
@@ -128,6 +130,13 @@ const MOBILE_WALLET_STABILIZE_MS = 450
 // On mobile, retry once after 401 (session not ready yet after wallet connect).
 const MOBILE_401_RETRY_DELAY_MS = 800
 
+const MY_ENTRIES_PAGE_SIZE = 20
+
+type RaffleEntrySummary = {
+  raffle: EntryWithRaffle['raffle']
+  totalTickets: number
+}
+
 export default function DashboardPage() {
   const { publicKey, connected, signMessage } = useWallet()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -137,6 +146,7 @@ export default function DashboardPage() {
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [entriesFilter, setEntriesFilter] = useState<'all' | 'won'>('all')
+  const [entriesPage, setEntriesPage] = useState(0)
   const [openRaffleId, setOpenRaffleId] = useState<string | null>(null)
   const [displayNameInput, setDisplayNameInput] = useState('')
   const [displayNameSaving, setDisplayNameSaving] = useState(false)
@@ -450,6 +460,39 @@ export default function DashboardPage() {
     return Array.from(byId.values())
   }, [myEntriesForMemo, walletForMemo])
 
+  const raffleSummaries = useMemo((): RaffleEntrySummary[] => {
+    const sourceEntries =
+      entriesFilter === 'won'
+        ? myEntriesForMemo.filter(({ raffle }) => raffle.winner_wallet === walletForMemo)
+        : myEntriesForMemo
+    return Object.values(
+      sourceEntries.reduce<Record<string, RaffleEntrySummary>>((acc, { entry, raffle }) => {
+        const key = raffle.id
+        const qty = Number(entry.ticket_quantity) || 0
+        const existing = acc[key]
+        if (existing) {
+          existing.totalTickets += qty
+        } else {
+          acc[key] = { raffle, totalTickets: qty }
+        }
+        return acc
+      }, {})
+    )
+  }, [myEntriesForMemo, entriesFilter, walletForMemo])
+
+  const entriesListMaxPage =
+    raffleSummaries.length === 0
+      ? 0
+      : Math.ceil(raffleSummaries.length / MY_ENTRIES_PAGE_SIZE) - 1
+
+  useEffect(() => {
+    setEntriesPage(0)
+  }, [entriesFilter])
+
+  useEffect(() => {
+    setEntriesPage((p) => Math.min(p, entriesListMaxPage))
+  }, [entriesListMaxPage])
+
   if (!connected) {
     return (
       <main className="container mx-auto px-4 py-8 max-w-2xl">
@@ -554,11 +597,6 @@ export default function DashboardPage() {
   const displayName = data.displayName != null ? String(data.displayName) : null
   const creatorRefundRaffles = Array.isArray(data.creatorRefundRaffles) ? data.creatorRefundRaffles : []
 
-  const sourceEntries =
-    entriesFilter === 'won'
-      ? myEntries.filter(({ raffle }) => raffle.winner_wallet === wallet)
-      : myEntries
-
   const refundableEntries = myEntries.filter(
     (x) =>
       x.raffle.status === 'failed_refund_available' &&
@@ -567,26 +605,10 @@ export default function DashboardPage() {
       x.raffle.ticket_payments_to_funds_escrow === true
   )
 
-  type RaffleEntrySummary = {
-    raffle: (typeof myEntries)[number]['raffle']
-    totalTickets: number
-  }
-
-  const raffleSummaries: RaffleEntrySummary[] = Object.values(
-    sourceEntries.reduce<Record<string, RaffleEntrySummary>>((acc, { entry, raffle }) => {
-      const key = raffle.id
-      const qty = Number(entry.ticket_quantity) || 0
-      const existing = acc[key]
-      if (existing) {
-        existing.totalTickets += qty
-      } else {
-        acc[key] = {
-          raffle,
-          totalTickets: qty,
-        }
-      }
-      return acc
-    }, {})
+  const entriesPageSafe = Math.min(entriesPage, entriesListMaxPage)
+  const raffleSummariesPage = raffleSummaries.slice(
+    entriesPageSafe * MY_ENTRIES_PAGE_SIZE,
+    entriesPageSafe * MY_ENTRIES_PAGE_SIZE + MY_ENTRIES_PAGE_SIZE
   )
 
   const toggleRaffle = (id: string) => {
@@ -1274,13 +1296,13 @@ export default function DashboardPage() {
           )}
           {raffleSummaries.length === 0 ? (
             <p className="text-muted-foreground">
-              {raffleSummaries.length === 0
+              {myEntries.length === 0
                 ? 'You haven’t entered any raffles yet.'
                 : 'No entries match this filter.'}
             </p>
           ) : (
             <ul className="space-y-2">
-              {raffleSummaries.slice(0, 20).map(({ raffle, totalTickets }) => {
+              {raffleSummariesPage.map(({ raffle, totalTickets }) => {
                 return (
                   <li
                     key={raffle.id}
@@ -1362,10 +1384,44 @@ export default function DashboardPage() {
               })}
             </ul>
           )}
-          {raffleSummaries.length > 20 && (
-            <p className="text-sm text-muted-foreground mt-2">
-              Showing latest 20 of {raffleSummaries.length}
-            </p>
+          {raffleSummaries.length > MY_ENTRIES_PAGE_SIZE && (
+            <div className="mt-4 flex flex-col gap-3 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Showing{' '}
+                {entriesPageSafe * MY_ENTRIES_PAGE_SIZE + 1}–
+                {Math.min(
+                  (entriesPageSafe + 1) * MY_ENTRIES_PAGE_SIZE,
+                  raffleSummaries.length
+                )}{' '}
+                of {raffleSummaries.length}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-[44px] flex-1 sm:flex-initial"
+                  disabled={entriesPageSafe <= 0}
+                  onClick={() => setEntriesPage((p) => Math.max(0, p - 1))}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4 shrink-0" aria-hidden />
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-[44px] flex-1 sm:flex-initial"
+                  disabled={entriesPageSafe >= entriesListMaxPage}
+                  onClick={() =>
+                    setEntriesPage((p) => Math.min(entriesListMaxPage, p + 1))
+                  }
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4 shrink-0" aria-hidden />
+                </Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -6,10 +6,13 @@ import type { Connection } from '@solana/web3.js'
  * Wait until the RPC reports the transaction landed without error.
  * Wallets sometimes return a signature before getTransaction indexes it; mobile RPC can lag.
  */
+const TIMEOUT_HINT =
+  'Check your wallet activity. If the transaction appears successful, tap Verify deposit — the transfer may already be on-chain (common on mobile or busy RPCs).'
+
 export async function confirmSignatureSuccessOnChain(
   connection: Connection,
   signature: string,
-  timeoutMs = 45_000
+  timeoutMs = 90_000
 ): Promise<void> {
   const started = Date.now()
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -39,7 +42,12 @@ export async function confirmSignatureSuccessOnChain(
       if (s?.err) {
         throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`)
       }
-      if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') {
+      // Include processed: public RPCs often lag before status shows confirmed/finalized (mobile).
+      if (
+        s?.confirmationStatus === 'processed' ||
+        s?.confirmationStatus === 'confirmed' ||
+        s?.confirmationStatus === 'finalized'
+      ) {
         return
       }
     } catch (e) {
@@ -47,10 +55,10 @@ export async function confirmSignatureSuccessOnChain(
       if (msg.toLowerCase().includes('transaction failed')) throw e
     }
 
-    await sleep(900)
+    await sleep(700)
   }
 
   throw new Error(
-    'Transaction signature was returned, but it was not confirmed on-chain in time. Check your wallet activity and retry.'
+    `Transaction signature was returned, but it was not confirmed on-chain in time. ${TIMEOUT_HINT}`
   )
 }

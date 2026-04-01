@@ -9,7 +9,7 @@ export type EnrichRafflesWithCreatorHolderOptions = {
   /**
    * Stop scheduling new Helius lookups after this many ms from the start of enrichment.
    * Creators not yet resolved get `creator_is_holder: false` (badge may be missing until refresh).
-   * List endpoints should set this so the route stays under serverless maxDuration (e.g. Vercel 10s).
+   * List endpoints should set this so the route stays under serverless maxDuration (e.g. Vercel Pro 60s).
    */
   budgetMs?: number
   /**

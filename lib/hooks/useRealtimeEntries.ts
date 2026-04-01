@@ -32,6 +32,9 @@ export function useRealtimeEntries({
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const realtimeSafetyPollRef = useRef<NodeJS.Timeout | null>(null)
   const isRealtimeActiveRef = useRef(false) // Track subscription status synchronously
+  /** Serializes fetches so a slow response cannot overwrite a newer one (avoids ticket count flicker). */
+  const fetchGenRef = useRef(0)
+  const fetchAbortRef = useRef<AbortController | null>(null)
 
   // Seed from SSR on first paint; ongoing truth comes from fetch + Realtime (see safety poll).
   useEffect(() => {
@@ -52,8 +55,12 @@ export function useRealtimeEntries({
 
   const fetchEntries = useCallback(async () => {
     if (typeof window === 'undefined') return null
-    const url = `${window.location.origin}/api/entries?raffleId=${encodeURIComponent(raffleId)}&_t=${Date.now()}`
+    fetchAbortRef.current?.abort()
     const controller = new AbortController()
+    fetchAbortRef.current = controller
+    const gen = ++fetchGenRef.current
+
+    const url = `${window.location.origin}/api/entries?raffleId=${encodeURIComponent(raffleId)}&_t=${Date.now()}`
     const timeoutId = setTimeout(() => controller.abort(), ENTRY_FETCH_TIMEOUT_MS)
     try {
       const response = await fetch(url, {
@@ -63,6 +70,7 @@ export function useRealtimeEntries({
       })
       if (response.ok) {
         const updatedEntries = await response.json()
+        if (gen !== fetchGenRef.current) return null
         setEntries(updatedEntries)
         onUpdate?.(updatedEntries)
         return updatedEntries
@@ -73,6 +81,9 @@ export function useRealtimeEntries({
       }
     } finally {
       clearTimeout(timeoutId)
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null
+      }
     }
     return null
   }, [raffleId, onUpdate])
@@ -168,6 +179,8 @@ export function useRealtimeEntries({
         return () => {
           clearTimeout(fallbackTimeout)
           clearRealtimeSafetyPoll()
+          fetchAbortRef.current?.abort()
+          fetchGenRef.current += 1
           if (channelRef.current) {
             supabase.removeChannel(channelRef.current)
             channelRef.current = null
@@ -199,6 +212,8 @@ export function useRealtimeEntries({
     // Cleanup function
     return () => {
       clearRealtimeSafetyPoll()
+      fetchAbortRef.current?.abort()
+      fetchGenRef.current += 1
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
         channelRef.current = null
