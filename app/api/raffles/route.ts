@@ -81,7 +81,8 @@ export async function GET(request: NextRequest) {
     }
 
     const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
-    const enriched = await enrichRafflesWithCreatorHolder(filtered)
+    // Helius DAS per unique creator can exceed Vercel maxDuration if unbounded; cap enrichment time.
+    const enriched = await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 5_000 })
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

@@ -52,6 +52,11 @@ function assetMatchesOwltopiaCollection(item: unknown, collectionAddress: string
 export type OwnsOwltopiaOptions = {
   /** When true, always verify against chain/DAS and do not use cache. Use for dashboard and when setting raffle fee. */
   skipCache?: boolean
+  /**
+   * Raffles list / card badges: after `searchAssets`, do not run the multi-batch `getAssetsByOwner` walk
+   * (can be tens of RPC round-trips per wallet). Returns false when search is inconclusive; does not write cache.
+   */
+  listMode?: boolean
 }
 
 /**
@@ -166,6 +171,10 @@ export async function ownsOwltopia(
       }
 
       // Keyset-style scan (sortBy id + after): walk the wallet in stable order (Helius keyset pagination).
+      if (options?.listMode) {
+        return false
+      }
+
       const limit = 1000
       const maxBatches = 50
       let after: string | undefined

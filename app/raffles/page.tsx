@@ -86,6 +86,8 @@ export default async function RafflesPage() {
     const viewerWallet = session?.wallet ?? null
     const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
 
+    const requestStartedAt = Date.now()
+
     // Promote any draft raffles whose start_time has passed to live (so they show as active)
     await promoteDraftRafflesToLive()
 
@@ -138,8 +140,9 @@ export default async function RafflesPage() {
     // Pending NFT raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
-    // Enrich with creator Owl holder status for card badges
-    allRaffles = await enrichRafflesWithCreatorHolder(allRaffles)
+    // Enrich with creator Owl holder status — bound time so total request stays under maxDuration (10s).
+    const holderBudgetMs = Math.max(2_000, 9_200 - (Date.now() - requestStartedAt))
+    allRaffles = await enrichRafflesWithCreatorHolder(allRaffles, { budgetMs: holderBudgetMs })
 
     const now = new Date()
     const nowTime = now.getTime()

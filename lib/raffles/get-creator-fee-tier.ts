@@ -4,6 +4,11 @@ import { HOLDER_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 export type GetCreatorFeeTierOptions = {
   /** When true, always verify holder status (skip cache). Use for dashboard and when creating/updating a raffle. */
   skipCache?: boolean
+  /**
+   * Raffles list only: use quick DAS `searchAssets` only; skip the heavy per-wallet scan.
+   * Avoids serverless timeouts when many unique creators are on the page.
+   */
+  listDisplayOnly?: boolean
 }
 
 /**
@@ -25,7 +30,10 @@ export async function getCreatorFeeTier(
     }
   }
 
-  const isHolder = await ownsOwltopia(normalized, { skipCache: options?.skipCache })
+  const isHolder = await ownsOwltopia(normalized, {
+    skipCache: options?.skipCache,
+    listMode: options?.listDisplayOnly,
+  })
   if (isHolder) {
     return {
       feeBps: HOLDER_FEE_BPS,

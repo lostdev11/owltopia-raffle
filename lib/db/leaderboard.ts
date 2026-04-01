@@ -26,11 +26,21 @@ function normalizeWallet(v: string | null | undefined): string {
   return s || ''
 }
 
-function takeTopTen<T>(items: { wallet: string; value: number }[]): LeaderboardEntry[] {
+function takeTopTen(items: { wallet: string; value: number }[]): LeaderboardEntry[] {
   return items
-    .sort((a, b) => b.value - a.value)
+    .sort((a, b) => b.value - a.value || a.wallet.localeCompare(b.wallet))
     .slice(0, 10)
     .map((item, i) => ({ rank: i + 1, wallet: item.wallet, value: item.value }))
+}
+
+/**
+ * Count a leaderboard "win" once a winner is recorded and the raffle has left the pre-draw
+ * states. Escrow raffles use `successful_pending_claims` until claims finish, then `completed`;
+ * counting only `completed` undercounted wins on the leaderboard.
+ */
+function statusCountsAsRaffleWon(status: string | null): boolean {
+  const s = (status || '').toLowerCase()
+  return s === 'completed' || s === 'successful_pending_claims'
 }
 
 async function fetchAllLeaderboardRaffles(
@@ -161,12 +171,12 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     Array.from(ticketsByCreator.entries()).map(([wallet, value]) => ({ wallet, value }))
   )
 
-  // Raffles won: count of completed raffles where this wallet is the recorded winner
+  // Raffles won: raffles with a recorded winner after the draw (includes escrow pending claims)
   const winsByWallet = new Map<string, number>()
   for (const r of raffles) {
     const winner = normalizeWallet(r.winner_wallet)
     if (!winner) continue
-    if ((r.status || '').toLowerCase() !== 'completed') continue
+    if (!statusCountsAsRaffleWon(r.status)) continue
     winsByWallet.set(winner, (winsByWallet.get(winner) ?? 0) + 1)
   }
   const rafflesWon = takeTopTen(
