@@ -499,7 +499,11 @@ export function CreateRaffleForm() {
                   lastMplCoreEscrowError &&
                   isMplCoreNoApprovalsError(lastMplCoreEscrowError)
                 ) {
-                  alert(mplCoreNoApprovalsEscrowMessage(mintShort))
+                  alert(
+                    mplCoreNoApprovalsEscrowMessage(mintShort, {
+                      fullAssetId: selectedNft.mint,
+                    })
+                  )
                 } else {
                   alert(
                     'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +

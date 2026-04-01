@@ -329,6 +329,7 @@ export function RafflesPageClient({
     rafflesWon: Array<{ rank: number; wallet: string; value: number }>
     ticketsSold: Array<{ rank: number; wallet: string; value: number }>
   } | null>(null)
+  const [leaderboardPeriodLabel, setLeaderboardPeriodLabel] = useState<string | null>(null)
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
 
@@ -379,8 +380,27 @@ export function RafflesPageClient({
     setLeaderboardLoading(true)
     fetch('/api/leaderboard', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
-      .then(setLeaderboardData)
-      .catch(() => setLeaderboardData(null))
+      .then((json: Record<string, unknown>) => {
+        const { period, ...rest } = json
+        setLeaderboardData(
+          rest as {
+            rafflesEntered: Array<{ rank: number; wallet: string; value: number }>
+            ticketsPurchased: Array<{ rank: number; wallet: string; value: number }>
+            rafflesCreated: Array<{ rank: number; wallet: string; value: number }>
+            rafflesWon: Array<{ rank: number; wallet: string; value: number }>
+            ticketsSold: Array<{ rank: number; wallet: string; value: number }>
+          }
+        )
+        setLeaderboardPeriodLabel(
+          period && typeof period === 'object' && period !== null && 'label' in period && typeof (period as { label: unknown }).label === 'string'
+            ? (period as { label: string }).label
+            : null
+        )
+      })
+      .catch(() => {
+        setLeaderboardData(null)
+        setLeaderboardPeriodLabel(null)
+      })
       .finally(() => setLeaderboardLoading(false))
   }, [tab])
 
@@ -898,8 +918,20 @@ export function RafflesPageClient({
                 <Trophy className="h-6 w-6 text-primary shrink-0" />
                 Leaderboard
               </h2>
-              <p className="text-muted-foreground text-sm mb-6">
+              <p className="text-muted-foreground text-sm mb-2">
                 Top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold.
+                {leaderboardPeriodLabel ? (
+                  <>
+                    {' '}
+                    <span className="text-foreground font-medium">{leaderboardPeriodLabel}</span>
+                    {' '}
+                    (open{' '}
+                    <Link href="/leaderboard" className="text-primary underline underline-offset-2">
+                      Leaderboard
+                    </Link>{' '}
+                    for other months, year totals, or all-time).
+                  </>
+                ) : null}
               </p>
               {leaderboardLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8">

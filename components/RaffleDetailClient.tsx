@@ -51,6 +51,7 @@ import {
   XCircle,
   Loader2,
   Coins,
+  CircleCheck,
 } from 'lucide-react'
 import {
   Transaction,
@@ -119,6 +120,8 @@ export function RaffleDetailClient({
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
+  /** Set after wallet confirms on-chain; lets users open Solscan before server verify catches up. */
+  const [depositLastTxSignature, setDepositLastTxSignature] = useState<string | null>(null)
   const [showManualEscrowFallback, setShowManualEscrowFallback] = useState(false)
   const [manualDepositTx, setManualDepositTx] = useState('')
   const [depositVerifyLoading, setDepositVerifyLoading] = useState(false)
@@ -434,6 +437,13 @@ export function RaffleDetailClient({
       .catch(() => {})
     return () => { cancelled = true }
   }, [raffle.id, raffle.prize_type, raffle.nft_mint_address, raffle.prize_deposited_at])
+
+  useEffect(() => {
+    if (raffle.prize_deposited_at) {
+      setDepositLastTxSignature(null)
+      setDepositEscrowSuccess(false)
+    }
+  }, [raffle.prize_deposited_at])
 
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
@@ -1487,6 +1497,8 @@ export function RaffleDetailClient({
     setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
     setShowManualEscrowFallback(false)
+    setDepositEscrowSuccess(false)
+    setDepositLastTxSignature(null)
     setDepositEscrowLoading(true)
 
     const signInForSession = async (): Promise<boolean> => {
@@ -1556,17 +1568,22 @@ export function RaffleDetailClient({
       }
     }
     const finalizeAfterTransfer = async (depositTx?: string) => {
+      if (depositTx?.trim()) {
+        setDepositLastTxSignature(depositTx.trim())
+      }
       const verified = await verifyDepositAfterTransfer(depositTx)
       logEscrowDepositVerify(
         depositLogCtx,
         verified,
         verified ? undefined : 'Server verify did not confirm escrow yet (see UI message)'
       )
-      // Keep a clear user signal that the NFT left the wallet.
-      setDepositEscrowSuccess(true)
       if (verified) {
+        setDepositEscrowSuccess(true)
         setDepositEscrowError(null)
+        setShowManualEscrowFallback(false)
         router.refresh()
+      } else {
+        setDepositEscrowSuccess(false)
       }
     }
 
@@ -1682,7 +1699,9 @@ export function RaffleDetailClient({
           transferFallbackDetails &&
           isMplCoreNoApprovalsError(transferFallbackDetails)
         ) {
-          setDepositEscrowError(mplCoreNoApprovalsEscrowMessage(mintShort))
+          setDepositEscrowError(
+            mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: transferAssetId })
+          )
           setShowManualEscrowFallback(false)
         } else {
           setDepositEscrowError(
@@ -1780,7 +1799,9 @@ export function RaffleDetailClient({
           ? `${transferAssetId.slice(0, 4)}…${transferAssetId.slice(-4)}`
           : transferAssetId
       if (isMplCoreNoApprovalsError(baseMessage)) {
-        setDepositEscrowError(mplCoreNoApprovalsEscrowMessage(short))
+        setDepositEscrowError(
+          mplCoreNoApprovalsEscrowMessage(short, { fullAssetId: transferAssetId })
+        )
         setShowManualEscrowFallback(false)
       } else {
         setDepositEscrowError(baseMessage)
@@ -1871,6 +1892,11 @@ export function RaffleDetailClient({
         setDepositEscrowError(result.error)
         setShowManualEscrowFallback(true)
         return
+      }
+      setDepositEscrowSuccess(true)
+      setDepositEscrowError(null)
+      if (manualTx) {
+        setDepositLastTxSignature(manualTx)
       }
       setManualDepositTx('')
       router.refresh()
@@ -2283,7 +2309,11 @@ export function RaffleDetailClient({
                         onClick={() => setShowEscrowConfirmDialog(true)}
                         disabled={!connected || depositEscrowLoading}
                       >
-                        {depositEscrowLoading ? 'Sending…' : 'Transfer NFT to escrow'}
+                        {depositEscrowLoading
+                          ? depositLastTxSignature
+                            ? 'Confirming…'
+                            : 'Sending…'
+                          : 'Transfer NFT to escrow'}
                       </Button>
                       <Button
                         variant="outline"
@@ -2346,6 +2376,33 @@ export function RaffleDetailClient({
                     <p className="text-xs text-muted-foreground">
                       Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.
                     </p>
+                    {depositLastTxSignature &&
+                      !(depositEscrowSuccess && !depositEscrowError) && (
+                        <div className="rounded-lg border border-sky-500/45 bg-sky-500/[0.12] p-4 space-y-2">
+                          <p className="text-sm font-semibold text-sky-950 dark:text-sky-100">
+                            {depositEscrowLoading
+                              ? 'Transaction submitted — checking escrow…'
+                              : 'On-chain transaction (proof)'}
+                          </p>
+                          <p className="text-xs text-sky-950/85 dark:text-sky-50/85 leading-relaxed">
+                            {depositEscrowLoading
+                              ? 'Your wallet already signed. Open Solscan to confirm the transfer on-chain while we finish the server check.'
+                              : 'Use Solscan to see that the transfer executed. If our app still shows a warning, wait a few seconds for RPC to catch up, then tap Verify deposit again.'}
+                          </p>
+                          <a
+                            href={solscanTransactionUrl(depositLastTxSignature)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary font-medium hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                            onTouchStart={handleMobileLinkTouchStart}
+                            onTouchMove={handleMobileLinkTouchMove}
+                            onTouchEnd={handleMobileLinkTouchEnd}
+                          >
+                            View transaction on Solscan
+                            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          </a>
+                        </div>
+                      )}
                     {escrowExplorer && (
                       <div className="flex flex-col gap-2">
                         <a
@@ -2383,37 +2440,96 @@ export function RaffleDetailClient({
                     )}
                   </>
                 )}
-                {depositEscrowSuccess && (
-                  <p className="text-sm text-green-600 dark:text-green-400">
-                    NFT sent to escrow. Click &quot;Verify deposit&quot; below. The NFT has left your wallet on-chain; if it still appears in Phantom or in &quot;Load NFTs&quot; elsewhere, refresh or wait a moment—indexers can lag.
-                  </p>
+                {depositEscrowSuccess && !depositEscrowError && (
+                  <div
+                    role="status"
+                    className="rounded-lg border border-emerald-500/45 bg-emerald-500/[0.12] p-4 space-y-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <CircleCheck
+                        className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5"
+                        aria-hidden
+                      />
+                      <div className="space-y-2 min-w-0">
+                        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                          Escrow confirmed — raffle updating
+                        </p>
+                        <p className="text-sm text-emerald-900/90 dark:text-emerald-50/90 leading-relaxed">
+                          The prize is verified in escrow. This page should refresh momentarily; if it does not, reload
+                          once. Your wallet UI can lag behind the chain — that does not mean the NFT is still yours.
+                        </p>
+                        {depositLastTxSignature && (
+                          <a
+                            href={solscanTransactionUrl(depositLastTxSignature)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary font-medium hover:underline inline-flex items-center gap-1 touch-manipulation min-h-[44px] sm:min-h-0"
+                            onTouchStart={handleMobileLinkTouchStart}
+                            onTouchMove={handleMobileLinkTouchMove}
+                            onTouchEnd={handleMobileLinkTouchEnd}
+                          >
+                            View deposit transaction
+                            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
                 {depositEscrowError && (
-                  <p className="text-sm text-destructive">{depositEscrowError}</p>
-                )}
-                {showManualEscrowFallback && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    Manual fallback is enabled: transfer NFT to escrow from wallet, then click Verify deposit.
-                  </p>
+                  <div
+                    role="alert"
+                    aria-live="polite"
+                    className="rounded-lg border border-destructive/50 bg-destructive/[0.08] p-4 space-y-3"
+                  >
+                    <p className="text-sm font-semibold text-destructive">
+                      {isMplCoreNoApprovalsError(depositEscrowError)
+                        ? 'This prize cannot be moved into escrow yet'
+                        : 'Transfer did not complete'}
+                    </p>
+                    <div className="text-sm text-foreground/90 leading-relaxed">
+                      <LinkifiedText
+                        text={depositEscrowError}
+                        className="whitespace-pre-wrap"
+                        linkClassName="text-primary underline font-medium break-all"
+                      />
+                    </div>
+                    {showManualEscrowFallback && (
+                      <p className="text-xs text-amber-800 dark:text-amber-200 border-t border-destructive/15 pt-3 leading-relaxed">
+                        <strong>Try manually:</strong> send the NFT to the escrow address above, then tap{' '}
+                        <strong>Verify deposit</strong>.
+                      </p>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>
 
             <Dialog open={showEscrowConfirmDialog} onOpenChange={setShowEscrowConfirmDialog}>
-              <DialogContent className="sm:max-w-md">
+              <DialogContent className="sm:max-w-md max-h-[min(90dvh,32rem)] overflow-y-auto touch-manipulation">
                 <DialogHeader>
-                  <DialogTitle>Transfer NFT to escrow?</DialogTitle>
+                  <DialogTitle>Confirm transfer to escrow</DialogTitle>
                   <DialogDescription asChild>
-                    <div className="space-y-2 text-left">
-                      <p>
-                        You are about to send this NFT to the platform escrow wallet. Your wallet will prompt you to sign the transaction.
+                    <div className="space-y-3 text-left text-foreground">
+                      <p className="text-sm">
+                        Your wallet will open next so you can <strong>review and sign</strong> the transaction that
+                        sends this prize to the platform escrow wallet.
                       </p>
-                      <p>
-                        <strong>The NFT will be locked in escrow</strong> until the raffle ends and a winner is chosen. At that point, <strong>the winner can claim the prize</strong> from escrow.
-                      </p>
-                      <p>
-                        Are you sure you want to transfer this NFT to escrow?
-                      </p>
+                      <ul className="text-sm list-disc pl-5 space-y-1.5 text-muted-foreground">
+                        <li>
+                          Keep a little <strong>SOL</strong> for fees (and sometimes a one-time account rent). If
+                          simulation fails, top up SOL and try again.
+                        </li>
+                        <li>
+                          Some <strong>Metaplex Core</strong> collections restrict transfers until you complete steps in
+                          their app or Discord. If that applies, Owltopia cannot override it.
+                        </li>
+                        <li>
+                          <strong>The NFT stays locked in escrow</strong> until the raffle ends; the winner claims it from
+                          escrow.
+                        </li>
+                      </ul>
+                      <p className="text-sm font-medium text-foreground">Continue and open your wallet?</p>
                     </div>
                   </DialogDescription>
                 </DialogHeader>

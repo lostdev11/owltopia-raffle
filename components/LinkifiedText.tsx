@@ -17,6 +17,8 @@ export function LinkifiedTextInsideLinkProvider({ children }: { children: React.
 interface LinkifiedTextProps {
   text: string | null | undefined
   className?: string
+  /** Classes for link segments (default: green accent for chat-style copy). */
+  linkClassName?: string
   /** When true, URLs are rendered as spans with click handlers instead of <a>, to avoid nested <a> (invalid HTML). */
   nestedInLink?: boolean
 }
@@ -30,11 +32,17 @@ function openUrl(url: string) {
  * pasted URLs (e.g. from Word or browsers) are detected and linked.
  * Use nestedInLink (or wrap in LinkifiedTextInsideLinkProvider) when inside another link to avoid invalid nested <a>.
  */
-export function LinkifiedText({ text, className, nestedInLink }: LinkifiedTextProps) {
+export function LinkifiedText({
+  text,
+  className,
+  linkClassName: linkClassNameProp,
+  nestedInLink,
+}: LinkifiedTextProps) {
   const insideLinkContext = useContext(LinkifiedTextInsideLinkContext)
   const useSpanForLinks = nestedInLink === true || insideLinkContext
   const segments = linkifySegments(text)
-  const linkClassName = 'text-green-500 hover:text-green-400 underline break-all'
+  const linkClassName =
+    linkClassNameProp ?? 'text-green-500 hover:text-green-400 underline break-all'
   return (
     <span className={className}>
       {segments.map((seg, i) =>

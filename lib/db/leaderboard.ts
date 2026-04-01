@@ -1,11 +1,16 @@
 /**
  * Public leaderboard: top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
+ * Supports all-time, UTC calendar month, and UTC calendar year scopes.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 /** PostgREST page size; must paginate — a hard .limit() undercounts once row count exceeds the cap. */
 const LEADERBOARD_PAGE_SIZE = 2500
+
+/** Raffles likely did not exist before this year; clamps year picker / API. */
+const LEADERBOARD_MIN_YEAR = 2024
+const LEADERBOARD_MAX_YEAR = 2100
 
 export type LeaderboardEntry = {
   rank: number
@@ -21,9 +26,122 @@ export type LeaderboardData = {
   rafflesWon: LeaderboardEntry[]
 }
 
+export type LeaderboardPeriod =
+  | { kind: 'all' }
+  | { kind: 'month'; year: number; month: number }
+  | { kind: 'year'; year: number }
+
+export type LeaderboardPeriodMeta = {
+  kind: 'all' | 'month' | 'year'
+  year?: number
+  month?: number
+  /** Human-readable scope, e.g. "April 2026 (UTC)" */
+  label: string
+  /** Inclusive UTC range start (ISO), if scoped */
+  rangeStart?: string
+  /** Exclusive UTC range end (ISO), if scoped */
+  rangeEndExclusive?: string
+}
+
+type TimeWindow = { startIso: string; endIso: string }
+
+type LeaderboardRaffleRow = {
+  id: string
+  created_by: string | null
+  creator_wallet: string | null
+  winner_wallet: string | null
+  status: string | null
+  created_at: string
+  winner_selected_at: string | null
+}
+
+type LeaderboardEntryRow = {
+  id: string
+  raffle_id: string
+  wallet_address: string
+  ticket_quantity: number
+  verified_at: string | null
+  created_at: string
+}
+
 function normalizeWallet(v: string | null | undefined): string {
   const s = typeof v === 'string' ? v.trim() : ''
   return s || ''
+}
+
+function clampYear(y: number): number {
+  return Math.min(LEADERBOARD_MAX_YEAR, Math.max(LEADERBOARD_MIN_YEAR, y))
+}
+
+function utcMonthWindow(year: number, month1to12: number): TimeWindow {
+  const y = clampYear(year)
+  const m = month1to12
+  const start = Date.UTC(y, m - 1, 1, 0, 0, 0, 0)
+  const end = Date.UTC(y, m, 1, 0, 0, 0, 0)
+  return { startIso: new Date(start).toISOString(), endIso: new Date(end).toISOString() }
+}
+
+function utcYearWindow(year: number): TimeWindow {
+  const y = clampYear(year)
+  const start = Date.UTC(y, 0, 1, 0, 0, 0, 0)
+  const end = Date.UTC(y + 1, 0, 1, 0, 0, 0, 0)
+  return { startIso: new Date(start).toISOString(), endIso: new Date(end).toISOString() }
+}
+
+function monthLabel(year: number, month1to12: number): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
+    Date.UTC(year, month1to12 - 1, 1)
+  )
+}
+
+export function periodToWindow(period: LeaderboardPeriod): TimeWindow | null {
+  if (period.kind === 'all') return null
+  if (period.kind === 'month') return utcMonthWindow(period.year, period.month)
+  return utcYearWindow(period.year)
+}
+
+export function buildLeaderboardPeriodMeta(period: LeaderboardPeriod): LeaderboardPeriodMeta {
+  if (period.kind === 'all') {
+    return { kind: 'all', label: 'All time' }
+  }
+  const w = periodToWindow(period)!
+  if (period.kind === 'month') {
+    return {
+      kind: 'month',
+      year: period.year,
+      month: period.month,
+      label: `${monthLabel(period.year, period.month)} (UTC)`,
+      rangeStart: w.startIso,
+      rangeEndExclusive: w.endIso,
+    }
+  }
+  return {
+    kind: 'year',
+    year: period.year,
+    label: `${period.year} (UTC)`,
+    rangeStart: w.startIso,
+    rangeEndExclusive: w.endIso,
+  }
+}
+
+/**
+ * Parse query params for GET /api/leaderboard.
+ * Default: current UTC calendar month (monthly “season”).
+ */
+export function parseLeaderboardPeriodFromSearchParams(searchParams: URLSearchParams): LeaderboardPeriod {
+  const period = (searchParams.get('period') || 'month').toLowerCase()
+  if (period === 'all') return { kind: 'all' }
+  if (period === 'year') {
+    const y = parseInt(searchParams.get('year') || '', 10)
+    const year = Number.isFinite(y) ? clampYear(y) : new Date().getUTCFullYear()
+    return { kind: 'year', year }
+  }
+  const now = new Date()
+  const y = parseInt(searchParams.get('year') || '', 10)
+  const m = parseInt(searchParams.get('month') || '', 10)
+  const year = Number.isFinite(y) ? clampYear(y) : now.getUTCFullYear()
+  const month = Number.isFinite(m) && m >= 1 && m <= 12 ? m : now.getUTCMonth() + 1
+  return { kind: 'month', year, month }
 }
 
 function takeTopTen(items: { wallet: string; value: number }[]): LeaderboardEntry[] {
@@ -33,43 +151,36 @@ function takeTopTen(items: { wallet: string; value: number }[]): LeaderboardEntr
     .map((item, i) => ({ rank: i + 1, wallet: item.wallet, value: item.value }))
 }
 
-/**
- * Count a leaderboard "win" once a winner is recorded and the raffle has left the pre-draw
- * states. Escrow raffles use `successful_pending_claims` until claims finish, then `completed`;
- * counting only `completed` undercounted wins on the leaderboard.
- */
 function statusCountsAsRaffleWon(status: string | null): boolean {
   const s = (status || '').toLowerCase()
   return s === 'completed' || s === 'successful_pending_claims'
 }
 
-async function fetchAllLeaderboardRaffles(
-  db: SupabaseClient
-): Promise<
-  {
-    id: string
-    created_by: string | null
-    creator_wallet: string | null
-    winner_wallet: string | null
-    status: string | null
-  }[]
-> {
-  const rows: {
-    id: string
-    created_by: string | null
-    creator_wallet: string | null
-    winner_wallet: string | null
-    status: string | null
-  }[] = []
+function parseTimeMs(iso: string | null | undefined): number | null {
+  if (iso == null || iso === '') return null
+  const t = new Date(iso).getTime()
+  return Number.isFinite(t) ? t : null
+}
+
+function inUtcWindow(iso: string | null | undefined, window: TimeWindow): boolean {
+  const t = parseTimeMs(iso)
+  if (t === null) return false
+  const start = parseTimeMs(window.startIso)!
+  const end = parseTimeMs(window.endIso)!
+  return t >= start && t < end
+}
+
+async function fetchAllLeaderboardRaffles(db: SupabaseClient): Promise<LeaderboardRaffleRow[]> {
+  const rows: LeaderboardRaffleRow[] = []
   let from = 0
   for (;;) {
     const { data, error } = await db
       .from('raffles')
-      .select('id, created_by, creator_wallet, winner_wallet, status')
+      .select('id, created_by, creator_wallet, winner_wallet, status, created_at, winner_selected_at')
       .order('id', { ascending: true })
       .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
-    const chunk = (data || []) as typeof rows
+    const chunk = (data || []) as LeaderboardRaffleRow[]
     rows.push(...chunk)
     if (chunk.length < LEADERBOARD_PAGE_SIZE) break
     from += LEADERBOARD_PAGE_SIZE
@@ -77,40 +188,70 @@ async function fetchAllLeaderboardRaffles(
   return rows
 }
 
-async function fetchAllConfirmedEntriesForLeaderboard(
-  db: SupabaseClient
-): Promise<{ raffle_id: string; wallet_address: string; ticket_quantity: number }[]> {
-  const rows: { raffle_id: string; wallet_address: string; ticket_quantity: number }[] = []
-  let from = 0
+async function fetchAllConfirmedEntriesForLeaderboard(db: SupabaseClient, window: TimeWindow | null): Promise<LeaderboardEntryRow[]> {
+  if (!window) {
+    const rows: LeaderboardEntryRow[] = []
+    let from = 0
+    for (;;) {
+      const { data, error } = await db
+        .from('entries')
+        .select('id, raffle_id, wallet_address, ticket_quantity, verified_at, created_at')
+        .eq('status', 'confirmed')
+        .order('id', { ascending: true })
+        .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
+      if (error) throw new Error(error.message)
+      const chunk = (data || []) as LeaderboardEntryRow[]
+      rows.push(...chunk)
+      if (chunk.length < LEADERBOARD_PAGE_SIZE) break
+      from += LEADERBOARD_PAGE_SIZE
+    }
+    return rows
+  }
+
+  const { startIso, endIso } = window
+  const byId = new Map<string, LeaderboardEntryRow>()
+
+  let fromA = 0
   for (;;) {
     const { data, error } = await db
       .from('entries')
-      .select('raffle_id, wallet_address, ticket_quantity')
+      .select('id, raffle_id, wallet_address, ticket_quantity, verified_at, created_at')
       .eq('status', 'confirmed')
+      .not('verified_at', 'is', null)
+      .gte('verified_at', startIso)
+      .lt('verified_at', endIso)
       .order('id', { ascending: true })
-      .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
+      .range(fromA, fromA + LEADERBOARD_PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
-    const chunk = (data || []) as typeof rows
-    rows.push(...chunk)
+    const chunk = (data || []) as LeaderboardEntryRow[]
+    for (const row of chunk) byId.set(row.id, row)
     if (chunk.length < LEADERBOARD_PAGE_SIZE) break
-    from += LEADERBOARD_PAGE_SIZE
+    fromA += LEADERBOARD_PAGE_SIZE
   }
-  return rows
+
+  let fromB = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('entries')
+      .select('id, raffle_id, wallet_address, ticket_quantity, verified_at, created_at')
+      .eq('status', 'confirmed')
+      .is('verified_at', null)
+      .gte('created_at', startIso)
+      .lt('created_at', endIso)
+      .order('id', { ascending: true })
+      .range(fromB, fromB + LEADERBOARD_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as LeaderboardEntryRow[]
+    for (const row of chunk) byId.set(row.id, row)
+    if (chunk.length < LEADERBOARD_PAGE_SIZE) break
+    fromB += LEADERBOARD_PAGE_SIZE
+  }
+
+  return [...byId.values()]
 }
 
-/**
- * Returns top 10 users for each category. Loads all confirmed entries and raffles via
- * keyset-stable pagination so totals stay correct as the dataset grows.
- */
-export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
-  const db = getSupabaseAdmin()
-
-  const [raffles, entries] = await Promise.all([
-    fetchAllLeaderboardRaffles(db),
-    fetchAllConfirmedEntriesForLeaderboard(db),
-  ])
-
-  // Raffles entered: distinct raffle count per wallet
+function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: LeaderboardEntryRow[], window: TimeWindow | null): LeaderboardData {
+  // Raffles entered: distinct raffle count per wallet (entries already scoped)
   const enteredByWallet = new Map<string, Set<string>>()
   for (const e of entries) {
     const w = normalizeWallet(e.wallet_address)
@@ -129,7 +270,6 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     }))
   )
 
-  // Tickets purchased: per buyer wallet, sum of ticket_quantity (confirmed entries)
   const purchasedByWallet = new Map<string, number>()
   for (const e of entries) {
     const w = normalizeWallet(e.wallet_address)
@@ -142,9 +282,9 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     Array.from(purchasedByWallet.entries()).map(([wallet, value]) => ({ wallet, value }))
   )
 
-  // Raffles created: count per creator
   const createdByWallet = new Map<string, number>()
   for (const r of raffles) {
+    if (window && !inUtcWindow(r.created_at, window)) continue
     const w = normalizeWallet(r.creator_wallet ?? r.created_by)
     if (!w) continue
     createdByWallet.set(w, (createdByWallet.get(w) ?? 0) + 1)
@@ -153,7 +293,6 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     Array.from(createdByWallet.entries()).map(([wallet, value]) => ({ wallet, value }))
   )
 
-  // Tickets sold: per creator, sum of ticket_quantity for entries in their raffles
   const raffleToCreator = new Map<string, string>()
   for (const r of raffles) {
     const w = normalizeWallet(r.creator_wallet ?? r.created_by)
@@ -171,12 +310,14 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     Array.from(ticketsByCreator.entries()).map(([wallet, value]) => ({ wallet, value }))
   )
 
-  // Raffles won: raffles with a recorded winner after the draw (includes escrow pending claims)
   const winsByWallet = new Map<string, number>()
   for (const r of raffles) {
     const winner = normalizeWallet(r.winner_wallet)
     if (!winner) continue
     if (!statusCountsAsRaffleWon(r.status)) continue
+    if (window) {
+      if (!inUtcWindow(r.winner_selected_at, window)) continue
+    }
     winsByWallet.set(winner, (winsByWallet.get(winner) ?? 0) + 1)
   }
   const rafflesWon = takeTopTen(
@@ -190,4 +331,29 @@ export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
     ticketsSold,
     rafflesWon,
   }
+}
+
+/**
+ * All-time top 10 (legacy helper).
+ */
+export async function getLeaderboardTopTen(): Promise<LeaderboardData> {
+  const { leaderboard } = await getLeaderboardWithMeta({ kind: 'all' })
+  return leaderboard
+}
+
+export async function getLeaderboardWithMeta(period: LeaderboardPeriod): Promise<{
+  leaderboard: LeaderboardData
+  period: LeaderboardPeriodMeta
+}> {
+  const db = getSupabaseAdmin()
+  const window = periodToWindow(period)
+  const meta = buildLeaderboardPeriodMeta(period)
+
+  const [raffles, entries] = await Promise.all([
+    fetchAllLeaderboardRaffles(db),
+    fetchAllConfirmedEntriesForLeaderboard(db, window),
+  ])
+
+  const leaderboard = aggregateLeaderboard(raffles, entries, window)
+  return { leaderboard, period: meta }
 }
