@@ -73,36 +73,35 @@ export async function POST(
       })
     }
 
-    // Mpl Core prizes: check asset owner instead of SPL token accounts.
+    // Mpl Core prizes: check asset owner first. If that fails, fall through — DB may say Core while
+    // the asset is SPL (or RPC/Core fetch failed); SPL + compressed paths below still apply.
     if ((raffle as any).prize_standard === 'mpl_core') {
       if (!raffle.nft_mint_address) {
         return NextResponse.json({ error: 'Missing NFT mint address' }, { status: 400 })
       }
-      const inEscrow = await isMplCoreAssetInEscrow(raffle.nft_mint_address)
-      if (!inEscrow) {
-        return NextResponse.json(
-          {
-            error:
-              'Core NFT not found in prize escrow. Complete the transfer, wait for confirmation, then try Verify again.',
-          },
-          { status: 400 }
-        )
+      let inCoreEscrow = false
+      try {
+        inCoreEscrow = await isMplCoreAssetInEscrow(raffle.nft_mint_address)
+      } catch {
+        inCoreEscrow = false
       }
-      const now = new Date().toISOString()
-      // Keep raffle.nft_mint_address in sync with what's actually in escrow for Core prizes.
-      await updateRaffle(id, {
-        prize_deposited_at: now,
-        is_active: true,
-        nft_mint_address: raffle.nft_mint_address,
-      })
-      return NextResponse.json({
-        success: true,
-        prizeDepositedAt: now,
-        nftMintAddress: raffle.nft_mint_address,
-      })
+      if (inCoreEscrow) {
+        const now = new Date().toISOString()
+        await updateRaffle(id, {
+          prize_deposited_at: now,
+          is_active: true,
+          nft_mint_address: raffle.nft_mint_address,
+        })
+        return NextResponse.json({
+          success: true,
+          prizeDepositedAt: now,
+          nftMintAddress: raffle.nft_mint_address,
+        })
+      }
     }
 
     const held = await getEscrowHeldNftMints()
+    const preferredMint = (raffle.nft_mint_address || '').trim()
 
     // When deposit_tx is provided, parse it to get the mint transferred to escrow.
     // This identifies which NFT belongs to this raffle even when escrow holds multiple NFTs.
@@ -142,6 +141,41 @@ export async function POST(
             })
           }
         }
+      }
+    }
+
+    // Confirm escrow holds this raffle's mint via ATA lookup. Handles RPC flakiness where
+    // getParsedTokenAccountsByOwner returns nothing even though the escrow token account exists.
+    if (preferredMint) {
+      try {
+        const mintPk = new PublicKey(preferredMint)
+        const ataForPreferred = await getEscrowTokenAccountForMint(mintPk)
+        if (ataForPreferred) {
+          const frozen = await assertEscrowSplPrizeNotFrozen(mintPk)
+          if (frozen.blocked) {
+            return NextResponse.json({ error: frozen.error }, { status: 400 })
+          }
+          const now = new Date().toISOString()
+          const tokenId =
+            typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
+              ? raffle.nft_token_id.trim()
+              : preferredMint
+          await updateRaffle(id, {
+            prize_deposited_at: now,
+            is_active: true,
+            nft_mint_address: preferredMint,
+            nft_token_id: tokenId,
+            ...(depositTx ? { prize_deposit_tx: depositTx } : {}),
+          } as any)
+          return NextResponse.json({
+            success: true,
+            prizeDepositedAt: now,
+            nftMintAddress: preferredMint,
+            ...(depositTx ? { prizeDepositTx: depositTx } : {}),
+          })
+        }
+      } catch {
+        // Invalid mint address or transient RPC — continue with held-list logic.
       }
     }
 
@@ -236,7 +270,6 @@ export async function POST(
       )
     }
 
-    const preferredMint = (raffle.nft_mint_address || '').trim()
     let mintToSet: string
     if (held.length === 1) {
       const onlyMint = held[0].mint
