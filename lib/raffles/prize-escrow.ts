@@ -7,9 +7,11 @@
  * in the same transaction as the transfer. The escrow wallet alone cannot move tokens out
  * of a frozen account; thaw always requires a signature from the mint's freeze authority.
  *
- * Optional PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY=true (or 1/yes): verify-prize-deposit
- * will not reject SPL prizes when the escrow token account is frozen (raffle can go live).
- * Winner claim and return-to-creator still require an on-chain thaw or a matching freeze-authority key above.
+ * Frozen escrow SPL accounts: by default verify-prize-deposit does not reject (raffle can go live).
+ * Set PRIZE_ESCROW_STRICT_FROZEN_SPL_VERIFY=true to block verify until the escrow token account is thawed.
+ * PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY=false also disables bypass (same as strict for verify).
+ * Winner claim / return-to-creator still need thaw, PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY, or a manual admin
+ * transfer recorded via PATCH /api/raffles/[id]/nft-transfer.
  *
  * Return-to-creator transfers are sent with skipPreflight: true because some RPC nodes
  * can fail simulation ("Attempt to debit") even when getAccount shows balance at
@@ -132,11 +134,18 @@ function envLooksTruthyFlag(raw: string | undefined): boolean {
 }
 
 /**
- * When enabled, verify-prize-deposit allows SPL prizes in escrow even if the escrow token account is frozen.
- * Claim/return still fail until thaw or PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY matches mint.freezeAuthority.
+ * When true, verify-prize-deposit does not reject SPL prizes solely because the escrow token account is frozen.
+ * Default true so deposits can verify; use PRIZE_ESCROW_STRICT_FROZEN_SPL_VERIFY=true for legacy strict behavior.
  */
 export function isPrizeEscrowFrozenSplVerifyBypassEnabled(): boolean {
-  return envLooksTruthyFlag(process.env.PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY)
+  if (envLooksTruthyFlag(process.env.PRIZE_ESCROW_STRICT_FROZEN_SPL_VERIFY)) {
+    return false
+  }
+  const raw = process.env.PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY
+  if (raw !== undefined && raw.trim() !== '') {
+    return envLooksTruthyFlag(raw)
+  }
+  return true
 }
 
 /**
@@ -235,7 +244,15 @@ export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<Pub
 // If you change this text, update `isEscrowSplPrizeFrozenVerifyError` in verify-prize-deposit-client.ts.
 const FROZEN_ESCROW_PRIZE_MSG =
   'This prize cannot go live while its token account in escrow is frozen. Solana would not be able to send it to a winner. ' +
+  'The NFT can still show as owned by escrow on explorers—that is separate from the token account’s frozen flag. ' +
   'Collections often freeze accounts for holder safety; the freeze authority still needs to thaw only the escrow token account for this mint when you want this raffle to be claimable, or use a different prize.'
+
+/** Returned with verify-prize-deposit 400 so creators see which account must be thawed on-chain. */
+export type EscrowSplPrizeFrozenDiagnostics = {
+  mint: string
+  escrowTokenAccount: string
+  freezeAuthority: string | null
+}
 
 const FROZEN_CREATOR_HOLDING_MSG =
   'This NFT cannot be sent to escrow while its token account in your wallet is frozen. If you froze it for security, thaw when you are ready to deposit, then try again—or pick another prize.'
@@ -246,13 +263,10 @@ const FROZEN_CREATOR_HOLDING_MSG =
  */
 export async function assertEscrowSplPrizeNotFrozen(
   mint: PublicKey
-): Promise<{ blocked: false } | { blocked: true; error: string }> {
+): Promise<
+  { blocked: false } | { blocked: true; error: string; diagnostics: EscrowSplPrizeFrozenDiagnostics }
+> {
   if (isPrizeEscrowFrozenSplVerifyBypassEnabled()) {
-    console.warn(
-      '[prize-escrow] PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY: skipping frozen escrow check for verify; ' +
-        'automatic claim/return may still fail until thaw or freeze-authority key is configured. Mint:',
-      mint.toBase58()
-    )
     return { blocked: false }
   }
 
@@ -283,7 +297,15 @@ export async function assertEscrowSplPrizeNotFrozen(
       ) {
         return { blocked: false }
       }
-      return { blocked: true, error: FROZEN_ESCROW_PRIZE_MSG }
+      return {
+        blocked: true,
+        error: FROZEN_ESCROW_PRIZE_MSG,
+        diagnostics: {
+          mint: mint.toBase58(),
+          escrowTokenAccount: ata.toBase58(),
+          freezeAuthority: fa ? fa.toBase58() : null,
+        },
+      }
     }
   } catch {
     return { blocked: false }

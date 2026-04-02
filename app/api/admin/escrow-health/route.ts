@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
       },
       frozenSplDepositVerifyBypass: {
         enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),
+        strictEnv: Boolean(process.env.PRIZE_ESCROW_STRICT_FROZEN_SPL_VERIFY?.trim()),
       },
       solana: {
         clusterGuess: cluster,

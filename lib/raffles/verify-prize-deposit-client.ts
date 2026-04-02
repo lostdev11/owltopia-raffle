@@ -6,9 +6,16 @@
 export const VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS = 14
 export const VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS = 1000
 
+/** Mirrors POST verify-prize-deposit `frozenEscrowDiagnostics` when the escrow SPL account is frozen. */
+export type FrozenEscrowDiagnostics = {
+  mint: string
+  escrowTokenAccount: string
+  freezeAuthority: string | null
+}
+
 export type VerifyPrizeDepositClientResult =
   | { ok: true }
-  | { ok: false; error: string; status?: number }
+  | { ok: false; error: string; status?: number; frozenEscrowDiagnostics?: FrozenEscrowDiagnostics }
 
 /**
  * Server `assertEscrowSplPrizeNotFrozen` rejects with copy containing this phrase when the
@@ -23,7 +30,12 @@ export function isEscrowSplPrizeFrozenVerifyError(message: string): boolean {
  */
 export async function verifyPrizeDepositWithRetries(
   raffleId: string,
-  options: { depositTx?: string | null; signal?: AbortSignal } = {}
+  options: {
+    depositTx?: string | null
+    signal?: AbortSignal
+    /** Called before each HTTP attempt (1-based index). For deposit progress UI on mobile. */
+    onAttempt?: (attemptIndex: number, maxAttempts: number) => void
+  } = {}
 ): Promise<VerifyPrizeDepositClientResult> {
   const depositTx = options.depositTx?.trim() || null
   const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
@@ -31,11 +43,14 @@ export async function verifyPrizeDepositWithRetries(
 
   let lastError = 'Verification failed'
   let lastStatus: number | undefined
+  let lastFrozenDiagnostics: FrozenEscrowDiagnostics | undefined
 
   for (let attempt = 0; attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS; attempt++) {
     if (options.signal?.aborted) {
       return { ok: false, error: 'Aborted' }
     }
+
+    options.onAttempt?.(attempt + 1, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
 
     let res: Response
     try {
@@ -55,16 +70,37 @@ export async function verifyPrizeDepositWithRetries(
       continue
     }
 
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string
+      frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+    }
     if (res.ok) {
       return { ok: true }
     }
 
     lastStatus = res.status
     lastError = typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : 'Verification failed'
+    const fd = data?.frozenEscrowDiagnostics
+    if (fd && typeof fd.mint === 'string' && typeof fd.escrowTokenAccount === 'string') {
+      lastFrozenDiagnostics = {
+        mint: fd.mint,
+        escrowTokenAccount: fd.escrowTokenAccount,
+        freezeAuthority:
+          fd.freezeAuthority === null || fd.freezeAuthority === undefined
+            ? null
+            : typeof fd.freezeAuthority === 'string'
+              ? fd.freezeAuthority
+              : null,
+      }
+    }
 
     if (res.status === 401 || res.status === 403 || res.status === 404) {
-      return { ok: false, error: lastError, status: res.status }
+      return {
+        ok: false,
+        error: lastError,
+        status: res.status,
+        ...(lastFrozenDiagnostics ? { frozenEscrowDiagnostics: lastFrozenDiagnostics } : {}),
+      }
     }
 
     if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
@@ -72,5 +108,10 @@ export async function verifyPrizeDepositWithRetries(
     }
   }
 
-  return { ok: false, error: lastError, status: lastStatus }
+  return {
+    ok: false,
+    error: lastError,
+    status: lastStatus,
+    ...(lastFrozenDiagnostics ? { frozenEscrowDiagnostics: lastFrozenDiagnostics } : {}),
+  }
 }

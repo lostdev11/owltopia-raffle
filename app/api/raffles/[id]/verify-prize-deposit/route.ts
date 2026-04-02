@@ -118,7 +118,10 @@ export async function POST(
             if (ata) {
               const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(mintFromTx))
               if (frozen.blocked) {
-                return NextResponse.json({ error: frozen.error }, { status: 400 })
+                return NextResponse.json(
+                  { error: frozen.error, frozenEscrowDiagnostics: frozen.diagnostics },
+                  { status: 400 }
+                )
               }
             }
             const now = new Date().toISOString()
@@ -153,7 +156,10 @@ export async function POST(
         if (ataForPreferred) {
           const frozen = await assertEscrowSplPrizeNotFrozen(mintPk)
           if (frozen.blocked) {
-            return NextResponse.json({ error: frozen.error }, { status: 400 })
+            return NextResponse.json(
+              { error: frozen.error, frozenEscrowDiagnostics: frozen.diagnostics },
+              { status: 400 }
+            )
           }
           const now = new Date().toISOString()
           const tokenId =
@@ -370,7 +376,10 @@ export async function POST(
 
     const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(mintToSet))
     if (frozen.blocked) {
-      return NextResponse.json({ error: frozen.error }, { status: 400 })
+      return NextResponse.json(
+        { error: frozen.error, frozenEscrowDiagnostics: frozen.diagnostics },
+        { status: 400 }
+      )
     }
 
     const now = new Date().toISOString()

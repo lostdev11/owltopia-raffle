@@ -12,7 +12,8 @@ const TIMEOUT_HINT =
 export async function confirmSignatureSuccessOnChain(
   connection: Connection,
   signature: string,
-  timeoutMs = 90_000
+  /** Mobile / congested RPC: allow extra time before we ask the user to verify manually. */
+  timeoutMs = 120_000
 ): Promise<void> {
   const started = Date.now()
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -55,7 +56,7 @@ export async function confirmSignatureSuccessOnChain(
       if (msg.toLowerCase().includes('transaction failed')) throw e
     }
 
-    await sleep(700)
+    await sleep(500)
   }
 
   throw new Error(

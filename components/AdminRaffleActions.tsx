@@ -583,7 +583,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   Winner prize — escrow transfer
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  If the winner&apos;s &quot;Claim prize&quot; fails (RPC, wallet ATA, etc.), run this to sign the same transfer from the platform escrow key. Clears any stuck claim lock first.
+                  If the winner&apos;s &quot;Claim prize&quot; fails (RPC, frozen token account, wallet ATA, etc.), try this
+                  first—it signs the same path as claim from the platform escrow key. If the escrow SPL account is frozen
+                  and you have no thaw key, send the NFT to the winner with a wallet that can thaw (e.g. collection
+                  authority), then use <strong>Record NFT transfer</strong> on the raffle page to paste the Solana
+                  signature. Clears any stuck claim lock first.
                 </p>
                 <Button
                   type="button"

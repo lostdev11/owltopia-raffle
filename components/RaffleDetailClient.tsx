@@ -84,10 +84,13 @@ import {
   logEscrowDepositSigned,
   logEscrowDepositStart,
   logEscrowDepositVerify,
+  type EscrowDepositPath,
 } from '@/lib/solana/escrow-deposit-log'
 import {
   verifyPrizeDepositWithRetries,
   isEscrowSplPrizeFrozenVerifyError,
+  VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS,
+  type FrozenEscrowDiagnostics,
 } from '@/lib/raffles/verify-prize-deposit-client'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
@@ -96,9 +99,20 @@ import { LinkifiedText } from '@/components/LinkifiedText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
+function solscanClusterQuery(): string {
+  return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+}
+
 function solscanTransactionUrl(signature: string): string {
-  const cluster = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
-  return `https://solscan.io/tx/${signature}${cluster}`
+  return `https://solscan.io/tx/${signature}${solscanClusterQuery()}`
+}
+
+function solscanAccountUrl(address: string): string {
+  return `https://solscan.io/account/${encodeURIComponent(address.trim())}${solscanClusterQuery()}`
+}
+
+function solscanTokenUrl(mint: string): string {
+  return `https://solscan.io/token/${encodeURIComponent(mint.trim())}${solscanClusterQuery()}`
 }
 
 interface RaffleDetailClientProps {
@@ -122,6 +136,15 @@ export function RaffleDetailClient({
   const [shareCopied, setShareCopied] = useState(false)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
+  /** Populated when verify fails with frozen escrow SPL account; cleared when error is not that case. */
+  const [depositEscrowFrozenDiagnostics, setDepositEscrowFrozenDiagnostics] =
+    useState<FrozenEscrowDiagnostics | null>(null)
+  /** In-app transfer flow: wallet → optional chain confirm → server verify (shown in modal + button label). */
+  const [depositEscrowProgressOpen, setDepositEscrowProgressOpen] = useState(false)
+  const [depositEscrowProgressStep, setDepositEscrowProgressStep] = useState<
+    'idle' | 'wallet' | 'chain' | 'verify' | 'sign_in'
+  >('idle')
+  const [depositVerifyAttemptLabel, setDepositVerifyAttemptLabel] = useState({ current: 0, max: 0 })
   const [depositEscrowSuccess, setDepositEscrowSuccess] = useState(false)
   /** Set after wallet confirms on-chain; lets users open Solscan before server verify catches up. */
   const [depositLastTxSignature, setDepositLastTxSignature] = useState<string | null>(null)
@@ -214,6 +237,12 @@ export function RaffleDetailClient({
       setHeroImgPhase('dead')
     }
   }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+
+  useEffect(() => {
+    if (!depositEscrowError || !isEscrowSplPrizeFrozenVerifyError(depositEscrowError)) {
+      setDepositEscrowFrozenDiagnostics(null)
+    }
+  }, [depositEscrowError])
 
   useEffect(() => {
     if (heroImgPhase !== 'mint_loading') return
@@ -1499,9 +1528,13 @@ export function RaffleDetailClient({
     })
     setShowEscrowConfirmDialog(false)
     setDepositEscrowError(null)
+    setDepositEscrowFrozenDiagnostics(null)
     setShowManualEscrowFallback(false)
     setDepositEscrowSuccess(false)
     setDepositLastTxSignature(null)
+    setDepositEscrowProgressOpen(true)
+    setDepositEscrowProgressStep('wallet')
+    setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     setDepositEscrowLoading(true)
 
     const signInForSession = async (): Promise<boolean> => {
@@ -1552,16 +1585,25 @@ export function RaffleDetailClient({
       }
     }
 
-    const verifyDepositAfterTransfer = async (depositTx?: string) => {
+    const runVerifyWithOptionalSignIn = async (depositTx?: string | null): Promise<boolean> => {
+      const attemptOpts = {
+        onAttempt: (current: number, max: number) => {
+          setDepositEscrowProgressStep('verify')
+          setDepositVerifyAttemptLabel({ current, max })
+        },
+      }
       try {
-        let result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx })
+        let result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
         if (!result.ok && result.status === 401) {
+          setDepositEscrowProgressStep('sign_in')
           const signedIn = await signInForSession()
           if (!signedIn) return false
-          result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx })
+          setDepositEscrowProgressStep('verify')
+          result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
         }
         if (!result.ok) {
           setDepositEscrowError(result.error)
+          setDepositEscrowFrozenDiagnostics(result.frozenEscrowDiagnostics ?? null)
           return false
         }
         return true
@@ -1570,11 +1612,13 @@ export function RaffleDetailClient({
         return false
       }
     }
-    const finalizeAfterTransfer = async (depositTx?: string) => {
+
+    const finalizeAfterTransfer = async (depositTx?: string): Promise<boolean> => {
       if (depositTx?.trim()) {
         setDepositLastTxSignature(depositTx.trim())
       }
-      const verified = await verifyDepositAfterTransfer(depositTx)
+      setDepositEscrowProgressStep('verify')
+      const verified = await runVerifyWithOptionalSignIn(depositTx)
       logEscrowDepositVerify(
         depositLogCtx,
         verified,
@@ -1583,14 +1627,25 @@ export function RaffleDetailClient({
       if (verified) {
         setDepositEscrowSuccess(true)
         setDepositEscrowError(null)
+        setDepositEscrowFrozenDiagnostics(null)
         setShowManualEscrowFallback(false)
         router.refresh()
       } else {
         setDepositEscrowSuccess(false)
       }
+      return verified
+    }
+
+    /** Same UX for every path: show “confirming on-chain”, wait for RPC, then server verify. */
+    const afterWalletSignature = async (sig: string, logSignedPath: EscrowDepositPath) => {
+      setDepositEscrowProgressStep('chain')
+      await confirmSignatureSuccessOnChain(connection, sig)
+      logEscrowDepositSigned(depositLogCtx, logSignedPath, sig)
+      await finalizeAfterTransfer(sig)
     }
 
     try {
+      try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
       // Prefer DB value; otherwise default to SPL/Token-2022 path first and fall back to Mpl Core.
@@ -1613,9 +1668,7 @@ export function RaffleDetailClient({
           assetId: transferAssetId,
           escrowAddress,
         })
-        logEscrowDepositSigned(depositLogCtx, 'mpl_core', sig)
-        // Mpl Core path uses UMI sendAndConfirm — no second poll (avoids false timeouts on laggy RPC).
-        await finalizeAfterTransfer(sig)
+        await afterWalletSignature(sig, 'mpl_core')
         return
       }
 
@@ -1634,8 +1687,7 @@ export function RaffleDetailClient({
           assetId: transferAssetId,
           escrowAddress,
         })
-        logEscrowDepositSigned(depositLogCtx, 'compressed', sig)
-        await finalizeAfterTransfer(sig)
+        await afterWalletSignature(sig, 'compressed')
         return
       }
 
@@ -1660,8 +1712,7 @@ export function RaffleDetailClient({
               assetId: transferAssetId,
               escrowAddress,
             })
-            logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', sig)
-            await finalizeAfterTransfer(sig)
+            await afterWalletSignature(sig, 'fallback_compressed')
             return
           } catch (e) {
             // Not a compressed NFT (or proof/build failed); continue to Core fallback.
@@ -1680,8 +1731,7 @@ export function RaffleDetailClient({
               assetId: transferAssetId,
               escrowAddress,
             })
-            logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', sig)
-            await finalizeAfterTransfer(sig)
+            await afterWalletSignature(sig, 'fallback_mpl_core')
             return
           } catch (e) {
             // Fall through to the detailed not-found guidance below.
@@ -1743,8 +1793,7 @@ export function RaffleDetailClient({
             mintAddress: raffle.nft_mint_address,
             escrowAddress,
           })
-          logEscrowDepositSigned(depositLogCtx, 'token_metadata', sig)
-          await finalizeAfterTransfer(sig)
+          await afterWalletSignature(sig, 'token_metadata')
           return
         } catch (tmErr) {
           logEscrowDepositAbort(depositLogCtx, 'token_metadata_failed_trying_spl', {
@@ -1791,27 +1840,29 @@ export function RaffleDetailClient({
         escrowAta: escrowAta.toBase58(),
       })
       const sig = await sendTransaction(tx, connection)
-      await confirmSignatureSuccessOnChain(connection, sig)
-      logEscrowDepositSigned(depositLogCtx, 'spl_transfer', sig)
-      await finalizeAfterTransfer(sig)
-    } catch (e) {
-      logEscrowDepositError(depositLogCtx, e)
-      const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
-      const short =
-        transferAssetId.length > 16
-          ? `${transferAssetId.slice(0, 4)}…${transferAssetId.slice(-4)}`
-          : transferAssetId
-      if (isMplCoreNoApprovalsError(baseMessage)) {
-        setDepositEscrowError(
-          mplCoreNoApprovalsEscrowMessage(short, { fullAssetId: transferAssetId })
-        )
-        setShowManualEscrowFallback(false)
-      } else {
-        setDepositEscrowError(baseMessage)
-        setShowManualEscrowFallback(true)
+      await afterWalletSignature(sig, 'spl_transfer')
+      } catch (e) {
+        logEscrowDepositError(depositLogCtx, e)
+        const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
+        const short =
+          transferAssetId.length > 16
+            ? `${transferAssetId.slice(0, 4)}…${transferAssetId.slice(-4)}`
+            : transferAssetId
+        if (isMplCoreNoApprovalsError(baseMessage)) {
+          setDepositEscrowError(
+            mplCoreNoApprovalsEscrowMessage(short, { fullAssetId: transferAssetId })
+          )
+          setShowManualEscrowFallback(false)
+        } else {
+          setDepositEscrowError(baseMessage)
+          setShowManualEscrowFallback(true)
+        }
       }
     } finally {
       setDepositEscrowLoading(false)
+      setDepositEscrowProgressOpen(false)
+      setDepositEscrowProgressStep('idle')
+      setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     }
   }, [
     publicKey,
@@ -1831,7 +1882,11 @@ export function RaffleDetailClient({
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
     setDepositEscrowError(null)
+    setDepositEscrowFrozenDiagnostics(null)
     setDepositVerifyLoading(true)
+    setDepositEscrowProgressOpen(true)
+    setDepositEscrowProgressStep('verify')
+    setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     const manualTx = manualDepositTx.trim()
     try {
       const signInForSession = async (): Promise<boolean> => {
@@ -1881,23 +1936,34 @@ export function RaffleDetailClient({
         }
       }
 
+      const attemptOpts = {
+        onAttempt: (current: number, max: number) => {
+          setDepositVerifyAttemptLabel({ current, max })
+        },
+      }
       let result = await verifyPrizeDepositWithRetries(raffle.id, {
         depositTx: manualTx || undefined,
+        ...attemptOpts,
       })
       if (!result.ok && result.status === 401) {
+        setDepositEscrowProgressStep('sign_in')
         const signedIn = await signInForSession()
         if (!signedIn) return
+        setDepositEscrowProgressStep('verify')
         result = await verifyPrizeDepositWithRetries(raffle.id, {
           depositTx: manualTx || undefined,
+          ...attemptOpts,
         })
       }
       if (!result.ok) {
         setDepositEscrowError(result.error)
+        setDepositEscrowFrozenDiagnostics(result.frozenEscrowDiagnostics ?? null)
         setShowManualEscrowFallback(true)
         return
       }
       setDepositEscrowSuccess(true)
       setDepositEscrowError(null)
+      setDepositEscrowFrozenDiagnostics(null)
       if (manualTx) {
         setDepositLastTxSignature(manualTx)
       }
@@ -1908,6 +1974,9 @@ export function RaffleDetailClient({
       setShowManualEscrowFallback(true)
     } finally {
       setDepositVerifyLoading(false)
+      setDepositEscrowProgressOpen(false)
+      setDepositEscrowProgressStep('idle')
+      setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     }
   }, [raffle.id, router, publicKey, signMessage, manualDepositTx])
 
@@ -2295,7 +2364,11 @@ export function RaffleDetailClient({
               <CardHeader>
                 <CardTitle className="text-lg">Prize in escrow required</CardTitle>
                 <CardDescription>
-                  <strong>Flow:</strong> You created this raffle → next, transfer the NFT to escrow (it stays locked for the duration of the raffle) → when the raffle ends and a winner is selected, the winner can claim the prize from escrow. Transfer your NFT below; your wallet will ask you to sign. <strong>No listing fee</strong> — only network (gas) fees. Then click Verify deposit.
+                  <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
+                  transaction succeeds, we <strong>automatically verify</strong> that the prize is in escrow and activate
+                  the raffle—watch the progress popup. Use <strong>Verify deposit</strong> only if you sent the NFT
+                  manually or the automatic step timed out. <strong>No listing fee</strong> — only network fees. The
+                  prize stays locked until a winner claims it.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -2313,9 +2386,15 @@ export function RaffleDetailClient({
                         disabled={!connected || depositEscrowLoading}
                       >
                         {depositEscrowLoading
-                          ? depositLastTxSignature
-                            ? 'Confirming…'
-                            : 'Sending…'
+                          ? depositEscrowProgressStep === 'verify'
+                            ? depositVerifyAttemptLabel.current > 0
+                              ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
+                              : 'Verifying deposit…'
+                            : depositEscrowProgressStep === 'sign_in'
+                              ? 'Sign in to finish…'
+                              : depositEscrowProgressStep === 'chain'
+                                ? 'Confirming on-chain…'
+                                : 'Approve in wallet…'
                           : 'Transfer NFT to escrow'}
                       </Button>
                       <Button
@@ -2324,7 +2403,11 @@ export function RaffleDetailClient({
                         disabled={depositVerifyLoading}
                         title="Checks on-chain that the NFT is in platform escrow, then activates the raffle"
                       >
-                        {depositVerifyLoading ? 'Verifying…' : 'Verify deposit'}
+                        {depositVerifyLoading
+                          ? depositVerifyAttemptLabel.current > 0
+                            ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
+                            : 'Verifying…'
+                          : 'Verify deposit'}
                       </Button>
                     </div>
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
@@ -2499,6 +2582,64 @@ export function RaffleDetailClient({
                         linkClassName="text-primary underline font-medium break-all"
                       />
                     </div>
+                    {isEscrowSplPrizeFrozenVerifyError(depositEscrowError) && depositEscrowFrozenDiagnostics && (
+                      <div className="text-xs text-foreground/90 border-t border-destructive/15 pt-3 space-y-2 leading-relaxed">
+                        <p className="font-medium text-foreground">On-chain details</p>
+                        <p>
+                          On Solscan, open the escrow <strong>token account</strong> (not only the mint) and check{' '}
+                          <strong>Frozen</strong>. While that flag is on, transfers to a winner will fail even though the
+                          NFT is in escrow.
+                        </p>
+                        <ul className="list-none space-y-2">
+                          <li>
+                            <a
+                              href={solscanAccountUrl(depositEscrowFrozenDiagnostics.escrowTokenAccount)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-primary font-medium underline break-all touch-manipulation min-h-[44px] py-2"
+                              onTouchStart={handleMobileLinkTouchStart}
+                              onTouchMove={handleMobileLinkTouchMove}
+                              onTouchEnd={handleMobileLinkTouchEnd}
+                            >
+                              Escrow token account — thaw this for claims
+                              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            </a>
+                          </li>
+                          <li>
+                            <a
+                              href={solscanTokenUrl(depositEscrowFrozenDiagnostics.mint)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-primary font-medium underline break-all touch-manipulation min-h-[44px] py-2"
+                              onTouchStart={handleMobileLinkTouchStart}
+                              onTouchMove={handleMobileLinkTouchMove}
+                              onTouchEnd={handleMobileLinkTouchEnd}
+                            >
+                              Prize mint
+                              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            </a>
+                          </li>
+                          {depositEscrowFrozenDiagnostics.freezeAuthority ? (
+                            <li className="text-muted-foreground break-all">
+                              <span className="font-medium text-foreground">Freeze authority </span>
+                              (who can sign thaw):{' '}
+                              <a
+                                href={solscanAccountUrl(depositEscrowFrozenDiagnostics.freezeAuthority)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary font-medium underline touch-manipulation min-h-[44px] inline-flex items-center gap-1 py-1"
+                                onTouchStart={handleMobileLinkTouchStart}
+                                onTouchMove={handleMobileLinkTouchMove}
+                                onTouchEnd={handleMobileLinkTouchEnd}
+                              >
+                                {depositEscrowFrozenDiagnostics.freezeAuthority}
+                                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              </a>
+                            </li>
+                          ) : null}
+                        </ul>
+                      </div>
+                    )}
                     {showManualEscrowFallback && !isEscrowSplPrizeFrozenVerifyError(depositEscrowError) && (
                       <p className="text-xs text-amber-800 dark:text-amber-200 border-t border-destructive/15 pt-3 leading-relaxed">
                         <strong>Try manually:</strong> send the NFT to the escrow address above, then tap{' '}
@@ -2553,6 +2694,76 @@ export function RaffleDetailClient({
                     {depositEscrowLoading ? 'Sending…' : 'Yes, transfer to escrow'}
                   </Button>
                 </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={depositEscrowProgressOpen}
+              onOpenChange={(open) => {
+                if (!open && (depositEscrowLoading || depositVerifyLoading)) return
+                setDepositEscrowProgressOpen(open)
+              }}
+            >
+              <DialogContent
+                className="sm:max-w-md touch-manipulation"
+                onPointerDownOutside={(e) => {
+                  if (depositEscrowLoading || depositVerifyLoading) e.preventDefault()
+                }}
+                onEscapeKeyDown={(e) => {
+                  if (depositEscrowLoading || depositVerifyLoading) e.preventDefault()
+                }}
+              >
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 pr-8">
+                    {(depositEscrowLoading || depositVerifyLoading) && (
+                      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden />
+                    )}
+                    {depositEscrowProgressStep === 'wallet'
+                      ? 'Approve in your wallet'
+                      : depositEscrowProgressStep === 'chain'
+                        ? 'Confirming on the blockchain'
+                        : depositEscrowProgressStep === 'sign_in'
+                          ? 'Sign in to finish'
+                          : 'Verifying NFT in escrow'}
+                  </DialogTitle>
+                  <DialogDescription asChild>
+                    <div className="space-y-2 text-left text-sm text-muted-foreground">
+                      {depositEscrowProgressStep === 'wallet' && (
+                        <p>
+                          Your wallet should open for you to <strong>review and approve</strong> the transfer. If nothing
+                          appears, unlock your wallet app or try again on Wi‑Fi.
+                        </p>
+                      )}
+                      {depositEscrowProgressStep === 'chain' && (
+                        <p>
+                          Waiting until your RPC sees the signed transaction (same step for SPL, Metaplex Core,
+                          compressed, and Token Metadata paths). Usually quick after your wallet finishes; on busy
+                          networks or mobile data it can take up to a couple of minutes—keep this page open.
+                        </p>
+                      )}
+                      {depositEscrowProgressStep === 'sign_in' && (
+                        <p>
+                          Sign the message in your wallet so we can record that the prize is in escrow. This is separate
+                          from the NFT transfer signature.
+                        </p>
+                      )}
+                      {(depositEscrowProgressStep === 'verify' || depositVerifyLoading) && (
+                        <p>
+                          Checking with Owltopia that your NFT is in platform escrow so the raffle can go live. On mobile,
+                          RPC can lag—we retry automatically
+                          {depositVerifyAttemptLabel.max > 0
+                            ? ` (up to ${depositVerifyAttemptLabel.max} tries).`
+                            : '.'}
+                          {depositVerifyAttemptLabel.current > 0 && (
+                            <span className="block mt-2 font-medium text-foreground">
+                              Attempt {depositVerifyAttemptLabel.current} of {depositVerifyAttemptLabel.max}
+                            </span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  </DialogDescription>
+                </DialogHeader>
               </DialogContent>
             </Dialog>
           </>
@@ -3255,7 +3466,9 @@ export function RaffleDetailClient({
           <DialogHeader>
             <DialogTitle>Record NFT Transfer Transaction</DialogTitle>
             <DialogDescription>
-              Prefer sending from escrow on the admin raffle page (&quot;Send prize from escrow&quot;). Use this form only when you already transferred the NFT manually and need to record the Solana signature for transparency.
+              Prefer &quot;Send prize from escrow&quot; on the admin raffle tools. Use this when the prize was sent
+              manually—for example the escrow SPL token account was frozen and someone with freeze authority moved the NFT
+              to the winner—then paste the Solana transaction signature here for transparency.
             </DialogDescription>
           </DialogHeader>
           

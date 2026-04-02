@@ -34,6 +34,7 @@ import {
   verifyPrizeDepositWithRetries,
   isEscrowSplPrizeFrozenVerifyError,
 } from '@/lib/raffles/verify-prize-deposit-client'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -541,7 +542,12 @@ export function CreateRaffleForm() {
             }
             if (!verifyResult.ok) {
               if (isEscrowSplPrizeFrozenVerifyError(verifyResult.error)) {
-                alert(verifyResult.error)
+                const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+                const d = verifyResult.frozenEscrowDiagnostics
+                const links = d
+                  ? `\n\nEscrow token account (must be thawed on-chain):\nhttps://solscan.io/account/${encodeURIComponent(d.escrowTokenAccount)}${q}`
+                  : ''
+                alert(verifyResult.error + links)
               } else {
                 alert(
                   'Your transfer may have succeeded, but the server has not confirmed escrow yet (common on mobile RPC). ' +
