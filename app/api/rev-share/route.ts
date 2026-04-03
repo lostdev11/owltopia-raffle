@@ -14,7 +14,7 @@ async function resolveCreatorFeeTier(creatorWallet: string, cache: Map<string, F
   const cached = cache.get(normalized)
   if (cached) return cached
 
-  const isHolder = await ownsOwltopia(normalized, { skipCache: true })
+  const isHolder = await ownsOwltopia(normalized, { skipCache: true, deepWalletScan: true })
   const tier: FeeTier = isHolder
     ? { feeBps: HOLDER_FEE_BPS, reason: 'holder' }
     : { feeBps: STANDARD_FEE_BPS, reason: 'standard' }

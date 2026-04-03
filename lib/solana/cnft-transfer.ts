@@ -5,12 +5,8 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey } from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
-import {
-  getAssetWithProof,
-  getCompressionProgramsForV1Ixs,
-  mplBubblegum,
-  transfer,
-} from '@metaplex-foundation/mpl-bubblegum'
+import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
+import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 
 interface TransferCompressedNftToEscrowArgs {
   connection: Connection
@@ -49,22 +45,13 @@ export async function transferCompressedNftToEscrow({
     throw new Error('Connected wallet does not own this compressed NFT')
   }
 
-  const { compressionProgram, logWrapper } = await getCompressionProgramsForV1Ixs(umi)
-  const builder = transfer(umi, {
-    leafOwner: ownerPk,
-    // Use current on-chain delegate from proof payload (can equal owner).
-    leafDelegate: asset.leafDelegate,
-    newLeafOwner: publicKey(escrowAddress),
-    merkleTree: asset.merkleTree,
-    root: asset.root,
-    dataHash: asset.dataHash,
-    creatorHash: asset.creatorHash,
-    nonce: BigInt(asset.nonce),
-    index: asset.index,
-    proof: asset.proof,
-    compressionProgram,
-    logWrapper,
-  })
+  const builder = await buildBubblegumLeafTransferBuilder(
+    umi,
+    umi.identity,
+    ownerPk,
+    publicKey(escrowAddress),
+    asset
+  )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result: any = await builder.sendAndConfirm(umi)

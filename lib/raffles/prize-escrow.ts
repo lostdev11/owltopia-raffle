@@ -35,12 +35,8 @@ import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
-import {
-  getAssetWithProof,
-  getCompressionProgramsForV1Ixs,
-  mplBubblegum,
-  transfer as bubblegumTransfer,
-} from '@metaplex-foundation/mpl-bubblegum'
+import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
+import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -549,22 +545,14 @@ export async function transferCompressedPrizeToWinner(raffleId: string): Promise
       }
     }
 
-    const { compressionProgram, logWrapper } = await getCompressionProgramsForV1Ixs(umi)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const builder: any = bubblegumTransfer(umi, {
-      leafOwner: umiPublicKey(escrowBase58),
-      leafDelegate: asset.leafDelegate,
-      newLeafOwner: umiPublicKey(raffle.winner_wallet.trim()),
-      merkleTree: asset.merkleTree,
-      root: asset.root,
-      dataHash: asset.dataHash,
-      creatorHash: asset.creatorHash,
-      nonce: BigInt(asset.nonce),
-      index: asset.index,
-      proof: asset.proof,
-      compressionProgram,
-      logWrapper,
-    } as any)
+    const builder: any = await buildBubblegumLeafTransferBuilder(
+      umi,
+      signer,
+      umiPublicKey(escrowBase58),
+      umiPublicKey(raffle.winner_wallet.trim()),
+      asset
+    )
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)
@@ -1153,22 +1141,14 @@ async function transferCompressedPrizeToCreatorFromEscrow(
       }
     }
 
-    const { compressionProgram, logWrapper } = await getCompressionProgramsForV1Ixs(umi)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const builder: any = bubblegumTransfer(umi, {
-      leafOwner: umiPublicKey(escrowBase58),
-      leafDelegate: asset.leafDelegate,
-      newLeafOwner: umiPublicKey(creatorWallet.trim()),
-      merkleTree: asset.merkleTree,
-      root: asset.root,
-      dataHash: asset.dataHash,
-      creatorHash: asset.creatorHash,
-      nonce: BigInt(asset.nonce),
-      index: asset.index,
-      proof: asset.proof,
-      compressionProgram,
-      logWrapper,
-    } as any)
+    const builder: any = await buildBubblegumLeafTransferBuilder(
+      umi,
+      signer,
+      umiPublicKey(escrowBase58),
+      umiPublicKey(creatorWallet.trim()),
+      asset
+    )
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)

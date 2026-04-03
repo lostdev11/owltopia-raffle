@@ -39,9 +39,17 @@ function assetMatchesOwltopiaCollection(item: unknown, collectionAddress: string
     if (inCollection) return true
   }
 
+  const topCol = o.collection
+  if (topCol && typeof topCol === 'object') {
+    const key = (topCol as { key?: string; address?: string }).key
+    const addr = (topCol as { key?: string; address?: string }).address
+    if (typeof key === 'string' && key === collectionAddress) return true
+    if (typeof addr === 'string' && addr === collectionAddress) return true
+  }
+
   const content = o.content
   if (content && typeof content === 'object') {
-    const metadata = (content as { metadata?: { collection?: { key?: string } } }).metadata
+    const metadata = (content as { metadata?: { collection?: { key?: string; verified?: boolean } } }).metadata
     const key = metadata?.collection?.key
     if (typeof key === 'string' && key === collectionAddress) return true
   }
@@ -57,6 +65,11 @@ export type OwnsOwltopiaOptions = {
    * (can be tens of RPC round-trips per wallet). Returns false when search is inconclusive; does not write cache.
    */
   listMode?: boolean
+  /**
+   * When true, allow a larger `getAssetsByOwner` walk (e.g. dashboard, ticket purchase, settlement).
+   * List/badge mode keeps a smaller cap to save time and Helius quota.
+   */
+  deepWalletScan?: boolean
 }
 
 /**
@@ -64,7 +77,7 @@ export type OwnsOwltopiaOptions = {
  *
  * - Runs server-side only.
  * - Uses Helius DAS searchAssets (owner + collection) when HELIUS_API_KEY + collection are set;
- *   if that returns no hit, scans the wallet via getAssetsByOwner with sortBy id + after (keyset), up to 50k NFTs.
+ *   if that returns no hit, scans the wallet via getAssetsByOwner with sortBy id + after (keyset), up to 50k–200k NFTs.
  * - Uses mainnet Helius for DAS even when SOLANA_RPC_URL is devnet (Owltopia NFTs are mainnet).
  * - On devnet RPC, skips OWL SPL balance check only; Helius path still runs when configured.
  * - Falls back to Solana RPC OWL SPL token balance when Helius is unavailable or inconclusive (mainnet).
@@ -114,60 +127,72 @@ export async function ownsOwltopia(
     }
 
     try {
-      const searchBody = () =>
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'owltopia-ownership-search',
-          method: 'searchAssets',
-          params: {
-            ownerAddress: normalized,
-            tokenType: 'all',
-            page: 1,
-            limit: 1,
-            burnt: false,
-            grouping: ['collection', collectionAddress],
-            options: {
-              showUnverifiedCollections: true,
-            },
-          },
-        })
+      // `tokenType: 'all'` can miss some compressed or standard NFTs in collection-filtered search; try explicit types too.
+      const searchLimit = 15
+      const tokenTypesListMode = ['all', 'compressedNft', 'regularNft'] as const
+      const tokenTypesFull = ['all', 'nonFungible', 'compressedNft', 'regularNft'] as const
+      const tokenTypes = options?.listMode ? tokenTypesListMode : tokenTypesFull
 
-      // Prefer searchAssets(owner + collection): indexed query (works for very large wallets).
-      let searchRes = await fetch(heliusUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: searchBody(),
-      })
-      if (searchRes.status === 429) {
-        await sleep(retryAfterMsFromResponse(searchRes))
-        searchRes = await fetch(heliusUrl, {
+      let skipOwnerScan = false
+
+      for (const tokenType of tokenTypes) {
+        const searchBody = () =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `owltopia-ownership-search-${tokenType}`,
+            method: 'searchAssets',
+            params: {
+              ownerAddress: normalized,
+              tokenType,
+              page: 1,
+              limit: searchLimit,
+              burnt: false,
+              grouping: ['collection', collectionAddress],
+              options: {
+                showUnverifiedCollections: true,
+              },
+            },
+          })
+
+        let searchRes = await fetch(heliusUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: searchBody(),
         })
-      }
-
-      let skipOwnerScan = false
-      if (searchRes.ok) {
-        const searchJson: { error?: unknown; result?: { items?: unknown[] } } = await searchRes.json().catch(() => ({}))
-        if (!searchJson.error) {
-          const searchItems = searchJson.result?.items
-          if (Array.isArray(searchItems) && searchItems.length > 0) {
-            ownsOwltopiaCache.set(normalized, {
-              value: true,
-              expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-            })
-            return true
-          }
-          // Empty array: fall through — DAS can lag vs getAssetsByOwner; full scan may still find the NFT.
+        if (searchRes.status === 429) {
+          await sleep(retryAfterMsFromResponse(searchRes))
+          searchRes = await fetch(heliusUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: searchBody(),
+          })
         }
-      } else if (searchRes.status === 429) {
-        skipOwnerScan = true
-        console.warn(
-          'Helius searchAssets rate limited after retry; skipping DAS owner scan (SPL fallback may still apply)'
-        )
-      } else {
-        console.error('Helius searchAssets returned non-OK status', searchRes.status)
+
+        if (!searchRes.ok) {
+          if (searchRes.status === 429) {
+            skipOwnerScan = true
+            console.warn(
+              'Helius searchAssets rate limited after retry; skipping DAS owner scan (SPL fallback may still apply)'
+            )
+            break
+          }
+          console.error('Helius searchAssets returned non-OK status', searchRes.status)
+          continue
+        }
+
+        const searchJson: { error?: unknown; result?: { items?: unknown[] } } = await searchRes.json().catch(() => ({}))
+        if (searchJson.error) continue
+
+        const searchItems = searchJson.result?.items
+        if (!Array.isArray(searchItems) || searchItems.length === 0) continue
+
+        if (searchItems.some((item) => assetMatchesOwltopiaCollection(item, collectionAddress))) {
+          ownsOwltopiaCache.set(normalized, {
+            value: true,
+            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
+          })
+          return true
+        }
       }
 
       // Keyset-style scan (sortBy id + after): walk the wallet in stable order (Helius keyset pagination).
@@ -176,7 +201,7 @@ export async function ownsOwltopia(
       }
 
       const limit = 1000
-      const maxBatches = 50
+      const maxBatches = options?.deepWalletScan ? 200 : 50
       let after: string | undefined
       let ownerScanAborted = false
 

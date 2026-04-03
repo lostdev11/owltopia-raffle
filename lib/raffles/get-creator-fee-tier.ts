@@ -30,9 +30,14 @@ export async function getCreatorFeeTier(
     }
   }
 
+  const deepWalletScan =
+    options?.skipCache === true &&
+    options?.listDisplayOnly !== true
+
   const isHolder = await ownsOwltopia(normalized, {
     skipCache: options?.skipCache,
     listMode: options?.listDisplayOnly,
+    deepWalletScan,
   })
   if (isHolder) {
     return {

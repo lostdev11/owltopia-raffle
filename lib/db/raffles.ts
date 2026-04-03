@@ -82,12 +82,18 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 }
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
-const RAFFLE_TAIL_MINIMAL =
+const RAFFLE_TAIL_CORE =
   ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+
+/** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
+const RAFFLE_TAIL_FUNDS_ESCROW =
+  ',ticket_payments_to_funds_escrow,nft_escrow_address_snapshot,funds_escrow_address_snapshot,creator_claimed_at,creator_claim_tx,creator_funds_claim_locked_at'
+
+const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at,ticket_payments_to_funds_escrow,nft_escrow_address_snapshot,funds_escrow_address_snapshot,creator_claimed_at,creator_claim_tx,creator_funds_claim_locked_at'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'

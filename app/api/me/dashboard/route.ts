@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
         getCreatorRevenueByWallet(wallet),
         getCreatorLiveEarningsByWallet(wallet),
         getCreatorTicketSalesGrossByWallet(wallet),
-        getCreatorFeeTier(wallet, { skipCache: true }), // always verify holder status when loading dashboard
+        getCreatorFeeTier(wallet, { skipCache: true, listDisplayOnly: false }), // full holder check (3% vs 6%) for dashboard
         getDisplayNamesByWallets([wallet]),
       ])
 
