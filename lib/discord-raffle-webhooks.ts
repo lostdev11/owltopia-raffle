@@ -130,6 +130,36 @@ export function buildLiveRaffleXShareTemplates(raffle: Raffle): XShareTemplate[]
   }))
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function postDiscordWebhookOnce(
+  webhookUrl: string,
+  embed: DiscordEmbed,
+  signal: AbortSignal
+): Promise<{ ok: boolean; retryable: boolean }> {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        username: PLATFORM_NAME,
+        embeds: [embed],
+      }),
+    })
+    if (res.ok) return { ok: true, retryable: false }
+    const text = await res.text().catch(() => '')
+    console.error(`Discord webhook failed: ${res.status} ${res.statusText}`, text.slice(0, 200))
+    const retryable = res.status === 429 || res.status >= 500
+    return { ok: false, retryable }
+  } catch (e) {
+    console.error('Discord webhook request error:', e)
+    return { ok: false, retryable: true }
+  }
+}
+
 async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Promise<boolean> {
   if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
     console.error(
@@ -137,33 +167,26 @@ async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Prom
     )
     return false
   }
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        username: PLATFORM_NAME,
-        embeds: [embed],
-      }),
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      console.error(`Discord webhook failed: ${res.status} ${res.statusText}`, text.slice(0, 200))
-      return false
+
+  const attempt = async (): Promise<{ ok: boolean; retryable: boolean }> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
+    try {
+      return await postDiscordWebhookOnce(webhookUrl, embed, controller.signal)
+    } finally {
+      clearTimeout(timer)
     }
-    return true
-  } catch (e) {
-    console.error('Discord webhook request error:', e)
-    return false
-  } finally {
-    clearTimeout(timer)
   }
+
+  const first = await attempt()
+  if (first.ok) return true
+  if (!first.retryable) return false
+  await delay(900)
+  const second = await attempt()
+  return second.ok
 }
 
-/** Fire-and-forget safe: logs errors, never throws. */
+/** Logs errors, never throws. Await when calling from API/cron so serverless does not exit before Discord receives the request. */
 export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   const url = webhookUrlCreated()
   if (!url) return
@@ -201,7 +224,7 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   })
 }
 
-/** Fire-and-forget safe: logs errors, never throws. */
+/** Logs errors, never throws. Await from selectWinner (or any serverless handler) so the outgoing webhook finishes before the invocation freezes. */
 export async function notifyRaffleWinnerDrawn(
   raffle: Raffle,
   winnerWallet: string,

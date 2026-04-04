@@ -332,7 +332,7 @@ export async function POST(request: NextRequest) {
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
-    void notifyRaffleCreated(raffle)
+    await notifyRaffleCreated(raffle)
 
     return NextResponse.json(raffle, { status: 201 })
   } catch (error) {

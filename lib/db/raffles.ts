@@ -1569,7 +1569,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       }
 
       console.log(`Winner selected for raffle ${raffleId}: ${winnerWallet} (${weights[i]} tickets)`)
-      void notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
+      await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
       return winnerWallet
     }
   }
@@ -1615,7 +1615,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     throw new Error(`Failed to update raffle with winner: ${error.message}`)
   }
 
-  void notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
+  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
   return winnerWallet
 }
 
