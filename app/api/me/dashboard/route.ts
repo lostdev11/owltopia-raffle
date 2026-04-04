@@ -5,6 +5,7 @@ import {
   getCreatorRevenueByWallet,
   getCreatorLiveEarningsByWallet,
   getCreatorTicketSalesGrossByWallet,
+  getLiveFundsEscrowSalesBreakdownByWallet,
 } from '@/lib/db/raffles'
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
@@ -33,16 +34,25 @@ export async function GET(request: NextRequest) {
     }
 
     const wallet = session.wallet
-    const [raffles, entriesWithRaffles, settledRevenue, liveEarnings, grossSales, feeTier, profiles] =
-      await Promise.all([
-        getRafflesByCreator(wallet),
-        getEntriesByWallet(wallet),
-        getCreatorRevenueByWallet(wallet),
-        getCreatorLiveEarningsByWallet(wallet),
-        getCreatorTicketSalesGrossByWallet(wallet),
-        getCreatorFeeTier(wallet, { skipCache: true, listDisplayOnly: false }), // full holder check (3% vs 6%) for dashboard
-        getDisplayNamesByWallets([wallet]),
-      ])
+    const [
+      raffles,
+      entriesWithRaffles,
+      settledRevenue,
+      liveEarnings,
+      grossSales,
+      liveFundsEscrowBreakdown,
+      feeTier,
+      profiles,
+    ] = await Promise.all([
+      getRafflesByCreator(wallet),
+      getEntriesByWallet(wallet),
+      getCreatorRevenueByWallet(wallet),
+      getCreatorLiveEarningsByWallet(wallet),
+      getCreatorTicketSalesGrossByWallet(wallet),
+      getLiveFundsEscrowSalesBreakdownByWallet(wallet),
+      getCreatorFeeTier(wallet, { skipCache: true, listDisplayOnly: false }), // full holder check (3% vs 6%) for dashboard
+      getDisplayNamesByWallets([wallet]),
+    ])
 
     // Earned = completed settlement totals (net) + live raffles (creator share after platform fee).
     const creatorRevenueByCurrency: Record<string, number> = {}
@@ -82,6 +92,11 @@ export async function GET(request: NextRequest) {
       creatorRevenueByCurrency,
       creatorLiveEarningsByCurrency: liveEarnings.byCurrency,
       creatorAllTimeGrossByCurrency: grossSales.byCurrency,
+      claimTrackerLiveFundsEscrowSales: {
+        netByCurrency: liveFundsEscrowBreakdown.netByCurrency,
+        feeByCurrency: liveFundsEscrowBreakdown.feeByCurrency,
+        grossByCurrency: liveFundsEscrowBreakdown.grossByCurrency,
+      },
       creatorRefundRaffles,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
     })

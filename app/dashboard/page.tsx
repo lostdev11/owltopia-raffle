@@ -103,6 +103,11 @@ type DashboardData = {
   creatorRevenueByCurrency: Record<string, number>
   creatorLiveEarningsByCurrency?: Record<string, number>
   creatorAllTimeGrossByCurrency?: Record<string, number>
+  claimTrackerLiveFundsEscrowSales?: {
+    netByCurrency: Record<string, number>
+    feeByCurrency: Record<string, number>
+    grossByCurrency: Record<string, number>
+  }
   creatorRefundRaffles?: Array<{
     raffleId: string
     raffleSlug: string
@@ -167,6 +172,16 @@ function formatMultiCurrencyTotals(by: Record<string, number>): string {
   return keys
     .map((cur) => `${by[cur]!.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
     .join(' · ')
+}
+
+/** DB default is funds escrow; only explicit false (legacy direct settlement) opts out. */
+function raffleRowUsesFundsEscrow(r: {
+  ticket_payments_to_funds_escrow?: boolean | null | string | number
+}): boolean {
+  const v = r.ticket_payments_to_funds_escrow
+  if (v === true || v === 'true') return true
+  if (v === false || v === 'false' || v === 0) return false
+  return true
 }
 
 type RaffleEntrySummary = {
@@ -513,7 +528,7 @@ export default function DashboardPage() {
       myRafflesForMemo.filter(
         (r) =>
           r.status === 'successful_pending_claims' &&
-          r.ticket_payments_to_funds_escrow === true &&
+          raffleRowUsesFundsEscrow(r) &&
           !r.creator_claimed_at &&
           !!r.settled_at?.trim()
       ),
@@ -525,7 +540,7 @@ export default function DashboardPage() {
       myRafflesForMemo.filter(
         (r) =>
           r.status === 'successful_pending_claims' &&
-          r.ticket_payments_to_funds_escrow === true &&
+          raffleRowUsesFundsEscrow(r) &&
           !r.creator_claimed_at &&
           !r.settled_at?.trim()
       ),
@@ -536,11 +551,35 @@ export default function DashboardPage() {
     () =>
       myRafflesForMemo.filter(
         (r) =>
-          r.ticket_payments_to_funds_escrow === true &&
+          raffleRowUsesFundsEscrow(r) &&
           (r.status === 'live' || r.status === 'ready_to_draw')
       ),
     [myRafflesForMemo]
   )
+
+  const claimTrackerLiveSales = useMemo(() => {
+    const s = data?.claimTrackerLiveFundsEscrowSales
+    if (!s || typeof s !== 'object') {
+      return { net: {}, fee: {}, gross: {} } as const
+    }
+    const asRec = (x: unknown) =>
+      x && typeof x === 'object' ? (x as Record<string, number>) : {}
+    return {
+      net: asRec(s.netByCurrency),
+      fee: asRec(s.feeByCurrency),
+      gross: asRec(s.grossByCurrency),
+    }
+  }, [data?.claimTrackerLiveFundsEscrowSales])
+
+  const claimTrackerHasLiveEscrowSales = useMemo(() => {
+    const hasPositive = (o: Record<string, number>) =>
+      Object.values(o).some((v) => typeof v === 'number' && Number.isFinite(v) && v > 0)
+    return (
+      hasPositive(claimTrackerLiveSales.net) ||
+      hasPositive(claimTrackerLiveSales.fee) ||
+      hasPositive(claimTrackerLiveSales.gross)
+    )
+  }, [claimTrackerLiveSales])
 
   const claimTrackerReadyNetByCurrency = useMemo(
     () => aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'creator_payout_amount'),
@@ -953,6 +992,13 @@ export default function DashboardPage() {
                 {pendingCreatorFundClaims.length} raffle
                 {pendingCreatorFundClaims.length === 1 ? '' : 's'} settled — claim below
               </p>
+              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (net in escrow)</p>
+              <p className="text-base font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerLiveSales.net)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Estimated from confirmed ticket sales on funds-escrow raffles still live or waiting to draw.
+              </p>
             </div>
             <div className="rounded-lg border border-border/60 bg-background/60 p-3">
               <p className="text-xs font-medium text-muted-foreground mb-1">Platform fee (same claim tx)</p>
@@ -960,6 +1006,11 @@ export default function DashboardPage() {
                 {formatMultiCurrencyTotals(claimTrackerReadyFeeByCurrency)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">Goes to treasury when you claim</p>
+              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (fee in escrow)</p>
+              <p className="text-base font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerLiveSales.fee)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Same fee tier as your dashboard; included when you claim after the draw.</p>
             </div>
             <div className="rounded-lg border border-border/60 bg-background/60 p-3 sm:col-span-1">
               <p className="text-xs font-medium text-muted-foreground mb-1">Gross in escrow (pre-claim)</p>
@@ -967,6 +1018,11 @@ export default function DashboardPage() {
                 {formatMultiCurrencyTotals(claimTrackerReadyGrossByCurrency)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">Net + fee for raffles ready to claim</p>
+              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (gross in escrow)</p>
+              <p className="text-base font-semibold tabular-nums break-words">
+                {formatMultiCurrencyTotals(claimTrackerLiveSales.gross)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Total confirmed ticket volume still in funds escrow before the draw.</p>
             </div>
           </div>
 
@@ -1012,10 +1068,11 @@ export default function DashboardPage() {
 
           {pendingCreatorFundClaims.length === 0 &&
             awaitingSettlementEscrowClaims.length === 0 &&
-            liveEscrowRaffles.length === 0 && (
+            liveEscrowRaffles.length === 0 &&
+            !claimTrackerHasLiveEscrowSales && (
               <p className="text-sm text-muted-foreground">
-                No active escrow claim pipeline right now. When you host escrow raffles, live sales update the cards
-                above; after a draw you will see amounts here until you claim.
+                No active escrow claim pipeline right now. When you host funds-escrow raffles, live sales show in the
+                tracker above; after a draw, ready-to-claim totals appear in the top row of each column until you claim.
               </p>
             )}
         </CardContent>

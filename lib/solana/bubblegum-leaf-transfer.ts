@@ -1,6 +1,11 @@
 /**
  * Bubblegum leaf transfer: V2 trees require `transferV2` with MPL account compression + MPL noop.
  * V1 trees use `transfer` with SPL compression + SPL noop (see getCompressionProgramsForV1Ixs).
+ *
+ * Some trees report `TreeConfig.version` as V1 while the merkle tree account is already owned by
+ * MPL Account Compression; using V1 `transfer` then passes SPL noop and Bubblegum returns
+ * InvalidProgramId on `log_wrapper` (expects MPL noop). We pick the instruction path from the
+ * merkle tree's owner when possible, then fall back to tree config version.
  */
 import {
   fetchTreeConfigFromSeeds,
@@ -9,7 +14,18 @@ import {
   transferV2 as bubblegumTransferV2,
   Version,
 } from '@metaplex-foundation/mpl-bubblegum'
+import { MPL_ACCOUNT_COMPRESSION_PROGRAM_ID } from '@metaplex-foundation/mpl-account-compression'
+import { SPL_ACCOUNT_COMPRESSION_PROGRAM_ID } from '@metaplex-foundation/spl-account-compression'
 import { none, some } from '@metaplex-foundation/umi'
+
+function shouldUseBubblegumTransferV2(
+  treeCfgVersion: Version,
+  merkleTreeOwner: string | null
+): boolean {
+  if (merkleTreeOwner === MPL_ACCOUNT_COMPRESSION_PROGRAM_ID) return true
+  if (merkleTreeOwner === SPL_ACCOUNT_COMPRESSION_PROGRAM_ID) return false
+  return treeCfgVersion === Version.V2
+}
 
 export async function buildBubblegumLeafTransferBuilder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,7 +42,19 @@ export async function buildBubblegumLeafTransferBuilder(
 ): Promise<any> {
   const treeCfg = await fetchTreeConfigFromSeeds(umi, { merkleTree: asset.merkleTree })
 
-  if (treeCfg.version === Version.V2) {
+  let merkleTreeOwner: string | null = null
+  try {
+    const mt = await umi.rpc.getAccount(asset.merkleTree)
+    if (mt.exists) {
+      merkleTreeOwner = String(mt.owner)
+    }
+  } catch {
+    // Fall back to treeCfg.version only.
+  }
+
+  const useV2 = shouldUseBubblegumTransferV2(treeCfg.version, merkleTreeOwner)
+
+  if (useV2) {
     const assetDataHash =
       asset.asset_data_hash instanceof Uint8Array && asset.asset_data_hash.length === 32
         ? some(asset.asset_data_hash)

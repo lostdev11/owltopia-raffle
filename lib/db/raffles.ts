@@ -838,6 +838,69 @@ export async function getCreatorLiveEarningsByWallet(walletAddress: string): Pro
 }
 
 /**
+ * Confirmed ticket sales for this creator's **funds-escrow** raffles that are still live or ready-to-draw.
+ * Drives the dashboard "Live claim tracker" so it shows net / fee / gross while sales accumulate (not only after draw).
+ */
+export async function getLiveFundsEscrowSalesBreakdownByWallet(walletAddress: string): Promise<{
+  netByCurrency: Record<string, number>
+  feeByCurrency: Record<string, number>
+  grossByCurrency: Record<string, number>
+}> {
+  const empty = {
+    netByCurrency: {} as Record<string, number>,
+    feeByCurrency: {} as Record<string, number>,
+    grossByCurrency: {} as Record<string, number>,
+  }
+  const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
+  if (!normalized) return empty
+
+  const { data: raffles, error: rafflesError } = await getSupabaseForRead()
+    .from('raffles')
+    .select('id, status')
+    .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
+    .in('status', ['live', 'ready_to_draw'])
+    .eq('ticket_payments_to_funds_escrow', true)
+
+  if (rafflesError) {
+    console.error('Error fetching live funds-escrow raffles for claim tracker:', rafflesError)
+    return empty
+  }
+
+  if (!raffles || raffles.length === 0) return empty
+
+  const raffleIds = raffles.map((r) => r.id as string)
+
+  const { data: entries, error: entriesError } = await getSupabaseForRead()
+    .from('entries')
+    .select('amount_paid, currency, raffle_id, status')
+    .in('raffle_id', raffleIds)
+    .eq('status', 'confirmed')
+
+  if (entriesError) {
+    console.error('Error fetching entries for live funds-escrow breakdown:', entriesError)
+    return empty
+  }
+
+  const { feeBps } = await getCreatorFeeTier(normalized, { skipCache: true })
+
+  const netByCurrency: Record<string, number> = {}
+  const feeByCurrency: Record<string, number> = {}
+  const grossByCurrency: Record<string, number> = {}
+
+  for (const row of entries || []) {
+    const gross = Number((row as { amount_paid?: unknown }).amount_paid ?? 0)
+    if (!Number.isFinite(gross) || gross <= 0) continue
+    const cur = String((row as { currency?: string }).currency || 'SOL').toUpperCase()
+    const { platformFee, creatorPayout } = calculateSettlement(gross, feeBps)
+    grossByCurrency[cur] = (grossByCurrency[cur] ?? 0) + gross
+    feeByCurrency[cur] = (feeByCurrency[cur] ?? 0) + platformFee
+    netByCurrency[cur] = (netByCurrency[cur] ?? 0) + creatorPayout
+  }
+
+  return { netByCurrency, feeByCurrency, grossByCurrency }
+}
+
+/**
  * Total confirmed ticket sales (gross) for this creator's raffles in the given statuses.
  * Used for dashboard "all-time gross" (before platform fee).
  */
