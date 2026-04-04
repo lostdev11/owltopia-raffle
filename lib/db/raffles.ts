@@ -5,7 +5,12 @@ import { withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
 import { getRaffleRevenue } from '@/lib/raffle-profit'
-import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import {
+  raffleUsesFundsEscrow,
+  raffleCountsTowardLiveFundsEscrowBreakdown,
+} from '@/lib/raffles/ticket-escrow-policy'
+import { countUnrefundedConfirmedEntries } from '@/lib/db/entries'
+import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleWinnerDrawn } from '@/lib/discord-raffle-webhooks'
 
 function getSupabaseForRead() {
@@ -653,6 +658,43 @@ export async function getRaffleById(id: string) {
 }
 
 /**
+ * Migration 044 set `ticket_payments_to_funds_escrow = false` for any raffle that had confirmed entries.
+ * After refunds, that flag was never cleared. When there are no unrefunded confirmed rows, flip back to
+ * escrow so new sales and the live claim tracker match on-chain behavior.
+ */
+export async function upgradeRaffleToFundsEscrowIfEligible(raffleId: string): Promise<void> {
+  const id = typeof raffleId === 'string' ? raffleId.trim() : ''
+  if (!id) return
+
+  const raffle = await getRaffleById(id)
+  if (!raffle || raffleUsesFundsEscrow(raffle)) return
+
+  const status = raffle.status
+  if (status !== 'draft' && status !== 'live' && status !== 'ready_to_draw') return
+
+  const active = await countUnrefundedConfirmedEntries(id)
+  if (active > 0) return
+
+  const escrowPk = getFundsEscrowPublicKey()
+  const payload: {
+    ticket_payments_to_funds_escrow: boolean
+    updated_at: string
+    funds_escrow_address_snapshot?: string
+  } = {
+    ticket_payments_to_funds_escrow: true,
+    updated_at: new Date().toISOString(),
+  }
+  if (escrowPk && !(raffle.funds_escrow_address_snapshot?.trim())) {
+    payload.funds_escrow_address_snapshot = escrowPk
+  }
+
+  const { error } = await getSupabaseAdmin().from('raffles').update(payload).eq('id', id)
+  if (error) {
+    console.error('upgradeRaffleToFundsEscrowIfEligible:', error)
+  }
+}
+
+/**
  * Fetch raffles created by a given wallet (for "My raffles" list).
  * Returns only raffles where this wallet is the creator (created_by or creator_wallet).
  */
@@ -815,6 +857,7 @@ export async function getCreatorLiveEarningsByWallet(walletAddress: string): Pro
     .select('amount_paid, currency, raffle_id, status')
     .in('raffle_id', raffleIds)
     .eq('status', 'confirmed')
+    .is('refunded_at', null)
 
   if (entriesError) {
     console.error('Error fetching live creator earnings entries:', entriesError)
@@ -845,21 +888,22 @@ export async function getLiveFundsEscrowSalesBreakdownByWallet(walletAddress: st
   netByCurrency: Record<string, number>
   feeByCurrency: Record<string, number>
   grossByCurrency: Record<string, number>
+  trackedRaffleIds: string[]
 }> {
   const empty = {
     netByCurrency: {} as Record<string, number>,
     feeByCurrency: {} as Record<string, number>,
     grossByCurrency: {} as Record<string, number>,
+    trackedRaffleIds: [] as string[],
   }
   const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
   if (!normalized) return empty
 
   const { data: raffles, error: rafflesError } = await getSupabaseForRead()
     .from('raffles')
-    .select('id, status')
+    .select('id, status, ticket_payments_to_funds_escrow')
     .or(`created_by.eq.${normalized},creator_wallet.eq.${normalized}`)
     .in('status', ['live', 'ready_to_draw'])
-    .eq('ticket_payments_to_funds_escrow', true)
 
   if (rafflesError) {
     console.error('Error fetching live funds-escrow raffles for claim tracker:', rafflesError)
@@ -868,13 +912,43 @@ export async function getLiveFundsEscrowSalesBreakdownByWallet(walletAddress: st
 
   if (!raffles || raffles.length === 0) return empty
 
-  const raffleIds = raffles.map((r) => r.id as string)
+  const allIds = raffles.map((r) => r.id as string)
+
+  const { data: activeRows, error: activeErr } = await getSupabaseForRead()
+    .from('entries')
+    .select('raffle_id')
+    .in('raffle_id', allIds)
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+
+  if (activeErr) {
+    console.error('Error fetching unrefunded entries for live funds-escrow breakdown:', activeErr)
+    return empty
+  }
+
+  const rafflesWithUnrefunded = new Set<string>()
+  for (const row of activeRows || []) {
+    const rid = String((row as { raffle_id?: string }).raffle_id || '').trim()
+    if (rid) rafflesWithUnrefunded.add(rid)
+  }
+
+  const trackedRaffleIds = raffles
+    .filter((r) =>
+      raffleCountsTowardLiveFundsEscrowBreakdown(
+        r as { ticket_payments_to_funds_escrow?: boolean | null | string | number },
+        rafflesWithUnrefunded.has(r.id as string)
+      )
+    )
+    .map((r) => r.id as string)
+
+  if (trackedRaffleIds.length === 0) return { ...empty, trackedRaffleIds }
 
   const { data: entries, error: entriesError } = await getSupabaseForRead()
     .from('entries')
     .select('amount_paid, currency, raffle_id, status')
-    .in('raffle_id', raffleIds)
+    .in('raffle_id', trackedRaffleIds)
     .eq('status', 'confirmed')
+    .is('refunded_at', null)
 
   if (entriesError) {
     console.error('Error fetching entries for live funds-escrow breakdown:', entriesError)
@@ -897,7 +971,7 @@ export async function getLiveFundsEscrowSalesBreakdownByWallet(walletAddress: st
     netByCurrency[cur] = (netByCurrency[cur] ?? 0) + creatorPayout
   }
 
-  return { netByCurrency, feeByCurrency, grossByCurrency }
+  return { netByCurrency, feeByCurrency, grossByCurrency, trackedRaffleIds }
 }
 
 /**

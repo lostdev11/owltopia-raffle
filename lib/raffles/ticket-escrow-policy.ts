@@ -5,9 +5,26 @@ export const MAX_MIN_THRESHOLD_TIME_EXTENSIONS = 1
 
 /** True when ticket gross must be verified as paid into the funds escrow wallet. */
 export function raffleUsesFundsEscrow(raffle: {
-  ticket_payments_to_funds_escrow?: boolean | null
+  ticket_payments_to_funds_escrow?: boolean | null | string | number
 }): boolean {
-  return raffle.ticket_payments_to_funds_escrow === true
+  const v = raffle.ticket_payments_to_funds_escrow
+  return v === true || v === 'true' || v === 1
+}
+
+/**
+ * Live / ready-to-draw raffles included in the dashboard "Live claim tracker" gross/net/fee breakdown.
+ * Uses funds escrow when the flag is on, or when legacy migration 044 left the flag false but every
+ * confirmed sale was refunded (no unrefunded rows) — those raffles can be upgraded to escrow on next checkout.
+ */
+export function raffleCountsTowardLiveFundsEscrowBreakdown(
+  row: { ticket_payments_to_funds_escrow?: boolean | null | string | number },
+  raffleHasUnrefundedConfirmedEntry: boolean
+): boolean {
+  if (raffleUsesFundsEscrow(row)) return true
+  const v = row.ticket_payments_to_funds_escrow
+  const explicitFalse = v === false || v === 'false' || v === 0
+  if (!explicitFalse) return true
+  return !raffleHasUnrefundedConfirmedEntry
 }
 
 /** True after the raffle has already been extended the maximum times for min-threshold misses. */

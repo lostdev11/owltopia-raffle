@@ -3,7 +3,7 @@ import {
   createEntry,
   getPendingEntryIdsForWalletAndRaffle,
 } from '@/lib/db/entries'
-import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId, upgradeRaffleToFundsEscrowIfEligible } from '@/lib/db/raffles'
 import { hasAnyInVerification } from '@/lib/verify-in-flight'
 import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
 import { entriesCreateBody, parseOr400 } from '@/lib/validations'
@@ -59,7 +59,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const raffle = await getRaffleById(raffleIdStr)
+    let raffle = await getRaffleById(raffleIdStr)
+    if (!raffle) {
+      return NextResponse.json(ERROR_BODY, { status: 404 })
+    }
+
+    await upgradeRaffleToFundsEscrowIfEligible(raffleIdStr)
+    raffle = await getRaffleById(raffleIdStr)
     if (!raffle) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
     }

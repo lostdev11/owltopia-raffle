@@ -96,6 +96,7 @@ export async function GET(request: NextRequest) {
         netByCurrency: liveFundsEscrowBreakdown.netByCurrency,
         feeByCurrency: liveFundsEscrowBreakdown.feeByCurrency,
         grossByCurrency: liveFundsEscrowBreakdown.grossByCurrency,
+        trackedRaffleIds: liveFundsEscrowBreakdown.trackedRaffleIds,
       },
       creatorRefundRaffles,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },

@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -107,6 +108,7 @@ type DashboardData = {
     netByCurrency: Record<string, number>
     feeByCurrency: Record<string, number>
     grossByCurrency: Record<string, number>
+    trackedRaffleIds?: string[]
   }
   creatorRefundRaffles?: Array<{
     raffleId: string
@@ -174,14 +176,16 @@ function formatMultiCurrencyTotals(by: Record<string, number>): string {
     .join(' · ')
 }
 
-/** DB default is funds escrow; only explicit false (legacy direct settlement) opts out. */
+/**
+ * Matches server payment / claim rules. If the column is missing (minimal API shape), assume funds escrow.
+ */
 function raffleRowUsesFundsEscrow(r: {
   ticket_payments_to_funds_escrow?: boolean | null | string | number
 }): boolean {
-  const v = r.ticket_payments_to_funds_escrow
-  if (v === true || v === 'true') return true
-  if (v === false || v === 'false' || v === 0) return false
-  return true
+  if (!Object.prototype.hasOwnProperty.call(r, 'ticket_payments_to_funds_escrow')) {
+    return true
+  }
+  return raffleUsesFundsEscrow(r)
 }
 
 type RaffleEntrySummary = {
@@ -547,15 +551,15 @@ export default function DashboardPage() {
     [myRafflesForMemo]
   )
 
-  const liveEscrowRaffles = useMemo(
-    () =>
-      myRafflesForMemo.filter(
-        (r) =>
-          raffleRowUsesFundsEscrow(r) &&
-          (r.status === 'live' || r.status === 'ready_to_draw')
-      ),
-    [myRafflesForMemo]
-  )
+  const liveEscrowRaffles = useMemo(() => {
+    const tracked = data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds
+    const trackedSet = Array.isArray(tracked) ? new Set(tracked) : null
+    return myRafflesForMemo.filter((r) => {
+      if (r.status !== 'live' && r.status !== 'ready_to_draw') return false
+      if (trackedSet) return trackedSet.has(r.id)
+      return raffleRowUsesFundsEscrow(r)
+    })
+  }, [myRafflesForMemo, data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds])
 
   const claimTrackerLiveSales = useMemo(() => {
     const s = data?.claimTrackerLiveFundsEscrowSales

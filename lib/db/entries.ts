@@ -608,6 +608,27 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
 }
 
 /**
+ * Count of confirmed entries that are not refunded (still represent live ticket liability / volume).
+ */
+export async function countUnrefundedConfirmedEntries(raffleId: string): Promise<number> {
+  const id = typeof raffleId === 'string' ? raffleId.trim() : ''
+  if (!id) return Number.POSITIVE_INFINITY
+
+  const { count, error } = await getSupabaseForServerRead(supabase)
+    .from('entries')
+    .select('*', { count: 'exact', head: true })
+    .eq('raffle_id', id)
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+
+  if (error) {
+    console.error('countUnrefundedConfirmedEntries:', error)
+    return Number.POSITIVE_INFINITY
+  }
+  return count ?? 0
+}
+
+/**
  * For creator dashboard: aggregated refund candidates per raffle.
  * Includes confirmed entries only; groups by wallet and computes pending amount.
  */
