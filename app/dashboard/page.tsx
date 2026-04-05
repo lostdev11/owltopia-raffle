@@ -1285,15 +1285,22 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
-          {Array.isArray(data.nftGiveaways) && data.nftGiveaways.length > 0 && (
-            <div>
-              <p className="text-sm font-medium text-foreground mb-2">Giveaway NFTs</p>
-              <p className="text-xs text-muted-foreground mb-3">
-                One-off drops from the team: when the prize is verified in escrow, claim here with this wallet (same as
-                sign-in). On mobile, use Wi‑Fi or solid data and a reliable RPC if claim fails once.
+          <div>
+            <p className="text-sm font-medium text-foreground mb-2">Giveaway NFTs</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              One-off drops from the team: when the prize is verified in escrow, claim here with this wallet (same as
+              sign-in). The eligible wallet on the giveaway must match this signed-in wallet. On mobile, use Wi‑Fi or
+              solid data and a reliable RPC if claim fails once.
+            </p>
+            {(Array.isArray(data.nftGiveaways) ? data.nftGiveaways : []).length === 0 ? (
+              <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border/70 p-3">
+                No giveaways for this wallet yet. If you were sent a link, open{' '}
+                <span className="font-medium text-foreground">/giveaway/…</span> and make sure you connect and sign in
+                with the wallet the team set as eligible.
               </p>
+            ) : (
               <ul className="space-y-3">
-                {data.nftGiveaways.map((g) => {
+                {(Array.isArray(data.nftGiveaways) ? data.nftGiveaways : []).map((g) => {
                   const claimed = Boolean(g.claimed_at)
                   const ready = Boolean(g.prize_deposited_at) && !claimed
                   const label = g.title?.trim() || 'Giveaway NFT'
@@ -1374,8 +1381,8 @@ export default function DashboardPage() {
                   )
                 })}
               </ul>
-            </div>
-          )}
+            )}
+          </div>
           <div>
             <p className="text-sm font-medium text-foreground mb-2">Raffle winners (NFT prizes)</p>
             {nftPrizeDashboardRows.length > 0 ? (

@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
@@ -72,6 +72,7 @@ export function Header() {
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
+    ...(showOwlVision ? [{ href: '/admin/giveaways', label: 'Giveaways', icon: Gift }] : []),
     ...(showCreateRaffle ? [{ href: '/admin/raffles/new', label: 'Create Raffle', icon: Plus }] : []),
   ]
 
@@ -104,6 +105,15 @@ export function Header() {
                   <Settings className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Owl Vision</span>
                   <span className="sm:hidden">Owl Vision</span>
+                </Button>
+              </Link>
+            )}
+            {showOwlVision && (
+              <Link href="/admin/giveaways">
+                <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                  <Gift className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Giveaways</span>
+                  <span className="sm:hidden">Giveaways</span>
                 </Button>
               </Link>
             )}
