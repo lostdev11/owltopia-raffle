@@ -69,7 +69,17 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const canOverrideNftEconomics =
     raffle.prize_type === 'nft' &&
-    ['live', 'ready_to_draw', 'pending_min_not_met'].includes((raffle.status ?? '').toLowerCase())
+    ['live', 'ready_to_draw', 'pending_min_not_met', 'failed_refund_available'].includes(
+      (raffle.status ?? '').toLowerCase()
+    )
+
+  const canDeadlineAdminOverride =
+    !(raffle.winner_wallet ?? '').trim() &&
+    !raffle.winner_selected_at &&
+    !raffle.prize_returned_at &&
+    ['live', 'ready_to_draw', 'pending_min_not_met', 'failed_refund_available'].includes(
+      (raffle.status ?? '').toLowerCase()
+    )
 
   const [nftMinInput, setNftMinInput] = useState('')
   const [nftFloorInput, setNftFloorInput] = useState('')
@@ -77,6 +87,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [nftMaxInput, setNftMaxInput] = useState('')
   const [nftEconomicsConfirm, setNftEconomicsConfirm] = useState(false)
   const [savingNftEconomics, setSavingNftEconomics] = useState(false)
+
+  const [reopenEndLocal, setReopenEndLocal] = useState('')
+  const [reopenStatus, setReopenStatus] = useState<'live' | 'ready_to_draw'>('live')
+  const [reopenExtCount, setReopenExtCount] = useState('')
+  const [reopenDeadlineConfirm, setReopenDeadlineConfirm] = useState(false)
+  const [savingDeadline, setSavingDeadline] = useState(false)
 
   const resetNftEconomicsForm = useCallback((r: Raffle) => {
     const eff = getRaffleMinimum(r)
@@ -96,6 +112,18 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
       resetNftEconomicsForm(raffle)
     }
   }, [raffle, canOverrideNftEconomics, resetNftEconomicsForm])
+
+  useEffect(() => {
+    if (!canDeadlineAdminOverride) return
+    const d = new Date(Date.now() + 72 * 60 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setReopenEndLocal(
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    )
+    setReopenStatus('live')
+    setReopenExtCount('')
+    setReopenDeadlineConfirm(false)
+  }, [raffle.id, canDeadlineAdminOverride])
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
   const canReturnNft =
@@ -381,6 +409,71 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleSaveDeadline = async () => {
+    setMessage(null)
+    if (!reopenDeadlineConfirm) {
+      setMessage({ type: 'error', text: 'Confirm deadline change before saving.' })
+      return
+    }
+    const end = new Date(reopenEndLocal)
+    if (!Number.isFinite(end.getTime())) {
+      setMessage({ type: 'error', text: 'Invalid end date/time.' })
+      return
+    }
+    if (end.getTime() <= Date.now()) {
+      setMessage({ type: 'error', text: 'End time must be in the future.' })
+      return
+    }
+
+    const body: Record<string, unknown> = {
+      raffle_deadline_admin_override: true,
+      end_time: end.toISOString(),
+      status: reopenStatus,
+    }
+    if (reopenExtCount.trim() !== '') {
+      const n = parseInt(reopenExtCount.trim(), 10)
+      if (!Number.isFinite(n) || n < 0 || n > 10) {
+        setMessage({
+          type: 'error',
+          text: 'Extension count must be between 0 and 10, or leave empty to keep the current value.',
+        })
+        return
+      }
+      body.time_extension_count = n
+    }
+
+    setSavingDeadline(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setMessage({
+          type: 'success',
+          text: 'Deadline updated. Raffle is open again for the new end time (status and is_active adjusted).',
+        })
+        setReopenDeadlineConfirm(false)
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to update deadline',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to update deadline',
+      })
+    } finally {
+      setSavingDeadline(false)
+    }
+  }
+
   const handleDelete = async () => {
     setDeleting(true)
     setMessage(null)
@@ -570,6 +663,81 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
               >
                 {savingNftEconomics ? 'Saving…' : 'Save NFT economics'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {canDeadlineAdminOverride && (
+          <Card className="border-sky-600/40 bg-sky-500/[0.07]">
+            <CardHeader>
+              <CardTitle>Extend deadline / reopen listing (full admin)</CardTitle>
+              <CardDescription>
+                Use when a raffle ended (or is in refund/min-not-met state) but there is still no winner.
+                Sets a new <strong>end time in the future</strong>, moves status to <strong>live</strong> (or
+                ready_to_draw), and turns <strong>is_active</strong> on for live so tickets can sell again.
+                Time is your device local timezone. If purchases are admin-blocked, clear that flag separately.
+                Fix draw threshold in the NFT economics card before or after as needed.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="admin-reopen-end">New end time</Label>
+                  <Input
+                    id="admin-reopen-end"
+                    type="datetime-local"
+                    value={reopenEndLocal}
+                    onChange={(e) => setReopenEndLocal(e.target.value)}
+                    className="touch-manipulation min-h-[44px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-reopen-status">Status after save</Label>
+                  <select
+                    id="admin-reopen-status"
+                    value={reopenStatus}
+                    onChange={(e) => setReopenStatus(e.target.value as 'live' | 'ready_to_draw')}
+                    className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background touch-manipulation min-h-[44px]"
+                  >
+                    <option value="live">live (ticket sales)</option>
+                    <option value="ready_to_draw">ready_to_draw (ended, draw winner)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-reopen-ext">time_extension_count (optional)</Label>
+                  <Input
+                    id="admin-reopen-ext"
+                    inputMode="numeric"
+                    value={reopenExtCount}
+                    onChange={(e) => setReopenExtCount(e.target.value)}
+                    placeholder="Leave empty to keep DB value"
+                    className="touch-manipulation min-h-[44px]"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1">
+                <input
+                  type="checkbox"
+                  checked={reopenDeadlineConfirm}
+                  onChange={(e) => setReopenDeadlineConfirm(e.target.checked)}
+                  className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                  aria-label="Confirm extending raffle deadline"
+                />
+                <span className="text-muted-foreground leading-snug">
+                  I confirm this raffle has no winner yet and I am intentionally changing the end time and
+                  status.
+                </span>
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleSaveDeadline}
+                disabled={savingDeadline}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto border-sky-600/50"
+              >
+                {savingDeadline ? 'Saving…' : 'Save deadline / reopen'}
               </Button>
             </CardContent>
           </Card>

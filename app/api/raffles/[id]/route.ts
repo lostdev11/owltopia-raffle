@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
+import type { Raffle } from '@/lib/types'
 import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -98,6 +99,151 @@ export async function PATCH(
       return NextResponse.json(raffle)
     }
 
+    /** Full admin: push end_time into the future and return a listing to live/ready_to_draw (no winner yet). */
+    if (body.raffle_deadline_admin_override === true) {
+      const endRaw = body.end_time
+      if (!endRaw || typeof endRaw !== 'string') {
+        return NextResponse.json(
+          { error: 'end_time is required (ISO 8601).' },
+          { status: 400 }
+        )
+      }
+      const endDate = new Date(endRaw)
+      if (isNaN(endDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid end_time.' }, { status: 400 })
+      }
+      const now = new Date()
+      if (endDate <= now) {
+        return NextResponse.json(
+          { error: 'end_time must be in the future.' },
+          { status: 400 }
+        )
+      }
+      if (existingRaffle.winner_wallet || existingRaffle.winner_selected_at) {
+        return NextResponse.json(
+          { error: 'Cannot reopen a raffle that already has a winner.' },
+          { status: 400 }
+        )
+      }
+      if (existingRaffle.prize_returned_at) {
+        return NextResponse.json(
+          {
+            error:
+              'Prize was returned to the creator; reopen only after a new escrow deposit if applicable.',
+          },
+          { status: 400 }
+        )
+      }
+
+      const curStatus = (existingRaffle.status ?? '').toLowerCase()
+      const allowedFrom = [
+        'live',
+        'ready_to_draw',
+        'pending_min_not_met',
+        'failed_refund_available',
+      ]
+      if (!allowedFrom.includes(curStatus)) {
+        return NextResponse.json(
+          {
+            error: `Deadline override is not allowed from status "${existingRaffle.status}".`,
+          },
+          { status: 400 }
+        )
+      }
+
+      const nextStatusRaw = body.status
+      const nextStatus =
+        nextStatusRaw === 'ready_to_draw'
+          ? 'ready_to_draw'
+          : nextStatusRaw === 'live' || nextStatusRaw === undefined
+            ? 'live'
+            : null
+      if (nextStatus === null) {
+        return NextResponse.json(
+          { error: 'status must be live or ready_to_draw when set.' },
+          { status: 400 }
+        )
+      }
+
+      const isNftRaffle = existingRaffle.prize_type === 'nft'
+      if (
+        isNftRaffle &&
+        (nextStatus === 'live' || nextStatus === 'ready_to_draw') &&
+        !existingRaffle.prize_deposited_at
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'NFT raffle cannot be live/ready_to_draw before prize escrow deposit is verified.',
+          },
+          { status: 400 }
+        )
+      }
+
+      const startMs = new Date(existingRaffle.start_time).getTime()
+      if (!Number.isNaN(startMs) && endDate.getTime() <= startMs) {
+        return NextResponse.json(
+          { error: 'end_time must be after start_time.' },
+          { status: 400 }
+        )
+      }
+
+      const patch: Record<string, unknown> = {
+        end_time: endDate.toISOString(),
+        status: nextStatus,
+        edited_after_entries: true,
+        updated_at: now.toISOString(),
+      }
+
+      if (nextStatus === 'live') {
+        patch.is_active = true
+      }
+
+      if (body.time_extension_count !== undefined) {
+        const n =
+          typeof body.time_extension_count === 'number'
+            ? body.time_extension_count
+            : parseInt(String(body.time_extension_count), 10)
+        if (isNaN(n) || n < 0 || n > 10) {
+          return NextResponse.json(
+            { error: 'time_extension_count must be an integer from 0 to 10.' },
+            { status: 400 }
+          )
+        }
+        patch.time_extension_count = n
+      }
+
+      if (
+        body.original_end_time !== undefined &&
+        body.original_end_time !== null &&
+        String(body.original_end_time).trim() !== ''
+      ) {
+        const o = new Date(String(body.original_end_time))
+        if (isNaN(o.getTime())) {
+          return NextResponse.json({ error: 'Invalid original_end_time.' }, { status: 400 })
+        }
+        patch.original_end_time = o.toISOString()
+      }
+
+      console.info('[Raffle deadline admin override]', {
+        raffleId,
+        wallet: session.wallet,
+        fromStatus: existingRaffle.status,
+        end_time: patch.end_time,
+        status: nextStatus,
+        time_extension_count: patch.time_extension_count,
+      })
+
+      const raffle = await updateRaffle(
+        raffleId,
+        patch as Partial<Raffle> & { edited_after_entries?: boolean }
+      )
+      if (!raffle) {
+        return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
+      }
+      return NextResponse.json(raffle)
+    }
+
     const role = await getAdminRole(session.wallet)
     const status = (existingRaffle.status ?? '').toLowerCase()
     const isDraft = status === 'draft'
@@ -145,12 +291,17 @@ export async function PATCH(
       }
       if (isNftEconomicsAdminOverride) {
         const st = (existingRaffle.status ?? '').toLowerCase()
-        const allowedNftEconomicsStatuses = ['live', 'ready_to_draw', 'pending_min_not_met']
+        const allowedNftEconomicsStatuses = [
+          'live',
+          'ready_to_draw',
+          'pending_min_not_met',
+          'failed_refund_available',
+        ]
         if (!allowedNftEconomicsStatuses.includes(st)) {
           return NextResponse.json(
             {
               error:
-                'NFT economics override is only allowed when status is live, ready_to_draw, or pending_min_not_met.',
+                'NFT economics override is only allowed when status is live, ready_to_draw, pending_min_not_met, or failed_refund_available.',
             },
             { status: 400 }
           )
