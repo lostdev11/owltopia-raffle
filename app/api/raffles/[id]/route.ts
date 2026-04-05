@@ -127,9 +127,15 @@ export async function PATCH(
       requestedEndTime !== undefined && requestedEndTime !== existingRaffle.end_time
     const isTimeEdit = isStartTimeChanged || isEndTimeChanged
 
+    const isNftEconomicsAdminOverride =
+      role === 'full' &&
+      isNft &&
+      body.nft_economics_admin_override === true
+
     // Non-draft edits are restricted:
-    // - raffle_creator: cannot edit non-draft raffles
+    // - raffle_creator: cannot edit non-draft raffles (this route requires full admin session)
     // - full admin: may edit time for live/ready_to_draw only when there are no confirmed entries
+    // - full admin: may override NFT floor/ticket/min/max on active NFT raffles (nft_economics_admin_override)
     if (!isDraft) {
       if (role !== 'full') {
         return NextResponse.json(
@@ -137,13 +143,24 @@ export async function PATCH(
           { status: 403 }
         )
       }
-      if (!isLiveLike || !isTimeEdit) {
+      if (isNftEconomicsAdminOverride) {
+        const st = (existingRaffle.status ?? '').toLowerCase()
+        const allowedNftEconomicsStatuses = ['live', 'ready_to_draw', 'pending_min_not_met']
+        if (!allowedNftEconomicsStatuses.includes(st)) {
+          return NextResponse.json(
+            {
+              error:
+                'NFT economics override is only allowed when status is live, ready_to_draw, or pending_min_not_met.',
+            },
+            { status: 400 }
+          )
+        }
+      } else if (!isLiveLike || !isTimeEdit) {
         return NextResponse.json(
           { error: 'For non-draft raffles, full admins can only edit start/end time.' },
           { status: 403 }
         )
-      }
-      if (hasConfirmedEntries) {
+      } else if (hasConfirmedEntries) {
         return NextResponse.json(
           { error: 'Cannot edit raffle time after confirmed tickets exist.' },
           { status: 400 }
@@ -329,10 +346,7 @@ export async function PATCH(
       updates.prize_currency = null
       // NFT ticket economics are fixed after draft: only new raffles get recomputed floor/ticket/min at edit time.
       if (!isDraft) {
-        const adminNftEconomicsOverride =
-          role === 'full' && body.nft_economics_admin_override === true
-
-        if (adminNftEconomicsOverride) {
+        if (isNftEconomicsAdminOverride) {
           const touched =
             body.min_tickets !== undefined ||
             body.floor_price !== undefined ||
