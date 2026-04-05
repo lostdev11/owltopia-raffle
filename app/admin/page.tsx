@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2 } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, CircleDot } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,6 +14,7 @@ import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import type { CreatorHealthRow } from '@/lib/db/creator-health'
+import type { DevTask } from '@/lib/db/dev-tasks'
 
 interface DeletedEntry {
   id: string
@@ -154,6 +155,14 @@ export default function AdminDashboardPage() {
     raffleTitle?: string
     xTemplates?: LiveRaffleXTemplate[]
   } | null>(null)
+
+  const [devTasks, setDevTasks] = useState<DevTask[]>([])
+  const [loadingDevTasks, setLoadingDevTasks] = useState(false)
+  const [devTaskTitle, setDevTaskTitle] = useState('')
+  const [devTaskBody, setDevTaskBody] = useState('')
+  const [devTaskSaving, setDevTaskSaving] = useState(false)
+  const [devTaskError, setDevTaskError] = useState<string | null>(null)
+  const [devTaskActionId, setDevTaskActionId] = useState<string | null>(null)
 
   // Keep dashboard data live while open and force a refresh each new day.
   useEffect(() => {
@@ -390,6 +399,28 @@ export default function AdminDashboardPage() {
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
+  const fetchDevTasks = async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) return
+    setLoadingDevTasks(true)
+    try {
+      const res = await fetch('/api/admin/dev-tasks', { credentials: 'include', cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json()
+        setDevTasks(Array.isArray(data) ? (data as DevTask[]) : [])
+      }
+    } catch (error) {
+      console.error('Error fetching dev tasks:', error)
+    } finally {
+      setLoadingDevTasks(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin && sessionReady) {
+      void fetchDevTasks()
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+
   useEffect(() => {
     const fetchRevenue = async () => {
       if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -550,6 +581,66 @@ export default function AdminDashboardPage() {
       console.error('Error saving rev share schedule:', e)
     } finally {
       setRevShareScheduleSaving(false)
+    }
+  }
+
+  const handleAddDevTask = async () => {
+    const title = devTaskTitle.trim()
+    if (!title) {
+      setDevTaskError('Add a short title (for example from a Discord ticket).')
+      return
+    }
+    setDevTaskError(null)
+    setDevTaskSaving(true)
+    try {
+      const res = await fetch('/api/admin/dev-tasks', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body: devTaskBody.trim() || null }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDevTaskError(typeof data.error === 'string' ? data.error : 'Could not add task')
+        return
+      }
+      setDevTaskTitle('')
+      setDevTaskBody('')
+      await fetchDevTasks()
+    } catch {
+      setDevTaskError('Network error. Check your connection and try again.')
+    } finally {
+      setDevTaskSaving(false)
+    }
+  }
+
+  const handleDevTaskStatus = async (id: string, status: 'open' | 'done') => {
+    setDevTaskActionId(id)
+    try {
+      const res = await fetch(`/api/admin/dev-tasks/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (res.ok) await fetchDevTasks()
+    } catch (e) {
+      console.error('handleDevTaskStatus:', e)
+    } finally {
+      setDevTaskActionId(null)
+    }
+  }
+
+  const handleDeleteDevTask = async (id: string) => {
+    if (!confirm('Remove this dev task permanently?')) return
+    setDevTaskActionId(id)
+    try {
+      const res = await fetch(`/api/admin/dev-tasks/${id}`, { method: 'DELETE', credentials: 'include' })
+      if (res.ok) await fetchDevTasks()
+    } catch (e) {
+      console.error('handleDeleteDevTask:', e)
+    } finally {
+      setDevTaskActionId(null)
     }
   }
 
@@ -821,6 +912,153 @@ export default function AdminDashboardPage() {
             Manage raffles and oversee the {PLATFORM_NAME} platform
           </p>
         </div>
+
+        {/* Dev tasks — backlog from Discord / support for platform fixes */}
+        <Card className="mb-8 border-green-500/20 bg-green-500/[0.03]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ListTodo className="h-5 w-5 text-green-500" />
+              Dev tasks
+            </CardTitle>
+            <CardDescription>
+              When users report issues in Discord, add a task here so nothing is lost. Open tasks are listed first; mark done when shipped or fixed.
+              {devTasks.length > 0 && (
+                <span className="block mt-1 text-foreground/80">
+                  {devTasks.filter((t) => t.status === 'open').length} open
+                  {devTasks.filter((t) => t.status === 'done').length > 0
+                    ? ` · ${devTasks.filter((t) => t.status === 'done').length} done`
+                    : ''}
+                </span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3 rounded-lg border bg-background/60 p-4">
+              <p className="text-sm font-medium">Add task</p>
+              <div>
+                <Label htmlFor="dev-task-title">Title</Label>
+                <Input
+                  id="dev-task-title"
+                  className="mt-1.5 min-h-11 touch-manipulation"
+                  value={devTaskTitle}
+                  onChange={(e) => setDevTaskTitle(e.target.value)}
+                  placeholder="Short summary (e.g. Discord ticket, user report)"
+                  maxLength={500}
+                />
+              </div>
+              <div>
+                <Label htmlFor="dev-task-body">Details (optional)</Label>
+                <textarea
+                  id="dev-task-body"
+                  className="mt-1.5 flex min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 touch-manipulation"
+                  value={devTaskBody}
+                  onChange={(e) => setDevTaskBody(e.target.value)}
+                  placeholder="Steps to reproduce, links, wallet addresses, screenshots note…"
+                  maxLength={8000}
+                />
+              </div>
+              {devTaskError && <p className="text-sm text-destructive">{devTaskError}</p>}
+              <Button
+                type="button"
+                className="min-h-11 w-full sm:w-auto touch-manipulation"
+                onClick={() => void handleAddDevTask()}
+                disabled={devTaskSaving || !devTaskTitle.trim()}
+              >
+                {devTaskSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                <span className="ml-2">Add dev task</span>
+              </Button>
+            </div>
+
+            {loadingDevTasks ? (
+              <p className="text-muted-foreground flex items-center gap-2 py-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading tasks…
+              </p>
+            ) : devTasks.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">No dev tasks yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {devTasks.map((task) => {
+                  const shortCreator =
+                    task.created_by.length > 12
+                      ? `${task.created_by.slice(0, 6)}…${task.created_by.slice(-4)}`
+                      : task.created_by
+                  const busy = devTaskActionId === task.id
+                  return (
+                    <li
+                      key={task.id}
+                      className={`rounded-lg border p-4 space-y-2 ${
+                        task.status === 'done' ? 'opacity-75 bg-muted/20' : ''
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className={`font-medium text-sm sm:text-base ${task.status === 'done' ? 'line-through text-muted-foreground' : ''}`}>
+                            {task.title}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Added {new Date(task.created_at).toLocaleString()} · {shortCreator}
+                            {task.status === 'done' && task.completed_at && (
+                              <> · Done {new Date(task.completed_at).toLocaleString()}</>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end">
+                          {task.status === 'open' ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="min-h-11 flex-1 sm:flex-none touch-manipulation"
+                              disabled={busy}
+                              onClick={() => void handleDevTaskStatus(task.id, 'done')}
+                            >
+                              {busy ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4 mr-1.5 shrink-0" />
+                                  Mark done
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="min-h-11 flex-1 sm:flex-none touch-manipulation"
+                              disabled={busy}
+                              onClick={() => void handleDevTaskStatus(task.id, 'open')}
+                            >
+                              Reopen
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-11 flex-1 sm:flex-none text-destructive hover:text-destructive hover:bg-destructive/10 touch-manipulation"
+                            disabled={busy}
+                            onClick={() => void handleDeleteDevTask(task.id)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1.5 shrink-0" />
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                      {task.body && (
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words border-t border-border/50 pt-2">
+                          {task.body}
+                        </p>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Projected Revenue - confirmed entries only */}
         <Card className="mb-8">
