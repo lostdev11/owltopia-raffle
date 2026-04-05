@@ -15,7 +15,7 @@
     "start": "next start",
     "lint": "next lint",
     "normalize:nft-economics": "node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs",
-    "normalize:nft-economics:apply": "node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs --apply --confirm-apply",
+    "check:nft-economics": "node --env-file=.env.local scripts/check-nft-economics-compliance.mjs",
     "postinstall": "node scripts/postinstall-next-global-error.js"
   },
   "dependencies": {
