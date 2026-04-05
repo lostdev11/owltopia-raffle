@@ -2,28 +2,27 @@
  * Prize escrow: platform-held NFT until settlement, then automatic transfer to winner.
  * Requires PRIZE_ESCROW_SECRET_KEY (JSON array of 64 bytes, or base58 secret key).
  *
- * Optional PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY: same formats. When set, if a prize mint's
- * SPL freeze authority matches this keypair, the server can ThawAccount on the escrow ATA
- * in the same transaction as the transfer. The escrow wallet alone cannot move tokens out
- * of a frozen account; thaw always requires a signature from the mint's freeze authority.
+ * Creators deposit by signing a wallet transaction to the escrow address; verify-prize-deposit confirms
+ * custody on-chain (optionally using the deposit tx signature). Winner claim and return-to-creator use only
+ * PRIZE_ESCROW_SECRET_KEY (Token Metadata transferV1 first, then raw SPL transfer).
  *
  * Frozen escrow SPL accounts: by default verify-prize-deposit does not reject (raffle can go live).
  * Set PRIZE_ESCROW_STRICT_FROZEN_SPL_VERIFY=true to block verify until the escrow token account is thawed.
  * PRIZE_ESCROW_ALLOW_FROZEN_SPL_DEPOSIT_VERIFY=false also disables bypass (same as strict for verify).
- * Winner claim / return-to-creator still need thaw, PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY, or a manual admin
- * transfer recorded via PATCH /api/raffles/[id]/nft-transfer.
  *
  * Return-to-creator transfers are sent with skipPreflight: true because some RPC nodes
  * can fail simulation ("Attempt to debit") even when getAccount shows balance at
  * commitment 'confirmed'. We still verify balance before building the tx; if the tx
  * is invalid it will fail at confirmTransaction.
+ *
+ * SPL Token–program prizes: winner payout and return-to-creator try Metaplex Token Metadata
+ * transferV1 first (same as creator deposit in-app), then fall back to raw SPL transfer.
  */
-import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js'
+import { Keypair, PublicKey, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
-  createThawAccountInstruction,
   getAccount,
   getMint,
   TOKEN_PROGRAM_ID,
@@ -37,6 +36,7 @@ import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } fr
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
+import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -53,10 +53,8 @@ function humanizeSplPrizeTransferError(message: string): string {
     /\b0x11\b/.test(m)
   ) {
     return (
-      'Payout is blocked on-chain: Solana will not move tokens while that token account is frozen. ' +
-      'Many collections use freeze authority to protect stolen NFTs from being sold; that is normal, but the same rule applies in escrow. ' +
-      'Whoever holds the mint freeze authority must thaw the prize escrow token account for this mint, then the winner can claim. ' +
-      'Ask the collection or support for a thaw of that specific escrow account. On mobile, wait for one attempt to finish before retrying.'
+      'Payout failed on-chain (often error 0x11: token account frozen). ' +
+      'If this prize account is frozen, the chain will reject transfers until that account is unfrozen by the mint freeze authority, or you record a manual transfer in admin.'
     )
   }
   return message
@@ -101,29 +99,6 @@ export function getPrizeEscrowPublicKey(): string | null {
   return kp ? kp.publicKey.toBase58() : null
 }
 
-let nftFreezeAuthorityCache: Keypair | null | undefined = undefined
-
-/**
- * Optional SPL mint freeze authority keypair (server-only).
- * When it matches mint.freezeAuthority, claim/return txs can ThawAccount then Transfer.
- */
-function getOptionalNftFreezeAuthorityKeypair(): Keypair | null {
-  if (nftFreezeAuthorityCache !== undefined) return nftFreezeAuthorityCache
-  nftFreezeAuthorityCache = parseSolanaSecretKeyFromEnv(
-    process.env.PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY
-  )
-  return nftFreezeAuthorityCache
-}
-
-/**
- * When PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY is set, returns that keypair's public key so ops can
- * confirm it matches mint.freezeAuthority on Solscan (claim txs use ThawAccount + Transfer).
- */
-export function getPrizeNftFreezeAuthorityPublicKey(): string | null {
-  const kp = getOptionalNftFreezeAuthorityKeypair()
-  return kp ? kp.publicKey.toBase58() : null
-}
-
 function envLooksTruthyFlag(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
@@ -142,42 +117,6 @@ export function isPrizeEscrowFrozenSplVerifyBypassEnabled(): boolean {
     return envLooksTruthyFlag(raw)
   }
   return true
-}
-
-/**
- * If escrow source ATA is frozen, returns who must sign ThawAccount (always the mint freeze authority).
- * When not frozen, thawSigner is null.
- */
-async function resolveThawSignerIfEscrowSourceFrozen(
-  connection: Connection,
-  mint: PublicKey,
-  sourceIsFrozen: boolean,
-  tokenProgram: typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID,
-  escrowKeypair: Keypair
-): Promise<
-  { ok: true; thawSigner: Keypair | null } | { ok: false; error: string }
-> {
-  if (!sourceIsFrozen) return { ok: true, thawSigner: null }
-  const mintInfo = await getMint(connection, mint, 'confirmed', tokenProgram)
-  const freezeAuthority = mintInfo.freezeAuthority
-  if (!freezeAuthority) {
-    return { ok: false, error: humanizeSplPrizeTransferError('Account is frozen') }
-  }
-  if (freezeAuthority.equals(escrowKeypair.publicKey)) {
-    return { ok: true, thawSigner: escrowKeypair }
-  }
-  const freezeKp = getOptionalNftFreezeAuthorityKeypair()
-  if (freezeKp && freezeAuthority.equals(freezeKp.publicKey)) {
-    return { ok: true, thawSigner: freezeKp }
-  }
-  return { ok: false, error: humanizeSplPrizeTransferError('Account is frozen') }
-}
-
-function collectTxSigners(escrowKeypair: Keypair, thawSigner: Keypair | null): Keypair[] {
-  if (!thawSigner || thawSigner.publicKey.equals(escrowKeypair.publicKey)) {
-    return [escrowKeypair]
-  }
-  return [escrowKeypair, thawSigner]
 }
 
 /** Token program ID type for SPL vs Token-2022 */
@@ -239,9 +178,9 @@ export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<Pub
 
 // If you change this text, update `isEscrowSplPrizeFrozenVerifyError` in verify-prize-deposit-client.ts.
 const FROZEN_ESCROW_PRIZE_MSG =
-  'This prize cannot go live while its token account in escrow is frozen. Solana would not be able to send it to a winner. ' +
-  'The NFT can still show as owned by escrow on explorers—that is separate from the token account’s frozen flag. ' +
-  'Collections often freeze accounts for holder safety; the freeze authority still needs to thaw only the escrow token account for this mint when you want this raffle to be claimable, or use a different prize.'
+  'This prize cannot go live while its token account in escrow is frozen (strict verify mode). ' +
+  'The NFT may still show as owned by escrow on Solscan—that is separate from the token account frozen flag. ' +
+  'Use a different prize, or turn off strict frozen verify if deposits are confirmed on-chain.'
 
 /** Returned with verify-prize-deposit 400 so creators see which account must be thawed on-chain. */
 export type EscrowSplPrizeFrozenDiagnostics = {
@@ -249,9 +188,6 @@ export type EscrowSplPrizeFrozenDiagnostics = {
   escrowTokenAccount: string
   freezeAuthority: string | null
 }
-
-const FROZEN_CREATOR_HOLDING_MSG =
-  'This NFT cannot be sent to escrow while its token account in your wallet is frozen. If you froze it for security, thaw when you are ready to deposit, then try again—or pick another prize.'
 
 /**
  * If escrow holds this mint as SPL/Token-2022 with balance ≥ 1, reject when that token account is frozen.
@@ -286,11 +222,7 @@ export async function assertEscrowSplPrizeNotFrozen(
     if (acc.isFrozen) {
       const mintInfo = await getMint(connection, mint, 'confirmed', tokenProgram)
       const fa = mintInfo.freezeAuthority
-      const freezeKp = getOptionalNftFreezeAuthorityKeypair()
-      if (
-        fa &&
-        (fa.equals(keypair.publicKey) || (freezeKp && fa.equals(freezeKp.publicKey)))
-      ) {
+      if (fa && fa.equals(keypair.publicKey)) {
         return { blocked: false }
       }
       return {
@@ -305,35 +237,6 @@ export async function assertEscrowSplPrizeNotFrozen(
     }
   } catch {
     return { blocked: false }
-  }
-  return { blocked: false }
-}
-
-/**
- * If the creator wallet holds this mint as SPL/Token-2022 with balance ≥ 1, reject when that token account is frozen.
- * No-op when not holding (e.g. mint not yet acquired).
- */
-export async function assertCreatorSplHoldingNotFrozen(
-  creatorWallet: PublicKey,
-  mint: PublicKey
-): Promise<{ blocked: false } | { blocked: true; error: string }> {
-  const connection = getSolanaConnection()
-  for (const programId of TOKEN_PROGRAM_IDS) {
-    try {
-      const ata = await getAssociatedTokenAddress(
-        mint,
-        creatorWallet,
-        false,
-        programId,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
-      const acc = await getAccount(connection, ata, 'confirmed', programId)
-      if (acc.amount >= NFT_AMOUNT && acc.isFrozen) {
-        return { blocked: true, error: FROZEN_CREATOR_HOLDING_MSG }
-      }
-    } catch {
-      // no account or wrong program
-    }
   }
   return { blocked: false }
 }
@@ -642,27 +545,20 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     ASSOCIATED_TOKEN_PROGRAM_ID
   )
 
-  let sourceTokenAccount
   try {
-    sourceTokenAccount = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    if (sourceAcc.amount < NFT_AMOUNT) {
+      return {
+        ok: false,
+        error: 'Escrow token account has no NFT balance for this mint on-chain.',
+      }
+    }
   } catch {
     return {
       ok: false,
       error: 'Could not read the escrow token account for this NFT on-chain.',
     }
   }
-  const thawRes = await resolveThawSignerIfEscrowSourceFrozen(
-    connection,
-    mint,
-    sourceTokenAccount.isFrozen,
-    tokenProgram,
-    keypair
-  )
-  if (!thawRes.ok) {
-    return { ok: false, error: thawRes.error }
-  }
-  const thawSigner = thawRes.thawSigner
-
   let destAccountExists = false
   try {
     const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
@@ -679,12 +575,44 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     destAccountExists = false
   }
 
-  const tx = new Transaction()
-  if (thawSigner) {
-    tx.add(
-      createThawAccountInstruction(sourceAta, mint, thawSigner.publicKey, [], tokenProgram)
-    )
+  const persistWinnerTransferSig = async (sig: string) => {
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({
+          nft_transfer_transaction: sig,
+          nft_claim_locked_at: null,
+          nft_claim_locked_wallet: null,
+        })
+        .eq('id', raffleId)
+    } catch (dbErr) {
+      console.error(`Failed to persist NFT prize transfer for raffle ${raffleId}:`, dbErr)
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // swallow - we still return the on-chain signature
+      }
+    }
   }
+
+  if (tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+    const tmResult = await trySendSplNftViaTokenMetadataFromEscrow({
+      connection,
+      escrowKeypair: keypair,
+      mint,
+      destinationOwner: winnerPubkey,
+      skipPreflight: false,
+    })
+    if (tmResult) {
+      await persistWinnerTransferSig(tmResult.signature)
+      return { ok: true, signature: tmResult.signature }
+    }
+  }
+
+  const tx = new Transaction()
   if (!destAccountExists) {
     tx.add(
       createAssociatedTokenAccountInstruction(
@@ -712,7 +640,7 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
     tx.recentBlockhash = blockhash
     tx.feePayer = keypair.publicKey
-    tx.sign(...collectTxSigners(keypair, thawSigner))
+    tx.sign(keypair)
 
     const sig = await connection.sendRawTransaction(tx.serialize(), {
       skipPreflight: false,
@@ -720,28 +648,7 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     })
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
 
-    // Persist winner claim + release lock (best effort; on-chain transfer already succeeded).
-    try {
-      await getSupabaseAdmin()
-        .from('raffles')
-        .update({
-          nft_transfer_transaction: sig,
-          nft_claim_locked_at: null,
-          nft_claim_locked_wallet: null,
-        })
-        .eq('id', raffleId)
-    } catch (dbErr) {
-      console.error(`Failed to persist NFT prize transfer for raffle ${raffleId}:`, dbErr)
-      // Avoid leaving the raffle stuck in "locked" state.
-      try {
-        await getSupabaseAdmin()
-          .from('raffles')
-          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
-          .eq('id', raffleId)
-      } catch {
-        // swallow - we still return the on-chain signature
-      }
-    }
+    await persistWinnerTransferSig(sig)
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -954,18 +861,6 @@ async function transferSplPrizeToCreatorFromEscrow(
     }
   }
 
-  const thawRes = await resolveThawSignerIfEscrowSourceFrozen(
-    connection,
-    mint,
-    sourceAccount.isFrozen,
-    tokenProgram,
-    keypair
-  )
-  if (!thawRes.ok) {
-    return { ok: false, error: thawRes.error }
-  }
-  const thawSigner = thawRes.thawSigner
-
   const destAta = await getAssociatedTokenAddress(
     mint,
     creatorPubkey,
@@ -982,12 +877,21 @@ async function transferSplPrizeToCreatorFromEscrow(
     destAccountExists = false
   }
 
-  const tx = new Transaction()
-  if (thawSigner) {
-    tx.add(
-      createThawAccountInstruction(sourceAta, mint, thawSigner.publicKey, [], tokenProgram)
-    )
+  if (tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+    const tmResult = await trySendSplNftViaTokenMetadataFromEscrow({
+      connection,
+      escrowKeypair: keypair,
+      mint,
+      destinationOwner: creatorPubkey,
+      skipPreflight: true,
+    })
+    if (tmResult) {
+      await persistPrizeReturnToCreator(raffleId, reason, tmResult.signature)
+      return { ok: true, signature: tmResult.signature }
+    }
   }
+
+  const tx = new Transaction()
   if (!destAccountExists) {
     tx.add(
       createAssociatedTokenAccountInstruction(
@@ -1015,7 +919,7 @@ async function transferSplPrizeToCreatorFromEscrow(
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
     tx.recentBlockhash = blockhash
     tx.feePayer = keypair.publicKey
-    tx.sign(...collectTxSigners(keypair, thawSigner))
+    tx.sign(keypair)
 
     const sig = await connection.sendRawTransaction(tx.serialize(), {
       skipPreflight: true,

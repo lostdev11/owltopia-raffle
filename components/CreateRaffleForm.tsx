@@ -160,21 +160,6 @@ export function CreateRaffleForm() {
           if (nfts.length === 0) throw rpcErr
         }
       }
-      // Exclude scam/spam NFTs when we used RPC fallback (API already filters)
-      if (nfts.length > 0 && !apiRes.ok) {
-        try {
-          const blockRes = await fetch('/api/config/scam-blocklist', { credentials: 'include' })
-          if (blockRes.ok) {
-            const { addresses } = await blockRes.json()
-            if (Array.isArray(addresses) && addresses.length > 0) {
-              const blockSet = new Set((addresses as string[]).map((a) => a.toLowerCase()))
-              nfts = nfts.filter((n) => !blockSet.has(n.mint.toLowerCase()))
-            }
-          }
-        } catch {
-          // ignore; show all if blocklist fails
-        }
-      }
       // Exclude NFTs already in escrow (from parallel fetch)
       if (escrowRes.ok) {
         try {
@@ -234,6 +219,19 @@ export function CreateRaffleForm() {
     if (!selectedNft) {
       alert('Please select an NFT from your wallet for an NFT raffle.')
       return
+    }
+
+    try {
+      const mintPk = new PublicKey(selectedNft.mint)
+      const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
+      if (stakedCheck && 'delegated' in stakedCheck && stakedCheck.delegated) {
+        alert(
+          'This NFT is staked or delegated. Unstake it before creating a raffle—it cannot be sent to escrow while staked.'
+        )
+        return
+      }
+    } catch {
+      // Mint parse or RPC: server will re-check on create
     }
 
     // Validate 7-day maximum duration
@@ -651,7 +649,7 @@ export function CreateRaffleForm() {
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
-                  Only choose an NFT you intend to give away. Scam or spam NFTs may appear in your wallet—double-check the name and collection. The platform may blocklist known scam NFTs; those cannot be used as prizes.
+                  Only choose an NFT you intend to give away. Staked or delegated NFTs cannot be used until you unstake them.
                 </p>
               </div>
               <Button

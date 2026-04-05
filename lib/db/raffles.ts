@@ -809,7 +809,9 @@ export async function getCreatorRevenueByWallet(walletAddress: string): Promise<
   const byCurrency: Record<string, number> = {}
   let total = 0
   for (const row of data || []) {
-    const usesFundsEscrow = row.ticket_payments_to_funds_escrow === true
+    const usesFundsEscrow = raffleUsesFundsEscrow(
+      row as { ticket_payments_to_funds_escrow?: boolean | null | string | number }
+    )
     const claimed = row.creator_claimed_at != null
     const completedOk = row.status === 'completed'
     if (usesFundsEscrow && !claimed) continue

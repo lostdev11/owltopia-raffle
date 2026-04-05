@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, CircleDot } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,7 +14,8 @@ import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import type { CreatorHealthRow } from '@/lib/db/creator-health'
-import type { DevTask } from '@/lib/db/dev-tasks'
+import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks'
+import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-storage'
 
 interface DeletedEntry {
   id: string
@@ -162,7 +163,11 @@ export default function AdminDashboardPage() {
   const [devTaskBody, setDevTaskBody] = useState('')
   const [devTaskSaving, setDevTaskSaving] = useState(false)
   const [devTaskError, setDevTaskError] = useState<string | null>(null)
+  const [devTaskPhotoError, setDevTaskPhotoError] = useState<string | null>(null)
   const [devTaskActionId, setDevTaskActionId] = useState<string | null>(null)
+  const [devTaskFiles, setDevTaskFiles] = useState<Array<{ file: File; url: string }>>([])
+  const devTaskAppendInputRef = useRef<HTMLInputElement | null>(null)
+  const devTaskAppendTaskIdRef = useRef<string | null>(null)
 
   // Keep dashboard data live while open and force a refresh each new day.
   useEffect(() => {
@@ -584,6 +589,47 @@ export default function AdminDashboardPage() {
     }
   }
 
+  const clearDevTaskPendingFiles = () => {
+    setDevTaskFiles((prev) => {
+      prev.forEach((x) => URL.revokeObjectURL(x.url))
+      return []
+    })
+  }
+
+  const removeDevTaskFileAt = (index: number) => {
+    setDevTaskFiles((prev) => {
+      const next = [...prev]
+      const [removed] = next.splice(index, 1)
+      if (removed) URL.revokeObjectURL(removed.url)
+      return next
+    })
+  }
+
+  const onDevTaskScreenshotsSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDevTaskPhotoError(null)
+    const list = e.target.files
+    e.target.value = ''
+    if (!list?.length) return
+    setDevTaskFiles((prev) => {
+      const next = [...prev]
+      for (let i = 0; i < list.length; i++) {
+        if (next.length >= DEV_TASK_SCREENSHOT_MAX_FILES) break
+        const file = list[i]
+        const okType = file.type.startsWith('image/')
+        const okName = /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
+        if (!okType && !okName) continue
+        if (file.size > DEV_TASK_SCREENSHOT_MAX_BYTES) {
+          setDevTaskPhotoError(
+            `Skipped "${file.name}" — larger than ${DEV_TASK_SCREENSHOT_MAX_BYTES / (1024 * 1024)}MB.`
+          )
+          continue
+        }
+        next.push({ file, url: URL.createObjectURL(file) })
+      }
+      return next
+    })
+  }
+
   const handleAddDevTask = async () => {
     const title = devTaskTitle.trim()
     if (!title) {
@@ -591,8 +637,34 @@ export default function AdminDashboardPage() {
       return
     }
     setDevTaskError(null)
+    setDevTaskPhotoError(null)
     setDevTaskSaving(true)
     try {
+      if (devTaskFiles.length > 0) {
+        const fd = new FormData()
+        fd.set('title', title)
+        const b = devTaskBody.trim()
+        if (b) fd.set('body', b)
+        for (const { file } of devTaskFiles) {
+          fd.append('screenshots', file)
+        }
+        const res = await fetch('/api/admin/dev-tasks', {
+          method: 'POST',
+          credentials: 'include',
+          body: fd,
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setDevTaskError(typeof data.error === 'string' ? data.error : 'Could not add task')
+          return
+        }
+        clearDevTaskPendingFiles()
+        setDevTaskTitle('')
+        setDevTaskBody('')
+        await fetchDevTasks()
+        return
+      }
+
       const res = await fetch('/api/admin/dev-tasks', {
         method: 'POST',
         credentials: 'include',
@@ -611,6 +683,46 @@ export default function AdminDashboardPage() {
       setDevTaskError('Network error. Check your connection and try again.')
     } finally {
       setDevTaskSaving(false)
+    }
+  }
+
+  const openDevTaskAppendPicker = (taskId: string) => {
+    devTaskAppendTaskIdRef.current = taskId
+    setDevTaskPhotoError(null)
+    requestAnimationFrame(() => {
+      devTaskAppendInputRef.current?.click()
+    })
+  }
+
+  const onDevTaskAppendSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const taskId = devTaskAppendTaskIdRef.current
+    devTaskAppendTaskIdRef.current = null
+    const list = e.target.files
+    e.target.value = ''
+    if (!taskId || !list?.length) return
+
+    setDevTaskActionId(taskId)
+    setDevTaskPhotoError(null)
+    try {
+      const fd = new FormData()
+      for (let i = 0; i < list.length; i++) {
+        fd.append('screenshots', list[i])
+      }
+      const res = await fetch(`/api/admin/dev-tasks/${taskId}/screenshots`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDevTaskPhotoError(typeof data.error === 'string' ? data.error : 'Could not upload photos')
+        return
+      }
+      await fetchDevTasks()
+    } catch {
+      setDevTaskPhotoError('Network error while uploading photos.')
+    } finally {
+      setDevTaskActionId(null)
     }
   }
 
@@ -921,7 +1033,8 @@ export default function AdminDashboardPage() {
               Dev tasks
             </CardTitle>
             <CardDescription>
-              When users report issues in Discord, add a task here so nothing is lost. Open tasks are listed first; mark done when shipped or fixed.
+              When users report issues in Discord, add a task here so nothing is lost. Open tasks are listed first; mark done when shipped or fixed. Attach screenshots from your phone gallery or desktop files (up to{' '}
+              {DEV_TASK_SCREENSHOT_MAX_FILES} per upload, {DEV_TASK_MAX_SCREENSHOTS_TOTAL} per task).
               {devTasks.length > 0 && (
                 <span className="block mt-1 text-foreground/80">
                   {devTasks.filter((t) => t.status === 'open').length} open
@@ -957,7 +1070,44 @@ export default function AdminDashboardPage() {
                   maxLength={8000}
                 />
               </div>
-              {devTaskError && <p className="text-sm text-destructive">{devTaskError}</p>}
+              <div>
+                <Label htmlFor="dev-task-screenshots">Screenshots (optional)</Label>
+                <p className="text-xs text-muted-foreground mt-1 mb-1.5">
+                  On mobile, opens your photo library or camera roll; on desktop, any image files. Max {DEV_TASK_SCREENSHOT_MAX_FILES} images and{' '}
+                  {DEV_TASK_SCREENSHOT_MAX_BYTES / (1024 * 1024)}MB each for this upload.
+                </p>
+                <input
+                  id="dev-task-screenshots"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="min-h-11 w-full max-w-full cursor-pointer rounded-md border border-input bg-background px-2 py-2 text-sm file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-2 file:text-sm touch-manipulation"
+                  onChange={onDevTaskScreenshotsSelected}
+                />
+                {devTaskFiles.length > 0 && (
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {devTaskFiles.map((item, i) => (
+                      <div key={item.url} className="relative overflow-hidden rounded-md border bg-muted/20">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URLs from file picker */}
+                        <img src={item.url} alt="" className="h-28 w-full object-cover" />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="absolute right-1 top-1 h-9 min-h-9 w-9 min-w-9 p-0 touch-manipulation"
+                          onClick={() => removeDevTaskFileAt(i)}
+                          aria-label={`Remove image ${i + 1}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {(devTaskError || devTaskPhotoError) && (
+                <p className="text-sm text-destructive">{devTaskError || devTaskPhotoError}</p>
+              )}
               <Button
                 type="button"
                 className="min-h-11 w-full sm:w-auto touch-manipulation"
@@ -1004,6 +1154,18 @@ export default function AdminDashboardPage() {
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end">
+                          {(task.screenshot_urls?.length ?? 0) < DEV_TASK_MAX_SCREENSHOTS_TOTAL && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="min-h-11 flex-1 sm:flex-none touch-manipulation"
+                              disabled={busy}
+                              onClick={() => openDevTaskAppendPicker(task.id)}
+                            >
+                              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add photos'}
+                            </Button>
+                          )}
                           {task.status === 'open' ? (
                             <Button
                               type="button"
@@ -1052,11 +1214,41 @@ export default function AdminDashboardPage() {
                           {task.body}
                         </p>
                       )}
+                      {(task.screenshot_urls?.length ?? 0) > 0 && (
+                        <div className="flex flex-wrap gap-2 border-t border-border/50 pt-2">
+                          {(task.screenshot_urls ?? []).map((url, imgIdx) => (
+                            <a
+                              key={`${task.id}-${imgIdx}`}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block max-w-full rounded-md border bg-muted/10 p-0.5 touch-manipulation"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element -- Supabase public URLs */}
+                              <img
+                                src={url}
+                                alt={`Screenshot ${imgIdx + 1} for ${task.title}`}
+                                className="max-h-44 max-w-[min(100%,220px)] rounded object-contain sm:max-h-52"
+                                loading="lazy"
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </li>
                   )
                 })}
               </ul>
             )}
+            <input
+              ref={devTaskAppendInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="sr-only"
+              tabIndex={-1}
+              onChange={(e) => void onDevTaskAppendSelected(e)}
+            />
           </CardContent>
         </Card>
 

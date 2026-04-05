@@ -3,8 +3,9 @@ import { createRaffle, generateUniqueSlug, getRaffleCreationCountForCreatorToday
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
-import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
 import { PublicKey } from '@solana/web3.js'
+import { getSolanaConnection } from '@/lib/solana/connection'
+import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -208,20 +209,25 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    // Moderation: block scam / spam NFTs (mint or collection if provided)
-    const blocklist = await getScamBlocklist()
-    if (nftMintAddress && isBlocked(blocklist, nftMintAddress)) {
-      return NextResponse.json(
-        { error: 'This NFT cannot be used as a prize. It may be on the platform blocklist.' },
-        { status: 400 }
-      )
-    }
-    const collectionAddress = body.nft_collection_address ?? body.collection_address
-    if (typeof collectionAddress === 'string' && collectionAddress.trim() && isBlocked(blocklist, collectionAddress.trim())) {
-      return NextResponse.json(
-        { error: 'This collection cannot be used for NFT prizes. It may be on the platform blocklist.' },
-        { status: 400 }
-      )
+
+    // Only block creation when the prize is SPL/Token-2022 and only held in a delegated (staked) account.
+    if (nftMintAddress) {
+      try {
+        const mintPk = new PublicKey(nftMintAddress)
+        const creatorPk = new PublicKey(walletAddress)
+        const holder = await getNftHolderInWallet(getSolanaConnection(), mintPk, creatorPk, 'confirmed')
+        if (holder && 'delegated' in holder && holder.delegated) {
+          return NextResponse.json(
+            {
+              error:
+                'This NFT is staked or delegated. Unstake it before creating a raffle—otherwise it cannot be sent to escrow.',
+            },
+            { status: 400 }
+          )
+        }
+      } catch {
+        // Invalid mint or transient RPC: allow create (deposit flow will surface issues).
+      }
     }
 
     // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist

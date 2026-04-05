@@ -3,7 +3,6 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import {
   getPrizeEscrowKeypair,
   getPrizeEscrowPublicKey,
-  getPrizeNftFreezeAuthorityPublicKey,
   isPrizeEscrowFrozenSplVerifyBypassEnabled,
 } from '@/lib/raffles/prize-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -37,10 +36,8 @@ export async function GET(request: NextRequest) {
     if (session instanceof NextResponse) return session
 
     const raw = process.env.PRIZE_ESCROW_SECRET_KEY?.trim() ?? ''
-    const rawFreeze = process.env.PRIZE_NFT_FREEZE_AUTHORITY_SECRET_KEY?.trim() ?? ''
     const keypair = getPrizeEscrowKeypair()
     const address = getPrizeEscrowPublicKey()
-    const freezeAuthPub = getPrizeNftFreezeAuthorityPublicKey()
 
     const rpcUrl = resolveServerSolanaRpcUrl()
     const cluster = /devnet/i.test(rpcUrl) ? 'devnet' : 'mainnet'
@@ -55,14 +52,6 @@ export async function GET(request: NextRequest) {
         envPresent: raw.length > 0,
         envLooksJsonArray: raw.startsWith('[') && raw.endsWith(']'),
         envLength: raw.length,
-      },
-      // When publicKey matches mint.freezeAuthority, frozen escrow prizes can thaw+transfer in one claim tx
-      nftFreezeAuthority: {
-        configured: Boolean(freezeAuthPub),
-        publicKey: freezeAuthPub,
-        envPresent: rawFreeze.length > 0,
-        envLooksJsonArray: rawFreeze.startsWith('[') && rawFreeze.endsWith(']'),
-        envLength: rawFreeze.length,
       },
       frozenSplDepositVerifyBypass: {
         enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),

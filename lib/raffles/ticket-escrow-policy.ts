@@ -8,6 +8,9 @@ export function raffleUsesFundsEscrow(raffle: {
   ticket_payments_to_funds_escrow?: boolean | null | string | number
 }): boolean {
   const v = raffle.ticket_payments_to_funds_escrow
+  // DB column is NOT NULL DEFAULT true (044). Missing/null in API payloads must match that default so
+  // draw → `successful_pending_claims` and dashboard claim UI stay aligned with on-chain escrow routing.
+  if (v === undefined || v === null) return true
   return v === true || v === 'true' || v === 1
 }
 

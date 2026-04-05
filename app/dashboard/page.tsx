@@ -176,17 +176,6 @@ function formatMultiCurrencyTotals(by: Record<string, number>): string {
     .join(' · ')
 }
 
-/**
- * Matches server payment / claim rules. If the column is missing (minimal API shape), assume funds escrow.
- */
-function raffleRowUsesFundsEscrow(r: {
-  ticket_payments_to_funds_escrow?: boolean | null | string | number
-}): boolean {
-  if (!Object.prototype.hasOwnProperty.call(r, 'ticket_payments_to_funds_escrow')) {
-    return true
-  }
-  return raffleUsesFundsEscrow(r)
-}
 
 type RaffleEntrySummary = {
   raffle: EntryWithRaffle['raffle']
@@ -532,7 +521,7 @@ export default function DashboardPage() {
       myRafflesForMemo.filter(
         (r) =>
           r.status === 'successful_pending_claims' &&
-          raffleRowUsesFundsEscrow(r) &&
+          raffleUsesFundsEscrow(r) &&
           !r.creator_claimed_at &&
           !!r.settled_at?.trim()
       ),
@@ -544,7 +533,7 @@ export default function DashboardPage() {
       myRafflesForMemo.filter(
         (r) =>
           r.status === 'successful_pending_claims' &&
-          raffleRowUsesFundsEscrow(r) &&
+          raffleUsesFundsEscrow(r) &&
           !r.creator_claimed_at &&
           !r.settled_at?.trim()
       ),
@@ -557,7 +546,7 @@ export default function DashboardPage() {
     return myRafflesForMemo.filter((r) => {
       if (r.status !== 'live' && r.status !== 'ready_to_draw') return false
       if (trackedSet) return trackedSet.has(r.id)
-      return raffleRowUsesFundsEscrow(r)
+      return raffleUsesFundsEscrow(r)
     })
   }, [myRafflesForMemo, data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds])
 
@@ -780,7 +769,7 @@ export default function DashboardPage() {
       x.raffle.status === 'failed_refund_available' &&
       x.entry.status === 'confirmed' &&
       !x.entry.refunded_at &&
-      x.raffle.ticket_payments_to_funds_escrow === true
+      raffleUsesFundsEscrow(x.raffle)
   )
 
   const entriesPageSafe = Math.min(entriesPage, entriesListMaxPage)
@@ -1282,7 +1271,7 @@ export default function DashboardPage() {
                       <span className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground flex-wrap justify-end">
                         <span className="capitalize">{(r.status ?? 'draft').replace(/_/g, ' ')}</span>
                         {r.status === 'successful_pending_claims' &&
-                          r.ticket_payments_to_funds_escrow &&
+                          raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
                           !!r.settled_at?.trim() && (
                             <Button
@@ -1352,7 +1341,7 @@ export default function DashboardPage() {
                           <p className="text-destructive text-xs">{requestCancelError}</p>
                         )}
                         {r.status === 'successful_pending_claims' &&
-                          r.ticket_payments_to_funds_escrow &&
+                          raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
                           !!r.settled_at?.trim() && (
                             <div className="py-2">
@@ -1385,7 +1374,7 @@ export default function DashboardPage() {
                             </div>
                           )}
                         {r.status === 'successful_pending_claims' &&
-                          r.ticket_payments_to_funds_escrow &&
+                          raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
                           !r.settled_at?.trim() && (
                             <p className="text-xs text-muted-foreground py-2">

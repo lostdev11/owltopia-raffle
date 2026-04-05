@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
-import { getScamBlocklist, isBlocked } from '@/lib/scam-blocklist'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
 
 export const dynamic = 'force-dynamic'
@@ -25,36 +24,14 @@ interface ParsedTokenAccountInfo {
   tokenAmount?: { decimals?: number; amount?: string }
 }
 
-/**
- * Optional: fetch staked mint list from external API when STAKED_NFTS_API_URL is set.
- * URL may contain {wallet} placeholder. Response may be string[] or { mints?: string[] }.
- */
-async function getStakedMintsFromApi(wallet: string): Promise<Set<string>> {
-  const urlTemplate = process.env.STAKED_NFTS_API_URL?.trim()
-  if (!urlTemplate) return new Set<string>()
-  const url = urlTemplate.replace('{wallet}', encodeURIComponent(wallet))
-  try {
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return new Set<string>()
-    const data = await res.json().catch(() => null)
-    if (Array.isArray(data)) return new Set(data.filter((m: unknown) => typeof m === 'string'))
-    if (data && Array.isArray(data.mints)) return new Set(data.mints.filter((m: unknown) => typeof m === 'string'))
-    return new Set<string>()
-  } catch {
-    return new Set<string>()
-  }
-}
-
 /** Parse one page of getParsedTokenAccountsByOwner into WalletNft list. */
 function parseTokenAccountsToNfts(
-  value: Array<{ pubkey?: string; account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } } }>,
-  stakedMints: Set<string>
+  value: Array<{ pubkey?: string; account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } } }>
 ): WalletNft[] {
   const nfts: WalletNft[] = []
   for (const item of value) {
     const info = item.account?.data?.parsed?.info
     if (!info?.mint) continue
-    if (stakedMints.has(info.mint)) continue
     const decimals = Number(info.tokenAmount?.decimals ?? 9)
     const amount = String(info.tokenAmount?.amount ?? '0')
     const isNft =
@@ -79,11 +56,7 @@ function parseTokenAccountsToNfts(
  * On devnet, Helius DAS may return no assets. Fallback: use getParsedTokenAccountsByOwner
  * for both SPL Token and Token-2022 to find NFT token accounts (minimal WalletNft list, no metadata).
  */
-async function getNftsViaRpcFallback(
-  rpcUrl: string,
-  wallet: string,
-  stakedMints: Set<string>
-): Promise<WalletNft[]> {
+async function getNftsViaRpcFallback(rpcUrl: string, wallet: string): Promise<WalletNft[]> {
   const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
   const seenMints = new Set<string>()
   const nfts: WalletNft[] = []
@@ -107,7 +80,7 @@ async function getNftsViaRpcFallback(
         account?: { data?: { parsed?: { info?: ParsedTokenAccountInfo } } }
       }> | undefined
       if (!Array.isArray(value)) continue
-      for (const nft of parseTokenAccountsToNfts(value, stakedMints)) {
+      for (const nft of parseTokenAccountsToNfts(value)) {
         if (seenMints.has(nft.mint)) continue
         seenMints.add(nft.mint)
         nfts.push(nft)
@@ -123,6 +96,7 @@ async function getNftsViaRpcFallback(
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
  * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show.
+ * Raffle creation only rejects staked/delegated SPL holdings (see POST /api/raffles); listing is not filtered by blocklist.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -198,25 +172,8 @@ export async function GET(request: NextRequest) {
     }
 
     const items = allItems
-    const [stakedMintsFromApi, scamBlocklist] = await Promise.all([
-      getStakedMintsFromApi(wallet),
-      getScamBlocklist(),
-    ])
-    const excludeMints = new Set(stakedMintsFromApi)
-    const isScam = (item: HeliusAsset) => {
-      if (!item.id) return true
-      if (excludeMints.has(item.id)) return true
-      if (isBlocked(scamBlocklist, item.id)) return true
-      const grouping = item.grouping
-      if (Array.isArray(grouping)) {
-        for (const g of grouping) {
-          if (g?.group_key === 'collection' && g.group_value && isBlocked(scamBlocklist, g.group_value)) return true
-        }
-      }
-      return false
-    }
     let nfts: WalletNft[] = items
-      .filter((item) => item.id && !isScam(item))
+      .filter((item) => item.id)
       .map((item) => {
         const mint = item.id!
         const content = item.content
@@ -242,11 +199,7 @@ export async function GET(request: NextRequest) {
 
     // On devnet, Helius DAS often returns no assets; use RPC getParsedTokenAccountsByOwner as fallback
     if (nfts.length === 0 && isDevnet) {
-      const rpcFallback = await getNftsViaRpcFallback(
-        heliusRpcUrl,
-        wallet,
-        excludeMints
-      )
+      const rpcFallback = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
       if (rpcFallback.length > 0) nfts = rpcFallback
     }
 

@@ -1,9 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
-import { createDevTask, listDevTasks } from '@/lib/db/dev-tasks'
+import {
+  createDevTask,
+  deleteDevTask,
+  DEV_TASK_MAX_SCREENSHOTS_TOTAL,
+  listDevTasks,
+  updateDevTask,
+} from '@/lib/db/dev-tasks'
+import { uploadDevTaskScreenshots } from '@/lib/dev-task-storage'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+
+async function filesFromFormData(form: FormData): Promise<Array<{ buffer: Buffer; type: string; name: string }>> {
+  const out: Array<{ buffer: Buffer; type: string; name: string }> = []
+  for (const value of form.getAll('screenshots')) {
+    if (value instanceof File && value.size > 0) {
+      const buffer = Buffer.from(await value.arrayBuffer())
+      out.push({ buffer, type: value.type, name: value.name })
+    }
+  }
+  return out
+}
 
 /**
  * GET /api/admin/dev-tasks — list backlog (full admin session).
@@ -28,11 +46,58 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/admin/dev-tasks — add task (full admin session).
+ * JSON: { title, body? }
+ * multipart/form-data: title, body?, screenshots (repeatable File fields)
  */
 export async function POST(request: NextRequest) {
   try {
     const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
+
+    const contentType = request.headers.get('content-type') || ''
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData()
+      const titleRaw = form.get('title')
+      const title = typeof titleRaw === 'string' ? titleRaw.trim() : ''
+      if (!title) {
+        return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+      }
+      const rawBody = form.get('body')
+      const taskBody = typeof rawBody === 'string' ? rawBody : null
+
+      const files = await filesFromFormData(form)
+      if (files.length > DEV_TASK_MAX_SCREENSHOTS_TOTAL) {
+        return NextResponse.json(
+          { error: `At most ${DEV_TASK_MAX_SCREENSHOTS_TOTAL} images per task (use Add more photos for the rest).` },
+          { status: 400 }
+        )
+      }
+
+      const task = await createDevTask({
+        title,
+        body: taskBody,
+        created_by: session.wallet,
+        screenshot_paths: [],
+      })
+      if (!task) {
+        return NextResponse.json({ error: 'Failed to create task' }, { status: 500 })
+      }
+
+      if (files.length === 0) {
+        return NextResponse.json(task)
+      }
+
+      const uploaded = await uploadDevTaskScreenshots(task.id, files)
+      if ('error' in uploaded) {
+        await deleteDevTask(task.id)
+        return NextResponse.json({ error: uploaded.error }, { status: 400 })
+      }
+
+      const updated = await updateDevTask(task.id, { screenshot_paths: uploaded.paths })
+      return NextResponse.json(updated ?? task)
+    }
+
     const body = await request.json().catch(() => ({}))
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     if (!title) {

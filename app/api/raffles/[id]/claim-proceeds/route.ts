@@ -50,7 +50,7 @@ export async function POST(
       )
     }
 
-    if (!raffle.settled_at?.trim()) {
+    if (!String(raffle.settled_at ?? '').trim()) {
       return NextResponse.json(
         {
           error:
