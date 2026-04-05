@@ -18,6 +18,19 @@ export interface RaffleProfitInfo {
   threshold: number | null
   thresholdCurrency: RaffleCurrency | null
   isProfitable: boolean
+  /**
+   * Surplus shown as “Amount over threshold” in the raffle UI.
+   * Uses the same decimal rounding as the UI (USDC 2dp, SOL/OWL 4dp) so float noise
+   * does not show a false “+” when revenue and the bar match in practice (e.g. ticket sum vs min×price).
+   */
+  surplusOverThreshold: number | null
+}
+
+/** Aligns with raffle detail display: USDC 2 decimals, SOL/OWL 4. */
+function roundForProfitDisplay(n: number, currency: RaffleCurrency): number {
+  const decimals = currency === 'USDC' ? 2 : 4
+  const f = 10 ** decimals
+  return Math.round(n * f) / f
 }
 
 /**
@@ -116,8 +129,9 @@ function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): nu
 
 /**
  * Compute profitability for a raffle from its entries.
- * `isProfitable` is true when revenue (in threshold currency) is **strictly greater** than the threshold
- * (break-even line). Claims and draws do not read this; see {@link getRaffleThreshold}.
+ * `isProfitable` is true when rounded display revenue (in threshold currency) is **strictly greater** than
+ * the rounded threshold — avoids IEEE float glitches vs {@link getRaffleThreshold}’s `minTickets * ticket_price`.
+ * Claims and draws do not read this; see {@link getRaffleThreshold}.
  */
 export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RaffleProfitInfo {
   const revenue = getRaffleRevenue(entries)
@@ -128,15 +142,23 @@ export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RafflePro
       threshold: null,
       thresholdCurrency: null,
       isProfitable: false,
+      surplusOverThreshold: null,
     }
   }
   const revenueInThreshold = revenueInCurrency(revenue, th.currency)
-  const isProfitable = revenueInThreshold > th.value
+  const rRounded = roundForProfitDisplay(revenueInThreshold, th.currency)
+  const tRounded = roundForProfitDisplay(th.value, th.currency)
+  const isProfitable = rRounded > tRounded
+  const surplusOverThreshold =
+    tRounded > 0 && rRounded > tRounded
+      ? roundForProfitDisplay(rRounded - tRounded, th.currency)
+      : null
   return {
     revenue,
     threshold: th.value,
     thresholdCurrency: th.currency,
     isProfitable,
+    surplusOverThreshold,
   }
 }
 
@@ -157,7 +179,9 @@ export function getRevShareAmounts(raffle: Raffle, entries: Entry[]): RevShareAm
   const out: RevShareAmounts = { founderSol: 0, founderUsdc: 0, communitySol: 0, communityUsdc: 0 }
   if (!th || th.currency === 'OWL') return out
   const revInCur = revenueInCurrency(revenue, th.currency)
-  const profit = Math.max(0, revInCur - th.value)
+  const rRounded = roundForProfitDisplay(revInCur, th.currency)
+  const tRounded = roundForProfitDisplay(th.value, th.currency)
+  const profit = Math.max(0, rRounded - tRounded)
   const half = profit * 0.5
   if (th.currency === 'SOL') {
     out.founderSol = half

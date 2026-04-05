@@ -3161,9 +3161,7 @@ export function RaffleDetailClient({
               const cur = profitInfo.thresholdCurrency ?? raffle.currency
               const revenueInCur = cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
               const threshold = profitInfo.threshold
-              const amountOver = threshold != null && threshold > 0 && revenueInCur > threshold
-                ? revenueInCur - threshold
-                : null
+              const amountOver = profitInfo.surplusOverThreshold
               const thresholdLabel =
                 raffle.prize_type === 'nft' ? 'Revenue threshold' : 'Threshold'
               return (
