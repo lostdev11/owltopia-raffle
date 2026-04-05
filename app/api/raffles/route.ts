@@ -15,6 +15,12 @@ import { filterRafflesByPendingVisibility } from '@/lib/raffles/visibility'
 import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
+import {
+  NFT_RAFFLE_MIN_TICKETS,
+  parseNftFloorPrice,
+  computeNftTicketPriceFromFloor,
+  validateNftMaxTickets,
+} from '@/lib/raffles/nft-raffle-economics'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -230,24 +236,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Parse min_tickets safely - default to minTickets if both minTickets and minParticipants exist
-    let minTickets: number | null = null
-    if (body.min_tickets != null && body.min_tickets !== '') {
-      const parsed = typeof body.min_tickets === 'number' 
-        ? body.min_tickets 
-        : parseInt(String(body.min_tickets), 10)
-      if (!isNaN(parsed) && parsed > 0) {
-        minTickets = parsed
+    let maxTickets: number | null = null
+    if (body.max_tickets != null && body.max_tickets !== '') {
+      const parsed =
+        typeof body.max_tickets === 'number' ? body.max_tickets : parseInt(String(body.max_tickets), 10)
+      if (isNaN(parsed) || parsed <= 0) {
+        return NextResponse.json({ error: 'max_tickets must be a positive integer when set.' }, { status: 400 })
       }
-    } else if (body.minParticipants != null && body.minParticipants !== '') {
-      // Fallback to minParticipants if min_tickets not provided
-      const parsed = typeof body.minParticipants === 'number' 
-        ? body.minParticipants 
-        : parseInt(String(body.minParticipants), 10)
-      if (!isNaN(parsed) && parsed > 0) {
-        minTickets = parsed
-      }
+      maxTickets = parsed
     }
+
+    const fpParsed = parseNftFloorPrice(body.floor_price)
+    if (!fpParsed.ok) {
+      return NextResponse.json({ error: fpParsed.error }, { status: 400 })
+    }
+    const maxCheck = validateNftMaxTickets(maxTickets)
+    if (!maxCheck.ok) {
+      return NextResponse.json({ error: maxCheck.error }, { status: 400 })
+    }
+
+    const minTickets = NFT_RAFFLE_MIN_TICKETS
+    const ticketPriceNum = computeNftTicketPriceFromFloor(fpParsed.value)
 
     // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day). Admins: no limit.
     const adminRole = await getAdminRole(walletAddress)
@@ -273,7 +282,7 @@ export async function POST(request: NextRequest) {
 
     // Parse optional metadata fields
     const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
-    const floorPrice = body.floor_price && body.floor_price.trim() ? body.floor_price.trim() : null
+    const floorPrice = fpParsed.string
 
     // Build raffle data - only include NFT fields if this is an NFT prize
     const raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'> = {
@@ -293,9 +302,9 @@ export async function POST(request: NextRequest) {
       nft_collection_name: prizeType === 'nft' ? (body.nft_collection_name || null) : null,
       nft_token_id: prizeType === 'nft' ? nftTokenId : null,
       nft_metadata_uri: prizeType === 'nft' ? (body.nft_metadata_uri || null) : null,
-      ticket_price: body.ticket_price,
+      ticket_price: ticketPriceNum,
       currency: body.currency || 'SOL',
-      max_tickets: body.max_tickets ? parseInt(body.max_tickets) : null,
+      max_tickets: maxTickets,
       min_tickets: minTickets,
       start_time: startTime,
       end_time: body.end_time,

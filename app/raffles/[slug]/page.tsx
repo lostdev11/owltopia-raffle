@@ -102,8 +102,13 @@ export default async function RaffleDetailPage({
   const endTimeToCheck = new Date(raffle.end_time)
   const hasEnded = endTimeToCheck <= now
   const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
+  // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
+  // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.
+  const mayAutoDraw =
+    (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+    !(raffle.prize_type === 'nft' && !raffle.prize_deposited_at)
 
-  if (hasEnded && hasNoWinner && raffle.is_active) {
+  if (hasEnded && hasNoWinner && mayAutoDraw) {
     try {
       // Get entries to check eligibility
       const entries = await getEntriesByRaffleId(raffle.id)

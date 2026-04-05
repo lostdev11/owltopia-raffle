@@ -17,6 +17,11 @@ import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import { canSelectWinner, isRaffleEligibleToDraw, calculateTicketsSold } from '@/lib/db/raffles'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
+import {
+  NFT_RAFFLE_MIN_TICKETS,
+  computeNftTicketPriceFromFloor,
+  parseNftFloorPrice,
+} from '@/lib/raffles/nft-raffle-economics'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -70,6 +75,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [returnNftDialogOpen, setReturnNftDialogOpen] = useState(false)
   const [returningNft, setReturningNft] = useState(false)
   const [returnNftReason, setReturnNftReason] = useState<string>('cancelled')
+  const isDraft = (raffle.status ?? '').toLowerCase() === 'draft'
+  const isDraftNft = isDraft && raffle.prize_type === 'nft'
+  const isNonDraftNft = !isDraft && raffle.prize_type === 'nft'
+  const [nftDraftFloor, setNftDraftFloor] = useState(raffle.floor_price ?? '')
+  useEffect(() => {
+    setNftDraftFloor(raffle.floor_price ?? '')
+  }, [raffle.id, raffle.floor_price])
+  const nftDraftTicketLabel = useMemo(() => {
+    if (!isDraftNft) return ''
+    const p = parseNftFloorPrice(nftDraftFloor)
+    if (!p.ok) return '—'
+    const n = computeNftTicketPriceFromFloor(p.value)
+    return n >= 1 ? n.toFixed(2) : n >= 0.01 ? n.toFixed(4) : n.toFixed(6)
+  }, [isDraftNft, nftDraftFloor])
   const hasSettlement =
     !!raffle.settled_at &&
     raffle.platform_fee_amount != null &&
@@ -174,23 +193,41 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
 
     setLoading(true)
     const maxTicketsValue = formData.get('max_tickets') as string
-    const minTicketsValue = formData.get('min_tickets') as string
     const rankValue = formData.get('rank') as string
-    const floorPriceValue = formData.get('floor_price') as string
+
     const data: Record<string, unknown> = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
-      ticket_price: parseFloat(formData.get('ticket_price') as string),
-      currency: formData.get('currency') as string,
-      max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
-      min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
-      rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
-      floor_price: floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null,
       start_time: localDateTimeToUtc(startTimeValue),
       end_time: localDateTimeToUtc(endTimeValue),
       theme_accent: formData.get('theme_accent') as string,
       status: formData.get('status') as string,
       wallet_address: publicKey.toBase58(),
+      rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
+    }
+
+    if (isDraftNft) {
+      const fp = parseNftFloorPrice(nftDraftFloor)
+      if (!fp.ok) {
+        alert(fp.error)
+        setLoading(false)
+        return
+      }
+      data.ticket_price = computeNftTicketPriceFromFloor(fp.value)
+      data.currency = formData.get('currency') as string
+      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      data.min_tickets = NFT_RAFFLE_MIN_TICKETS
+      data.floor_price = fp.string
+    } else if (isNonDraftNft) {
+      // Server keeps existing pricing; do not send fields that could clear columns.
+    } else {
+      const minTicketsValue = formData.get('min_tickets') as string
+      const floorPriceValue = formData.get('floor_price') as string
+      data.ticket_price = parseFloat(formData.get('ticket_price') as string)
+      data.currency = formData.get('currency') as string
+      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      data.min_tickets = minTicketsValue ? parseInt(minTicketsValue, 10) : null
+      data.floor_price = floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null
     }
     if (adminRole === 'full') {
       const fb = (formData.get('image_fallback_url') as string)?.trim()
@@ -1014,92 +1051,209 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="ticket_price">Ticket Price *</Label>
-                  <Input
-                    id="ticket_price"
-                    name="ticket_price"
-                    type="number"
-                    step="0.000001"
-                    defaultValue={raffle.ticket_price}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="currency">Currency *</Label>
-                  <select
-                    id="currency"
-                    name="currency"
-                    defaultValue={raffle.currency}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    required
-                  >
-                    <option value="SOL">SOL</option>
-                    <option value="USDC">USDC</option>
-                    {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="max_tickets">Max Tickets (optional)</Label>
-                <Input
-                  id="max_tickets"
-                  name="max_tickets"
-                  type="number"
-                  min="1"
-                  defaultValue={raffle.max_tickets || ''}
-                  placeholder="Leave empty for unlimited tickets"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
-                <Input
-                  id="min_tickets"
-                  name="min_tickets"
-                  type="number"
-                  min="1"
-                  defaultValue={raffle.min_tickets || '50'}
-                  placeholder="50 (recommended)"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="rank">Rank (optional)</Label>
-                  <Input
-                    id="rank"
-                    name="rank"
-                    type="text"
-                    defaultValue={raffle.rank || ''}
-                    placeholder="e.g., #123 or 123"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Optional rank metadata (text or integer)
+              {isNonDraftNft ? (
+                <div className="rounded-md border border-border px-3 py-2.5 text-sm space-y-1.5 text-muted-foreground">
+                  <p className="font-medium text-foreground">Ticket economics (locked)</p>
+                  <p>
+                    <span className="text-foreground font-medium">Currency:</span> {raffle.currency}
+                  </p>
+                  <p>
+                    <span className="text-foreground font-medium">Floor price:</span> {raffle.floor_price ?? '—'}
+                  </p>
+                  <p>
+                    <span className="text-foreground font-medium">Ticket price:</span> {raffle.ticket_price ?? '—'}
+                  </p>
+                  <p>
+                    <span className="text-foreground font-medium">Draw goal:</span> {raffle.min_tickets ?? '—'} tickets
+                  </p>
+                  <p>
+                    <span className="text-foreground font-medium">Max tickets:</span>{' '}
+                    {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
+                  </p>
+                  <p className="text-xs pt-1">
+                    These values cannot be changed after the raffle leaves draft. New NFT drafts always use a fixed{' '}
+                    {NFT_RAFFLE_MIN_TICKETS}-ticket goal and ticket price = floor ÷ {NFT_RAFFLE_MIN_TICKETS}.
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="floor_price">Floor Price (prize value for NFT)</Label>
-                  <Input
-                    id="floor_price"
-                    name="floor_price"
-                    type="text"
-                    defaultValue={raffle.floor_price || ''}
-                    placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
-                  </p>
-                </div>
-              </div>
+              ) : isDraftNft ? (
+                <>
+                  <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                    Draft NFT raffles use a fixed draw goal of {NFT_RAFFLE_MIN_TICKETS} tickets and ticket price = floor
+                    ÷ {NFT_RAFFLE_MIN_TICKETS}. Misleading floor prices may result in removal.
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="currency">Currency *</Label>
+                      <select
+                        id="currency"
+                        name="currency"
+                        defaultValue={raffle.currency}
+                        className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+                        required
+                      >
+                        <option value="SOL">SOL</option>
+                        <option value="USDC">USDC</option>
+                        {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ticket_price_display">Ticket price (auto)</Label>
+                      <Input
+                        id="ticket_price_display"
+                        readOnly
+                        className="bg-muted/50 min-h-[44px] touch-manipulation"
+                        value={nftDraftTicketLabel}
+                      />
+                      <p className="text-xs text-muted-foreground">Floor ÷ {NFT_RAFFLE_MIN_TICKETS}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="max_tickets">Max tickets (optional)</Label>
+                    <Input
+                      id="max_tickets"
+                      name="max_tickets"
+                      type="number"
+                      min={NFT_RAFFLE_MIN_TICKETS}
+                      defaultValue={raffle.max_tickets || ''}
+                      placeholder="Leave empty for unlimited"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      If set, must be at least {NFT_RAFFLE_MIN_TICKETS} (the draw goal), or leave empty for unlimited.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">Draw goal:</span> {NFT_RAFFLE_MIN_TICKETS} tickets
+                    (fixed).
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="rank">Rank (optional)</Label>
+                      <Input
+                        id="rank"
+                        name="rank"
+                        type="text"
+                        defaultValue={raffle.rank || ''}
+                        placeholder="e.g., #123 or 123"
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                      <p className="text-xs text-muted-foreground">Optional rank metadata (text or integer)</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                      <Input
+                        id="floor_price"
+                        name="floor_price"
+                        type="text"
+                        inputMode="decimal"
+                        value={nftDraftFloor}
+                        onChange={(e) => setNftDraftFloor(e.target.value)}
+                        placeholder="e.g., 0.25 (in raffle currency)"
+                        className="min-h-[44px] touch-manipulation"
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Revenue threshold for rev share; ticket price is derived from this value.
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="ticket_price">Ticket Price *</Label>
+                      <Input
+                        id="ticket_price"
+                        name="ticket_price"
+                        type="number"
+                        step="0.000001"
+                        defaultValue={raffle.ticket_price}
+                        required
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="currency">Currency *</Label>
+                      <select
+                        id="currency"
+                        name="currency"
+                        defaultValue={raffle.currency}
+                        className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+                        required
+                      >
+                        <option value="SOL">SOL</option>
+                        <option value="USDC">USDC</option>
+                        {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="max_tickets">Max Tickets (optional)</Label>
+                    <Input
+                      id="max_tickets"
+                      name="max_tickets"
+                      type="number"
+                      min="1"
+                      defaultValue={raffle.max_tickets || ''}
+                      placeholder="Leave empty for unlimited tickets"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
+                    <Input
+                      id="min_tickets"
+                      name="min_tickets"
+                      type="number"
+                      min="1"
+                      defaultValue={raffle.min_tickets || '50'}
+                      placeholder="50 (recommended)"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="rank">Rank (optional)</Label>
+                      <Input
+                        id="rank"
+                        name="rank"
+                        type="text"
+                        defaultValue={raffle.rank || ''}
+                        placeholder="e.g., #123 or 123"
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Optional rank metadata (text or integer)
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="floor_price">Floor Price (prize value for NFT)</Label>
+                      <Input
+                        id="floor_price"
+                        name="floor_price"
+                        type="text"
+                        defaultValue={raffle.floor_price || ''}
+                        placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to
+                        rev share.
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="status">Status *</Label>

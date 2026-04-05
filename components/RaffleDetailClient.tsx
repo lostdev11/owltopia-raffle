@@ -3175,7 +3175,19 @@ export function RaffleDetailClient({
                         <p className={classes.contentText + ' font-semibold text-emerald-600 dark:text-emerald-400'}>
                           +{amountOver.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
                         </p>
+                        <p className={classes.labelText + ' text-muted-foreground mt-1.5'}>
+                          That surplus is profit you keep above the cost side you set (prize, floor, or draw minimum). Net
+                          ticket payout after the platform fee still uses your <span className="font-medium text-foreground">total</span>{' '}
+                          gross sales—the dashboard shows that settled total after the draw.
+                        </p>
                       </div>
+                    )}
+                    {threshold != null && threshold > 0 && (amountOver == null || amountOver <= 0) && (
+                      <p className={classes.labelText + ' text-muted-foreground'}>
+                        Profit above the threshold is ticket revenue past this bar. Until you are over it, there is no surplus
+                        yet. Net payout after fees always reflects <span className="font-medium text-foreground">all</span>{' '}
+                        sales once the raffle settles.
+                      </p>
                     )}
                   </div>
                 </div>

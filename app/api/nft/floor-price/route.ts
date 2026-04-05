@@ -28,10 +28,12 @@ export async function GET(request: NextRequest) {
 
     const heliusApiKey = process.env.HELIUS_API_KEY?.trim()
     if (!heliusApiKey) {
-      return NextResponse.json(
-        { error: 'Floor price API not configured' },
-        { status: 503 }
-      )
+      return NextResponse.json({
+        floorPrice: null,
+        currency: null,
+        source: 'unconfigured' as const,
+        message: 'Automatic floor price is not configured. Enter the prize value manually in your raffle currency.',
+      })
     }
 
     const res = await fetch(
@@ -50,10 +52,12 @@ export async function GET(request: NextRequest) {
     )
 
     if (!res.ok) {
-      return NextResponse.json(
-        { error: 'Failed to fetch asset' },
-        { status: 502 }
-      )
+      return NextResponse.json({
+        floorPrice: null,
+        currency: null,
+        source: 'error' as const,
+        message: 'Could not fetch price data. Enter the floor price manually.',
+      })
     }
 
     const json: {
@@ -62,10 +66,12 @@ export async function GET(request: NextRequest) {
     } = await res.json().catch(() => ({}))
 
     if (json.error) {
-      return NextResponse.json(
-        { error: json.error.message || 'Failed to fetch asset' },
-        { status: 502 }
-      )
+      return NextResponse.json({
+        floorPrice: null,
+        currency: null,
+        source: 'error' as const,
+        message: json.error.message || 'Could not fetch price data. Enter the floor price manually.',
+      })
     }
 
     const priceInfo = json.result?.token_info?.price_info
@@ -77,7 +83,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         floorPrice: null,
         currency: null,
-        message: 'No price data for this NFT (may be outside top 10k by volume).',
+        source: 'none' as const,
+        message:
+          'No automatic price for this NFT (common for low-volume items). Enter a fair floor price manually in your raffle currency.',
       })
     }
 
@@ -93,10 +101,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       floorPrice,
       currency,
+      source: 'helius' as const,
+      message: null as string | null,
     })
   } catch (error) {
     console.error('Error fetching NFT floor price:', error)
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({
+      floorPrice: null,
+      currency: null,
+      source: 'error' as const,
+      message: 'Something went wrong loading price data. Enter the floor price manually.',
+    })
   }
 }

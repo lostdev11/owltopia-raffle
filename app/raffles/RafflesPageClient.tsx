@@ -27,6 +27,7 @@ import { MarkdownContent } from '@/components/MarkdownContent'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
+import { RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT } from '@/lib/raffles/list-query-statuses'
 import { RAFFLES_PAGE_SERVER_REFRESH_MS } from '@/lib/dev-budget'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
@@ -290,7 +291,7 @@ export function RafflesPageClient({
         const { data, error } = await supabase
           .from('raffles')
           .select('*')
-          .in('status', ['draft', 'live', 'ready_to_draw', 'completed', 'cancelled'])
+          .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
           .order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
@@ -457,7 +458,7 @@ export function RafflesPageClient({
         const { data, error } = await supabase
           .from('raffles')
           .select('*')
-          .in('status', ['draft', 'live', 'ready_to_draw', 'completed'])
+          .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
           .order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)

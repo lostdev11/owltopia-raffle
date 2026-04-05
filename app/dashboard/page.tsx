@@ -38,6 +38,9 @@ type Raffle = {
   currency: string
   end_time: string
   prize_type?: string | null
+  prize_deposited_at?: string | null
+  winner_wallet?: string | null
+  winner_selected_at?: string | null
   cancellation_requested_at?: string | null
   ticket_payments_to_funds_escrow?: boolean | null
   creator_claimed_at?: string | null
@@ -93,6 +96,13 @@ function canClaimNftPrize(raffle: EntryWithRaffle['raffle'], wallet: string): bo
 function solscanTxUrl(signature: string): string {
   const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
   return `https://solscan.io/tx/${encodeURIComponent(signature)}${dev ? '?cluster=devnet' : ''}`
+}
+
+/** Readable status for creator list (DB uses snake_case; some states need clearer wording). */
+function myRaffleStatusLabel(status: string | null): string {
+  const s = status ?? 'draft'
+  if (s === 'successful_pending_claims') return 'Settled — claim proceeds'
+  return s.replace(/_/g, ' ')
 }
 
 type DashboardData = {
@@ -550,6 +560,20 @@ export default function DashboardPage() {
     })
   }, [myRafflesForMemo, data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds])
 
+  /** End time passed, still live/ready_to_draw, no winner — claim button cannot appear until draw runs. */
+  const creatorRafflesEndedAwaitingDraw = useMemo(() => {
+    const nowMs = Date.now()
+    return myRafflesForMemo.filter((r) => {
+      if (!raffleUsesFundsEscrow(r)) return false
+      if (r.status !== 'live' && r.status !== 'ready_to_draw') return false
+      const endMs = new Date(r.end_time).getTime()
+      if (Number.isNaN(endMs) || endMs > nowMs) return false
+      if (r.winner_wallet?.trim() || r.winner_selected_at) return false
+      if (r.prize_type === 'nft' && !r.prize_deposited_at) return false
+      return true
+    })
+  }, [myRafflesForMemo])
+
   const claimTrackerLiveSales = useMemo(() => {
     const s = data?.claimTrackerLiveFundsEscrowSales
     if (!s || typeof s !== 'object') {
@@ -983,7 +1007,9 @@ export default function DashboardPage() {
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 {pendingCreatorFundClaims.length} raffle
-                {pendingCreatorFundClaims.length === 1 ? '' : 's'} settled — claim below
+                {pendingCreatorFundClaims.length === 1 ? '' : 's'} settled — use{' '}
+                <span className="font-medium text-foreground">Claim now</span> in this card or{' '}
+                <span className="font-medium text-foreground">Creator funds</span> below
               </p>
               <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (net in escrow)</p>
               <p className="text-base font-semibold tabular-nums break-words">
@@ -1019,6 +1045,47 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {pendingCreatorFundClaims.length > 0 && (
+            <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/[0.09] p-3 sm:p-4">
+              <p className="text-sm font-semibold text-foreground mb-1">Claim now — ticket proceeds (funds escrow)</p>
+              <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                One transaction sends your net share to this wallet and the platform fee to treasury. Same action as in
+                “Creator funds” below.
+              </p>
+              <ul className="space-y-3">
+                {pendingCreatorFundClaims.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/30 pb-3 last:border-0 last:pb-0"
+                  >
+                    <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate min-w-0">
+                      {r.title}
+                    </Link>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
+                      disabled={claimProceedsLoadingId === r.id}
+                      onClick={() => handleClaimProceeds(r.id)}
+                    >
+                      {claimProceedsLoadingId === r.id ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Claiming…
+                        </>
+                      ) : (
+                        <>
+                          <Coins className="h-4 w-4 mr-2" />
+                          Claim funds
+                        </>
+                      )}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {awaitingSettlementEscrowClaims.length > 0 && (
             <div>
               <p className="text-sm font-medium text-foreground mb-2">
@@ -1051,11 +1118,40 @@ export default function DashboardPage() {
                 {liveEscrowRaffles.length === 1 ? '' : 's'})
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Live and ready-to-draw raffles keep gross proceeds in escrow until the draw. Watch{' '}
+                Live and ready-to-draw raffles keep gross proceeds in escrow until the draw. The top row stays “—” until
+                a winner is drawn; then your net and fee move to “ready to claim.” Watch{' '}
                 <span className="font-medium text-foreground">Creator revenue</span> and{' '}
-                <span className="font-medium text-foreground">All-time gross ticket sales</span> above for numbers as
-                purchases confirm.
+                <span className="font-medium text-foreground">All-time gross ticket sales</span> above as purchases
+                confirm.
               </p>
+            </div>
+          )}
+
+          {creatorRafflesEndedAwaitingDraw.length > 0 && (
+            <div
+              className="rounded-lg border border-amber-500/40 bg-amber-500/[0.07] p-3"
+              role="status"
+            >
+              <p className="text-sm font-medium text-foreground">End time passed — winner draw still pending</p>
+              <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                Your claim button only appears <span className="font-medium text-foreground">after</span> a winner is
+                chosen and settlement is recorded. Open each raffle page once to run the draw immediately, or wait for
+                the automatic job (about every 15 minutes).
+              </p>
+              <ul className="mt-2.5 space-y-1.5 text-sm">
+                {creatorRafflesEndedAwaitingDraw.slice(0, 10).map((r) => (
+                  <li key={r.id}>
+                    <Link href={`/raffles/${r.slug}`} className="text-primary font-medium hover:underline">
+                      {r.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {creatorRafflesEndedAwaitingDraw.length > 10 && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  +{creatorRafflesEndedAwaitingDraw.length - 10} more in My raffles below
+                </p>
+              )}
             </div>
           )}
 
@@ -1122,6 +1218,27 @@ export default function DashboardPage() {
                   </li>
                 ))}
               </ul>
+            ) : creatorRafflesEndedAwaitingDraw.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Nothing to claim yet: these raffles are past their end time but still need a winner draw before
+                  proceeds unlock. Open the raffle (or wait ~15 minutes for the automatic draw).
+                </p>
+                <ul className="text-sm space-y-1">
+                  {creatorRafflesEndedAwaitingDraw.slice(0, 6).map((r) => (
+                    <li key={r.id}>
+                      <Link href={`/raffles/${r.slug}`} className="text-primary font-medium hover:underline">
+                        {r.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : liveEscrowRaffles.length > 0 ? (
+              <p className="text-sm text-muted-foreground">
+                You have ticket sales in funds escrow, but the raffle has not finished yet (or the winner draw has not
+                run). The claim button appears here only after the end time passes and a winner is drawn.
+              </p>
             ) : (
               <p className="text-sm text-muted-foreground">
                 Nothing to claim here right now. After a raffle you created has settled (winner drawn and payout amounts
@@ -1269,7 +1386,7 @@ export default function DashboardPage() {
                         </span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground flex-wrap justify-end">
-                        <span className="capitalize">{(r.status ?? 'draft').replace(/_/g, ' ')}</span>
+                        <span className="capitalize">{myRaffleStatusLabel(r.status)}</span>
                         {r.status === 'successful_pending_claims' &&
                           raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
@@ -1401,8 +1518,49 @@ export default function DashboardPage() {
                         </p>
                         <p>
                           <span className="font-medium text-foreground">Status:</span>{' '}
-                          <span className="capitalize">{r.status ?? 'draft'}</span>
+                          <span className="capitalize">{myRaffleStatusLabel(r.status)}</span>
                         </p>
+                        {r.status === 'completed' && (
+                          <div className="text-xs text-muted-foreground space-y-2 pt-1 border-t border-border/40 mt-2">
+                            {raffleUsesFundsEscrow(r) && r.creator_claim_tx?.trim() ? (
+                              <p>
+                                Ticket proceeds from escrow were already sent to your creator wallet in{' '}
+                                <a
+                                  href={solscanTxUrl(r.creator_claim_tx.trim())}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary underline underline-offset-2 inline-flex items-center gap-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  this Solscan transaction
+                                  <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                                </a>
+                                . There is no second claim after the raffle shows completed.
+                              </p>
+                            ) : null}
+                            {raffleUsesFundsEscrow(r) && !r.creator_claim_tx?.trim() ? (
+                              <p>
+                                This raffle is marked completed but no on-chain proceeds transaction is on file. If you
+                                never completed &ldquo;Claim proceeds,&rdquo; contact support with this raffle so the team
+                                can reconcile escrow and your wallet.
+                              </p>
+                            ) : null}
+                            {!raffleUsesFundsEscrow(r) ? (
+                              <p>
+                                This raffle used per-purchase payment splits: your share of each ticket arrived when
+                                buyers paid. There is no separate claim after the draw. The payout figure above is your
+                                recorded net from those sales.
+                              </p>
+                            ) : null}
+                            <p>
+                              On the raffle page, <span className="font-medium text-foreground">Amount over threshold</span>{' '}
+                              is profit above your configured prize value, NFT floor, or draw minimum—what you keep as surplus
+                              once ticket revenue passes that bar. The <span className="font-medium text-foreground">Payout</span>{' '}
+                              line here is your net from <span className="font-medium text-foreground">all</span> ticket
+                              sales after the platform fee, not only the over-threshold portion.
+                            </p>
+                          </div>
+                        )}
                         {(r.status === 'live' || r.status === 'ready_to_draw') && !r.cancellation_requested_at && (
                           <p>
                             <Button

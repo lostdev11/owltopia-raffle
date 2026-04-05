@@ -37,17 +37,19 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
 /**
  * Get the profit threshold for a raffle (cost to cover).
  *
- * 1) Explicit prize_amount / prize_currency when set and positive.
+ * 1) Explicit prize_amount / prize_currency when set and positive (non-NFT / crypto prizes only).
  * 2) When min_tickets is set: min_tickets * ticket_price in raffle.currency (so "Draw Threshold: 80"
  *    tickets at 1 USDC each = 80 USDC revenue threshold).
  * 3) Else: floor_price in raffle.currency (e.g. NFT prize value).
  */
 export function getRaffleThreshold(raffle: Raffle): { value: number; currency: RaffleCurrency } | null {
-  // 1) Explicit prize_amount / prize_currency when set and positive
-  const amount = raffle.prize_amount != null ? Number(raffle.prize_amount) : NaN
-  const currency = (raffle.prize_currency || raffle.currency || '').toUpperCase()
-  if (Number.isFinite(amount) && amount > 0 && (currency === 'SOL' || currency === 'USDC' || currency === 'OWL')) {
-    return { value: amount, currency: currency as RaffleCurrency }
+  // 1) Explicit prize_amount / prize_currency for non-NFT (crypto cash prizes). NFT raffles always use floor_price.
+  if ((raffle.prize_type || '').toLowerCase() !== 'nft') {
+    const amount = raffle.prize_amount != null ? Number(raffle.prize_amount) : NaN
+    const currency = (raffle.prize_currency || raffle.currency || '').toUpperCase()
+    if (Number.isFinite(amount) && amount > 0 && (currency === 'SOL' || currency === 'USDC' || currency === 'OWL')) {
+      return { value: amount, currency: currency as RaffleCurrency }
+    }
   }
 
   // 2) For crypto raffles: draw threshold in revenue = min_tickets * ticket_price

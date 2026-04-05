@@ -5,6 +5,12 @@ import { getAdminRole } from '@/lib/db/admins'
 import { isOwlEnabled } from '@/lib/tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { checkEscrowHoldsNft, transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
+import {
+  NFT_RAFFLE_MIN_TICKETS,
+  parseNftFloorPrice,
+  computeNftTicketPriceFromFloor,
+  validateNftMaxTickets,
+} from '@/lib/raffles/nft-raffle-economics'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -95,6 +101,7 @@ export async function PATCH(
     const status = (existingRaffle.status ?? '').toLowerCase()
     const isDraft = status === 'draft'
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
+    const isNft = existingRaffle.prize_type === 'nft'
 
     // Validate currency: SOL, USDC, and OWL when enabled
     const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
@@ -314,6 +321,36 @@ export async function PATCH(
         )
       }
       updates.status = body.status
+    }
+
+    if (isNft) {
+      updates.prize_amount = null
+      updates.prize_currency = null
+      if (!isDraft) {
+        updates.floor_price = existingRaffle.floor_price
+        updates.ticket_price = existingRaffle.ticket_price
+        updates.min_tickets = existingRaffle.min_tickets
+        updates.max_tickets = existingRaffle.max_tickets
+        updates.currency = existingRaffle.currency
+      } else {
+        const rawFloor =
+          body.floor_price !== undefined &&
+          body.floor_price !== null &&
+          String(body.floor_price).trim()
+            ? String(body.floor_price).trim()
+            : existingRaffle.floor_price
+        const fp = parseNftFloorPrice(rawFloor)
+        if (!fp.ok) {
+          return NextResponse.json({ error: fp.error }, { status: 400 })
+        }
+        const maxOk = validateNftMaxTickets(maxTickets)
+        if (!maxOk.ok) {
+          return NextResponse.json({ error: maxOk.error }, { status: 400 })
+        }
+        updates.min_tickets = NFT_RAFFLE_MIN_TICKETS
+        updates.ticket_price = computeNftTicketPriceFromFloor(fp.value)
+        updates.floor_price = fp.string
+      }
     }
 
     const raffle = await updateRaffle(raffleId, updates)

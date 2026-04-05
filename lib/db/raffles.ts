@@ -12,6 +12,11 @@ import {
 import { countUnrefundedConfirmedEntries } from '@/lib/db/entries'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleWinnerDrawn } from '@/lib/discord-raffle-webhooks'
+import {
+  RAFFLES_PUBLIC_LIST_STATUSES,
+  RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT,
+  rafflesRestStatusInClause,
+} from '@/lib/raffles/list-query-statuses'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -245,25 +250,10 @@ function isRetryableMessage(rawMessage: string): boolean {
 }
 
 /** Status values for public raffle listing (excludes draft and cancelled) */
-const PUBLIC_STATUSES = [
-  'live',
-  'ready_to_draw',
-  'completed',
-  'successful_pending_claims',
-  'failed_refund_available',
-] as const
+const PUBLIC_STATUSES = RAFFLES_PUBLIC_LIST_STATUSES
 
-/** Status values when admin needs to see drafts and cancelled */
-const ALL_STATUSES = [
-  'draft',
-  'live',
-  'ready_to_draw',
-  'completed',
-  'cancelled',
-  'pending_min_not_met',
-  'successful_pending_claims',
-  'failed_refund_available',
-] as const
+/** Status values when listing includes drafts and cancelled (public /raffles with includeDraft) */
+const ALL_STATUSES = RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT
 
 /**
  * Public list uses direct REST for cold-start resilience. Must be high enough that older **live**
@@ -325,10 +315,7 @@ async function fetchRafflesViaRestRaw(
   includeDraft: boolean = false
 ): Promise<Raffle[]> {
   const url = new URL(`${baseUrl}/rest/v1/raffles`)
-  const statusFilter = includeDraft
-    ? 'in.(draft,live,ready_to_draw,completed,cancelled)'
-    : 'in.(live,ready_to_draw,completed)'
-  url.searchParams.set('status', statusFilter)
+  url.searchParams.set('status', rafflesRestStatusInClause(includeDraft, activeOnly))
   if (activeOnly) url.searchParams.set('is_active', 'is.true')
   url.searchParams.set('order', 'created_at.desc,id.desc')
   url.searchParams.set('limit', String(getRafflesRestListLimit()))
@@ -462,7 +449,7 @@ export async function getRafflesViaRest(
 
 /**
  * Fetch raffles for public list. No wallet filter — public list shows all raffles.
- * - activeOnly=false, includeDraft=false: fetches status IN ('live','ready_to_draw','completed') — excludes draft
+ * - activeOnly=false, includeDraft=false: same statuses as RAFFLES_PUBLIC_LIST_STATUSES (incl. successful_pending_claims)
  * - activeOnly=true: fetches status IN ('live','ready_to_draw') — active raffles only
  * - includeDraft=true: fetches all statuses including draft (for admin)
  * Does a single Supabase round-trip (no separate migration check) to avoid upstream timeouts.

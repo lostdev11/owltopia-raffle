@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -46,6 +46,10 @@ import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import { isOwlEnabled } from '@/lib/tokens'
 import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import {
+  NFT_RAFFLE_MIN_TICKETS,
+  computeNftTicketPriceFromFloor,
+} from '@/lib/raffles/nft-raffle-economics'
 
 export function CreateRaffleForm() {
   const router = useRouter()
@@ -80,37 +84,65 @@ export function CreateRaffleForm() {
   const [floorPrice, setFloorPrice] = useState('')
   const [floorPriceLoading, setFloorPriceLoading] = useState(false)
   const [floorPriceCurrency, setFloorPriceCurrency] = useState<string | null>(null)
+  const [floorPriceAutoNote, setFloorPriceAutoNote] = useState<string | null>(null)
+  const [raffleCurrency, setRaffleCurrency] = useState('SOL')
   const [ticketPrice, setTicketPrice] = useState('')
-  const minTicketsInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!selectedNft) {
       setFloorPrice('')
       setFloorPriceLoading(false)
       setFloorPriceCurrency(null)
+      setFloorPriceAutoNote(null)
       setTicketPrice('')
       return
     }
     let cancelled = false
     setFloorPriceLoading(true)
     setFloorPriceCurrency(null)
+    setFloorPriceAutoNote(null)
     fetch(`/api/nft/floor-price?mint=${encodeURIComponent(selectedNft.mint)}`, { credentials: 'include' })
       .then((r) => {
         if (cancelled) return undefined
-        if (!r.ok) return undefined
-        return r.json()
+        return r.json().then((data) => ({ ok: r.ok, data }))
       })
-      .then((data: { floorPrice?: string | null; currency?: string | null } | undefined) => {
-        if (cancelled) return
-        if (data?.floorPrice != null && data.floorPrice !== '') {
-          const fp = String(data.floorPrice)
-          setFloorPrice(fp)
-          setFloorPriceCurrency(data.currency ?? null)
-          updateTicketPriceFromFloor(fp)
+      .then(
+        (
+          wrapped:
+            | { ok: boolean; data: { floorPrice?: string | null; currency?: string | null; message?: string | null } }
+            | undefined
+        ) => {
+          if (cancelled) return
+          if (!wrapped) {
+            setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
+            return
+          }
+          const { ok, data } = wrapped
+          if (!ok) {
+            setFloorPriceAutoNote(
+              typeof data?.message === 'string' && data.message
+                ? data.message
+                : 'Could not check floor price. Enter the prize value manually in your raffle currency.'
+            )
+            return
+          }
+          if (data?.floorPrice != null && data.floorPrice !== '') {
+            const fp = String(data.floorPrice)
+            setFloorPrice(fp)
+            setFloorPriceCurrency(data.currency ?? null)
+            updateTicketPriceFromFloor(fp)
+            setFloorPriceAutoNote(typeof data.message === 'string' && data.message ? data.message : null)
+          } else if (typeof data?.message === 'string' && data.message) {
+            setFloorPriceAutoNote(data.message)
+          } else {
+            setFloorPriceAutoNote('No automatic price for this NFT. Enter a fair floor price in your raffle currency.')
+          }
         }
-      })
+      )
       .catch(() => {
-        if (!cancelled) setFloorPrice('')
+        if (!cancelled) {
+          setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
+        }
       })
       .finally(() => {
         if (!cancelled) setFloorPriceLoading(false)
@@ -118,7 +150,6 @@ export function CreateRaffleForm() {
     return () => { cancelled = true }
   }, [selectedNft?.mint])
 
-  // Auto-calculate ticket price from floor price: ticket = floor / min_tickets (default 50)
   const updateTicketPriceFromFloor = (floorValue: string) => {
     const trimmed = floorValue.trim()
     if (!trimmed) {
@@ -126,11 +157,14 @@ export function CreateRaffleForm() {
       return
     }
     const floor = parseFloat(trimmed)
-    const minTicketsRaw = minTicketsInputRef.current?.value?.trim()
-    const minTickets = minTicketsRaw ? parseInt(minTicketsRaw, 10) : 50
-    if (Number.isFinite(floor) && floor > 0 && minTickets > 0) {
-      const calculated = floor / minTickets
-      const formatted = calculated >= 1 ? calculated.toFixed(2) : calculated >= 0.01 ? calculated.toFixed(4) : calculated.toFixed(6)
+    if (Number.isFinite(floor) && floor > 0) {
+      const calculated = computeNftTicketPriceFromFloor(floor)
+      const formatted =
+        calculated >= 1
+          ? calculated.toFixed(2)
+          : calculated >= 0.01
+            ? calculated.toFixed(4)
+            : calculated.toFixed(6)
       setTicketPrice(formatted)
     }
   }
@@ -247,14 +281,18 @@ export function CreateRaffleForm() {
       }
     }
 
+    const formData = new FormData(e.currentTarget)
+    const floorPriceValue = (formData.get('floor_price') as string)?.trim() ?? ''
+    const fpNum = parseFloat(floorPriceValue)
+    if (!floorPriceValue || !Number.isFinite(fpNum) || fpNum <= 0) {
+      alert('Enter a valid floor price (prize value) in your raffle currency.')
+      return
+    }
+
     setCreateStep('saving')
     setLoading(true)
-
-    const formData = new FormData(e.currentTarget)
     const maxTicketsValue = formData.get('max_tickets') as string
-    const minTicketsValue = formData.get('min_tickets') as string
     const rankValue = formData.get('rank') as string
-    const floorPriceValue = formData.get('floor_price') as string
     const currency = (formData.get('currency') as string) || 'SOL'
     const data: Record<string, unknown> = {
       title: formData.get('title') as string,
@@ -263,9 +301,9 @@ export function CreateRaffleForm() {
       ticket_price: parseFloat(formData.get('ticket_price') as string),
       currency,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
-      min_tickets: minTicketsValue ? parseInt(minTicketsValue) : null,
+      min_tickets: NFT_RAFFLE_MIN_TICKETS,
       rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
-      floor_price: floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null,
+      floor_price: floorPriceValue,
       start_time: localDateTimeToUtc(startTime),
       end_time: localDateTimeToUtc(endTime),
       theme_accent: themeAccent,
@@ -759,36 +797,49 @@ export function CreateRaffleForm() {
               )}
             </div>
 
+          <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Fair listing</p>
+            <p className="mt-1">
+              The floor price you set is the advertised prize value and revenue threshold. Ticket price is always floor
+              ÷ {NFT_RAFFLE_MIN_TICKETS} (fixed draw goal). Misleading listings may be removed.
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="ticket_price">Ticket Price *</Label>
-              <Input
-                id="ticket_price"
-                name="ticket_price"
-                type="number"
-                step="0.000001"
-                required
-                className="text-base sm:text-sm"
-                value={ticketPrice ?? ''}
-                onChange={(e) => setTicketPrice(e.target.value)}
-              />
-              {floorPrice && ticketPrice && (
-                <p className="text-xs text-muted-foreground">Auto-calculated from floor ÷ goal. You can edit.</p>
-              )}
-            </div>
             <div className="space-y-2">
               <Label htmlFor="currency">Currency *</Label>
               <select
                 id="currency"
                 name="currency"
-                defaultValue="SOL"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={raffleCurrency}
+                onChange={(e) => setRaffleCurrency(e.target.value)}
+                className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                 required
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
                 {isOwlEnabled() && <option value="OWL">OWL</option>}
               </select>
+              <p className="text-xs text-muted-foreground">
+                Choose the currency buyers pay in. Floor price must be in this same currency.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ticket_price">Ticket price (auto)</Label>
+              <Input
+                id="ticket_price"
+                name="ticket_price"
+                type="number"
+                step="any"
+                required
+                readOnly
+                className="text-base sm:text-sm bg-muted/50 touch-manipulation min-h-[44px]"
+                value={ticketPrice ?? ''}
+                aria-describedby="ticket_price_help"
+              />
+              <p id="ticket_price_help" className="text-xs text-muted-foreground">
+                Floor ÷ {NFT_RAFFLE_MIN_TICKETS} tickets (not editable).
+              </p>
             </div>
           </div>
 
@@ -798,29 +849,18 @@ export function CreateRaffleForm() {
               id="max_tickets"
               name="max_tickets"
               type="number"
-              min="1"
+              min={NFT_RAFFLE_MIN_TICKETS}
               placeholder="Leave empty for unlimited tickets"
+              className="min-h-[44px] touch-manipulation"
             />
             <p className="text-xs text-muted-foreground">
               Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="min_tickets">Goal: Minimum Tickets Required (optional)</Label>
-            <Input
-              ref={minTicketsInputRef}
-              id="min_tickets"
-              name="min_tickets"
-              type="number"
-              min="1"
-              defaultValue="50"
-              placeholder="50 (recommended)"
-              onChange={() => floorPrice && updateTicketPriceFromFloor(floorPrice)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Raffle will only be eligible to draw once this minimum is reached. Recommended: 50 tickets.
-            </p>
+          <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">Draw goal:</span>{' '}
+            {NFT_RAFFLE_MIN_TICKETS} tickets (fixed). The raffle can draw once this many confirmed tickets are sold.
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -838,30 +878,43 @@ export function CreateRaffleForm() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="floor_price">
-                Floor Price (prize value for NFT)
+                Floor price (prize value) *
                 {floorPriceLoading && (
-                  <span className="ml-2 text-muted-foreground font-normal">Fetching…</span>
+                  <span className="ml-2 text-muted-foreground font-normal">Checking marketplace…</span>
                 )}
               </Label>
               <Input
                 id="floor_price"
                 name="floor_price"
                 type="text"
+                inputMode="decimal"
+                className="text-base sm:text-sm touch-manipulation min-h-[44px]"
                 value={floorPrice ?? ''}
                 onChange={(e) => {
                   const v = e.target.value
                   setFloorPrice(v)
                   updateTicketPriceFromFloor(v)
                 }}
-                placeholder="e.g., 0.25 or 5.5 (in raffle currency)"
+                placeholder="e.g., 0.25 or 5.5 (same as currency above)"
+                required
               />
               <p className="text-xs text-muted-foreground">
-                Prize value for this NFT raffle. Used as the profit threshold: revenue above this amount goes to rev share.
-                <span className="block mt-0.5">Tip: enter a floor price and ticket price will auto-populate from your goal.</span>
-                {floorPriceCurrency && floorPrice && (
-                  <span className="block mt-0.5">Auto-filled from marketplace ({floorPriceCurrency}). You can edit.</span>
-                )}
+                We try to load a suggested price from the marketplace when you pick an NFT; if none appears, enter a fair
+                value in <strong className="font-medium text-foreground">{raffleCurrency}</strong>. This sets the revenue
+                threshold for rev share.
               </p>
+              {floorPriceCurrency &&
+                floorPrice &&
+                raffleCurrency &&
+                floorPriceCurrency.toUpperCase() !== raffleCurrency.toUpperCase() && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Suggested price is in {floorPriceCurrency}; your raffle currency is {raffleCurrency}. Adjust the number
+                    if needed so it matches {raffleCurrency}.
+                  </p>
+                )}
+              {floorPriceAutoNote && (
+                <p className="text-xs text-muted-foreground">{floorPriceAutoNote}</p>
+              )}
             </div>
           </div>
 

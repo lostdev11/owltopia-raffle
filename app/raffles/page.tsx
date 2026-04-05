@@ -150,7 +150,7 @@ export default async function RafflesPage() {
     const pausedPendingRaffles: Raffle[] = []
     const futureRaffles: Raffle[] = []
 
-    // Bucket by status + times (status already filtered: live, ready_to_draw, completed — no draft)
+    // Bucket by status + times (fetch includes drafts + terminal statuses e.g. successful_pending_claims)
     for (const raffle of allRaffles) {
       const startTime = new Date(raffle.start_time)
       const endTime = new Date(raffle.end_time)
