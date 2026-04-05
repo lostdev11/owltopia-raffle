@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import {
+  DEV_TASK_SCREENSHOTS_BUCKET,
+  DEV_TASK_SCREENSHOT_MAX_BYTES,
+  DEV_TASK_SCREENSHOT_MAX_FILES,
+} from '@/lib/dev-task-screenshot-limits'
 
-export const DEV_TASK_SCREENSHOTS_BUCKET = 'dev-task-screenshots'
-
-/** Per file; mobile screenshots are often 2–4MB. */
-export const DEV_TASK_SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024
-
-export const DEV_TASK_SCREENSHOT_MAX_FILES = 6
+export {
+  DEV_TASK_SCREENSHOTS_BUCKET,
+  DEV_TASK_SCREENSHOT_MAX_BYTES,
+  DEV_TASK_SCREENSHOT_MAX_FILES,
+} from '@/lib/dev-task-screenshot-limits'
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/jpeg': 'jpg',

@@ -1,20 +1,10 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { removeDevTaskScreenshotPaths, screenshotUrlsFromPaths } from '@/lib/dev-task-storage'
+import type { DevTask } from './dev-tasks-model'
+import { DEV_TASK_MAX_SCREENSHOTS_TOTAL } from './dev-tasks-model'
 
-export const DEV_TASK_MAX_SCREENSHOTS_TOTAL = 12
-
-export interface DevTask {
-  id: string
-  title: string
-  body: string | null
-  status: 'open' | 'done'
-  created_by: string
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  screenshot_paths: string[]
-  screenshot_urls: string[]
-}
+export type { DevTask } from './dev-tasks-model'
+export { DEV_TASK_MAX_SCREENSHOTS_TOTAL } from './dev-tasks-model'
 
 function hydrateDevTask(row: {
   id: string
