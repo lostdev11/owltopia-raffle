@@ -13,6 +13,7 @@ import {
   isRaffleEligibleToDraw,
   selectWinner,
   updateRaffle,
+  getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
@@ -78,7 +79,7 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
               success: false,
               winnerWallet: null,
               error: `Minimum ticket threshold not met (min: ${
-                raffle.min_tickets ?? 'N/A'
+                getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
               }, sold: ${entries
                 .filter((e) => e.status === 'confirmed')
                 .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${

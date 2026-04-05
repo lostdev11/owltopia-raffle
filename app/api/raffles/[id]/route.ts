@@ -327,12 +327,131 @@ export async function PATCH(
     if (isNft) {
       updates.prize_amount = null
       updates.prize_currency = null
+      // NFT ticket economics are fixed after draft: only new raffles get recomputed floor/ticket/min at edit time.
       if (!isDraft) {
-        updates.floor_price = existingRaffle.floor_price
-        updates.ticket_price = existingRaffle.ticket_price
-        updates.min_tickets = existingRaffle.min_tickets
-        updates.max_tickets = existingRaffle.max_tickets
-        updates.currency = existingRaffle.currency
+        const adminNftEconomicsOverride =
+          role === 'full' && body.nft_economics_admin_override === true
+
+        if (adminNftEconomicsOverride) {
+          const touched =
+            body.min_tickets !== undefined ||
+            body.floor_price !== undefined ||
+            body.ticket_price !== undefined ||
+            body.max_tickets !== undefined ||
+            (body.currency !== undefined && String(body.currency ?? '').trim() !== '')
+          if (!touched) {
+            return NextResponse.json(
+              {
+                error:
+                  'Provide at least one of: min_tickets, floor_price, ticket_price, max_tickets, or currency.',
+              },
+              { status: 400 }
+            )
+          }
+
+          const nextFloorStr =
+            body.floor_price !== undefined
+              ? String(body.floor_price ?? '').trim() || null
+              : existingRaffle.floor_price
+
+          const nextTicketRaw =
+            body.ticket_price !== undefined ? body.ticket_price : existingRaffle.ticket_price
+
+          let nextMinTickets: number | null = existingRaffle.min_tickets
+          if (body.min_tickets != null && body.min_tickets !== '') {
+            const p =
+              typeof body.min_tickets === 'number'
+                ? body.min_tickets
+                : parseInt(String(body.min_tickets), 10)
+            if (isNaN(p) || p <= 0) {
+              return NextResponse.json(
+                { error: 'min_tickets must be a positive integer' },
+                { status: 400 }
+              )
+            }
+            nextMinTickets = p
+          }
+
+          const fp = parseNftFloorPrice(nextFloorStr)
+          if (!fp.ok) {
+            return NextResponse.json({ error: fp.error }, { status: 400 })
+          }
+          const tp = parseNftTicketPrice(nextTicketRaw)
+          if (!tp.ok) {
+            return NextResponse.json({ error: tp.error }, { status: 400 })
+          }
+
+          const computedMin = computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
+          if (nextMinTickets == null || !Number.isFinite(nextMinTickets) || nextMinTickets <= 0) {
+            nextMinTickets = computedMin
+          }
+
+          const capOk = validateNftMinTicketsNotOverCap(nextMinTickets)
+          if (!capOk.ok) {
+            return NextResponse.json({ error: capOk.error }, { status: 400 })
+          }
+
+          const effectiveMinForMax = Math.max(nextMinTickets, computedMin)
+
+          let nextMaxTickets: number | null = existingRaffle.max_tickets
+          if (body.max_tickets !== undefined) {
+            if (body.max_tickets === null || body.max_tickets === '') {
+              nextMaxTickets = null
+            } else {
+              const parsed =
+                typeof body.max_tickets === 'number'
+                  ? body.max_tickets
+                  : parseInt(String(body.max_tickets), 10)
+              if (isNaN(parsed) || parsed <= 0) {
+                return NextResponse.json(
+                  { error: 'max_tickets must be a positive integer when set' },
+                  { status: 400 }
+                )
+              }
+              nextMaxTickets = parsed
+            }
+          }
+
+          const maxOk = validateNftMaxTickets(nextMaxTickets, effectiveMinForMax)
+          if (!maxOk.ok) {
+            return NextResponse.json({ error: maxOk.error }, { status: 400 })
+          }
+
+          if (body.currency !== undefined && String(body.currency ?? '').trim() !== '') {
+            if (!validCurrencies.includes(body.currency)) {
+              return NextResponse.json(
+                {
+                  error:
+                    body.currency === 'OWL' && !isOwlEnabled()
+                      ? 'OWL is not enabled on this server.'
+                      : `Currency must be one of: ${validCurrencies.join(', ')}`,
+                },
+                { status: 400 }
+              )
+            }
+            updates.currency = body.currency
+          }
+
+          updates.floor_price = fp.string
+          updates.ticket_price = tp.value
+          updates.min_tickets = nextMinTickets
+          updates.max_tickets = nextMaxTickets
+
+          console.info('[NFT economics admin override]', {
+            raffleId,
+            wallet: session.wallet,
+            min_tickets: nextMinTickets,
+            floor_price: fp.string,
+            ticket_price: tp.value,
+            max_tickets: nextMaxTickets,
+          })
+        } else {
+          updates.floor_price = existingRaffle.floor_price
+          updates.ticket_price = existingRaffle.ticket_price
+          updates.min_tickets = existingRaffle.min_tickets
+          updates.max_tickets = existingRaffle.max_tickets
+          updates.currency = existingRaffle.currency
+        }
       } else {
         const rawFloor =
           body.floor_price !== undefined &&

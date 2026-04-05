@@ -14,7 +14,12 @@ import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
-import { canSelectWinner, isRaffleEligibleToDraw, calculateTicketsSold } from '@/lib/db/raffles'
+import {
+  canSelectWinner,
+  isRaffleEligibleToDraw,
+  calculateTicketsSold,
+  getRaffleMinimum,
+} from '@/lib/db/raffles'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import {
@@ -834,7 +839,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           
           try {
             canDraw = canSelectWinner(raffle, entriesList)
-            meetsMinTickets = raffle.min_tickets ? isRaffleEligibleToDraw(raffle, entriesList) : true
+            meetsMinTickets = getRaffleMinimum(raffle)
+              ? isRaffleEligibleToDraw(raffle, entriesList)
+              : true
             ticketsSold = calculateTicketsSold(entriesList)
           } catch (error) {
             console.error('Error calculating eligibility:', error)
@@ -852,12 +859,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     <span className="text-sm text-muted-foreground">Raffle Status:</span>
                     <span className="text-sm font-semibold">Ended - No Winner Selected</span>
                   </div>
-                  {raffle.min_tickets && (
+                  {getRaffleMinimum(raffle) != null && (
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Minimum Tickets Required:</span>
                         <span className={`text-sm font-semibold ${meetsMinTickets ? 'text-green-500' : 'text-red-500'}`}>
-                          {raffle.min_tickets} {meetsMinTickets ? '✓' : '✗'}
+                          {getRaffleMinimum(raffle)} {meetsMinTickets ? '✓' : '✗'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -874,7 +881,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       )}
                     </>
                   )}
-                  {!raffle.min_tickets && (
+                  {getRaffleMinimum(raffle) == null && (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Tickets Sold:</span>
                       <span className="text-sm font-semibold">{ticketsSold}</span>
@@ -906,7 +913,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <label htmlFor="force-override" className="text-sm text-muted-foreground cursor-pointer flex-1">
                         <span className="font-semibold text-yellow-600 dark:text-yellow-400">Force Override:</span> Bypass restrictions and select winner anyway
                         {!meetsMinTickets && (
-                          <span className="block mt-1 text-xs">⚠️ Minimum ticket requirement not met (need {raffle.min_tickets}, have {ticketsSold})</span>
+                          <span className="block mt-1 text-xs">
+                            ⚠️ Minimum ticket requirement not met (need {getRaffleMinimum(raffle)}, have{' '}
+                            {ticketsSold})
+                          </span>
                         )}
                       </label>
                     </div>
@@ -924,8 +934,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     {!canDraw && !forceOverride && (
                       <div className="flex-1">
                         <p className="text-sm text-muted-foreground">
-                          {!meetsMinTickets 
-                            ? `Minimum ticket requirement not met (need ${raffle.min_tickets}, have ${ticketsSold})`
+                          {!meetsMinTickets
+                            ? `Minimum ticket requirement not met (need ${getRaffleMinimum(raffle)}, have ${ticketsSold})`
                             : 'Cannot select winner at this time'}
                         </p>
                       </div>
@@ -1074,7 +1084,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     <span className="text-foreground font-medium">Ticket price:</span> {raffle.ticket_price ?? '—'}
                   </p>
                   <p>
-                    <span className="text-foreground font-medium">Draw goal:</span> {raffle.min_tickets ?? '—'} tickets
+                    <span className="text-foreground font-medium">Draw goal:</span>{' '}
+                    {getRaffleMinimum(raffle) ?? raffle.min_tickets ?? '—'} tickets
                   </p>
                   <p>
                     <span className="text-foreground font-medium">Max tickets:</span>{' '}

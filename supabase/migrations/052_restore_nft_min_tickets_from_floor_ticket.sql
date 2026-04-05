@@ -1,6 +1,11 @@
 -- =============================================================================
 -- EMERGENCY: Restore NFT min_tickets from floor_price ÷ ticket_price
 -- =============================================================================
+-- WARNING: Prefer per-slug or per-id UPDATE for live raffles. Do NOT run the STEP B
+-- UPDATE across all NFT rows unless you intend to rewrite economics for every listing.
+-- New rules apply at creation (draft → live); live raffles should stay as stored unless
+-- you are deliberately correcting known-bad data.
+--
 -- Use when min_tickets was incorrectly mass-updated (e.g. forced to 50) so ended
 -- raffles no longer pick winners until the real threshold is met again.
 --

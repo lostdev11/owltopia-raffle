@@ -17,6 +17,7 @@ import {
   RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT,
   rafflesRestStatusInClause,
 } from '@/lib/raffles/list-query-statuses'
+import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -1700,14 +1701,12 @@ export function calculateUniqueParticipants(entries: Entry[]): number {
  * Returns true if no minimum is set OR if minimum is met
  */
 export function isRaffleEligibleToDraw(raffle: Raffle, entries: Entry[]): boolean {
-  // If no minimum is set, raffle is always eligible
-  if (!raffle.min_tickets) {
+  const min = getEffectiveDrawThresholdTickets(raffle)
+  if (min == null || min <= 0) {
     return true
   }
-
-  // Check if minimum tickets requirement is met
   const ticketsSold = calculateTicketsSold(entries)
-  return ticketsSold >= raffle.min_tickets
+  return ticketsSold >= min
 }
 
 /**
@@ -1736,21 +1735,21 @@ export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
  */
 export function canSelectWinner(raffle: Raffle, entries: Entry[]): boolean {
   const confirmedTickets = calculateTicketsSold(entries)
-
-  // If a minimum is configured, require that ticket threshold to be met
-  if (raffle.min_tickets && raffle.min_tickets > 0) {
-    return confirmedTickets >= raffle.min_tickets
+  const min = getEffectiveDrawThresholdTickets(raffle)
+  if (min != null && min > 0) {
+    return confirmedTickets >= min
   }
-
-  // No minimum configured: need at least one confirmed ticket
   return confirmedTickets > 0
 }
 
 /**
- * Get the minimum threshold for a raffle (prefers min_tickets over min_participants if both exist)
- * This is for display purposes
+ * Draw threshold ticket count for UI (and aligned with {@link isRaffleEligibleToDraw} / {@link canSelectWinner}).
+ * NFT: floor ÷ ticket when parsable; otherwise DB min_tickets. Crypto: min_tickets.
  */
 export function getRaffleMinimum(raffle: Raffle): number | null {
-  // Default to min_tickets if both exist (as per requirements)
-  return raffle.min_tickets ?? null
+  const min = getEffectiveDrawThresholdTickets(raffle)
+  if (min == null || min <= 0) return null
+  return min
 }
+
+export { getEffectiveDrawThresholdTickets }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
+import { getRaffleMinimum } from '@/lib/db/raffles'
 
 const FULL_REFUND_WINDOW_HOURS = 24
 function isWithinFullRefundWindow(createdAt: string): boolean {
@@ -65,6 +66,36 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
+
+  const canOverrideNftEconomics =
+    raffle.prize_type === 'nft' &&
+    ['live', 'ready_to_draw', 'pending_min_not_met'].includes((raffle.status ?? '').toLowerCase())
+
+  const [nftMinInput, setNftMinInput] = useState('')
+  const [nftFloorInput, setNftFloorInput] = useState('')
+  const [nftTicketInput, setNftTicketInput] = useState('')
+  const [nftMaxInput, setNftMaxInput] = useState('')
+  const [nftEconomicsConfirm, setNftEconomicsConfirm] = useState(false)
+  const [savingNftEconomics, setSavingNftEconomics] = useState(false)
+
+  const resetNftEconomicsForm = useCallback((r: Raffle) => {
+    const eff = getRaffleMinimum(r)
+    setNftMinInput(
+      eff != null ? String(eff) : r.min_tickets != null ? String(r.min_tickets) : ''
+    )
+    setNftFloorInput(r.floor_price ?? '')
+    setNftTicketInput(
+      r.ticket_price != null && Number.isFinite(r.ticket_price) ? String(r.ticket_price) : ''
+    )
+    setNftMaxInput(r.max_tickets != null ? String(r.max_tickets) : '')
+    setNftEconomicsConfirm(false)
+  }, [])
+
+  useEffect(() => {
+    if (canOverrideNftEconomics) {
+      resetNftEconomicsForm(raffle)
+    }
+  }, [raffle, canOverrideNftEconomics, resetNftEconomicsForm])
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
   const canReturnNft =
@@ -279,6 +310,77 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleSaveNftEconomics = async () => {
+    setMessage(null)
+    const minParsed = parseInt(nftMinInput.trim(), 10)
+    if (!Number.isFinite(minParsed) || minParsed <= 0) {
+      setMessage({ type: 'error', text: 'Draw threshold must be a positive whole number.' })
+      return
+    }
+    if (!nftFloorInput.trim()) {
+      setMessage({ type: 'error', text: 'Floor price is required.' })
+      return
+    }
+    const tp = parseFloat(nftTicketInput.trim())
+    if (!Number.isFinite(tp) || tp <= 0) {
+      setMessage({ type: 'error', text: 'Ticket price must be a positive number.' })
+      return
+    }
+    if (!nftEconomicsConfirm) {
+      setMessage({
+        type: 'error',
+        text: 'Check the box to confirm you intend to change live NFT ticket economics.',
+      })
+      return
+    }
+
+    const payload: Record<string, unknown> = {
+      nft_economics_admin_override: true,
+      min_tickets: minParsed,
+      floor_price: nftFloorInput.trim(),
+      ticket_price: tp,
+    }
+    if (nftMaxInput.trim() !== '') {
+      const m = parseInt(nftMaxInput.trim(), 10)
+      if (!Number.isFinite(m) || m <= 0) {
+        setMessage({ type: 'error', text: 'Max tickets must be a positive whole number or left empty.' })
+        return
+      }
+      payload.max_tickets = m
+    }
+
+    setSavingNftEconomics(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setMessage({
+          type: 'success',
+          text: 'NFT draw threshold and economics updated. Public page will reflect changes after refresh.',
+        })
+        setNftEconomicsConfirm(false)
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to update economics',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to update economics',
+      })
+    } finally {
+      setSavingNftEconomics(false)
+    }
+  }
+
   const handleDelete = async () => {
     setDeleting(true)
     setMessage(null)
@@ -387,6 +489,91 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             </Button>
           </CardContent>
         </Card>
+
+        {canOverrideNftEconomics && (
+          <Card className="border-amber-600/40 bg-amber-500/[0.07]">
+            <CardHeader>
+              <CardTitle>NFT draw goal &amp; ticket economics (full admin)</CardTitle>
+              <CardDescription>
+                The database does not keep the previous draw threshold after it is changed. To recover
+                originals, use Supabase backups / point-in-time recovery, internal analytics, or listing
+                copy you trust — then set values here. Changing ticket price affects what new buyers pay;
+                align floor, ticket price, and draw goal so round(floor ÷ ticket) is consistent with your
+                min tickets (the API enforces max cap and max ≥ min).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="admin-nft-min">Draw threshold (tickets)</Label>
+                  <Input
+                    id="admin-nft-min"
+                    inputMode="numeric"
+                    value={nftMinInput}
+                    onChange={(e) => setNftMinInput(e.target.value)}
+                    className="touch-manipulation min-h-[44px]"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-nft-max">Max tickets (optional)</Label>
+                  <Input
+                    id="admin-nft-max"
+                    inputMode="numeric"
+                    value={nftMaxInput}
+                    onChange={(e) => setNftMaxInput(e.target.value)}
+                    placeholder="Leave empty for unlimited"
+                    className="touch-manipulation min-h-[44px]"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="admin-nft-floor">Floor price (text, raffle currency)</Label>
+                  <Input
+                    id="admin-nft-floor"
+                    value={nftFloorInput}
+                    onChange={(e) => setNftFloorInput(e.target.value)}
+                    className="touch-manipulation min-h-[44px] font-mono text-sm"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="admin-nft-ticket">Ticket price</Label>
+                  <Input
+                    id="admin-nft-ticket"
+                    inputMode="decimal"
+                    value={nftTicketInput}
+                    onChange={(e) => setNftTicketInput(e.target.value)}
+                    className="touch-manipulation min-h-[44px] font-mono text-sm"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1">
+                <input
+                  type="checkbox"
+                  checked={nftEconomicsConfirm}
+                  onChange={(e) => setNftEconomicsConfirm(e.target.checked)}
+                  className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                  aria-label="Confirm changing live NFT ticket economics"
+                />
+                <span className="text-muted-foreground leading-snug">
+                  I confirm this raffle is live (or pending min) and I intend to change draw threshold
+                  and/or ticket pricing shown to buyers.
+                </span>
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleSaveNftEconomics}
+                disabled={savingNftEconomics}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
+              >
+                {savingNftEconomics ? 'Saving…' : 'Save NFT economics'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardHeader>

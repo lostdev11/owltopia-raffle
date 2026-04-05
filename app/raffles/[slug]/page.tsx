@@ -1,6 +1,13 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
-import { getRaffleBySlug, getEntriesByRaffleId, selectWinner, isRaffleEligibleToDraw, canSelectWinner } from '@/lib/db/raffles'
+import {
+  getRaffleBySlug,
+  getEntriesByRaffleId,
+  selectWinner,
+  isRaffleEligibleToDraw,
+  canSelectWinner,
+  getRaffleMinimum,
+} from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -130,7 +137,7 @@ export default async function RaffleDetailPage({
         }
       } else {
         // Ticket threshold (min_tickets) not met: one extension, then failed_refund + NFT return
-        const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
+        const hasMinTickets = getRaffleMinimum(raffle) != null
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (hasMinTickets && !meetsMinTickets) {

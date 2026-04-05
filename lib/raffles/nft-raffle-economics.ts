@@ -3,6 +3,8 @@
  * Creators set floor price and ticket price; the server computes min_tickets = round(floor / ticket_price).
  */
 
+import type { Raffle } from '@/lib/types'
+
 /** Default divisor when suggesting a starting ticket price from floor (floor ÷ this). */
 export const NFT_DEFAULT_SUGGEST_TICKET_COUNT = 50
 
@@ -22,6 +24,23 @@ export function parseNftFloorPrice(raw: unknown): { ok: true; value: number; str
     return { ok: false, error: 'Floor price is too large.' }
   }
   return { ok: true, value: n, string: s }
+}
+
+/**
+ * Parse a positive floor amount from stored text (display / legacy rows).
+ * Unlike {@link parseNftFloorPrice}, accepts labels and punctuation, e.g. "2.5 SOL", "SOL 2.5", "1,234.5".
+ */
+export function lenientParseNftFloorAmount(raw: unknown): number | null {
+  if (raw == null) return null
+  const s = String(raw).trim().replace(/,/g, '')
+  if (!s) return null
+  let n = parseFloat(s)
+  if (Number.isFinite(n) && n > 0 && n <= 1e15) return n
+  const m = s.match(/[0-9]+(?:\.[0-9]+)?/)
+  if (!m) return null
+  n = parseFloat(m[0])
+  if (!Number.isFinite(n) || n <= 0 || n > 1e15) return null
+  return n
 }
 
 export function parseNftTicketPrice(raw: unknown): { ok: true; value: number; string: string } | { ok: false; error: string } {
@@ -52,6 +71,35 @@ export function computeNftMinTicketsFromFloorAndTicket(floor: number, ticketPric
   const raw = floor / ticketPrice
   const n = Math.round(raw)
   return Math.max(1, n)
+}
+
+/**
+ * Ticket-count draw threshold for eligibility and UI.
+ * NFT: round(floor ÷ ticket) when parsable, but never below stored `min_tickets` when that is higher — e.g. ticket_price
+ * was later normalized to floor÷50 (computed → 50) while `min_tickets` still reflects the real goal (e.g. 200).
+ * Crypto: min_tickets column only.
+ */
+export function getEffectiveDrawThresholdTickets(raffle: Raffle): number | null {
+  if ((raffle.prize_type || '').toLowerCase() !== 'nft') {
+    return raffle.min_tickets ?? null
+  }
+  const dbMinRaw = raffle.min_tickets
+  const dbMin =
+    dbMinRaw != null && dbMinRaw > 0 ? Math.min(dbMinRaw, NFT_DRAW_MIN_TICKETS_CAP) : null
+
+  const floorN = lenientParseNftFloorAmount(raffle.floor_price)
+  const ticketParsed = parseNftTicketPrice(raffle.ticket_price)
+  if (floorN != null && ticketParsed.ok) {
+    const computed = Math.min(
+      computeNftMinTicketsFromFloorAndTicket(floorN, ticketParsed.value),
+      NFT_DRAW_MIN_TICKETS_CAP
+    )
+    if (dbMin != null) {
+      return Math.max(computed, dbMin)
+    }
+    return computed
+  }
+  return dbMin
 }
 
 export function validateNftMinTicketsNotOverCap(minTickets: number): { ok: true } | { ok: false; error: string } {

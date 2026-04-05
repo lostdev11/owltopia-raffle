@@ -247,6 +247,7 @@ export async function POST(request: NextRequest) {
       maxTickets = parsed
     }
 
+    // New NFT raffles only (POST): set min_tickets from floor ÷ ticket. Existing live listings are never updated here.
     const fpParsed = parseNftFloorPrice(body.floor_price)
     if (!fpParsed.ok) {
       return NextResponse.json({ error: fpParsed.error }, { status: 400 })

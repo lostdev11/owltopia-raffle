@@ -2,6 +2,13 @@
  * One-off: align NFT raffles with current rules — min_tickets = round(floor ÷ ticket_price),
  * clear prize_amount on NFT, fix max_tickets < min_tickets.
  *
+ * **Default scope: status = draft only.** Product rule: new economics apply to new raffles at
+ * creation; live / ended rows must not be bulk-rewritten by this script. Use explicit SQL per
+ * raffle if a live listing needs a manual fix.
+ *
+ * To include non-draft NFT raffles (dangerous): pass --include-non-draft plus
+ * ALLOW_NFT_ECONOMICS_NORMALIZE_NON_DRAFT=1 and --confirm-non-draft (in addition to apply flags).
+ *
  * Default: dry-run. Apply requires ALLOW_NFT_ECONOMICS_NORMALIZE=1 and --apply --confirm-apply
  *
  * Run: node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs
@@ -31,10 +38,27 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 const apply = process.argv.includes('--apply')
 const confirmApply = process.argv.includes('--confirm-apply')
+const includeNonDraft = process.argv.includes('--include-non-draft')
+const confirmNonDraft = process.argv.includes('--confirm-non-draft')
 
 if (!url || !key) {
   console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
   process.exit(1)
+}
+
+if (includeNonDraft) {
+  if (process.env.ALLOW_NFT_ECONOMICS_NORMALIZE_NON_DRAFT !== '1') {
+    console.error(
+      'Refusing --include-non-draft: set ALLOW_NFT_ECONOMICS_NORMALIZE_NON_DRAFT=1 for this command only.'
+    )
+    process.exit(1)
+  }
+  if (!confirmNonDraft) {
+    console.error(
+      'Refusing --include-non-draft: also pass --confirm-non-draft after reviewing impact on live/ended raffles.'
+    )
+    process.exit(1)
+  }
 }
 
 if (apply) {
@@ -52,12 +76,18 @@ if (apply) {
 
 const supabase = createClient(url, key)
 
-const { data: raffles, error: rafflesError } = await supabase
+let raffleQuery = supabase
   .from('raffles')
   .select(
     'id, slug, status, prize_type, floor_price, ticket_price, min_tickets, max_tickets, prize_amount, prize_currency, edited_after_entries'
   )
   .eq('prize_type', 'nft')
+
+if (!includeNonDraft) {
+  raffleQuery = raffleQuery.eq('status', 'draft')
+}
+
+const { data: raffles, error: rafflesError } = await raffleQuery
 
 if (rafflesError) {
   console.error(rafflesError)
@@ -114,7 +144,8 @@ for (const r of raffles ?? []) {
 }
 
 console.log(
-  `\nNFT raffles: ${(raffles ?? []).length} total | aligned: ${alreadyOk} | need update: ${toFix.length} | skipped: ${skippedNoFloor}`
+  `\nSCOPE: ${includeNonDraft ? 'ALL NFT statuses (non-draft included)' : 'draft NFT only'}\n` +
+    `NFT raffles in scope: ${(raffles ?? []).length} | aligned: ${alreadyOk} | need update: ${toFix.length} | skipped: ${skippedNoFloor}`
 )
 console.log(apply ? 'MODE: APPLY\n' : 'MODE: DRY-RUN. Use --apply --confirm-apply with ALLOW_NFT_ECONOMICS_NORMALIZE=1\n')
 

@@ -7,6 +7,7 @@ import {
   isRaffleEligibleToDraw,
   canSelectWinner,
   updateRaffle,
+  getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
       
       if (!forceOverride) {
         const canDraw = canSelectWinner(raffle, entries)
-        const hasMinTickets = raffle.min_tickets != null && raffle.min_tickets > 0
+        const hasMinTickets = getRaffleMinimum(raffle) != null
         const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (!canDraw) {
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
                   error:
                     'Minimum still not met after the extension. Raffle set to refund-available; NFT returned to creator when possible.',
                   raffleId: raffle.id,
-                  minTickets: raffle.min_tickets,
+                  minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
                   ticketsSold: entries
                     .filter((e) => e.status === 'confirmed')
                     .reduce((sum, entry) => sum + entry.ticket_quantity, 0),
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
               {
                 error: 'Raffle does not meet minimum ticket requirements. Extended by another period.',
                 raffleId: raffle.id,
-                minTickets: raffle.min_tickets,
+                minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
                 ticketsSold: entries
                   .filter((e) => e.status === 'confirmed')
                   .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
                 error:
                   'Raffle has no minimum ticket threshold and cannot draw a winner (no confirmed tickets).',
                 raffleId: raffle.id,
-                minTickets: raffle.min_tickets,
+                minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
                 ticketsSold: entries
                   .filter((e) => e.status === 'confirmed')
                   .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
