@@ -1257,6 +1257,14 @@ export async function promoteDraftRafflesToLive(): Promise<void> {
   }
 }
 
+function omitUndefinedKeys(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v
+  }
+  return out
+}
+
 export async function updateRaffle(
   id: string,
   updates: Partial<Raffle> & { edited_after_entries?: boolean }
@@ -1269,7 +1277,7 @@ export async function updateRaffle(
     updates.edited_after_entries = true
   }
 
-  const payload: Record<string, unknown> = { ...updates }
+  const payload = omitUndefinedKeys({ ...updates } as Record<string, unknown>)
   if (!(await checkImageFallbackColumnApplied()) && 'image_fallback_url' in payload) {
     delete payload.image_fallback_url
   }

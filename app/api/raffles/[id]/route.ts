@@ -411,13 +411,18 @@ export async function PATCH(
     const rank = body.rank !== undefined ? (body.rank && body.rank.trim() ? body.rank.trim() : null) : undefined
     const floorPrice = body.floor_price !== undefined ? (body.floor_price && body.floor_price.trim() ? body.floor_price.trim() : null) : undefined
 
-    const updates: any = {
+    const minTicketsInBody =
+      (body.min_tickets !== undefined && body.min_tickets !== '') ||
+      (body.minParticipants !== undefined && body.minParticipants !== '')
+
+    const updates: Record<string, unknown> = {
       title: body.title,
-      description: body.description || null,
+      description:
+        body.description !== undefined ? (body.description || null) : undefined,
       ticket_price: body.ticket_price,
       currency: body.currency,
-      max_tickets: maxTickets,
-      min_tickets: minTickets,
+      max_tickets: body.max_tickets !== undefined ? maxTickets : undefined,
+      min_tickets: minTicketsInBody ? minTickets : undefined,
       start_time: body.start_time,
       end_time: body.end_time,
       theme_accent: body.theme_accent,
@@ -649,7 +654,34 @@ export async function PATCH(
       }
     }
 
-    const raffle = await updateRaffle(raffleId, updates)
+    let raffle: Raffle
+    try {
+      raffle = await updateRaffle(
+        raffleId,
+        updates as Partial<Raffle> & { edited_after_entries?: boolean }
+      )
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err)
+      if (raw.includes('raffles_nft_min_tickets_fixed')) {
+        return NextResponse.json(
+          {
+            error:
+              'The database still enforces NFT min_tickets = 50 (old migration). In Supabase SQL Editor, run migration 054_ensure_drop_nft_fixed_min_tickets_constraints.sql (or 051_drop_nft_fixed_min_tickets_checks.sql), then try again.',
+          },
+          { status: 409 }
+        )
+      }
+      if (raw.includes('raffles_nft_max_tickets_minimum')) {
+        return NextResponse.json(
+          {
+            error:
+              'The database rejected max_tickets (legacy NFT rule). Run migration 054_ensure_drop_nft_fixed_min_tickets_constraints.sql in Supabase, then try again.',
+          },
+          { status: 409 }
+        )
+      }
+      throw err
+    }
 
     if (!raffle) {
       return NextResponse.json(
