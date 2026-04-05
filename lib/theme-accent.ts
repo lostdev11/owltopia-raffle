@@ -45,6 +45,26 @@ export function getThemeAccentGlow(theme: ThemeAccent): string {
   }
 }
 
+/** Space-separated R G B for `rgb(var(--entered-rgb) / a)` in CSS */
+export function getThemeAccentRgbChannels(theme: ThemeAccent): string {
+  switch (theme) {
+    case 'prime':
+      return '0 255 136'
+    case 'midnight':
+      return '0 212 255'
+    case 'dawn':
+      return '168 255 0'
+    case 'ember':
+      return '249 115 22'
+    case 'violet':
+      return '168 85 247'
+    case 'coral':
+      return '244 63 94'
+    default:
+      return '0 255 136'
+  }
+}
+
 /**
  * Get theme accent border style object
  */

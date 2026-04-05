@@ -403,13 +403,48 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   animation: golden-glow 3s ease-in-out infinite;
 }
 
-/* Raffles you've entered (Owl) — glitch + green sparkle / hyped effect */
-@keyframes owl-entered-glow {
+@keyframes golden-glow-subtle {
   0%, 100% {
-    box-shadow: 0 0 16px rgba(34, 197, 94, 0.45), 0 0 32px rgba(0, 255, 136, 0.2), inset 0 0 20px rgba(34, 197, 94, 0.06);
+    box-shadow: 0 0 12px rgba(234, 179, 8, 0.28), 0 0 22px rgba(234, 179, 8, 0.14);
   }
   50% {
-    box-shadow: 0 0 24px rgba(34, 197, 94, 0.65), 0 0 48px rgba(0, 255, 136, 0.35), inset 0 0 28px rgba(34, 197, 94, 0.1);
+    box-shadow: 0 0 16px rgba(234, 179, 8, 0.4), 0 0 28px rgba(234, 179, 8, 0.2);
+  }
+}
+
+/* Raffles you've entered — extra pulse uses raffle theme via --entered-rgb + status border glow */
+@keyframes owl-entered-glow {
+  0%, 100% {
+    box-shadow:
+      var(--card-status-glow, 0 0 18px rgb(var(--entered-rgb, 34 197 94) / 0.4)),
+      0 0 14px rgb(var(--entered-rgb, 34 197 94) / 0.38),
+      0 0 28px rgb(var(--entered-rgb, 34 197 94) / 0.14),
+      inset 0 0 18px rgb(var(--entered-rgb, 34 197 94) / 0.06);
+  }
+  50% {
+    box-shadow:
+      var(--card-status-glow, 0 0 18px rgb(var(--entered-rgb, 34 197 94) / 0.4)),
+      0 0 20px rgb(var(--entered-rgb, 34 197 94) / 0.52),
+      0 0 36px rgb(var(--entered-rgb, 34 197 94) / 0.22),
+      inset 0 0 22px rgb(var(--entered-rgb, 34 197 94) / 0.09);
+  }
+}
+
+/* Narrow / touch: smaller spread so stacked list cards do not bleed together */
+@keyframes owl-entered-glow-touch {
+  0%, 100% {
+    box-shadow:
+      var(--card-status-glow, 0 0 12px rgb(var(--entered-rgb, 34 197 94) / 0.28)),
+      0 0 8px rgb(var(--entered-rgb, 34 197 94) / 0.26),
+      0 0 14px rgb(var(--entered-rgb, 34 197 94) / 0.09),
+      inset 0 0 10px rgb(var(--entered-rgb, 34 197 94) / 0.04);
+  }
+  50% {
+    box-shadow:
+      var(--card-status-glow, 0 0 12px rgb(var(--entered-rgb, 34 197 94) / 0.28)),
+      0 0 11px rgb(var(--entered-rgb, 34 197 94) / 0.34),
+      0 0 18px rgb(var(--entered-rgb, 34 197 94) / 0.12),
+      inset 0 0 12px rgb(var(--entered-rgb, 34 197 94) / 0.055);
   }
 }
 
@@ -453,13 +488,21 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 
 .raffle-entered-card {
   animation: owl-entered-glow 2.5s ease-in-out infinite, owl-entered-glitch 4s ease-in-out infinite;
-  border-color: rgba(34, 197, 94, 0.6) !important;
+  border-color: rgb(var(--entered-rgb, 34 197 94) / 0.55) !important;
 }
 
-/* Disable glitch on mobile/touch to prevent flashing; keep glow only */
+/* Touch / small viewports: tighter glow, no glitch */
 @media (hover: none) and (pointer: coarse), (max-width: 768px) {
   .raffle-entered-card {
-    animation: owl-entered-glow 2.5s ease-in-out infinite;
+    animation: owl-entered-glow-touch 3s ease-in-out infinite;
+  }
+
+  .winner-golden-card {
+    animation: golden-glow-subtle 3s ease-in-out infinite;
+  }
+
+  .raffle-entered-overlay {
+    opacity: 0.65;
   }
 }
 
@@ -467,7 +510,10 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 @media (prefers-reduced-motion: reduce) {
   .raffle-entered-card {
     animation: none;
-    box-shadow: 0 0 16px rgba(34, 197, 94, 0.4), 0 0 32px rgba(0, 255, 136, 0.15);
+    box-shadow:
+      var(--card-status-glow, 0 0 14px rgb(var(--entered-rgb, 34 197 94) / 0.32)),
+      0 0 12px rgb(var(--entered-rgb, 34 197 94) / 0.28),
+      0 0 20px rgb(var(--entered-rgb, 34 197 94) / 0.1);
   }
   .raffle-entered-overlay {
     animation: none;
@@ -477,11 +523,11 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 .raffle-entered-overlay {
   background: linear-gradient(
     135deg,
-    rgba(34, 197, 94, 0.08) 0%,
-    rgba(0, 255, 136, 0.12) 25%,
-    rgba(34, 197, 94, 0.14) 50%,
-    rgba(0, 255, 136, 0.12) 75%,
-    rgba(34, 197, 94, 0.08) 100%
+    rgb(var(--entered-rgb, 34 197 94) / 0.08) 0%,
+    rgb(var(--entered-rgb, 34 197 94) / 0.12) 25%,
+    rgb(var(--entered-rgb, 34 197 94) / 0.14) 50%,
+    rgb(var(--entered-rgb, 34 197 94) / 0.12) 75%,
+    rgb(var(--entered-rgb, 34 197 94) / 0.08) 100%
   );
   background-size: 200% 200%;
   animation: golden-pulse 3s ease-in-out infinite, golden-shimmer 5s ease-in-out infinite;
@@ -521,6 +567,15 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   filter: blur(60px);
   opacity: 0.2;
   pointer-events: none;
+}
+
+@media (hover: none) and (pointer: coarse), (max-width: 768px) {
+  .raffle-card-accent-blob {
+    width: 100px;
+    height: 100px;
+    filter: blur(44px);
+    opacity: 0.12;
+  }
 }
 
 /* Scroll reveal for raffle list (mobile): visible by default; animate slide-up when card enters viewport */

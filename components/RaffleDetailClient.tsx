@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -28,7 +28,12 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
-import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
+import {
+  getThemeAccentBorderStyle,
+  getThemeAccentClasses,
+  getThemeAccentColor,
+  getThemeAccentRgbChannels,
+} from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
@@ -2064,6 +2069,15 @@ export function RaffleDetailClient({
   const isWinnerDetail = hasEnded && !!winnerWalletNorm && walletNorm === winnerWalletNorm
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
 
+  const detailHeroCardStyle: CSSProperties =
+    showEnteredStyle && userHasEnteredDetail
+      ? {
+          ...borderStyle,
+          ['--entered-rgb' as string]: getThemeAccentRgbChannels(raffle.theme_accent),
+          ['--card-status-glow' as string]: borderStyle.boxShadow,
+        }
+      : borderStyle
+
   // Confetti: show once when opening the winner modal on a past raffle you won
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -2769,7 +2783,7 @@ export function RaffleDetailClient({
           </>
         )}
 
-        <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${showEnteredStyle && userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={borderStyle}>
+        <Card className={`${getThemeAccentClasses(raffle.theme_accent)} ${showEnteredStyle && userHasEnteredDetail ? 'relative raffle-entered-card' : ''}`} style={detailHeroCardStyle}>
           {showEnteredStyle && userHasEnteredDetail && (
             <div className="raffle-entered-overlay absolute inset-0 rounded-lg z-0" />
           )}

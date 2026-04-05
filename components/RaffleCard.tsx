@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
@@ -18,7 +18,12 @@ import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getThemeAccentBorderStyle, getThemeAccentClasses, getThemeAccentColor } from '@/lib/theme-accent'
+import {
+  getThemeAccentBorderStyle,
+  getThemeAccentClasses,
+  getThemeAccentColor,
+  getThemeAccentRgbChannels,
+} from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
@@ -246,6 +251,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
       ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' } // blue-500, blue glow
       : baseBorderStyle
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
+  const cardSurfaceStyle: CSSProperties =
+    isWinner
+      ? { ...borderStyle, borderColor: '#facc15' }
+      : userHasEntered && !isWinner
+        ? {
+            ...borderStyle,
+            ['--entered-rgb' as string]: getThemeAccentRgbChannels(raffle.theme_accent),
+            ['--card-status-glow' as string]: borderStyle.boxShadow,
+          }
+        : borderStyle
   const statusLabel = isPendingDraft ? 'Pending' : (isFuture ? 'Future' : (isActive ? 'Active' : 'Ended'))
   const statusBadgeClass = isPendingDraft
     ? 'bg-amber-500 hover:bg-amber-600 text-white'
@@ -895,7 +910,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           <LinkifiedTextInsideLinkProvider>
           <Card
             className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-col p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
-            style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
+            style={cardSurfaceStyle}
           >
             <div className="flex flex-row items-stretch flex-1 min-h-0">
             {isWinner && (
@@ -1150,7 +1165,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         <LinkifiedTextInsideLinkProvider>
         <Card
           className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-[1.02] cursor-pointer p-0 overflow-hidden ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
-          style={isWinner ? { ...borderStyle, borderColor: '#facc15' } : borderStyle}
+          style={cardSurfaceStyle}
         >
           {isWinner && (
             <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
