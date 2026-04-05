@@ -90,6 +90,28 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     !raffle.prize_returned_at &&
     RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
 
+  const hasWinner =
+    !!(raffle.winner_wallet ?? '').trim() || !!raffle.winner_selected_at
+  const canVoidWinner =
+    hasWinner &&
+    !raffle.prize_returned_at &&
+    !(raffle.nft_transfer_transaction ?? '').trim() &&
+    !raffle.creator_claimed_at &&
+    !(raffle.creator_funds_claim_locked_at ?? '').trim()
+
+  const voidWinnerBlockedReason =
+    hasWinner && !canVoidWinner
+      ? raffle.prize_returned_at
+        ? 'Prize was returned to the creator — resolve escrow before changing draw state.'
+        : (raffle.nft_transfer_transaction ?? '').trim()
+          ? 'NFT transfer to the winner is already on-chain; the app cannot void this draw.'
+          : raffle.creator_claimed_at
+            ? 'Creator already claimed funds-escrow proceeds.'
+            : (raffle.creator_funds_claim_locked_at ?? '').trim()
+              ? 'Funds claim is in progress (lock). Retry when idle.'
+              : 'Void winner is not available.'
+      : null
+
   const [nftMinInput, setNftMinInput] = useState('')
   const [nftFloorInput, setNftFloorInput] = useState('')
   const [nftTicketInput, setNftTicketInput] = useState('')
@@ -104,6 +126,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   /** Extra acknowledgement when lifting `cancelled` (refunds may have been processed). */
   const [reopenRestoreCancelledConfirm, setReopenRestoreCancelledConfirm] = useState(false)
   const [savingDeadline, setSavingDeadline] = useState(false)
+
+  const [voidEndLocal, setVoidEndLocal] = useState('')
+  const [voidStatus, setVoidStatus] = useState<'live' | 'ready_to_draw'>('live')
+  const [voidWinnerConfirm, setVoidWinnerConfirm] = useState(false)
+  const [savingVoidWinner, setSavingVoidWinner] = useState(false)
 
   const resetNftEconomicsForm = useCallback((r: Raffle) => {
     const eff = getRaffleMinimum(r)
@@ -136,6 +163,18 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     setReopenDeadlineConfirm(false)
     setReopenRestoreCancelledConfirm(false)
   }, [raffle.id, canDeadlineAdminOverride])
+
+  useEffect(() => {
+    if (!canVoidWinner) return
+    const d = new Date(Date.now() + 72 * 60 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setVoidEndLocal(
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    )
+    setVoidStatus('live')
+    setVoidWinnerConfirm(false)
+  }, [raffle.id, canVoidWinner])
+
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
   const canReturnNft =
@@ -493,6 +532,59 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleVoidWinner = async () => {
+    setMessage(null)
+    if (!voidWinnerConfirm) {
+      setMessage({ type: 'error', text: 'Confirm void winner before saving.' })
+      return
+    }
+    const end = new Date(voidEndLocal)
+    if (!Number.isFinite(end.getTime())) {
+      setMessage({ type: 'error', text: 'Invalid end date/time.' })
+      return
+    }
+    if (end.getTime() <= Date.now()) {
+      setMessage({ type: 'error', text: 'End time must be in the future.' })
+      return
+    }
+
+    setSavingVoidWinner(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          void_winner_admin_override: true,
+          confirm_void_winner: true,
+          end_time: end.toISOString(),
+          status: voidStatus,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setMessage({
+          type: 'success',
+          text: 'Winner voided in the database. Set correct draw economics if needed, then monitor sales and redraw.',
+        })
+        setVoidWinnerConfirm(false)
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to void winner',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to void winner',
+      })
+    } finally {
+      setSavingVoidWinner(false)
+    }
+  }
+
   const handleDelete = async () => {
     setDeleting(true)
     setMessage(null)
@@ -682,6 +774,86 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
               >
                 {savingNftEconomics ? 'Saving…' : 'Save NFT economics'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {voidWinnerBlockedReason && (
+          <Card className="border-muted">
+            <CardHeader className="py-3">
+              <CardTitle className="text-base">Winner already selected</CardTitle>
+              <CardDescription className="text-amber-700 dark:text-amber-400">
+                {voidWinnerBlockedReason}
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )}
+
+        {canVoidWinner && (
+          <Card className="border-destructive/40 bg-destructive/[0.06]">
+            <CardHeader>
+              <CardTitle>Void winner &amp; reopen raffle (full admin)</CardTitle>
+              <CardDescription>
+                Use only for a <strong>bad draw</strong> (e.g. wrong min_tickets) when the NFT is{' '}
+                <strong>still in escrow</strong> (no prize TX to winner) and the creator has{' '}
+                <strong>not</strong> claimed funds-escrow proceeds. Clears winner, settlement fields, and
+                claim locks in the database, then sets a new <strong>end time</strong> and{' '}
+                <strong>live</strong> or <strong>ready_to_draw</strong>. Does <strong>not</strong> undo an
+                on-chain NFT transfer or a completed claim.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm font-mono text-muted-foreground break-all">
+                Current winner: {(raffle.winner_wallet ?? '').trim() || '—'}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="admin-void-winner-end">New end time (after reopen)</Label>
+                  <Input
+                    id="admin-void-winner-end"
+                    type="datetime-local"
+                    value={voidEndLocal}
+                    onChange={(e) => setVoidEndLocal(e.target.value)}
+                    className="touch-manipulation min-h-[44px]"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="admin-void-winner-status">Status after void</Label>
+                  <select
+                    id="admin-void-winner-status"
+                    value={voidStatus}
+                    onChange={(e) => setVoidStatus(e.target.value as 'live' | 'ready_to_draw')}
+                    className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background touch-manipulation min-h-[44px]"
+                  >
+                    <option value="live">live (ticket sales)</option>
+                    <option value="ready_to_draw">ready_to_draw (ended, draw again later)</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <input
+                  type="checkbox"
+                  checked={voidWinnerConfirm}
+                  onChange={(e) => setVoidWinnerConfirm(e.target.checked)}
+                  className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                  aria-label="Confirm voiding winner and reopening raffle"
+                />
+                <span className="text-muted-foreground leading-snug">
+                  I confirm the prize was <strong className="text-foreground">not</strong> sent to the winner
+                  on-chain, proceeds were <strong className="text-foreground">not</strong> claimed, and I am
+                  intentionally voiding this draw to fix platform data. I will communicate with buyers if
+                  needed.
+                </span>
+              </label>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleVoidWinner}
+                disabled={savingVoidWinner}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+              >
+                {savingVoidWinner ? 'Saving…' : 'Void winner & reopen'}
               </Button>
             </CardContent>
           </Card>

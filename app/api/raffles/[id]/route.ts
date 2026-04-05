@@ -99,6 +99,157 @@ export async function PATCH(
       return NextResponse.json(raffle)
     }
 
+    /**
+     * Full admin: void an erroneous winner selection (DB only). Only when the NFT was never sent to the
+     * winner and creator has not claimed funds escrow proceeds. Requires a new future end_time and live/ready_to_draw.
+     */
+    if (body.void_winner_admin_override === true) {
+      if (body.confirm_void_winner !== true) {
+        return NextResponse.json(
+          { error: 'You must set confirm_void_winner: true to void a winner.' },
+          { status: 400 }
+        )
+      }
+      const hasWinner =
+        !!(existingRaffle.winner_wallet ?? '').trim() || !!existingRaffle.winner_selected_at
+      if (!hasWinner) {
+        return NextResponse.json(
+          { error: 'This raffle has no winner to void.' },
+          { status: 400 }
+        )
+      }
+      if (existingRaffle.prize_returned_at) {
+        return NextResponse.json(
+          {
+            error:
+              'Cannot void winner: prize was returned to the creator. Resolve escrow separately before reopening.',
+          },
+          { status: 400 }
+        )
+      }
+      if ((existingRaffle.nft_transfer_transaction ?? '').trim()) {
+        return NextResponse.json(
+          {
+            error:
+              'Cannot void winner: NFT prize transfer to the winner is already recorded (on-chain). This cannot be undone from the app.',
+          },
+          { status: 400 }
+        )
+      }
+      if (existingRaffle.creator_claimed_at) {
+        return NextResponse.json(
+          {
+            error:
+              'Cannot void winner: creator already claimed proceeds from funds escrow.',
+          },
+          { status: 400 }
+        )
+      }
+      if ((existingRaffle.creator_funds_claim_locked_at ?? '').trim()) {
+        return NextResponse.json(
+          { error: 'Cannot void winner: a funds claim is in progress. Wait and retry, or clear the lock out-of-band.' },
+          { status: 423 }
+        )
+      }
+
+      const endRaw = body.end_time
+      if (!endRaw || typeof endRaw !== 'string') {
+        return NextResponse.json(
+          { error: 'end_time is required (ISO 8601) when voiding a winner.' },
+          { status: 400 }
+        )
+      }
+      const endDate = new Date(endRaw)
+      if (isNaN(endDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid end_time.' }, { status: 400 })
+      }
+      const now = new Date()
+      if (endDate <= now) {
+        return NextResponse.json(
+          { error: 'end_time must be in the future.' },
+          { status: 400 }
+        )
+      }
+
+      const nextStatusRaw = body.status
+      const nextStatus =
+        nextStatusRaw === 'ready_to_draw'
+          ? 'ready_to_draw'
+          : nextStatusRaw === 'live' || nextStatusRaw === undefined
+            ? 'live'
+            : null
+      if (nextStatus === null) {
+        return NextResponse.json(
+          { error: 'status must be live or ready_to_draw when set.' },
+          { status: 400 }
+        )
+      }
+
+      const isNftRaffle = existingRaffle.prize_type === 'nft'
+      if (
+        isNftRaffle &&
+        (nextStatus === 'live' || nextStatus === 'ready_to_draw') &&
+        !existingRaffle.prize_deposited_at
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'NFT raffle cannot be live/ready_to_draw before prize escrow deposit is verified.',
+          },
+          { status: 400 }
+        )
+      }
+
+      const startMs = new Date(existingRaffle.start_time).getTime()
+      if (!Number.isNaN(startMs) && endDate.getTime() <= startMs) {
+        return NextResponse.json(
+          { error: 'end_time must be after start_time.' },
+          { status: 400 }
+        )
+      }
+
+      const patch: Record<string, unknown> = {
+        winner_wallet: null,
+        winner_selected_at: null,
+        settled_at: null,
+        fee_bps_applied: null,
+        fee_tier_reason: null,
+        platform_fee_amount: null,
+        creator_payout_amount: null,
+        nft_claim_locked_at: null,
+        nft_claim_locked_wallet: null,
+        creator_claimed_at: null,
+        creator_claim_tx: null,
+        creator_funds_claim_locked_at: null,
+        end_time: endDate.toISOString(),
+        status: nextStatus,
+        edited_after_entries: true,
+        updated_at: now.toISOString(),
+      }
+
+      if (nextStatus === 'live') {
+        patch.is_active = true
+      }
+
+      console.info('[Raffle void winner admin override]', {
+        raffleId,
+        wallet: session.wallet,
+        priorWinner: existingRaffle.winner_wallet,
+        priorStatus: existingRaffle.status,
+        end_time: patch.end_time,
+        nextStatus,
+      })
+
+      const raffle = await updateRaffle(
+        raffleId,
+        patch as Partial<Raffle> & { edited_after_entries?: boolean }
+      )
+      if (!raffle) {
+        return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
+      }
+      return NextResponse.json(raffle)
+    }
+
     /** Full admin: push end_time into the future and return a listing to live/ready_to_draw (no winner yet). */
     if (body.raffle_deadline_admin_override === true) {
       const endRaw = body.end_time

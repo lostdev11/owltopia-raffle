@@ -60,3 +60,41 @@ WHERE slug = 'YOUR-SLUG-HERE'
   AND winner_selected_at IS NULL
   AND prize_returned_at IS NULL;
 */
+
+-- =============================================================================
+-- Manual: void erroneous winner + reopen (same rules as API void_winner_admin_override)
+-- =============================================================================
+-- Only if: nft_transfer_transaction empty, creator_claimed_at IS NULL,
+--   creator_funds_claim_locked_at IS NULL, prize_returned_at IS NULL.
+-- =============================================================================
+/*
+SELECT id, slug, status, winner_wallet, nft_transfer_transaction, creator_claimed_at, prize_returned_at
+FROM public.raffles
+WHERE slug = 'YOUR-SLUG-HERE';
+
+UPDATE public.raffles
+SET
+  winner_wallet = NULL,
+  winner_selected_at = NULL,
+  settled_at = NULL,
+  fee_bps_applied = NULL,
+  fee_tier_reason = NULL,
+  platform_fee_amount = NULL,
+  creator_payout_amount = NULL,
+  nft_claim_locked_at = NULL,
+  nft_claim_locked_wallet = NULL,
+  creator_claimed_at = NULL,
+  creator_claim_tx = NULL,
+  creator_funds_claim_locked_at = NULL,
+  end_time = (NOW() AT TIME ZONE 'utc') + INTERVAL '72 hours',
+  status = 'live',
+  is_active = true,
+  edited_after_entries = true,
+  updated_at = NOW()
+WHERE slug = 'YOUR-SLUG-HERE'
+  AND winner_wallet IS NOT NULL
+  AND coalesce(trim(nft_transfer_transaction), '') = ''
+  AND creator_claimed_at IS NULL
+  AND coalesce(trim(creator_funds_claim_locked_at::text), '') = ''
+  AND prize_returned_at IS NULL;
+*/
