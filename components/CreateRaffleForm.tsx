@@ -54,6 +54,12 @@ import {
   parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
+function focusFormField(elementId: string) {
+  const el = document.getElementById(elementId)
+  el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  if (el instanceof HTMLElement) el.focus()
+}
+
 export function CreateRaffleForm() {
   const router = useRouter()
   const { publicKey, connected, sendTransaction, wallet } = useWallet()
@@ -267,6 +273,26 @@ export function CreateRaffleForm() {
 
     if (!selectedNft) {
       alert('Please select an NFT from your wallet for an NFT raffle.')
+      focusFormField('nft-prize-section')
+      return
+    }
+
+    const formData = new FormData(e.currentTarget)
+    const titleTrimmed = ((formData.get('title') as string) ?? '').trim()
+    if (!titleTrimmed) {
+      alert('Please enter a raffle title (scroll up if you don’t see the title field).')
+      focusFormField('title')
+      return
+    }
+
+    if (!startTime?.trim()) {
+      alert('Please set a start time for your raffle.')
+      focusFormField('start_time')
+      return
+    }
+    if (!endTime?.trim()) {
+      alert('Please set an end time, or tap a Night Mode preset (Midnight / Dawn / Prime Time) to fill dates.')
+      focusFormField('end_time')
       return
     }
 
@@ -283,52 +309,82 @@ export function CreateRaffleForm() {
       // Mint parse or RPC: server will re-check on create
     }
 
-    // Validate 7-day maximum duration
-    if (startTime && endTime) {
-      const startDate = new Date(localDateTimeToUtc(startTime))
-      const endDate = new Date(localDateTimeToUtc(endTime))
-      const durationMs = endDate.getTime() - startDate.getTime()
-      const durationDays = durationMs / (1000 * 60 * 60 * 24)
-      
-      if (durationDays > 7) {
-        alert('Raffle duration cannot exceed 7 days')
-        return
-      }
+    // Validate end after start and 7-day maximum (browser HTML5 checks are skipped — see form noValidate)
+    let startDateUtc: Date
+    let endDateUtc: Date
+    try {
+      startDateUtc = new Date(localDateTimeToUtc(startTime))
+      endDateUtc = new Date(localDateTimeToUtc(endTime))
+    } catch {
+      alert('Start or end time is invalid. Check both date fields.')
+      focusFormField('start_time')
+      return
+    }
+    if (endDateUtc <= startDateUtc) {
+      alert('End time must be after start time.')
+      focusFormField('end_time')
+      return
+    }
+    const durationMs = endDateUtc.getTime() - startDateUtc.getTime()
+    const durationDays = durationMs / (1000 * 60 * 60 * 24)
+    if (durationDays > 7) {
+      alert('Raffle duration cannot exceed 7 days')
+      focusFormField('end_time')
+      return
     }
 
-    const formData = new FormData(e.currentTarget)
     const floorPriceValue = (formData.get('floor_price') as string)?.trim() ?? ''
     const fpNum = parseFloat(floorPriceValue)
     if (!floorPriceValue || !Number.isFinite(fpNum) || fpNum <= 0) {
       alert('Enter a valid floor price (prize value) in your raffle currency.')
+      focusFormField('floor_price')
       return
     }
     const ticketStr = (formData.get('ticket_price') as string)?.trim() ?? ''
     const tpParsed = parseNftTicketPrice(ticketStr)
     if (!tpParsed.ok) {
       alert(tpParsed.error)
+      focusFormField('ticket_price')
       return
+    }
+
+    const minDrawGoal = computeNftMinTicketsFromFloorAndTicket(fpNum, tpParsed.value)
+    const maxTicketsRaw = ((formData.get('max_tickets') as string) ?? '').trim()
+    let maxTicketsParsed: number | null = null
+    if (maxTicketsRaw) {
+      maxTicketsParsed = parseInt(maxTicketsRaw, 10)
+      if (!Number.isFinite(maxTicketsParsed) || maxTicketsParsed <= 0) {
+        alert('Max tickets must be a positive whole number, or leave the field empty for unlimited.')
+        focusFormField('max_tickets')
+        return
+      }
+      if (maxTicketsParsed < minDrawGoal) {
+        alert(
+          `Max tickets must be at least ${minDrawGoal} (draw goal from floor ÷ ticket price), or leave empty for unlimited.`
+        )
+        focusFormField('max_tickets')
+        return
+      }
     }
 
     setCreateStep('saving')
     setLoading(true)
-    const maxTicketsValue = formData.get('max_tickets') as string
     const rankValue = formData.get('rank') as string
     const currency = (formData.get('currency') as string) || 'SOL'
     const data: Record<string, unknown> = {
-      title: formData.get('title') as string,
+      title: titleTrimmed,
       description: formData.get('description') as string,
       image_url: imageUrl || null,
       ticket_price: tpParsed.value,
       currency,
-      max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
+      max_tickets: maxTicketsParsed,
       rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
       floor_price: floorPriceValue,
       start_time: localDateTimeToUtc(startTime),
       end_time: localDateTimeToUtc(endTime),
       theme_accent: themeAccent,
       status: (formData.get('status') as string) || 'draft',
-      slug: (formData.get('title') as string)
+      slug: titleTrimmed
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, ''),
@@ -684,7 +740,11 @@ export function CreateRaffleForm() {
           <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia (Owl NFT) holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form
+          onSubmit={handleSubmit}
+          noValidate
+          className="space-y-6"
+        >
           <div className="space-y-2">
             <Label htmlFor="title">Title *</Label>
             <Input id="title" name="title" required />
@@ -699,7 +759,7 @@ export function CreateRaffleForm() {
             />
           </div>
 
-          <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+          <div id="nft-prize-section" tabIndex={-1} className="space-y-3 rounded-md border bg-muted/30 p-4">
               <Label>NFT prize (from your wallet)</Label>
               <p className="text-xs text-muted-foreground">
                 Load your wallet to see NFTs you can use as the raffle prize. The raffle image is taken from the NFT you select.
