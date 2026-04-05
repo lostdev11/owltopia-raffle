@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1804,19 +1804,35 @@ export default function AdminDashboardPage() {
           </Card>
 
           {adminRole === 'full' && (
-            <Card className="hover:border-primary transition-colors cursor-pointer">
-              <Link href="/admin/users">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5" />
-                    Users
-                  </CardTitle>
-                  <CardDescription>
-                    Track creators and entrants: raffles created, creator revenue, entries, and total spent per wallet.
-                  </CardDescription>
-                </CardHeader>
-              </Link>
-            </Card>
+            <>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/giveaways">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Gift className="h-5 w-5" />
+                      NFT giveaways
+                    </CardTitle>
+                    <CardDescription>
+                      Escrow a one-off NFT, set the winner wallet, verify deposit, share the claim link. They claim from
+                      the dashboard.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/users">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Users
+                    </CardTitle>
+                    <CardDescription>
+                      Track creators and entrants: raffles created, creator revenue, entries, and total spent per wallet.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+            </>
           )}
 
           <Card>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -47,8 +47,11 @@ import { isOwlEnabled } from '@/lib/tokens'
 import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
-  NFT_RAFFLE_MIN_TICKETS,
-  computeNftTicketPriceFromFloor,
+  NFT_DEFAULT_SUGGEST_TICKET_COUNT,
+  suggestTicketPriceFromFloor,
+  computeNftMinTicketsFromFloorAndTicket,
+  parseNftFloorPrice,
+  parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
 export function CreateRaffleForm() {
@@ -130,7 +133,7 @@ export function CreateRaffleForm() {
             const fp = String(data.floorPrice)
             setFloorPrice(fp)
             setFloorPriceCurrency(data.currency ?? null)
-            updateTicketPriceFromFloor(fp)
+            suggestTicketFromFloor(fp)
             setFloorPriceAutoNote(typeof data.message === 'string' && data.message ? data.message : null)
           } else if (typeof data?.message === 'string' && data.message) {
             setFloorPriceAutoNote(data.message)
@@ -150,7 +153,15 @@ export function CreateRaffleForm() {
     return () => { cancelled = true }
   }, [selectedNft?.mint])
 
-  const updateTicketPriceFromFloor = (floorValue: string) => {
+  const derivedDrawGoal = useMemo(() => {
+    const fp = parseNftFloorPrice(floorPrice)
+    const tp = parseNftTicketPrice(ticketPrice)
+    if (!fp.ok || !tp.ok) return null
+    return computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
+  }, [floorPrice, ticketPrice])
+
+  /** Suggest ticket = floor ÷ default ticket count (editable after). */
+  const suggestTicketFromFloor = (floorValue: string) => {
     const trimmed = floorValue.trim()
     if (!trimmed) {
       setTicketPrice('')
@@ -158,7 +169,11 @@ export function CreateRaffleForm() {
     }
     const floor = parseFloat(trimmed)
     if (Number.isFinite(floor) && floor > 0) {
-      const calculated = computeNftTicketPriceFromFloor(floor)
+      const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
+      if (!Number.isFinite(calculated)) {
+        setTicketPrice('')
+        return
+      }
       const formatted =
         calculated >= 1
           ? calculated.toFixed(2)
@@ -288,6 +303,12 @@ export function CreateRaffleForm() {
       alert('Enter a valid floor price (prize value) in your raffle currency.')
       return
     }
+    const ticketStr = (formData.get('ticket_price') as string)?.trim() ?? ''
+    const tpParsed = parseNftTicketPrice(ticketStr)
+    if (!tpParsed.ok) {
+      alert(tpParsed.error)
+      return
+    }
 
     setCreateStep('saving')
     setLoading(true)
@@ -298,10 +319,9 @@ export function CreateRaffleForm() {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
       image_url: imageUrl || null,
-      ticket_price: parseFloat(formData.get('ticket_price') as string),
+      ticket_price: tpParsed.value,
       currency,
       max_tickets: maxTicketsValue ? parseInt(maxTicketsValue) : null,
-      min_tickets: NFT_RAFFLE_MIN_TICKETS,
       rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
       floor_price: floorPriceValue,
       start_time: localDateTimeToUtc(startTime),
@@ -800,8 +820,9 @@ export function CreateRaffleForm() {
           <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Fair listing</p>
             <p className="mt-1">
-              The floor price you set is the advertised prize value and revenue threshold. Ticket price is always floor
-              ÷ {NFT_RAFFLE_MIN_TICKETS} (fixed draw goal). Misleading listings may be removed.
+              Floor price is the advertised prize value and revenue threshold. Set ticket price yourself; we suggest
+              floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} as a starting point. Draw goal (min tickets) is computed as
+              round(floor ÷ ticket price) — you cannot set it separately. Misleading listings may be removed.
             </p>
           </div>
 
@@ -825,20 +846,20 @@ export function CreateRaffleForm() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="ticket_price">Ticket price (auto)</Label>
+              <Label htmlFor="ticket_price">Ticket price *</Label>
               <Input
                 id="ticket_price"
                 name="ticket_price"
                 type="number"
                 step="any"
                 required
-                readOnly
-                className="text-base sm:text-sm bg-muted/50 touch-manipulation min-h-[44px]"
+                className="text-base sm:text-sm touch-manipulation min-h-[44px]"
                 value={ticketPrice ?? ''}
+                onChange={(e) => setTicketPrice(e.target.value)}
                 aria-describedby="ticket_price_help"
               />
               <p id="ticket_price_help" className="text-xs text-muted-foreground">
-                Floor ÷ {NFT_RAFFLE_MIN_TICKETS} tickets (not editable).
+                Pre-filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when you enter floor; adjust as needed.
               </p>
             </div>
           </div>
@@ -849,18 +870,21 @@ export function CreateRaffleForm() {
               id="max_tickets"
               name="max_tickets"
               type="number"
-              min={NFT_RAFFLE_MIN_TICKETS}
+              min={derivedDrawGoal ?? 1}
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
             <p className="text-xs text-muted-foreground">
-              Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
+              Optional cap on total tickets. If set, must be at least your draw goal ({derivedDrawGoal ?? '—'}).
             </p>
           </div>
 
           <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Draw goal:</span>{' '}
-            {NFT_RAFFLE_MIN_TICKETS} tickets (fixed). The raffle can draw once this many confirmed tickets are sold.
+            <span className="font-medium text-foreground">Draw goal (computed):</span>{' '}
+            {derivedDrawGoal != null
+              ? `${derivedDrawGoal} tickets (round(floor ÷ ticket price))`
+              : 'Enter floor and ticket price to see draw goal.'}{' '}
+            The raffle can draw once this many confirmed tickets are sold.
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -893,7 +917,7 @@ export function CreateRaffleForm() {
                 onChange={(e) => {
                   const v = e.target.value
                   setFloorPrice(v)
-                  updateTicketPriceFromFloor(v)
+                  suggestTicketFromFloor(v)
                 }}
                 placeholder="e.g., 0.25 or 5.5 (same as currency above)"
                 required

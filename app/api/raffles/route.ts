@@ -16,10 +16,11 @@ import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
 import {
-  NFT_RAFFLE_MIN_TICKETS,
   parseNftFloorPrice,
-  computeNftTicketPriceFromFloor,
+  parseNftTicketPrice,
+  computeNftMinTicketsFromFloorAndTicket,
   validateNftMaxTickets,
+  validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 
 export const runtime = 'nodejs'
@@ -250,13 +251,20 @@ export async function POST(request: NextRequest) {
     if (!fpParsed.ok) {
       return NextResponse.json({ error: fpParsed.error }, { status: 400 })
     }
-    const maxCheck = validateNftMaxTickets(maxTickets)
+    const tpParsed = parseNftTicketPrice(body.ticket_price)
+    if (!tpParsed.ok) {
+      return NextResponse.json({ error: tpParsed.error }, { status: 400 })
+    }
+    const ticketPriceNum = tpParsed.value
+    const minTickets = computeNftMinTicketsFromFloorAndTicket(fpParsed.value, ticketPriceNum)
+    const capCheck = validateNftMinTicketsNotOverCap(minTickets)
+    if (!capCheck.ok) {
+      return NextResponse.json({ error: capCheck.error }, { status: 400 })
+    }
+    const maxCheck = validateNftMaxTickets(maxTickets, minTickets)
     if (!maxCheck.ok) {
       return NextResponse.json({ error: maxCheck.error }, { status: 400 })
     }
-
-    const minTickets = NFT_RAFFLE_MIN_TICKETS
-    const ticketPriceNum = computeNftTicketPriceFromFloor(fpParsed.value)
 
     // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day). Admins: no limit.
     const adminRole = await getAdminRole(walletAddress)

@@ -7,6 +7,26 @@ export type PrizeType = 'crypto' | 'nft'
 /** How the NFT prize is represented on-chain (used for escrow logic). */
 export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core' | 'compressed'
 
+/** Admin-created giveaway: NFT in prize escrow, one eligible claimant. */
+export interface NftGiveaway {
+  id: string
+  title: string | null
+  nft_mint_address: string
+  nft_token_id: string | null
+  prize_standard: PrizeStandard | null
+  eligible_wallet: string
+  deposit_tx_signature: string | null
+  prize_deposited_at: string | null
+  claim_tx_signature: string | null
+  claimed_at: string | null
+  nft_claim_locked_at: string | null
+  nft_claim_locked_wallet: string | null
+  created_by_wallet: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type RaffleStatus =
   | 'draft'
   | 'live'

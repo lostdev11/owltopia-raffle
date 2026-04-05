@@ -18,9 +18,10 @@ import { canSelectWinner, isRaffleEligibleToDraw, calculateTicketsSold } from '@
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import {
-  NFT_RAFFLE_MIN_TICKETS,
-  computeNftTicketPriceFromFloor,
+  NFT_DEFAULT_SUGGEST_TICKET_COUNT,
+  computeNftMinTicketsFromFloorAndTicket,
   parseNftFloorPrice,
+  parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
 interface EditRaffleFormProps {
@@ -79,16 +80,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const isDraftNft = isDraft && raffle.prize_type === 'nft'
   const isNonDraftNft = !isDraft && raffle.prize_type === 'nft'
   const [nftDraftFloor, setNftDraftFloor] = useState(raffle.floor_price ?? '')
+  const [nftDraftTicket, setNftDraftTicket] = useState(
+    raffle.ticket_price != null ? String(raffle.ticket_price) : ''
+  )
   useEffect(() => {
     setNftDraftFloor(raffle.floor_price ?? '')
-  }, [raffle.id, raffle.floor_price])
-  const nftDraftTicketLabel = useMemo(() => {
-    if (!isDraftNft) return ''
-    const p = parseNftFloorPrice(nftDraftFloor)
-    if (!p.ok) return '—'
-    const n = computeNftTicketPriceFromFloor(p.value)
-    return n >= 1 ? n.toFixed(2) : n >= 0.01 ? n.toFixed(4) : n.toFixed(6)
-  }, [isDraftNft, nftDraftFloor])
+    setNftDraftTicket(raffle.ticket_price != null ? String(raffle.ticket_price) : '')
+  }, [raffle.id, raffle.floor_price, raffle.ticket_price])
+  const nftDraftDerivedMin = useMemo(() => {
+    if (!isDraftNft) return null
+    const fp = parseNftFloorPrice(nftDraftFloor)
+    const tp = parseNftTicketPrice(nftDraftTicket)
+    if (!fp.ok || !tp.ok) return null
+    return computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
+  }, [isDraftNft, nftDraftFloor, nftDraftTicket])
   const hasSettlement =
     !!raffle.settled_at &&
     raffle.platform_fee_amount != null &&
@@ -213,10 +218,15 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         setLoading(false)
         return
       }
-      data.ticket_price = computeNftTicketPriceFromFloor(fp.value)
+      const tp = parseNftTicketPrice(nftDraftTicket)
+      if (!tp.ok) {
+        alert(tp.error)
+        setLoading(false)
+        return
+      }
+      data.ticket_price = tp.value
       data.currency = formData.get('currency') as string
       data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
-      data.min_tickets = NFT_RAFFLE_MIN_TICKETS
       data.floor_price = fp.string
     } else if (isNonDraftNft) {
       // Server keeps existing pricing; do not send fields that could clear columns.
@@ -1071,15 +1081,15 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
                   </p>
                   <p className="text-xs pt-1">
-                    These values cannot be changed after the raffle leaves draft. New NFT drafts always use a fixed{' '}
-                    {NFT_RAFFLE_MIN_TICKETS}-ticket goal and ticket price = floor ÷ {NFT_RAFFLE_MIN_TICKETS}.
+                    These values cannot be changed after the raffle leaves draft (live economics are locked in the
+                    database).
                   </p>
                 </div>
               ) : isDraftNft ? (
                 <>
                   <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                    Draft NFT raffles use a fixed draw goal of {NFT_RAFFLE_MIN_TICKETS} tickets and ticket price = floor
-                    ÷ {NFT_RAFFLE_MIN_TICKETS}. Misleading floor prices may result in removal.
+                    Set floor price and ticket price. Draw goal is computed as round(floor ÷ ticket price) — not editable
+                    on its own. We suggest starting with ticket = floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}.
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -1097,14 +1107,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="ticket_price_display">Ticket price (auto)</Label>
+                      <Label htmlFor="ticket_price">Ticket price *</Label>
                       <Input
-                        id="ticket_price_display"
-                        readOnly
-                        className="bg-muted/50 min-h-[44px] touch-manipulation"
-                        value={nftDraftTicketLabel}
+                        id="ticket_price"
+                        name="ticket_price"
+                        type="number"
+                        step="any"
+                        required
+                        className="min-h-[44px] touch-manipulation"
+                        value={nftDraftTicket}
+                        onChange={(e) => setNftDraftTicket(e.target.value)}
                       />
-                      <p className="text-xs text-muted-foreground">Floor ÷ {NFT_RAFFLE_MIN_TICKETS}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Suggested default: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}
+                      </p>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1113,18 +1129,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
-                      min={NFT_RAFFLE_MIN_TICKETS}
+                      min={nftDraftDerivedMin ?? 1}
                       defaultValue={raffle.max_tickets || ''}
                       placeholder="Leave empty for unlimited"
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      If set, must be at least {NFT_RAFFLE_MIN_TICKETS} (the draw goal), or leave empty for unlimited.
+                      If set, must be at least the draw goal ({nftDraftDerivedMin ?? '—'}), or leave empty for unlimited.
                     </p>
                   </div>
                   <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">Draw goal:</span> {NFT_RAFFLE_MIN_TICKETS} tickets
-                    (fixed).
+                    <span className="font-medium text-foreground">Draw goal (computed):</span>{' '}
+                    {nftDraftDerivedMin != null
+                      ? `${nftDraftDerivedMin} tickets`
+                      : 'Enter valid floor and ticket price.'}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">

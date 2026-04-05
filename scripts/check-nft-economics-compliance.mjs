@@ -1,35 +1,26 @@
 /**
- * Read-only: report NFT raffle rows vs migration 050 rules + normalize script rules.
- * Does not modify the database.
- *
+ * Read-only: NFT economics — min_tickets should equal round(floor ÷ ticket_price).
  * Run: node --env-file=.env.local scripts/check-nft-economics-compliance.mjs
- *
- * For "is migration 050 applied?" use scripts/check-nft-economics-compliance.sql in Supabase SQL Editor.
  */
 import { createClient } from '@supabase/supabase-js'
 
-const NFT_RAFFLE_MIN_TICKETS = 50
-
 function parseNftFloorPrice(raw) {
-  if (raw == null || (typeof raw === 'string' && !raw.trim())) {
-    return { ok: false }
-  }
+  if (raw == null || (typeof raw === 'string' && !raw.trim())) return { ok: false }
   const s = String(raw).trim()
   const n = parseFloat(s)
-  if (!Number.isFinite(n) || n <= 0 || n > 1e15) {
-    return { ok: false }
-  }
-  return { ok: true, value: n, string: s }
+  if (!Number.isFinite(n) || n <= 0) return { ok: false }
+  return { ok: true, value: n }
 }
 
-function computeNftTicketPriceFromFloor(floor) {
-  const raw = floor / NFT_RAFFLE_MIN_TICKETS
-  return Math.round(raw * 1e9) / 1e9
+function parseNftTicketPrice(raw) {
+  if (raw == null || raw === '') return { ok: false }
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw).trim())
+  if (!Number.isFinite(n) || n <= 0) return { ok: false }
+  return { ok: true, value: n }
 }
 
-function ticketMatches(a, b) {
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false
-  return Math.abs(a - b) <= 1e-8
+function computeMin(floor, ticket) {
+  return Math.max(1, Math.round(floor / ticket))
 }
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -55,106 +46,62 @@ if (error) {
 }
 
 const list = raffles ?? []
-
-const dbRuleViolations = []
-const ticketDrift = []
+const minMismatch = []
+const maxBelowMin = []
 const badFloor = []
-const strayPrizeCurrency = []
+const prizeAmount = []
+const strayCurrency = []
 
 for (const r of list) {
-  const curMin = r.min_tickets != null ? Number(r.min_tickets) : NaN
-  const curMax = r.max_tickets != null ? Number(r.max_tickets) : null
-  const prizeAmt = r.prize_amount != null ? Number(r.prize_amount) : null
-
-  if (!Number.isFinite(curMin) || curMin !== NFT_RAFFLE_MIN_TICKETS) {
-    dbRuleViolations.push({ r, reason: `min_tickets=${r.min_tickets} (expected ${NFT_RAFFLE_MIN_TICKETS})` })
-  }
-  if (curMax != null && Number.isFinite(curMax) && curMax < NFT_RAFFLE_MIN_TICKETS) {
-    dbRuleViolations.push({ r, reason: `max_tickets=${r.max_tickets} (< ${NFT_RAFFLE_MIN_TICKETS})` })
-  }
-  if (prizeAmt != null && Number.isFinite(prizeAmt) && prizeAmt > 0) {
-    dbRuleViolations.push({ r, reason: `prize_amount=${r.prize_amount} (expected null for NFT)` })
-  }
-
   const fp = parseNftFloorPrice(r.floor_price)
-  if (!fp.ok) {
+  const tp = parseNftTicketPrice(r.ticket_price)
+  if (!fp.ok || !tp.ok) {
     badFloor.push(r)
-  } else {
-    const expected = computeNftTicketPriceFromFloor(fp.value)
-    const curTicket = r.ticket_price != null ? Number(r.ticket_price) : NaN
-    if (!ticketMatches(curTicket, expected)) {
-      ticketDrift.push({
-        slug: r.slug,
-        floor: r.floor_price,
-        ticket_price: r.ticket_price,
-        expected_ticket: expected,
-      })
-    }
+    continue
   }
-
+  const expected = computeMin(fp.value, tp.value)
+  const curMin = r.min_tickets != null ? Number(r.min_tickets) : NaN
+  if (!Number.isFinite(curMin) || curMin !== expected) {
+    minMismatch.push({ slug: r.slug, stored: r.min_tickets, expected })
+  }
+  const curMax = r.max_tickets != null ? Number(r.max_tickets) : null
+  if (curMax != null && Number.isFinite(curMax) && curMax < expected) {
+    maxBelowMin.push({ slug: r.slug, max: r.max_tickets, minGoal: expected })
+  }
+  const pa = r.prize_amount != null ? Number(r.prize_amount) : null
+  if (pa != null && Number.isFinite(pa) && pa > 0) {
+    prizeAmount.push(r.slug)
+  }
   if (r.prize_currency != null && String(r.prize_currency).trim() !== '') {
-    strayPrizeCurrency.push({ slug: r.slug, prize_currency: r.prize_currency })
+    strayCurrency.push(r.slug)
   }
 }
 
-console.log('\n=== NFT raffle economics compliance (read-only) ===\n')
+console.log('\n=== NFT economics check (read-only) ===\n')
 console.log(`Total NFT raffles: ${list.length}`)
 console.log(
-  '\nMigration 050 (DB CHECKs): cannot be verified from this script. Run the SQL file in Supabase:'
+  'Optional: list migration 050 constraints in Supabase SQL Editor — if present, run migration 051 to drop fixed-50 checks.\n'
 )
-console.log('  scripts/check-nft-economics-compliance.sql\n')
 
-console.log('--- Rows violating migration 050 rules (min=50, max null or >=50, prize_amount null) ---')
-if (dbRuleViolations.length === 0) {
-  console.log('None. If migration 050 is applied, the database matches those rules.')
-} else {
-  for (const { r, reason } of dbRuleViolations) {
-    console.log(`  ${r.slug} | ${reason}`)
-  }
-}
+console.log('min_tickets ≠ round(floor ÷ ticket_price):')
+if (minMismatch.length === 0) console.log('  None.')
+else minMismatch.forEach((x) => console.log(`  ${x.slug} | stored=${x.stored} expected=${x.expected}`))
 
-console.log('\n--- Rows with invalid / missing floor_price (fix manually) ---')
-if (badFloor.length === 0) {
-  console.log('None.')
-} else {
-  for (const r of badFloor) {
-    console.log(`  ${r.slug} | floor_price=${JSON.stringify(r.floor_price)}`)
-  }
-}
+console.log('\nmax_tickets < draw goal:')
+if (maxBelowMin.length === 0) console.log('  None.')
+else maxBelowMin.forEach((x) => console.log(`  ${x.slug} | max=${x.max} goal=${x.minGoal}`))
 
-console.log('\n--- Rows where ticket_price ≠ floor÷50 (normalize script fixes this; not a DB CHECK) ---')
-if (ticketDrift.length === 0) {
-  console.log('None.')
-} else {
-  for (const x of ticketDrift) {
-    console.log(
-      `  ${x.slug} | ticket=${x.ticket_price} expected≈${x.expected_ticket} | floor=${x.floor}`
-    )
-  }
-}
+console.log('\nInvalid floor or ticket:')
+if (badFloor.length === 0) console.log('  None.')
+else badFloor.forEach((r) => console.log(`  ${r.slug}`))
 
-console.log('\n--- Rows with non-empty prize_currency (normalize clears; not in migration 050 alone) ---')
-if (strayPrizeCurrency.length === 0) {
-  console.log('None.')
-} else {
-  for (const x of strayPrizeCurrency) {
-    console.log(`  ${x.slug} | prize_currency=${x.prize_currency}`)
-  }
-}
+console.log('\nprize_amount > 0 (NFT should use floor only):')
+if (prizeAmount.length === 0) console.log('  None.')
+else prizeAmount.forEach((s) => console.log(`  ${s}`))
 
-console.log('\n--- What to do ---')
-if (dbRuleViolations.length > 0) {
-  console.log(
-    '- If migration 050 never ran: run normalize (apply), then apply migration 050.\n' +
-      '- If 050 already ran but violations show here, something is inconsistent — investigate before changing data.'
-  )
-} else if (ticketDrift.length > 0 || strayPrizeCurrency.length > 0) {
-  console.log(
-    '- DB rules OK. Optional: run normalize script (dry-run then apply) to align ticket_price and prize_currency.'
-  )
-} else {
-  console.log('- No issues reported by this check.')
-}
+console.log('\nnon-empty prize_currency:')
+if (strayCurrency.length === 0) console.log('  None.')
+else strayCurrency.forEach((s) => console.log(`  ${s}`))
 
-console.log('')
+console.log('\nFix: pnpm run normalize:nft-economics (dry-run) then apply with safeguards.\n')
 process.exit(0)

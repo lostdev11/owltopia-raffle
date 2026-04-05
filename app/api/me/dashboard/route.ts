@@ -10,6 +10,7 @@ import {
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
+import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
       liveFundsEscrowBreakdown,
       feeTier,
       profiles,
+      nftGiveaways,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getEntriesByWallet(wallet),
@@ -52,6 +54,10 @@ export async function GET(request: NextRequest) {
       getLiveFundsEscrowSalesBreakdownByWallet(wallet),
       getCreatorFeeTier(wallet, { skipCache: true, listDisplayOnly: false }), // full holder check (3% vs 6%) for dashboard
       getDisplayNamesByWallets([wallet]),
+      listNftGiveawaysForWallet(wallet).catch((err) => {
+        console.error('listNftGiveawaysForWallet:', err)
+        return []
+      }),
     ])
 
     // Earned = completed settlement totals (net) + live raffles (creator share after platform fee).
@@ -100,6 +106,7 @@ export async function GET(request: NextRequest) {
       },
       creatorRefundRaffles,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
+      nftGiveaways,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'

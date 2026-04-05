@@ -26,6 +26,7 @@ import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import type { NftGiveaway } from '@/lib/types'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -98,6 +99,11 @@ function solscanTxUrl(signature: string): string {
   return `https://solscan.io/tx/${encodeURIComponent(signature)}${dev ? '?cluster=devnet' : ''}`
 }
 
+function solscanTokenUrl(mint: string): string {
+  const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
+  return `https://solscan.io/token/${encodeURIComponent(mint)}${dev ? '?cluster=devnet' : ''}`
+}
+
 /** Readable status for creator list (DB uses snake_case; some states need clearer wording). */
 function myRaffleStatusLabel(status: string | null): string {
   const s = status ?? 'draft'
@@ -136,6 +142,7 @@ type DashboardData = {
     }>
   }>
   feeTier: FeeTier
+  nftGiveaways?: NftGiveaway[]
 }
 
 type NftWinnerDashboardRow = {
@@ -210,6 +217,7 @@ export default function DashboardPage() {
   const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
   const [claimProceedsLoadingId, setClaimProceedsLoadingId] = useState<string | null>(null)
   const [claimPrizeLoadingId, setClaimPrizeLoadingId] = useState<string | null>(null)
+  const [claimGiveawayLoadingId, setClaimGiveawayLoadingId] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
@@ -470,6 +478,35 @@ export default function DashboardPage() {
       }
     },
     [loadDashboard]
+  )
+
+  const handleClaimGiveaway = useCallback(
+    async (giveawayId: string) => {
+      if (!publicKey) return
+      setClaimActionError(null)
+      setClaimGiveawayLoadingId(giveawayId)
+      try {
+        const addr = publicKey.toBase58()
+        const res = await fetch(`/api/me/nft-giveaways/${giveawayId}/claim`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'X-Connected-Wallet': addr },
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not claim giveaway'
+          )
+          return
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimGiveawayLoadingId(null)
+      }
+    },
+    [loadDashboard, publicKey]
   )
 
   const handleClaimRefund = useCallback(
@@ -1175,7 +1212,8 @@ export default function DashboardPage() {
           </CardTitle>
           <CardDescription>
             Signed-in actions only. Claim net ticket proceeds from funds escrow after your raffle draws (platform fee
-            goes in the same transaction), or claim an NFT prize from escrow when you won an NFT raffle.
+            goes in the same transaction), claim an NFT prize from escrow when you won an NFT raffle, or claim
+            team giveaways listed below when you are the eligible wallet.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1247,6 +1285,97 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
+          {Array.isArray(data.nftGiveaways) && data.nftGiveaways.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-foreground mb-2">Giveaway NFTs</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                One-off drops from the team: when the prize is verified in escrow, claim here with this wallet (same as
+                sign-in). On mobile, use Wi‑Fi or solid data and a reliable RPC if claim fails once.
+              </p>
+              <ul className="space-y-3">
+                {data.nftGiveaways.map((g) => {
+                  const claimed = Boolean(g.claimed_at)
+                  const ready = Boolean(g.prize_deposited_at) && !claimed
+                  const label = g.title?.trim() || 'Giveaway NFT'
+                  return (
+                    <li
+                      key={g.id}
+                      className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between border-b border-border/40 pb-3 last:border-0 last:pb-0"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <p className="font-medium truncate">{label}</p>
+                        <p className="text-xs text-muted-foreground break-all">
+                          Asset:{' '}
+                          <a
+                            href={solscanTokenUrl(g.nft_mint_address)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            {g.nft_mint_address.length > 12
+                              ? `${g.nft_mint_address.slice(0, 6)}…${g.nft_mint_address.slice(-6)}`
+                              : g.nft_mint_address}
+                          </a>
+                          {g.prize_standard ? (
+                            <span className="text-muted-foreground"> · {g.prize_standard}</span>
+                          ) : null}
+                        </p>
+                        {!g.prize_deposited_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Waiting for the team to confirm the deposit to escrow.
+                          </p>
+                        )}
+                        {claimed && g.claim_tx_signature && (
+                          <a
+                            href={solscanTxUrl(g.claim_tx_signature)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            View claim transaction
+                          </a>
+                        )}
+                        <Link
+                          href={`/giveaway/${g.id}`}
+                          className="text-xs text-muted-foreground hover:text-foreground hover:underline inline-block"
+                        >
+                          Open giveaway page (share link)
+                        </Link>
+                      </div>
+                      <div className="shrink-0 w-full sm:w-auto">
+                        {ready ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                            disabled={claimGiveawayLoadingId === g.id}
+                            onClick={() => handleClaimGiveaway(g.id)}
+                          >
+                            {claimGiveawayLoadingId === g.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                Claiming…
+                              </>
+                            ) : (
+                              <>
+                                <Gift className="h-4 w-4 mr-2" />
+                                Claim NFT
+                              </>
+                            )}
+                          </Button>
+                        ) : claimed ? (
+                          <p className="text-sm text-muted-foreground py-2">Claimed</p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-2">Not ready</p>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
           <div>
             <p className="text-sm font-medium text-foreground mb-2">Raffle winners (NFT prizes)</p>
             {nftPrizeDashboardRows.length > 0 ? (

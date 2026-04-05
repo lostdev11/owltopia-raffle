@@ -6,10 +6,11 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { checkEscrowHoldsNft, transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
 import {
-  NFT_RAFFLE_MIN_TICKETS,
   parseNftFloorPrice,
-  computeNftTicketPriceFromFloor,
+  parseNftTicketPrice,
+  computeNftMinTicketsFromFloorAndTicket,
   validateNftMaxTickets,
+  validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 
 // Force dynamic rendering since we use request body and params
@@ -343,12 +344,23 @@ export async function PATCH(
         if (!fp.ok) {
           return NextResponse.json({ error: fp.error }, { status: 400 })
         }
-        const maxOk = validateNftMaxTickets(maxTickets)
+        const ticketRaw =
+          body.ticket_price !== undefined ? body.ticket_price : existingRaffle.ticket_price
+        const tp = parseNftTicketPrice(ticketRaw)
+        if (!tp.ok) {
+          return NextResponse.json({ error: tp.error }, { status: 400 })
+        }
+        const minTickets = computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
+        const capOk = validateNftMinTicketsNotOverCap(minTickets)
+        if (!capOk.ok) {
+          return NextResponse.json({ error: capOk.error }, { status: 400 })
+        }
+        const maxOk = validateNftMaxTickets(maxTickets, minTickets)
         if (!maxOk.ok) {
           return NextResponse.json({ error: maxOk.error }, { status: 400 })
         }
-        updates.min_tickets = NFT_RAFFLE_MIN_TICKETS
-        updates.ticket_price = computeNftTicketPriceFromFloor(fp.value)
+        updates.min_tickets = minTickets
+        updates.ticket_price = tp.value
         updates.floor_price = fp.string
       }
     }
