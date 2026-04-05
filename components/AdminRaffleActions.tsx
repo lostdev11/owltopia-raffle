@@ -67,19 +67,28 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
 
+  const noWinner =
+    !(raffle.winner_wallet ?? '').trim() && !raffle.winner_selected_at
+  const statusLc = (raffle.status ?? '').toLowerCase()
+  /** Ended or terminal-ish states where full admin can set a new end_time and return sales/draw flow (no winner, prize still in escrow). */
+  const RESTORE_ELIGIBLE_STATUSES = [
+    'live',
+    'ready_to_draw',
+    'pending_min_not_met',
+    'failed_refund_available',
+    'cancelled',
+    'completed',
+  ] as const
+
   const canOverrideNftEconomics =
     raffle.prize_type === 'nft' &&
-    ['live', 'ready_to_draw', 'pending_min_not_met', 'failed_refund_available'].includes(
-      (raffle.status ?? '').toLowerCase()
-    )
+    noWinner &&
+    RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
 
   const canDeadlineAdminOverride =
-    !(raffle.winner_wallet ?? '').trim() &&
-    !raffle.winner_selected_at &&
+    noWinner &&
     !raffle.prize_returned_at &&
-    ['live', 'ready_to_draw', 'pending_min_not_met', 'failed_refund_available'].includes(
-      (raffle.status ?? '').toLowerCase()
-    )
+    RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
 
   const [nftMinInput, setNftMinInput] = useState('')
   const [nftFloorInput, setNftFloorInput] = useState('')
@@ -92,6 +101,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [reopenStatus, setReopenStatus] = useState<'live' | 'ready_to_draw'>('live')
   const [reopenExtCount, setReopenExtCount] = useState('')
   const [reopenDeadlineConfirm, setReopenDeadlineConfirm] = useState(false)
+  /** Extra acknowledgement when lifting `cancelled` (refunds may have been processed). */
+  const [reopenRestoreCancelledConfirm, setReopenRestoreCancelledConfirm] = useState(false)
   const [savingDeadline, setSavingDeadline] = useState(false)
 
   const resetNftEconomicsForm = useCallback((r: Raffle) => {
@@ -123,6 +134,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     setReopenStatus('live')
     setReopenExtCount('')
     setReopenDeadlineConfirm(false)
+    setReopenRestoreCancelledConfirm(false)
   }, [raffle.id, canDeadlineAdminOverride])
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
@@ -415,6 +427,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
       setMessage({ type: 'error', text: 'Confirm deadline change before saving.' })
       return
     }
+    if (statusLc === 'cancelled' && !reopenRestoreCancelledConfirm) {
+      setMessage({
+        type: 'error',
+        text: 'Confirm restoring from cancelled: check refunds and treasury state before saving.',
+      })
+      return
+    }
     const end = new Date(reopenEndLocal)
     if (!Number.isFinite(end.getTime())) {
       setMessage({ type: 'error', text: 'Invalid end date/time.' })
@@ -671,13 +690,16 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
         {canDeadlineAdminOverride && (
           <Card className="border-sky-600/40 bg-sky-500/[0.07]">
             <CardHeader>
-              <CardTitle>Extend deadline / reopen listing (full admin)</CardTitle>
+              <CardTitle>Restore ended raffle / extend deadline (full admin)</CardTitle>
               <CardDescription>
-                Use when a raffle ended (or is in refund/min-not-met state) but there is still no winner.
-                Sets a new <strong>end time in the future</strong>, moves status to <strong>live</strong> (or
-                ready_to_draw), and turns <strong>is_active</strong> on for live so tickets can sell again.
-                Time is your device local timezone. If purchases are admin-blocked, clear that flag separately.
-                Fix draw threshold in the NFT economics card before or after as needed.
+                For raffles that ended or were marked cancelled / failed-refund / completed <strong>with no
+                winner</strong> — e.g. wrong draw threshold (e.g. min_tickets forced to 50). Sets a new{' '}
+                <strong>end time in the future</strong>, moves status to <strong>live</strong> (or
+                ready_to_draw), turns <strong>is_active</strong> on for live, and for{' '}
+                <strong>cancelled</strong> clears cancellation timestamps so the listing is operational again.
+                Correct NFT draw threshold in the economics card before or after. If purchases are blocked,
+                clear that separately. Restoring <strong>cancelled</strong> may be wrong if buyers were already
+                refunded — confirm treasury and support first.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -730,6 +752,22 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   status.
                 </span>
               </label>
+              {statusLc === 'cancelled' && (
+                <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                  <input
+                    type="checkbox"
+                    checked={reopenRestoreCancelledConfirm}
+                    onChange={(e) => setReopenRestoreCancelledConfirm(e.target.checked)}
+                    className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                    aria-label="Confirm restoring raffle from cancelled status"
+                  />
+                  <span className="text-muted-foreground leading-snug">
+                    This raffle is <strong className="text-foreground">cancelled</strong>. I have checked
+                    refunds and support impact; I still want to clear cancellation fields and reopen sales
+                    (or ready_to_draw) with the new end time.
+                  </span>
+                </label>
+              )}
               <Button
                 type="button"
                 variant="secondary"
@@ -737,7 +775,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 disabled={savingDeadline}
                 className="touch-manipulation min-h-[44px] w-full sm:w-auto border-sky-600/50"
               >
-                {savingDeadline ? 'Saving…' : 'Save deadline / reopen'}
+                {savingDeadline ? 'Saving…' : 'Save / restore raffle'}
               </Button>
             </CardContent>
           </Card>

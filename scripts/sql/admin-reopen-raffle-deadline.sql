@@ -40,3 +40,23 @@ SET
 WHERE slug = 'YOUR-SLUG-HERE'
   AND lower(coalesce(prize_type, '')) = 'nft';
 */
+
+-- Optional: restore from `cancelled` (clears cancellation metadata — only if refunds/support are OK)
+/*
+UPDATE public.raffles
+SET
+  end_time = (NOW() AT TIME ZONE 'utc') + INTERVAL '72 hours',
+  status = 'live',
+  is_active = true,
+  edited_after_entries = true,
+  cancelled_at = NULL,
+  cancellation_requested_at = NULL,
+  cancellation_fee_amount = NULL,
+  cancellation_fee_currency = NULL,
+  cancellation_refund_policy = NULL,
+  updated_at = NOW()
+WHERE slug = 'YOUR-SLUG-HERE'
+  AND winner_wallet IS NULL
+  AND winner_selected_at IS NULL
+  AND prize_returned_at IS NULL;
+*/

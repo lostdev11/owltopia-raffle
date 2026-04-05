@@ -13,7 +13,10 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/restore
- * Restore a raffle for outage recovery – extend end_time so tickets can be purchased again.
+ * Restore for **zero-ticket** outage recovery only (extends end_time).
+ * If the raffle already has confirmed sales, or you need to lift `cancelled` / fix threshold after a bad
+ * migration, use Owl Vision → **Restore ended raffle / extend deadline** (PATCH `raffle_deadline_admin_override`)
+ * instead.
  * Admin only (session required).
  */
 export async function POST(

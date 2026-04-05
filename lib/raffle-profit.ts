@@ -1,4 +1,8 @@
 import type { Raffle, Entry } from '@/lib/types'
+import {
+  getEffectiveDrawThresholdTickets,
+  lenientParseNftFloorAmount,
+} from '@/lib/raffles/nft-raffle-economics'
 
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
 
@@ -37,13 +41,18 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
 /**
  * Get the profit threshold for a raffle (cost to cover).
  *
+ * Used for **display** (revenue vs bar, rev-share hints) and {@link getRaffleProfitInfo}. It does **not**
+ * gate creator/winner claims or whether a draw may run — those use raffle status, escrow rules, and
+ * confirmed **ticket count** vs {@link getEffectiveDrawThresholdTickets} (see `canSelectWinner` in `lib/db/raffles.ts`).
+ *
  * 1) Explicit prize_amount / prize_currency when set and positive (non-NFT / crypto prizes only).
- * 2) When min_tickets is set: min_tickets * ticket_price in raffle.currency (so "Draw Threshold: 80"
- *    tickets at 1 USDC each = 80 USDC revenue threshold).
- * 3) Else: floor_price in raffle.currency (e.g. NFT prize value).
+ * 2) NFT: max of (effective draw goal × ticket_price) and lenient-parsed floor — aligns the bar with the
+ *    same effective min tickets as draw eligibility when that binding part is higher than floor alone.
+ * 3) Crypto: min_tickets * ticket_price when set.
+ * 4) Else: floor_price text (legacy / edge cases).
  */
 export function getRaffleThreshold(raffle: Raffle): { value: number; currency: RaffleCurrency } | null {
-  // 1) Explicit prize_amount / prize_currency for non-NFT (crypto cash prizes). NFT raffles always use floor_price.
+  // 1) Explicit prize_amount / prize_currency for non-NFT (crypto cash prizes).
   if ((raffle.prize_type || '').toLowerCase() !== 'nft') {
     const amount = raffle.prize_amount != null ? Number(raffle.prize_amount) : NaN
     const currency = (raffle.prize_currency || raffle.currency || '').toUpperCase()
@@ -52,24 +61,41 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
     }
   }
 
-  // 2) For crypto raffles: draw threshold in revenue = min_tickets * ticket_price
+  const cur = (raffle.currency || 'SOL').toUpperCase()
+  const currencyOk = cur === 'SOL' || cur === 'USDC' || cur === 'OWL'
+  if (!currencyOk) return null
+
+  // 2) NFT: revenue bar tracks draw goal (effective min tickets × ticket) and floor, whichever is higher.
+  if ((raffle.prize_type || '').toLowerCase() === 'nft') {
+    const ticketPrice = raffle.ticket_price != null ? Number(raffle.ticket_price) : NaN
+    const effectiveMin = getEffectiveDrawThresholdTickets(raffle)
+    let drawGoalRevenue = NaN
+    if (effectiveMin != null && effectiveMin > 0 && Number.isFinite(ticketPrice) && ticketPrice > 0) {
+      drawGoalRevenue = effectiveMin * ticketPrice
+    }
+    const floorN = lenientParseNftFloorAmount(raffle.floor_price)
+    const floorVal = floorN != null && floorN > 0 ? floorN : NaN
+    const parts: number[] = []
+    if (Number.isFinite(drawGoalRevenue) && drawGoalRevenue > 0) parts.push(drawGoalRevenue)
+    if (Number.isFinite(floorVal) && floorVal > 0) parts.push(floorVal)
+    if (parts.length === 0) return null
+    return { value: Math.max(...parts), currency: cur as RaffleCurrency }
+  }
+
+  // 3) Crypto: draw threshold in revenue = min_tickets * ticket_price
   const minTickets = raffle.min_tickets != null ? Number(raffle.min_tickets) : NaN
   const ticketPrice = raffle.ticket_price != null ? Number(raffle.ticket_price) : NaN
-  const cur = (raffle.currency || 'SOL').toUpperCase()
   const isCrypto = raffle.prize_type === 'crypto'
-  if (isCrypto && Number.isFinite(minTickets) && minTickets > 0 && Number.isFinite(ticketPrice) && ticketPrice > 0 && (cur === 'SOL' || cur === 'USDC' || cur === 'OWL')) {
+  if (isCrypto && Number.isFinite(minTickets) && minTickets > 0 && Number.isFinite(ticketPrice) && ticketPrice > 0) {
     return { value: minTickets * ticketPrice, currency: cur as RaffleCurrency }
   }
 
-  // 3) Default: floor_price in raffle.currency (prize value = floor price, e.g. NFT)
+  // 4) Default: floor_price in raffle.currency
   const rawFloor = raffle.floor_price
   if (rawFloor != null && String(rawFloor).trim() !== '') {
     const fp = parseFloat(String(rawFloor).trim())
     if (Number.isFinite(fp) && fp >= 0) {
-      const fc = (raffle.currency || 'SOL').toUpperCase()
-      if (fc === 'SOL' || fc === 'USDC' || fc === 'OWL') {
-        return { value: fp, currency: fc as RaffleCurrency }
-      }
+      return { value: fp, currency: cur as RaffleCurrency }
     }
   }
 
@@ -90,7 +116,8 @@ function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): nu
 
 /**
  * Compute profitability for a raffle from its entries.
- * Profitable when revenue (in threshold currency) > threshold.
+ * `isProfitable` is true when revenue (in threshold currency) is **strictly greater** than the threshold
+ * (break-even line). Claims and draws do not read this; see {@link getRaffleThreshold}.
  */
 export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RaffleProfitInfo {
   const revenue = getRaffleRevenue(entries)

@@ -141,11 +141,13 @@ export async function PATCH(
         'ready_to_draw',
         'pending_min_not_met',
         'failed_refund_available',
+        'cancelled',
+        'completed',
       ]
       if (!allowedFrom.includes(curStatus)) {
         return NextResponse.json(
           {
-            error: `Deadline override is not allowed from status "${existingRaffle.status}".`,
+            error: `Deadline override / restore is not allowed from status "${existingRaffle.status}".`,
           },
           { status: 400 }
         )
@@ -193,6 +195,14 @@ export async function PATCH(
         status: nextStatus,
         edited_after_entries: true,
         updated_at: now.toISOString(),
+      }
+
+      if (curStatus === 'cancelled') {
+        patch.cancelled_at = null
+        patch.cancellation_requested_at = null
+        patch.cancellation_fee_amount = null
+        patch.cancellation_fee_currency = null
+        patch.cancellation_refund_policy = null
       }
 
       if (nextStatus === 'live') {
@@ -296,12 +306,14 @@ export async function PATCH(
           'ready_to_draw',
           'pending_min_not_met',
           'failed_refund_available',
+          'cancelled',
+          'completed',
         ]
         if (!allowedNftEconomicsStatuses.includes(st)) {
           return NextResponse.json(
             {
               error:
-                'NFT economics override is only allowed when status is live, ready_to_draw, pending_min_not_met, or failed_refund_available.',
+                'NFT economics override is only allowed for live / ready_to_draw / pending_min_not_met / failed_refund_available / cancelled, or completed (no winner).',
             },
             { status: 400 }
           )
@@ -503,6 +515,12 @@ export async function PATCH(
       // NFT ticket economics are fixed after draft: only new raffles get recomputed floor/ticket/min at edit time.
       if (!isDraft) {
         if (isNftEconomicsAdminOverride) {
+          if (existingRaffle.winner_wallet || existingRaffle.winner_selected_at) {
+            return NextResponse.json(
+              { error: 'Cannot change NFT economics after a winner is selected.' },
+              { status: 400 }
+            )
+          }
           const touched =
             body.min_tickets !== undefined ||
             body.floor_price !== undefined ||

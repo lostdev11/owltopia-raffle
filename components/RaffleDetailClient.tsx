@@ -3164,7 +3164,8 @@ export function RaffleDetailClient({
               const amountOver = threshold != null && threshold > 0 && revenueInCur > threshold
                 ? revenueInCur - threshold
                 : null
-              const thresholdLabel = raffle.prize_type === 'nft' ? 'Floor (threshold)' : 'Threshold'
+              const thresholdLabel =
+                raffle.prize_type === 'nft' ? 'Revenue threshold' : 'Threshold'
               return (
                 <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
                   <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Revenue &amp; threshold</h3>
