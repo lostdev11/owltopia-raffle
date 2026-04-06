@@ -112,7 +112,9 @@ export default async function RaffleDetailPage({
   // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
   // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.
   const mayAutoDraw =
-    (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+    (raffle.status === 'live' ||
+      raffle.status === 'ready_to_draw' ||
+      raffle.status === 'pending_min_not_met') &&
     !(raffle.prize_type === 'nft' && !raffle.prize_deposited_at)
 
   if (hasEnded && hasNoWinner && mayAutoDraw) {

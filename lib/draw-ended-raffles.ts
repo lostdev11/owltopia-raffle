@@ -30,14 +30,21 @@ export type DrawResult = {
 }
 
 /**
- * Same rules as {@link getEndedRafflesWithoutWinner}: ended, no winner, live/ready_to_draw, NFT deposited when NFT prize.
+ * Same rules as {@link getEndedRafflesWithoutWinner}: ended, no winner, live/ready_to_draw (or legacy
+ * `pending_min_not_met`), NFT deposited when NFT prize.
  * Used so opening the dashboard can advance min-threshold / refunds without relying on cron or a raffle page view.
  */
 export async function processEndedRaffleByIdIfApplicable(raffleId: string): Promise<DrawResult | null> {
   const raffle = await getRaffleById(raffleId)
   if (!raffle) return null
   if (raffle.winner_wallet || raffle.winner_selected_at) return null
-  if (raffle.status !== 'live' && raffle.status !== 'ready_to_draw') return null
+  if (
+    raffle.status !== 'live' &&
+    raffle.status !== 'ready_to_draw' &&
+    raffle.status !== 'pending_min_not_met'
+  ) {
+    return null
+  }
   const now = new Date()
   if (new Date(raffle.end_time) > now) return null
   if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) return null

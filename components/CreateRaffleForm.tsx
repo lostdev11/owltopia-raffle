@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -62,6 +62,7 @@ function focusFormField(elementId: string) {
 
 export function CreateRaffleForm() {
   const router = useRouter()
+  const createSubmitInFlightRef = useRef(false)
   const { publicKey, connected, sendTransaction, wallet } = useWallet()
   const { connection } = useConnection()
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
@@ -265,6 +266,10 @@ export function CreateRaffleForm() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+
+    if (loading || createStep !== 'idle' || createSubmitInFlightRef.current) {
+      return
+    }
     
     if (!connected || !publicKey) {
       alert('Please connect your wallet to create a raffle')
@@ -367,6 +372,7 @@ export function CreateRaffleForm() {
       }
     }
 
+    createSubmitInFlightRef.current = true
     setCreateStep('saving')
     setLoading(true)
     const rankValue = formData.get('rank') as string
@@ -695,9 +701,16 @@ export function CreateRaffleForm() {
       } else {
         const errorData = await response.json().catch(() => ({}))
         const msg = errorData?.error ?? 'Error creating raffle'
+        const existingSlug =
+          typeof errorData?.existing_slug === 'string' && errorData.existing_slug.trim()
+            ? errorData.existing_slug.trim()
+            : ''
         if (response.status === 401) {
           alert(`${msg} Sign in from your dashboard first, then try again.`)
           router.push('/dashboard')
+        } else if (response.status === 409 && existingSlug) {
+          alert(`${msg}\n\nOpening your existing raffle…`)
+          router.push(`/raffles/${encodeURIComponent(existingSlug)}`)
         } else {
           alert(msg)
         }
@@ -706,6 +719,7 @@ export function CreateRaffleForm() {
       console.error('Error:', error)
       alert('Error creating raffle')
     } finally {
+      createSubmitInFlightRef.current = false
       setLoading(false)
       setCreateStep('idle')
     }
@@ -1135,7 +1149,11 @@ export function CreateRaffleForm() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-            <Button type="submit" disabled={loading} className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm">
+            <Button
+              type="submit"
+              disabled={loading || createStep !== 'idle'}
+              className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm"
+            >
               {loading
                 ? createStep === 'signing'
                   ? 'Approve in wallet…'

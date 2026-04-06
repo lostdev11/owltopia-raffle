@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,7 +28,10 @@ import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
-import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import {
+  raffleUsesFundsEscrow,
+  hasExhaustedMinThresholdTimeExtensions,
+} from '@/lib/raffles/ticket-escrow-policy'
 import {
   getThemeAccentBorderStyle,
   getThemeAccentClasses,
@@ -57,6 +61,8 @@ import {
   Loader2,
   Coins,
   CheckCircle,
+  Ticket,
+  RefreshCw,
 } from 'lucide-react'
 import {
   Transaction,
@@ -189,6 +195,9 @@ export function RaffleDetailClient({
   const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
   const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
   const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
+  const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
+  const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
+  const [refundTerminalLoading, setRefundTerminalLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -580,6 +589,47 @@ export function RaffleDetailClient({
       })
       .join('\n')
   }, [creatorRefundCandidates, raffle.currency])
+
+  /** Buyer self-claim from funds escrow (same rules as dashboard). */
+  const buyerRefundableEntries = useMemo(() => {
+    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    if (!raffleUsesFundsEscrow(raffle)) return []
+    const w = publicKey.toBase58()
+    return entries.filter(
+      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+    )
+  }, [connected, publicKey, raffle, entries])
+
+  const buyerLegacyRefundEligible = useMemo(() => {
+    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return false
+    if (raffleUsesFundsEscrow(raffle)) return false
+    const w = publicKey.toBase58()
+    return entries.some((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
+  }, [connected, publicKey, raffle, entries])
+
+  /** Ended, no winner, min threshold not met after max extension — matches server finalize rules. */
+  const minThresholdRefundRules = useMemo(() => {
+    const timeEnded = !isFuture && !isPendingDraft && !isActive
+    const noWinner =
+      !(raffle.winner_wallet ?? '').trim() && !(raffle.winner_selected_at ?? '').trim()
+    const minSet = minTickets != null && minTickets > 0
+    const belowMin = minSet && !isEligibleToDraw
+    const exhausted = hasExhaustedMinThresholdTimeExtensions(raffle)
+    return timeEnded && noWinner && minSet && belowMin && exhausted
+  }, [isFuture, isPendingDraft, isActive, raffle, minTickets, isEligibleToDraw])
+
+  const raffleHasUnrefundedConfirmedSales = useMemo(
+    () => entries.some((e) => e.status === 'confirmed' && !e.refunded_at),
+    [entries]
+  )
+
+  const statusAllowsTerminalFinalize =
+    raffle.status === 'live' ||
+    raffle.status === 'ready_to_draw' ||
+    raffle.status === 'pending_min_not_met'
+
+  const showRefundTerminalButton =
+    minThresholdRefundRules && statusAllowsTerminalFinalize && raffleHasUnrefundedConfirmedSales
 
   // Determine max tickets user can purchase in one transaction
   const maxPurchaseQuantity = availableTickets !== null 
@@ -1505,6 +1555,122 @@ export function RaffleDetailClient({
     setClaimPrizeAlreadyClaimed(false)
     router.refresh()
   }
+
+  const handleClaimTicketRefund = useCallback(
+    async (entryId: string) => {
+      if (!connected || !publicKey) {
+        setClaimRefundError('Please connect your wallet first.')
+        return
+      }
+      setClaimRefundLoadingEntryId(entryId)
+      setClaimRefundError(null)
+
+      const signInForRefund = async (): Promise<boolean> => {
+        if (!publicKey || !signMessage) {
+          setClaimRefundError('Sign in required. Connect your wallet and sign the message.')
+          return false
+        }
+        try {
+          const walletAddr = publicKey.toBase58()
+          const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
+            credentials: 'include',
+          })
+          if (!nonceRes.ok) {
+            const data = await nonceRes.json().catch(() => ({}))
+            setClaimRefundError(
+              typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
+            )
+            return false
+          }
+          const { message } = (await nonceRes.json()) as { message: string }
+          const messageBytes = new TextEncoder().encode(message)
+          const signature = await signMessage(messageBytes)
+          const signatureBase64 =
+            typeof signature === 'string'
+              ? btoa(signature)
+              : btoa(String.fromCharCode(...new Uint8Array(signature)))
+          const verifyRes = await fetch('/api/auth/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              wallet: walletAddr,
+              message,
+              signature: signatureBase64,
+            }),
+          })
+          if (!verifyRes.ok) {
+            const data = await verifyRes.json().catch(() => ({}))
+            setClaimRefundError(
+              typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
+            )
+            return false
+          }
+          return true
+        } catch (e) {
+          setClaimRefundError(e instanceof Error ? e.message : 'Sign-in failed')
+          return false
+        }
+      }
+
+      try {
+        let res = await fetch('/api/entries/claim-refund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ entryId }),
+        })
+        if (res.status === 401) {
+          const ok = await signInForRefund()
+          if (!ok) return
+          res = await fetch('/api/entries/claim-refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ entryId }),
+          })
+        }
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const msg =
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not claim refund'
+          throw new Error(msg)
+        }
+        router.refresh()
+      } catch (e) {
+        setClaimRefundError(e instanceof Error ? e.message : 'Could not claim refund')
+      } finally {
+        setClaimRefundLoadingEntryId(null)
+      }
+    },
+    [connected, publicKey, signMessage, router]
+  )
+
+  const handleEnsureRefundTerminal = useCallback(async () => {
+    setRefundTerminalLoading(true)
+    setClaimRefundError(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/ensure-min-threshold-terminal`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg =
+          typeof (json as { error?: string }).error === 'string'
+            ? (json as { error: string }).error
+            : 'Could not enable refunds'
+        throw new Error(msg)
+      }
+      router.refresh()
+    } catch (e) {
+      setClaimRefundError(e instanceof Error ? e.message : 'Could not enable refunds')
+    } finally {
+      setRefundTerminalLoading(false)
+    }
+  }, [raffle.id, router])
 
   const showDepositEscrow =
     raffle.prize_type === 'nft' &&
@@ -3240,6 +3406,129 @@ export function RaffleDetailClient({
                     Refresh
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {(showRefundTerminalButton ||
+              buyerRefundableEntries.length > 0 ||
+              buyerLegacyRefundEligible) && (
+              <div className="mb-4 space-y-4">
+                {showRefundTerminalButton && (
+                  <div
+                    className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg border border-amber-500/50 bg-amber-500/10 space-y-3`}
+                    role="region"
+                    aria-label="Enable refunds"
+                  >
+                    <div className="flex items-start gap-3">
+                      <Ticket className="h-6 w-6 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">Enable ticket refunds</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          The draw minimum was not met after the extended deadline, but this listing has not switched to
+                          refund mode yet. Tap below to update it—then use Claim refund for each of your entries (connect
+                          the wallet you bought with).
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full touch-manipulation min-h-[44px]"
+                      disabled={refundTerminalLoading}
+                      onClick={() => void handleEnsureRefundTerminal()}
+                    >
+                      {refundTerminalLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Updating…
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Enable refunds and refresh
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+                {buyerRefundableEntries.length > 0 && (
+                  <div
+                    className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg border border-amber-500/40 bg-amber-500/10 space-y-3`}
+                    role="region"
+                    aria-label="Claim ticket refunds"
+                  >
+                    <div className="flex items-start gap-3">
+                      <Ticket className="h-6 w-6 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">Claim your ticket refund</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          The minimum was not met after the extension. Claim each confirmed payment back from funds escrow.
+                          On mobile, use Wi‑Fi or stable data if the request fails.
+                        </p>
+                      </div>
+                    </div>
+                    <ul className="space-y-2">
+                      {buyerRefundableEntries.map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                        >
+                          <span className="text-sm font-medium tabular-nums">
+                            {Number(entry.amount_paid).toFixed(raffle.currency === 'USDC' ? 2 : 4)}{' '}
+                            {raffle.currency}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
+                            disabled={claimRefundLoadingEntryId === entry.id}
+                            onClick={() => void handleClaimTicketRefund(entry.id)}
+                          >
+                            {claimRefundLoadingEntryId === entry.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                Refunding…
+                              </>
+                            ) : (
+                              'Claim refund'
+                            )}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground">
+                      Same action is available on{' '}
+                      <Link href="/dashboard" className="text-primary underline font-medium">
+                        My Dashboard
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                )}
+                {buyerLegacyRefundEligible && buyerRefundableEntries.length === 0 && (
+                  <div
+                    className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg border border-amber-500/40 bg-amber-500/10 space-y-2`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <Ticket className="h-6 w-6 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">Refund owed (legacy listing)</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Ticket payments for this raffle did not use automated funds escrow. Refunds are issued
+                          manually—open{' '}
+                          <Link href="/dashboard" className="text-primary underline font-medium">
+                            My Dashboard
+                          </Link>{' '}
+                          or contact support.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {claimRefundError && (
+                  <p className="text-sm text-destructive px-1">{claimRefundError}</p>
+                )}
               </div>
             )}
 

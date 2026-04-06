@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRaffle, generateUniqueSlug, getRaffleCreationCountForCreatorToday, getRafflesViaRest, promoteDraftRafflesToLive } from '@/lib/db/raffles'
+import {
+  createRaffle,
+  findNonTerminalRaffleByCreatorAndPrizeMint,
+  generateUniqueSlug,
+  getRaffleCreationCountForCreatorToday,
+  getRafflesViaRest,
+  promoteDraftRafflesToLive,
+} from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -130,6 +137,14 @@ export async function POST(request: NextRequest) {
     }
     
     const walletAddress = session.wallet
+
+    const walletCreateRl = rateLimit(`raffles:create:${walletAddress}`, 6, 60_000)
+    if (!walletCreateRl.allowed) {
+      return NextResponse.json(
+        { error: 'Too many create attempts. Wait a minute and try again.' },
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
+    }
 
     // Generate slug from title if not provided, or use provided slug
     let slug = body.slug
@@ -269,6 +284,26 @@ export async function POST(request: NextRequest) {
 
     // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day). Admins: no limit.
     const adminRole = await getAdminRole(walletAddress)
+
+    const prizeAssetIdForDupCheck = String(nftMintAddress || nftTokenId || '').trim()
+    if (adminRole === null && prizeAssetIdForDupCheck) {
+      const existingForPrize = await withTimeout(
+        findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetIdForDupCheck),
+        SUPABASE_TIMEOUT_MS,
+        'supabase error'
+      )
+      if (existingForPrize) {
+        return NextResponse.json(
+          {
+            error:
+              'You already have a raffle using this NFT. Open that listing or wait until it is completed or cancelled before creating another with the same prize.',
+            existing_slug: existingForPrize.slug,
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     if (adminRole === null) {
       const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
       const isHolder = isOwlEnabled() && feeTier.reason === 'holder'

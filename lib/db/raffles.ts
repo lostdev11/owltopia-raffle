@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
-import type { Raffle, Entry } from '@/lib/types'
+import type { Raffle, Entry, RaffleStatus } from '@/lib/types'
 import { withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
@@ -1125,6 +1125,51 @@ export async function getRaffleCreationCountForCreatorToday(creatorWallet: strin
   return typeof count === 'number' ? count : 0
 }
 
+/** Raffle rows that still "own" the prize NFT for duplicate-create checks (not completed / cancelled / refund-done). */
+const NON_TERMINAL_DUPLICATE_STATUSES: RaffleStatus[] = [
+  'draft',
+  'live',
+  'ready_to_draw',
+  'pending_min_not_met',
+  'successful_pending_claims',
+]
+
+/**
+ * If the creator already has a non-terminal raffle listing this prize mint (or same id in nft_token_id), return it.
+ * Prevents double-tap / spam POST from creating multiple live listings for the same NFT.
+ */
+export async function findNonTerminalRaffleByCreatorAndPrizeMint(
+  creatorWallet: string,
+  prizeMintOrAssetId: string
+): Promise<{ id: string; slug: string; status: RaffleStatus } | null> {
+  const w = creatorWallet?.trim()
+  const mint = prizeMintOrAssetId?.trim()
+  if (!w || !mint) return null
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select('id, slug, status')
+    .eq('creator_wallet', w)
+    .or(`nft_mint_address.eq.${mint},nft_token_id.eq.${mint}`)
+    .or(
+      `status.in.(${NON_TERMINAL_DUPLICATE_STATUSES.join(',')}),status.is.null`
+    )
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('findNonTerminalRaffleByCreatorAndPrizeMint error:', error)
+    throw new Error(error.message)
+  }
+  if (!data) return null
+  return {
+    id: String(data.id),
+    slug: String(data.slug),
+    status: (data.status as RaffleStatus) ?? null,
+  }
+}
+
 export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>) {
   const hasImageFallbackColumn = await checkImageFallbackColumnApplied()
   // Build insert object conditionally to handle cases where NFT columns might not exist
@@ -1627,7 +1672,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const now = new Date()
   const columns = await getRaffleColumns()
   
-  // Fetch raffles without winners (status live or ready_to_draw), then filter in JavaScript
+  // Fetch raffles without winners (live / ready_to_draw / legacy pending_min_not_met), then filter in JavaScript
   // This ensures we catch all cases including extended raffles where 7 days have passed
   // since original_end_time even if end_time is still in the future
   const { data, error } = await getSupabaseForRead()
@@ -1635,7 +1680,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     .select(columns)
     .is('winner_wallet', null)
     .is('winner_selected_at', null)
-    .in('status', ['live', 'ready_to_draw'])
+    .in('status', ['live', 'ready_to_draw', 'pending_min_not_met'])
 
   if (error) {
     console.error('Error fetching ended raffles without winner:', error)

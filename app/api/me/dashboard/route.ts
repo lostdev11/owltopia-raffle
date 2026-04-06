@@ -42,8 +42,10 @@ export async function GET(request: NextRequest) {
     for (const row of entriesWithRaffles) {
       const r = row.raffle
       if (!r?.id) continue
-      if (r.winner_wallet || r.winner_selected_at) continue
-      if (r.status !== 'live' && r.status !== 'ready_to_draw') continue
+      if ((r.winner_wallet && String(r.winner_wallet).trim()) || (r.winner_selected_at && String(r.winner_selected_at).trim())) continue
+      if (r.status !== 'live' && r.status !== 'ready_to_draw' && r.status !== 'pending_min_not_met') {
+        continue
+      }
       const endMs = new Date(r.end_time).getTime()
       if (Number.isNaN(endMs) || endMs > Date.now()) continue
       if (r.prize_type === 'nft' && !r.prize_deposited_at) continue
