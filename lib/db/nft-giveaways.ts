@@ -17,6 +17,8 @@ function mapRow(row: Record<string, unknown>): NftGiveaway {
     nft_claim_locked_wallet: row.nft_claim_locked_wallet != null ? String(row.nft_claim_locked_wallet) : null,
     created_by_wallet: row.created_by_wallet != null ? String(row.created_by_wallet) : null,
     notes: row.notes != null ? String(row.notes) : null,
+    discord_partner_tenant_id:
+      row.discord_partner_tenant_id != null ? String(row.discord_partner_tenant_id) : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   }
@@ -73,6 +75,7 @@ export type CreateNftGiveawayInput = {
   eligible_wallet: string
   deposit_tx_signature?: string | null
   notes?: string | null
+  discord_partner_tenant_id?: string | null
   created_by_wallet: string
 }
 
@@ -87,6 +90,7 @@ export async function createNftGiveaway(input: CreateNftGiveawayInput): Promise<
       eligible_wallet: input.eligible_wallet.trim(),
       deposit_tx_signature: input.deposit_tx_signature?.trim() || null,
       notes: input.notes?.trim() || null,
+      discord_partner_tenant_id: input.discord_partner_tenant_id?.trim() || null,
       created_by_wallet: input.created_by_wallet.trim(),
     })
     .select()
@@ -110,6 +114,7 @@ export async function updateNftGiveaway(
     deposit_tx_signature: string | null
     prize_deposited_at: string | null
     notes: string | null
+    discord_partner_tenant_id: string | null
     claim_tx_signature: string | null
     claimed_at: string | null
     nft_claim_locked_at: string | null

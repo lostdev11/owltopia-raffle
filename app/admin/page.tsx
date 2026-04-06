@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1815,6 +1815,20 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Escrow a one-off NFT, set the winner wallet, verify deposit, share the claim link. They claim from
                       the dashboard.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/discord-giveaway-partners">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Radio className="h-5 w-5" />
+                      Discord giveaway partners
+                    </CardTitle>
+                    <CardDescription>
+                      Paid communities: channel webhook + API secret, optional pings on NFT giveaway verify/claim, or
+                      they POST custom embeds to your API.
                     </CardDescription>
                   </CardHeader>
                 </Link>

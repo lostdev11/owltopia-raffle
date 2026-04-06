@@ -11,6 +11,7 @@ import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/ent
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
+import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,9 +36,28 @@ export async function GET(request: NextRequest) {
     }
 
     const wallet = session.wallet
+
+    let entriesWithRaffles = await getEntriesByWallet(wallet)
+    const endedNoWinnerCandidateIds = new Set<string>()
+    for (const row of entriesWithRaffles) {
+      const r = row.raffle
+      if (!r?.id) continue
+      if (r.winner_wallet || r.winner_selected_at) continue
+      if (r.status !== 'live' && r.status !== 'ready_to_draw') continue
+      const endMs = new Date(r.end_time).getTime()
+      if (Number.isNaN(endMs) || endMs > Date.now()) continue
+      if (r.prize_type === 'nft' && !r.prize_deposited_at) continue
+      endedNoWinnerCandidateIds.add(r.id)
+    }
+    if (endedNoWinnerCandidateIds.size > 0) {
+      for (const raffleId of endedNoWinnerCandidateIds) {
+        await processEndedRaffleByIdIfApplicable(raffleId)
+      }
+      entriesWithRaffles = await getEntriesByWallet(wallet)
+    }
+
     const [
       raffles,
-      entriesWithRaffles,
       settledRevenue,
       liveEarnings,
       grossSales,
@@ -47,7 +67,6 @@ export async function GET(request: NextRequest) {
       nftGiveaways,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
-      getEntriesByWallet(wallet),
       getCreatorRevenueByWallet(wallet),
       getCreatorLiveEarningsByWallet(wallet),
       getCreatorTicketSalesGrossByWallet(wallet),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getNftGiveawayById, updateNftGiveaway } from '@/lib/db/nft-giveaways'
+import { getDiscordGiveawayPartnerById } from '@/lib/db/discord-giveaway-partners'
 import type { PrizeStandard } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -64,6 +65,19 @@ export async function PATCH(
 
     if (typeof body.deposit_tx_signature === 'string') {
       patch.deposit_tx_signature = body.deposit_tx_signature.trim() || null
+    }
+
+    if (body.discord_partner_tenant_id !== undefined) {
+      if (body.discord_partner_tenant_id === null || body.discord_partner_tenant_id === '') {
+        patch.discord_partner_tenant_id = null
+      } else if (typeof body.discord_partner_tenant_id === 'string') {
+        const tid = body.discord_partner_tenant_id.trim()
+        const partner = await getDiscordGiveawayPartnerById(tid)
+        if (!partner) {
+          return NextResponse.json({ error: 'discord_partner_tenant_id not found' }, { status: 400 })
+        }
+        patch.discord_partner_tenant_id = tid
+      }
     }
 
     if (Object.keys(patch).length === 0) {

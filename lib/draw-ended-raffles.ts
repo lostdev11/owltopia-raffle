@@ -9,6 +9,7 @@
 import {
   getEndedRafflesWithoutWinner,
   getEntriesByRaffleId,
+  getRaffleById,
   canSelectWinner,
   isRaffleEligibleToDraw,
   selectWinner,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
+import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
   raffleId: string
@@ -27,6 +29,104 @@ export type DrawResult = {
   extended?: boolean
 }
 
+/**
+ * Same rules as {@link getEndedRafflesWithoutWinner}: ended, no winner, live/ready_to_draw, NFT deposited when NFT prize.
+ * Used so opening the dashboard can advance min-threshold / refunds without relying on cron or a raffle page view.
+ */
+export async function processEndedRaffleByIdIfApplicable(raffleId: string): Promise<DrawResult | null> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) return null
+  if (raffle.winner_wallet || raffle.winner_selected_at) return null
+  if (raffle.status !== 'live' && raffle.status !== 'ready_to_draw') return null
+  const now = new Date()
+  if (new Date(raffle.end_time) > now) return null
+  if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) return null
+  return processOneEndedRaffle(raffle)
+}
+
+export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult> {
+  try {
+    const entries = await getEntriesByRaffleId(raffle.id)
+    const canDraw = canSelectWinner(raffle, entries)
+    const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
+
+    if (!canDraw) {
+      if (!meetsMinTickets) {
+        if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+          await finalizeMinThresholdTerminalFailure(raffle.id)
+          return {
+            raffleId: raffle.id,
+            raffleTitle: raffle.title,
+            success: false,
+            winnerWallet: null,
+            error:
+              'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
+          }
+        }
+        // Threshold not met: extend raffle by its original duration (or 7 days fallback)
+        const originalEndTime = raffle.original_end_time || raffle.end_time
+        const startTimeMs = new Date(raffle.start_time).getTime()
+        const originalEndMs = new Date(originalEndTime).getTime()
+        const baseDurationMs = originalEndMs - startTimeMs
+        const durationMs = baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+
+        const currentEndMs = new Date(raffle.end_time).getTime()
+        const newEndTime = new Date(currentEndMs + durationMs)
+
+        await updateRaffle(raffle.id, {
+          original_end_time: originalEndTime,
+          end_time: newEndTime.toISOString(),
+          status: 'live',
+          time_extension_count: (raffle.time_extension_count ?? 0) + 1,
+        })
+
+        return {
+          raffleId: raffle.id,
+          raffleTitle: raffle.title,
+          success: false,
+          winnerWallet: null,
+          error: `Minimum ticket threshold not met (min: ${
+            getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
+          }, sold: ${entries
+            .filter((e) => e.status === 'confirmed')
+            .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
+            durationMs / (24 * 60 * 60 * 1000)
+          } days.`,
+          extended: true,
+        }
+      }
+      // Threshold met but caller decided not to draw yet – mark as ready_to_draw
+      if (raffle.status !== 'ready_to_draw') {
+        await updateRaffle(raffle.id, { status: 'ready_to_draw' })
+      }
+      return {
+        raffleId: raffle.id,
+        raffleTitle: raffle.title,
+        success: false,
+        winnerWallet: null,
+        error: 'Raffle is ready to draw but winner selection was not run in this cycle.',
+      }
+    }
+
+    const winnerWallet = await selectWinner(raffle.id)
+    return {
+      raffleId: raffle.id,
+      raffleTitle: raffle.title,
+      success: !!winnerWallet,
+      winnerWallet: winnerWallet ?? null,
+      error: winnerWallet ? null : 'No confirmed entries found',
+    }
+  } catch (error) {
+    return {
+      raffleId: raffle.id,
+      raffleTitle: raffle.title,
+      success: false,
+      winnerWallet: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
 export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]> {
   const endedRaffles = await getEndedRafflesWithoutWinner()
 
@@ -35,93 +135,8 @@ export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]>
   }
 
   const results: DrawResult[] = []
-
   for (const raffle of endedRaffles) {
-    try {
-      const entries = await getEntriesByRaffleId(raffle.id)
-      const canDraw = canSelectWinner(raffle, entries)
-      const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
-
-      if (!canDraw) {
-        if (!meetsMinTickets) {
-          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
-            await finalizeMinThresholdTerminalFailure(raffle.id)
-            results.push({
-              raffleId: raffle.id,
-              raffleTitle: raffle.title,
-              success: false,
-              winnerWallet: null,
-              error:
-                'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
-            })
-          } else {
-            // Threshold not met: extend raffle by its original duration (or 7 days fallback)
-            const originalEndTime = raffle.original_end_time || raffle.end_time
-            const startTimeMs = new Date(raffle.start_time).getTime()
-            const originalEndMs = new Date(originalEndTime).getTime()
-            const baseDurationMs = originalEndMs - startTimeMs
-            const durationMs =
-              baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
-
-            const currentEndMs = new Date(raffle.end_time).getTime()
-            const newEndTime = new Date(currentEndMs + durationMs)
-
-            await updateRaffle(raffle.id, {
-              original_end_time: originalEndTime,
-              end_time: newEndTime.toISOString(),
-              status: 'live',
-              time_extension_count: (raffle.time_extension_count ?? 0) + 1,
-            })
-
-            results.push({
-              raffleId: raffle.id,
-              raffleTitle: raffle.title,
-              success: false,
-              winnerWallet: null,
-              error: `Minimum ticket threshold not met (min: ${
-                getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
-              }, sold: ${entries
-                .filter((e) => e.status === 'confirmed')
-                .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
-                durationMs / (24 * 60 * 60 * 1000)
-              } days.`,
-              extended: true,
-            })
-          }
-        } else {
-          // Threshold met but caller decided not to draw yet – mark as ready_to_draw
-          if (raffle.status !== 'ready_to_draw') {
-            await updateRaffle(raffle.id, { status: 'ready_to_draw' })
-          }
-          results.push({
-            raffleId: raffle.id,
-            raffleTitle: raffle.title,
-            success: false,
-            winnerWallet: null,
-            error:
-              'Raffle is ready to draw but winner selection was not run in this cycle.',
-          })
-        }
-        continue
-      }
-
-      const winnerWallet = await selectWinner(raffle.id)
-      results.push({
-        raffleId: raffle.id,
-        raffleTitle: raffle.title,
-        success: !!winnerWallet,
-        winnerWallet: winnerWallet ?? null,
-        error: winnerWallet ? null : 'No confirmed entries found',
-      })
-    } catch (error) {
-      results.push({
-        raffleId: raffle.id,
-        raffleTitle: raffle.title,
-        success: false,
-        winnerWallet: null,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      })
-    }
+    results.push(await processOneEndedRaffle(raffle))
   }
 
   return results

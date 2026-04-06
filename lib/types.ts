@@ -23,6 +23,26 @@ export interface NftGiveaway {
   nft_claim_locked_wallet: string | null
   created_by_wallet: string | null
   notes: string | null
+  /** Optional paid Discord partner: we post to their channel webhook on verify/claim. */
+  discord_partner_tenant_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** External Discord server using our giveaway webhook / API (billing: active_until + status). */
+export type DiscordGiveawayPartnerStatus = 'active' | 'trial' | 'suspended'
+
+export interface DiscordGiveawayPartnerTenant {
+  id: string
+  name: string
+  discord_guild_id: string | null
+  /** Null until the server owner runs /owltopia-partner webhook (slash). */
+  webhook_url: string | null
+  api_secret_hash: string
+  status: DiscordGiveawayPartnerStatus
+  active_until: string | null
+  contact_note: string | null
+  created_by_wallet: string | null
   created_at: string
   updated_at: string
 }

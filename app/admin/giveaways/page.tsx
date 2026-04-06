@@ -33,6 +33,7 @@ export default function AdminGiveawaysPage() {
   const [verifyTxById, setVerifyTxById] = useState<Record<string, string>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  const [discordPartners, setDiscordPartners] = useState<Array<{ id: string; name: string }>>([])
 
   const [form, setForm] = useState({
     title: '',
@@ -42,6 +43,7 @@ export default function AdminGiveawaysPage() {
     eligible_wallet: '',
     deposit_tx_signature: '',
     notes: '',
+    discord_partner_tenant_id: '',
   })
 
   useEffect(() => {
@@ -106,9 +108,28 @@ export default function AdminGiveawaysPage() {
     }
   }, [])
 
+  const fetchDiscordPartners = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/discord-giveaway-partners', { credentials: 'include' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && Array.isArray(data.partners)) {
+        setDiscordPartners(
+          data.partners.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))
+        )
+      } else {
+        setDiscordPartners([])
+      }
+    } catch {
+      setDiscordPartners([])
+    }
+  }, [])
+
   useEffect(() => {
-    if (isAdmin && adminRole !== 'raffle_creator') void fetchList()
-  }, [isAdmin, adminRole, fetchList])
+    if (isAdmin && adminRole !== 'raffle_creator') {
+      void fetchList()
+      void fetchDiscordPartners()
+    }
+  }, [isAdmin, adminRole, fetchList, fetchDiscordPartners])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -124,6 +145,9 @@ export default function AdminGiveawaysPage() {
       }
       if (form.nft_token_id.trim()) body.nft_token_id = form.nft_token_id.trim()
       if (form.prize_standard) body.prize_standard = form.prize_standard
+      if (form.discord_partner_tenant_id.trim()) {
+        body.discord_partner_tenant_id = form.discord_partner_tenant_id.trim()
+      }
 
       const res = await fetch('/api/admin/nft-giveaways', {
         method: 'POST',
@@ -144,6 +168,7 @@ export default function AdminGiveawaysPage() {
         eligible_wallet: '',
         deposit_tx_signature: '',
         notes: '',
+        discord_partner_tenant_id: '',
       })
       await fetchList()
     } finally {
@@ -267,7 +292,11 @@ export default function AdminGiveawaysPage() {
           <CardTitle className="text-lg">New giveaway</CardTitle>
           <CardDescription>
             Mint = SPL mint, MPL Core asset id, or compressed asset id as appropriate. For compressed, fill token ID
-            if different from mint field.
+            if different from mint field. Optional: link a{' '}
+            <Link href="/admin/discord-giveaway-partners" className="text-primary underline">
+              Discord partner
+            </Link>{' '}
+            to ping their channel when deposit is verified and when the prize is claimed.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -348,6 +377,24 @@ export default function AdminGiveawaysPage() {
                   className="min-h-[44px]"
                 />
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="g-dp">Discord partner (optional)</Label>
+                <select
+                  id="g-dp"
+                  className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
+                  value={form.discord_partner_tenant_id}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, discord_partner_tenant_id: e.target.value }))
+                  }
+                >
+                  <option value="">None</option>
+                  {discordPartners.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <Button type="submit" disabled={creating} className="touch-manipulation min-h-[44px] w-full sm:w-auto">
               {creating ? (
@@ -389,6 +436,15 @@ export default function AdminGiveawaysPage() {
                       <p className="text-xs text-muted-foreground mt-1">
                         Eligible: <span className="font-mono text-foreground">{g.eligible_wallet}</span>
                       </p>
+                      {g.discord_partner_tenant_id ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Discord partner:{' '}
+                          <span className="text-foreground">
+                            {discordPartners.find((p) => p.id === g.discord_partner_tenant_id)?.name ??
+                              g.discord_partner_tenant_id.slice(0, 8) + '…'}
+                          </span>
+                        </p>
+                      ) : null}
                       <p className="text-xs mt-1">
                         {g.claimed_at ? (
                           <span className="text-green-600 dark:text-green-400">Claimed</span>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { listAllNftGiveaways, createNftGiveaway } from '@/lib/db/nft-giveaways'
+import { getDiscordGiveawayPartnerById } from '@/lib/db/discord-giveaway-partners'
 import type { PrizeStandard } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
@@ -71,6 +72,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    let discord_partner_tenant_id: string | null = null
+    if (
+      typeof body.discord_partner_tenant_id === 'string' &&
+      body.discord_partner_tenant_id.trim()
+    ) {
+      const tid = body.discord_partner_tenant_id.trim()
+      const partner = await getDiscordGiveawayPartnerById(tid)
+      if (!partner) {
+        return NextResponse.json({ error: 'discord_partner_tenant_id not found' }, { status: 400 })
+      }
+      discord_partner_tenant_id = tid
+    }
+
     const created = await createNftGiveaway({
       title: typeof body.title === 'string' ? body.title.trim() : null,
       nft_mint_address: nftMint,
@@ -80,6 +94,7 @@ export async function POST(request: NextRequest) {
       deposit_tx_signature:
         typeof body.deposit_tx_signature === 'string' ? body.deposit_tx_signature.trim() : null,
       notes: typeof body.notes === 'string' ? body.notes.trim() : null,
+      discord_partner_tenant_id,
       created_by_wallet: session.wallet,
     })
 

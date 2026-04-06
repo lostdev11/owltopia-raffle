@@ -12,6 +12,7 @@ import { nftGiveawayToEscrowProbe } from '@/lib/giveaways/payout-nft-giveaway'
 import { getMintFromDepositTx } from '@/lib/solana/parse-deposit-tx'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { notifyDiscordPartnerGiveawayReady } from '@/lib/discord-giveaway-partner-notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,6 +104,8 @@ export async function POST(
     if (!updated) {
       return NextResponse.json({ error: 'Failed to save verification' }, { status: 500 })
     }
+
+    await notifyDiscordPartnerGiveawayReady(updated)
 
     return NextResponse.json({
       success: true,

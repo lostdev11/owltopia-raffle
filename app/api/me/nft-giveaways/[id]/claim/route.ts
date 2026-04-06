@@ -12,6 +12,7 @@ import {
 } from '@/lib/giveaways/payout-nft-giveaway'
 import { checkEscrowHoldsNft } from '@/lib/raffles/prize-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { notifyDiscordPartnerGiveawayClaimed } from '@/lib/discord-giveaway-partner-notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,6 +115,8 @@ export async function POST(
         { status: 500 }
       )
     }
+
+    await notifyDiscordPartnerGiveawayClaimed(saved)
 
     return NextResponse.json({
       success: true,
