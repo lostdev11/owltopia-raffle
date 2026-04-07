@@ -29,9 +29,11 @@ export default function AdminCommunityGiveawaysPage() {
   const router = useRouter()
   const { publicKey, connected, sendTransaction, wallet } = useWallet()
   const { connection } = useConnection()
-  const wallet = publicKey?.toBase58() ?? ''
-  const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
+  const connectedWallet = publicKey?.toBase58() ?? ''
+  const cachedTrue =
+    typeof window !== 'undefined' && connectedWallet && getCachedAdmin(connectedWallet) === true
+  const cachedRole =
+    typeof window !== 'undefined' && connectedWallet ? getCachedAdminRole(connectedWallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
   const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
