@@ -6,6 +6,7 @@
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
+import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
@@ -71,6 +72,44 @@ function rafflePageUrl(raffle: Raffle): string {
 function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {
   const base = getSiteBaseUrl()
   return `${base}/community-giveaway/${encodeURIComponent(g.id)}`
+}
+
+/** Normalize metadata image URIs so Discord embeds accept them (https, site-relative, common ipfs/ar schemes). */
+function discordEmbedImageFromNftUri(raw: string | null | undefined): string | undefined {
+  if (!raw?.trim()) return undefined
+  const t = raw.trim()
+  try {
+    const u = new URL(t)
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
+  } catch {
+    try {
+      const base = getSiteBaseUrl()
+      const u = new URL(t, `${base}/`)
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
+    } catch {
+      /* fall through */
+    }
+  }
+  if (/^ipfs:\/\//i.test(t)) {
+    const path = t.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '')
+    return `https://ipfs.io/ipfs/${path}`
+  }
+  if (/^ar:\/\//i.test(t)) {
+    const path = t.replace(/^ar:\/\//i, '').replace(/^\/+/, '')
+    return `https://arweave.net/${path}`
+  }
+  return undefined
+}
+
+async function communityGiveawayPrizeImageForDiscord(
+  nftMint: string,
+  nftTokenId: string | null | undefined
+): Promise<string | undefined> {
+  const mint = nftMint.trim()
+  if (!mint) return undefined
+  const assetId = nftTokenId?.trim() || mint
+  const raw = await fetchNftImageUriFromHelius(assetId)
+  return discordEmbedImageFromNftUri(raw)
 }
 
 function discordTimestampUnix(iso: string): number | null {
@@ -322,11 +361,19 @@ export async function notifyRaffleWinnerDrawn(
  * If `hostDiscordUserId` is set (wallet linked Discord for `created_by_wallet`), pings that user in message content.
  */
 export async function notifyCommunityGiveawayOpened(
-  giveaway: Pick<CommunityGiveaway, 'id' | 'title' | 'access_gate' | 'starts_at' | 'ends_at'>,
+  giveaway: Pick<
+    CommunityGiveaway,
+    'id' | 'title' | 'access_gate' | 'starts_at' | 'ends_at' | 'nft_mint_address' | 'nft_token_id'
+  >,
   hostDiscordUserId?: string | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayOpen()
   if (!url) return
+
+  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+    giveaway.nft_mint_address,
+    giveaway.nft_token_id
+  )
 
   const title = giveaway.title?.trim() || 'Community giveaway'
   const pageUrl = communityGiveawayPageUrl(giveaway)
@@ -367,6 +414,7 @@ export async function notifyCommunityGiveawayOpened(
         { name: 'OWL boost deadline', value: owlLine, inline: true },
         ...endFields,
       ],
+      image: prizeImage ? { url: prizeImage } : undefined,
       timestamp: new Date().toISOString(),
     },
     extras
@@ -378,12 +426,17 @@ export async function notifyCommunityGiveawayOpened(
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER, else DISCORD_WEBHOOK_RAFFLE_WINNER, else DISCORD_WEBHOOK_URL.
  */
 export async function notifyCommunityGiveawayWinnerDrawn(
-  giveaway: Pick<CommunityGiveaway, 'id' | 'title'>,
+  giveaway: Pick<CommunityGiveaway, 'id' | 'title' | 'nft_mint_address' | 'nft_token_id'>,
   winnerWallet: string,
   winnerDiscordUserId?: string | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayWinner()
   if (!url) return
+
+  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+    giveaway.nft_mint_address,
+    giveaway.nft_token_id
+  )
 
   const title = giveaway.title?.trim() || 'Community giveaway'
   const pageUrl = communityGiveawayPageUrl(giveaway)
@@ -415,6 +468,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
         winnerField,
         { name: 'Giveaway', value: pageUrl, inline: false },
       ],
+      image: prizeImage ? { url: prizeImage } : undefined,
       timestamp: new Date().toISOString(),
     },
     extras
