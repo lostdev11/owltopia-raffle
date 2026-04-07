@@ -131,7 +131,9 @@ export async function handleDiscordApplicationCommand(
       })
     } catch (e) {
       console.error('subscribe intent:', e)
-      return ephemeral('Could not create a payment session. Try again later.')
+      return ephemeral(
+        'Could not create a payment session (database error). On the host, set SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
+      )
     }
 
     const invite = botInviteUrl()
@@ -250,8 +252,17 @@ export async function handleDiscordApplicationCommand(
   }
 
   if (sub === 'status') {
-    const partner = await getDiscordGiveawayPartnerByGuildId(guildId)
-    const pending = await getPendingIntentForGuild(guildId)
+    let partner
+    let pending
+    try {
+      partner = await getDiscordGiveawayPartnerByGuildId(guildId)
+      pending = await getPendingIntentForGuild(guildId)
+    } catch (e) {
+      console.error('status partner query:', e)
+      return ephemeral(
+        'Could not load status (database error). Set SUPABASE_SERVICE_ROLE_KEY on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
+      )
+    }
     if (!partner && !pending) {
       return ephemeral('No partner subscription yet. Use `/owltopia-partner subscribe`.')
     }

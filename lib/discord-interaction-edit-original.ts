@@ -25,6 +25,7 @@ export async function editOriginalInteractionResponse(
   })
   if (!res.ok) {
     const text = await res.text()
+    console.error('[discord] PATCH @original failed', res.status, text.slice(0, 800))
     throw new Error(`Discord PATCH @original ${res.status}: ${text.slice(0, 500)}`)
   }
 }

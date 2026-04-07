@@ -8,6 +8,8 @@ import {
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+/** Allow deferred handler + Discord PATCH to finish on serverless (requires Vercel plan that supports it). */
+export const maxDuration = 60
 
 /** @see https://discord.com/developers/docs/interactions/receiving-and-responding */
 const DISCORD_INTERACTION_PING = 1
