@@ -316,7 +316,8 @@ export default function AdminCommunityGiveawaysPage() {
         escrowAddress &&
         nftForDeposit &&
         !created.prize_deposited_at &&
-        (sendTransaction || wallet?.adapter)
+        publicKey &&
+        wallet?.adapter
       ) {
         setActionError(null)
         setDepositingId(created.id)
