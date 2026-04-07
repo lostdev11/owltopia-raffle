@@ -1,3 +1,4 @@
+import { COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT } from '@/lib/config/community-giveaways'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type {
   CommunityGiveaway,
@@ -40,8 +41,6 @@ function mapEntryRow(row: Record<string, unknown>): CommunityGiveawayEntry {
     giveaway_id: String(row.giveaway_id),
     wallet_address: String(row.wallet_address),
     draw_weight: Number(row.draw_weight),
-    owl_boost_tx: row.owl_boost_tx != null ? String(row.owl_boost_tx) : null,
-    owl_boosted_at: row.owl_boosted_at != null ? String(row.owl_boosted_at) : null,
     created_at: String(row.created_at),
   }
 }
@@ -118,23 +117,21 @@ export async function countEntriesByGiveawayId(giveawayId: string): Promise<numb
   return count ?? 0
 }
 
-export async function findEntryByOwlBoostTx(
-  signature: string
-): Promise<CommunityGiveawayEntry | null> {
+/** True if this tx was already used for any OWL boost. */
+export async function isOwlBoostTxUsed(signature: string): Promise<boolean> {
   const sig = signature.trim()
-  if (!sig) return null
+  if (!sig) return false
   const { data, error } = await getSupabaseAdmin()
-    .from('community_giveaway_entries')
-    .select('*')
-    .eq('owl_boost_tx', sig)
+    .from('community_giveaway_owl_boosts')
+    .select('id')
+    .eq('tx_signature', sig)
     .maybeSingle()
 
   if (error) {
-    console.error('findEntryByOwlBoostTx:', error.message)
+    console.error('isOwlBoostTxUsed:', error.message)
     throw new Error(error.message)
   }
-  if (!data) return null
-  return mapEntryRow(data as Record<string, unknown>)
+  return !!data
 }
 
 export async function getEntryForWallet(
@@ -259,31 +256,34 @@ export async function insertCommunityGiveawayEntry(
   return mapEntryRow(data as Record<string, unknown>)
 }
 
-export async function applyOwlBoostToEntry(
+/**
+ * +1 draw_weight for one verified OWL payment (DB function: insert boost + increment, atomic).
+ * Returns null if no entry or already at max draw weight.
+ */
+export async function applyOwlBoostIncrement(
   giveawayId: string,
   walletAddress: string,
-  owlBoostTx: string,
-  boostedWeight: number
+  owlBoostTx: string
 ): Promise<CommunityGiveawayEntry | null> {
-  const now = new Date().toISOString()
-  const { data, error } = await getSupabaseAdmin()
-    .from('community_giveaway_entries')
-    .update({
-      draw_weight: boostedWeight,
-      owl_boost_tx: owlBoostTx.trim(),
-      owl_boosted_at: now,
-    })
-    .eq('giveaway_id', giveawayId)
-    .eq('wallet_address', walletAddress.trim())
-    .select()
-    .maybeSingle()
+  const entry = await getEntryForWallet(giveawayId, walletAddress)
+  if (!entry) return null
+
+  const current = Math.max(1, Math.floor(Number(entry.draw_weight) || 1))
+  if (current >= COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT) return null
+
+  const { data, error } = await getSupabaseAdmin().rpc('apply_community_giveaway_owl_boost', {
+    p_entry_id: entry.id,
+    p_tx: owlBoostTx.trim(),
+  })
 
   if (error) {
-    console.error('applyOwlBoostToEntry:', error.message)
+    console.error('applyOwlBoostIncrement rpc:', error.message)
     throw new Error(error.message)
   }
   if (!data) return null
-  return mapEntryRow(data as Record<string, unknown>)
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row || typeof row !== 'object') return null
+  return mapEntryRow(row as Record<string, unknown>)
 }
 
 /**

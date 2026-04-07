@@ -9,7 +9,7 @@ import {
 } from '@/lib/db/raffles'
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
+import { getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       grossSales,
       liveFundsEscrowBreakdown,
       feeTier,
-      profiles,
+      walletProfile,
       nftGiveaways,
       communityGiveaways,
     ] = await Promise.all([
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       getCreatorTicketSalesGrossByWallet(wallet),
       getLiveFundsEscrowSalesBreakdownByWallet(wallet),
       getCreatorFeeTier(wallet, { skipCache: true, listDisplayOnly: false }), // full holder check (3% vs 6%) for dashboard
-      getDisplayNamesByWallets([wallet]),
+      getWalletProfileForDashboard(wallet),
       listNftGiveawaysForWallet(wallet).catch((err) => {
         console.error('listNftGiveawaysForWallet:', err)
         return []
@@ -118,7 +118,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       wallet,
-      displayName: profiles[wallet] ?? null,
+      displayName: walletProfile.displayName,
+      discord: walletProfile.discord,
       myRaffles: raffles,
       myEntries: entriesWithRaffles,
       creatorRevenue: creatorRevenueTotal,

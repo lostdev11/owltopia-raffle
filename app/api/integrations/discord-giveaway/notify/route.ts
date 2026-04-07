@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/integrations/discord-giveaway/notify
  * Paid/trial partners: Authorization Bearer <api_secret> (shown once when admin creates the tenant).
- * Body: { title: string, description?: string, url?: string, color?: number, content?: string }
+ * Body: { title: string, description?: string, url?: string, color?: number, content?: string, allowed_mention_user_ids?: string[] }
+ * If `content` includes `<@userId>` mentions, pass matching snowflakes in `allowed_mention_user_ids` so Discord delivers pings.
  * Delivers to the partner's Discord **incoming webhook** (they create it in their server).
  *
  * This is not a hosted Discord bot process; communities can pair this with their own bot/cron calling our API,
@@ -71,6 +72,13 @@ export async function POST(request: NextRequest) {
         ? body.url.trim().slice(0, 2000)
         : undefined
     const content = typeof body.content === 'string' ? body.content.trim().slice(0, 1900) : undefined
+    const allowedMentionUserIds = Array.isArray(body.allowed_mention_user_ids)
+      ? (body.allowed_mention_user_ids as unknown[])
+          .filter((x: unknown): x is string => typeof x === 'string')
+          .map((x: string) => x.trim())
+          .filter(Boolean)
+          .slice(0, 25)
+      : undefined
     const colorRaw = body.color
     const color =
       typeof colorRaw === 'number' &&
@@ -89,8 +97,15 @@ export async function POST(request: NextRequest) {
     }
 
     const ok = content
-      ? await postDiscordIncomingWebhookContentAndEmbed(tenant.webhook_url, content, embed)
-      : await postDiscordIncomingWebhookEmbed(tenant.webhook_url, embed)
+      ? await postDiscordIncomingWebhookContentAndEmbed(
+          tenant.webhook_url,
+          content,
+          embed,
+          allowedMentionUserIds
+        )
+      : await postDiscordIncomingWebhookEmbed(tenant.webhook_url, embed, {
+          allowedMentionUserIds: allowedMentionUserIds,
+        })
 
     if (!ok) {
       return NextResponse.json({ error: 'Discord webhook delivery failed' }, { status: 502 })

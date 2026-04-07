@@ -1,5 +1,6 @@
+import { COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT } from '@/lib/config/community-giveaways'
 import { ownsOwltopia } from '@/lib/platform-fees'
-import type { CommunityGiveaway } from '@/lib/types'
+import type { CommunityGiveaway, CommunityGiveawayEntry } from '@/lib/types'
 
 export type JoinEligibility =
   | { ok: true }
@@ -57,6 +58,24 @@ export function canApplyOwlBoost(g: CommunityGiveaway, walletAddress: string): J
   }
   if (!walletAddress.trim()) {
     return { ok: false, reason: 'Wallet required', status: 400 }
+  }
+  return { ok: true }
+}
+
+/** OWL boost window is open and entry is below max draw weight (1 OWL per +1 weight). */
+export function canApplyMoreOwlBoost(
+  g: CommunityGiveaway,
+  walletAddress: string,
+  entry: CommunityGiveawayEntry | null
+): JoinEligibility {
+  const window = canApplyOwlBoost(g, walletAddress)
+  if (!window.ok) return window
+  if (!entry) {
+    return { ok: false, reason: 'Join the giveaway before applying an OWL boost', status: 400 }
+  }
+  const w = Math.max(1, Math.floor(Number(entry.draw_weight) || 1))
+  if (w >= COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT) {
+    return { ok: false, reason: 'Maximum draw weight reached', status: 400 }
   }
   return { ok: true }
 }

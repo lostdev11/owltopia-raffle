@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  MessageCircle,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
@@ -145,6 +146,7 @@ type DashboardData = {
   feeTier: FeeTier
   nftGiveaways?: NftGiveaway[]
   communityGiveaways?: CommunityGiveaway[]
+  discord?: { linked: boolean; username: string | null }
 }
 
 type NftWinnerDashboardRow = {
@@ -195,6 +197,27 @@ function formatMultiCurrencyTotals(by: Record<string, number>): string {
     .join(' · ')
 }
 
+function discordOAuthReturnMessage(code: string): string {
+  switch (code) {
+    case 'access_denied':
+      return 'Discord connection was cancelled.'
+    case 'discord_taken':
+      return 'That Discord account is already linked to a different wallet.'
+    case 'invalid_state':
+      return 'Link expired. Use Connect Discord and try again.'
+    case 'missing_params':
+      return 'Discord sign-in did not finish. Try again.'
+    case 'token':
+    case 'profile':
+      return 'Could not read your Discord account. Try again later.'
+    case 'link_failed':
+      return 'Could not save your Discord link. Try again.'
+    case 'not_configured':
+      return 'Discord linking is not enabled on this deployment yet.'
+    default:
+      return `Discord connection failed (${code}).`
+  }
+}
 
 type RaffleEntrySummary = {
   raffle: EntryWithRaffle['raffle']
@@ -231,6 +254,8 @@ export default function DashboardPage() {
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
   const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<number | null>(null)
   const [relativeTimeTick, setRelativeTimeTick] = useState(0)
+  const [discordLinkFlash, setDiscordLinkFlash] = useState<string | null>(null)
+  const [discordUnlinking, setDiscordUnlinking] = useState(false)
   const hasRetried401OnMobile = useRef(false)
   const dashboardHydratedRef = useRef(false)
   const hasDashboardDataRef = useRef(false)
@@ -303,6 +328,24 @@ export default function DashboardPage() {
       }
     }
   }, [connected, walletAddr])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const sp = new URLSearchParams(window.location.search)
+    const linked = sp.get('discord_linked')
+    const err = sp.get('discord_error')
+    if (!linked && !err) return
+
+    if (linked === '1') {
+      setDiscordLinkFlash(
+        'Discord connected. If you win a raffle, the server webhook can mention you when you are in that Discord server.'
+      )
+    } else if (err) {
+      setDiscordLinkFlash(discordOAuthReturnMessage(err))
+    }
+    window.history.replaceState({}, '', '/dashboard')
+    void loadDashboard({ silent: true })
+  }, [loadDashboard])
 
   // Reset 401 retry flag when wallet changes so a new connection gets one retry on mobile.
   useEffect(() => {
@@ -858,6 +901,12 @@ export default function DashboardPage() {
       : { feeBps: 600, reason: 'standard' as const }
   const wallet = walletForMemo
   const displayName = data.displayName != null ? String(data.displayName) : null
+  const discord =
+    data.discord &&
+    typeof data.discord === 'object' &&
+    typeof (data.discord as { linked?: unknown }).linked === 'boolean'
+      ? (data.discord as { linked: boolean; username: string | null })
+      : { linked: false as const, username: null as string | null }
   const creatorRefundRaffles = Array.isArray(data.creatorRefundRaffles) ? data.creatorRefundRaffles : []
 
   const refundableEntries = myEntries.filter(
@@ -938,6 +987,31 @@ export default function DashboardPage() {
       setTimeout(() => setDisplayNameSaved(false), 3000)
     } finally {
       setDisplayNameSaving(false)
+    }
+  }
+
+  const handleDiscordUnlink = async () => {
+    setDiscordLinkFlash(null)
+    setDiscordUnlinking(true)
+    try {
+      const res = await fetch('/api/me/discord/unlink', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDiscordLinkFlash(
+          typeof (json as { error?: string }).error === 'string'
+            ? (json as { error: string }).error
+            : 'Could not unlink Discord.'
+        )
+        return
+      }
+      setData((prev) =>
+        prev ? { ...prev, discord: { linked: false, username: null } } : null
+      )
+    } finally {
+      setDiscordUnlinking(false)
     }
   }
 
@@ -1098,6 +1172,63 @@ export default function DashboardPage() {
         </CardContent>
         {displayNameError && (
           <p className="text-sm text-destructive px-6 pb-4">{displayNameError}</p>
+        )}
+      </Card>
+
+      <Card className="mb-8">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <MessageCircle className="h-4 w-4" />
+            Discord
+          </CardTitle>
+          <CardDescription>
+            Link your Discord account so winner announcements that post to Discord (Owltopia webhooks, linked partner
+            giveaways, and community pool draws) can mention you. You need to be in that Discord server for the ping to
+            notify you.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground min-h-[44px] flex flex-col justify-center">
+            {discord.linked ? (
+              <>
+                <span className="text-foreground font-medium">Connected</span>
+                {discord.username ? (
+                  <span className="text-xs mt-0.5">{discord.username}</span>
+                ) : null}
+              </>
+            ) : (
+              <span>Not linked</span>
+            )}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            {discord.linked ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                disabled={discordUnlinking}
+                onClick={() => void handleDiscordUnlink()}
+              >
+                {discordUnlinking ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Unlinking…
+                  </>
+                ) : (
+                  'Unlink Discord'
+                )}
+              </Button>
+            ) : (
+              <Button asChild className="touch-manipulation min-h-[44px] w-full sm:w-auto">
+                <a href="/api/me/discord/link">Connect Discord</a>
+              </Button>
+            )}
+          </div>
+        </CardContent>
+        {discordLinkFlash && (
+          <p className="text-sm px-6 pb-4 text-muted-foreground" role="status">
+            {discordLinkFlash}
+          </p>
         )}
       </Card>
 

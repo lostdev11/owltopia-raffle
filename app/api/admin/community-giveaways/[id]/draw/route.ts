@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
+import { notifyCommunityGiveawayWinnerDrawn } from '@/lib/discord-raffle-webhooks'
 import { countEntriesByGiveawayId, drawCommunityGiveawayWinner, getCommunityGiveawayById } from '@/lib/db/community-giveaways'
+import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -44,6 +46,10 @@ export async function POST(
     }
 
     const updated = await getCommunityGiveawayById(id)
+    if (updated) {
+      const discordMap = await getDiscordUserIdsByWallets([winner])
+      await notifyCommunityGiveawayWinnerDrawn(updated, winner, discordMap[winner] ?? null)
+    }
     return NextResponse.json({
       success: true,
       winnerWallet: winner,

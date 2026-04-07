@@ -12,6 +12,7 @@ import {
 import { countUnrefundedConfirmedEntries } from '@/lib/db/entries'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleWinnerDrawn } from '@/lib/discord-raffle-webhooks'
+import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import {
   RAFFLES_PUBLIC_LIST_STATUSES,
   RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT,
@@ -21,6 +22,11 @@ import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-econo
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
+}
+
+async function discordUserIdForWinnerWallet(wallet: string): Promise<string | null> {
+  const m = await getDiscordUserIdsByWallets([wallet])
+  return m[wallet] ?? null
 }
 
 function normalizeEntryRow(row: Entry): Entry {
@@ -1612,7 +1618,8 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       }
 
       console.log(`Winner selected for raffle ${raffleId}: ${winnerWallet} (${weights[i]} tickets)`)
-      await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
+      const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
+      await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
       return winnerWallet
     }
   }
@@ -1658,7 +1665,8 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     throw new Error(`Failed to update raffle with winner: ${error.message}`)
   }
 
-  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus)
+  const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
+  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
   return winnerWallet
 }
 

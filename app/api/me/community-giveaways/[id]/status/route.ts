@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
+import { COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT } from '@/lib/config/community-giveaways'
+import { canApplyMoreOwlBoost } from '@/lib/community-giveaways/eligibility'
 import { getCommunityGiveawayById, getEntryForWallet } from '@/lib/db/community-giveaways'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -46,10 +48,14 @@ export async function GET(
       Boolean(g.prize_deposited_at) &&
       !g.claimed_at
 
+    const boostEligibility = canApplyMoreOwlBoost(g, wallet, entry)
+    const canOwlBoostMore = boostEligibility.ok
+
     return NextResponse.json({
       joined: Boolean(entry),
       drawWeight: entry?.draw_weight ?? null,
-      owlBoosted: Boolean(entry?.owl_boost_tx),
+      maxDrawWeight: COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
+      canOwlBoostMore,
       isWinner,
       readyToClaim,
       claimed: Boolean(g.claimed_at && isWinner),

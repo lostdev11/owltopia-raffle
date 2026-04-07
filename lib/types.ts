@@ -44,8 +44,6 @@ export interface CommunityGiveawayEntry {
   giveaway_id: string
   wallet_address: string
   draw_weight: number
-  owl_boost_tx: string | null
-  owl_boosted_at: string | null
   created_at: string
 }
 

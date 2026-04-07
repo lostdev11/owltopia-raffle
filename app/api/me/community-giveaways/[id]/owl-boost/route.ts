@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import {
-  applyOwlBoostToEntry,
-  findEntryByOwlBoostTx,
+  applyOwlBoostIncrement,
   getCommunityGiveawayById,
   getEntryForWallet,
+  isOwlBoostTxUsed,
 } from '@/lib/db/community-giveaways'
-import { canApplyOwlBoost } from '@/lib/community-giveaways/eligibility'
-import {
-  COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT,
-  COMMUNITY_GIVEAWAY_WEIGHT_OWL_BOOST,
-} from '@/lib/config/community-giveaways'
+import { canApplyMoreOwlBoost } from '@/lib/community-giveaways/eligibility'
+import { COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY } from '@/lib/config/community-giveaways'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyCommunityGiveawayOwlBoostPayment } from '@/lib/solana/verify-community-giveaway-owl-boost'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -21,7 +18,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 /**
  * POST /api/me/community-giveaways/[id]/owl-boost
- * Body: { signature: string } — SPL transfer of 3 OWL to raffle treasury from signed-in wallet.
+ * Body: { signature: string } — SPL transfer of 1 OWL to raffle treasury per +1 draw weight (up to max 4).
  */
 export async function POST(
   request: NextRequest,
@@ -70,20 +67,13 @@ export async function POST(
       return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
     }
 
-    const windowOk = canApplyOwlBoost(g, wallet)
-    if (!windowOk.ok) {
-      return NextResponse.json({ error: windowOk.reason }, { status: windowOk.status ?? 400 })
-    }
-
     const entry = await getEntryForWallet(id, wallet)
-    if (!entry) {
-      return NextResponse.json({ error: 'Join the giveaway before applying an OWL boost' }, { status: 400 })
-    }
-    if (entry.owl_boost_tx) {
-      return NextResponse.json({ success: true, alreadyBoosted: true, entry })
+    const boostOk = canApplyMoreOwlBoost(g, wallet, entry)
+    if (!boostOk.ok) {
+      return NextResponse.json({ error: boostOk.reason }, { status: boostOk.status ?? 400 })
     }
 
-    const dup = await findEntryByOwlBoostTx(signature)
+    const dup = await isOwlBoostTxUsed(signature)
     if (dup) {
       return NextResponse.json({ error: 'This transaction was already used for a boost' }, { status: 400 })
     }
@@ -91,15 +81,18 @@ export async function POST(
     const verified = await verifyCommunityGiveawayOwlBoostPayment({
       signature,
       payerWallet: wallet,
-      expectedUiOwl: COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT,
+      expectedUiOwl: COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
     })
     if (!verified.ok) {
       return NextResponse.json({ error: verified.error }, { status: 400 })
     }
 
-    const updated = await applyOwlBoostToEntry(id, wallet, signature, COMMUNITY_GIVEAWAY_WEIGHT_OWL_BOOST)
+    const updated = await applyOwlBoostIncrement(id, wallet, signature)
     if (!updated) {
-      return NextResponse.json({ error: 'Could not save boost' }, { status: 500 })
+      return NextResponse.json(
+        { error: 'Could not apply boost (may already be at maximum draw weight)' },
+        { status: 400 }
+      )
     }
 
     return NextResponse.json({ success: true, entry: updated })

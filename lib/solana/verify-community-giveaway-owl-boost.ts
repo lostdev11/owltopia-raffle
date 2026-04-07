@@ -4,13 +4,11 @@
 import { PublicKey } from '@solana/web3.js'
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
 function raffleTreasuryPubkey(): PublicKey | null {
-  const w =
-    process.env.RAFFLE_RECIPIENT_WALLET?.trim() ||
-    process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET?.trim() ||
-    ''
+  const w = getRaffleTreasuryWalletAddress()
   if (!w) return null
   try {
     return new PublicKey(w)

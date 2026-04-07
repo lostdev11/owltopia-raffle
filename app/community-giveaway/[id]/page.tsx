@@ -30,6 +30,7 @@ type PublicInfo = {
   claimed: boolean
   owlBoostWindowOpen: boolean
   owlBoostUiAmount: number
+  maxDrawWeight: number
   owlPayment: {
     treasuryWallet: string
     mint: string
@@ -41,7 +42,8 @@ type PublicInfo = {
 type MeStatus = {
   joined: boolean
   drawWeight: number | null
-  owlBoosted: boolean
+  maxDrawWeight: number
+  canOwlBoostMore: boolean
   isWinner: boolean
   readyToClaim: boolean
   claimed: boolean
@@ -283,8 +285,9 @@ export default function CommunityGiveawayPage() {
           </CardTitle>
           <CardDescription>
             Join the pool for a chance to win. Holder-only giveaways require an Owltopia (Owl NFT) in your wallet.
-            Before the scheduled start time, you can send {info?.owlBoostUiAmount ?? 3} OWL to the platform treasury
-            for triple weight in the draw (after you have joined).
+            Before the scheduled start time, you can send OWL to the raffle treasury wallet in separate transactions —{' '}
+            {info?.owlBoostUiAmount ?? 1} OWL adds +1 draw weight each time (up to {info?.maxDrawWeight ?? 4} total
+            weight, after you have joined). You can stop after one extra boost or use up to three.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -362,9 +365,11 @@ export default function CommunityGiveawayPage() {
                       <span className="text-muted-foreground"> · Draw weight: {status.drawWeight}</span>
                     ) : null}
                   </p>
-                  {status.owlBoosted ? (
-                    <p className="text-muted-foreground">OWL boost applied (3× weight).</p>
-                  ) : null}
+                  {status.joined &&
+                  status.drawWeight != null &&
+                  status.drawWeight >= status.maxDrawWeight && (
+                    <p className="text-muted-foreground">Draw weight is at the maximum ({status.maxDrawWeight}).</p>
+                  )}
                   {status.isWinner ? (
                     <p className="text-foreground font-medium">
                       You won — claim from your dashboard (mobile: stable connection recommended).
@@ -426,7 +431,7 @@ export default function CommunityGiveawayPage() {
                     {status?.joined &&
                       info.owlBoostWindowOpen &&
                       info.owlPayment &&
-                      !status.owlBoosted && (
+                      status.canOwlBoostMore && (
                         <Button
                           type="button"
                           variant="secondary"
@@ -440,7 +445,7 @@ export default function CommunityGiveawayPage() {
                               Sending OWL…
                             </>
                           ) : (
-                            `Pay ${info.owlBoostUiAmount} OWL for 3× draw weight`
+                            `Pay ${info.owlBoostUiAmount} OWL for +1 draw weight`
                           )}
                         </Button>
                       )}

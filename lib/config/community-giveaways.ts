@@ -1,8 +1,11 @@
-/** SPL OWL sent to raffle treasury to unlock boosted draw weight (before giveaway starts_at). */
-export const COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT = 3
-
-/** Base draw weight for a participant (one entry in the weighted pool). */
+/** Base draw weight (one pool entry per wallet). */
 export const COMMUNITY_GIVEAWAY_WEIGHT_DEFAULT = 1
 
-/** Draw weight after verified OWL boost (3× chance vs default). */
-export const COMMUNITY_GIVEAWAY_WEIGHT_OWL_BOOST = 3
+/** SPL OWL sent to raffle treasury per +1 draw weight (before giveaway starts_at). */
+export const COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY = 1
+
+/** Max additional weight from OWL (3 extra → max total draw_weight 4). */
+export const COMMUNITY_GIVEAWAY_MAX_EXTRA_WEIGHT = 3
+
+export const COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT =
+  COMMUNITY_GIVEAWAY_WEIGHT_DEFAULT + COMMUNITY_GIVEAWAY_MAX_EXTRA_WEIGHT

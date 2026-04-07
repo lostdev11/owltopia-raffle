@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT } from '@/lib/config/community-giveaways'
+import {
+  COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
+  COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
+} from '@/lib/config/community-giveaways'
 import { countEntriesByGiveawayId, getCommunityGiveawayById } from '@/lib/db/community-giveaways'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
@@ -35,10 +39,7 @@ export async function GET(
       !Number.isNaN(startMs) &&
       Date.now() < startMs
 
-    const treasuryWallet =
-      process.env.RAFFLE_RECIPIENT_WALLET?.trim() ||
-      process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET?.trim() ||
-      ''
+    const treasuryWallet = getRaffleTreasuryWalletAddress() ?? ''
     const owlInfo = getTokenInfo('OWL')
     const owlPayment =
       owlBoostWindowOpen && treasuryWallet && owlInfo.mintAddress
@@ -46,7 +47,7 @@ export async function GET(
             treasuryWallet,
             mint: owlInfo.mintAddress,
             decimals: owlInfo.decimals,
-            uiAmount: COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT,
+            uiAmount: COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
           }
         : null
 
@@ -63,7 +64,8 @@ export async function GET(
       winnerDrawn: Boolean(g.winner_wallet),
       claimed: Boolean(g.claimed_at),
       owlBoostWindowOpen,
-      owlBoostUiAmount: COMMUNITY_GIVEAWAY_OWL_BOOST_UI_AMOUNT,
+      owlBoostUiAmount: COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
+      maxDrawWeight: COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
       owlPayment,
     })
   } catch (error) {

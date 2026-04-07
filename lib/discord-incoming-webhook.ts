@@ -3,6 +3,7 @@
  * Shared by platform webhooks and partner / paid community webhooks.
  */
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
+import { allowedMentionsForUserIds } from '@/lib/discord-webhook-user-mentions'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
@@ -20,9 +21,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+type IncomingWebhookPayload = {
+  username: string
+  embeds: DiscordIncomingEmbed[]
+  content?: string
+  allowed_mentions?: { parse: []; users: string[] }
+}
+
 async function postOnce(
   webhookUrl: string,
-  payload: { username: string; embeds: DiscordIncomingEmbed[]; content?: string },
+  payload: IncomingWebhookPayload,
   signal: AbortSignal
 ): Promise<{ ok: boolean; retryable: boolean }> {
   try {
@@ -43,10 +51,18 @@ async function postOnce(
   }
 }
 
+export type IncomingWebhookMentionOptions = {
+  /** Plain message line (e.g. `<@userId>` ping). */
+  content?: string
+  /** Discord user snowflakes; enables ping when combined with `<@id>` in content or embed. */
+  allowedMentionUserIds?: string[]
+}
+
 /** Returns false if URL invalid or post failed. */
 export async function postDiscordIncomingWebhookEmbed(
   webhookUrl: string,
-  embed: DiscordIncomingEmbed
+  embed: DiscordIncomingEmbed,
+  mention?: IncomingWebhookMentionOptions
 ): Promise<boolean> {
   if (!webhookUrl?.trim()) return false
   if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
@@ -56,15 +72,20 @@ export async function postDiscordIncomingWebhookEmbed(
     return false
   }
 
+  const allowed = allowedMentionsForUserIds(mention?.allowedMentionUserIds ?? [])
+  const content = mention?.content?.trim() ? mention.content.trim().slice(0, 1900) : undefined
+
   const attempt = async (): Promise<{ ok: boolean; retryable: boolean }> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
     try {
-      return await postOnce(
-        webhookUrl,
-        { username: PLATFORM_NAME, embeds: [embed] },
-        controller.signal
-      )
+      const payload: IncomingWebhookPayload = {
+        username: PLATFORM_NAME,
+        embeds: [embed],
+        ...(content ? { content } : {}),
+        ...(allowed ? { allowed_mentions: allowed } : {}),
+      }
+      return await postOnce(webhookUrl, payload, controller.signal)
     } finally {
       clearTimeout(timer)
     }
@@ -82,17 +103,20 @@ export async function postDiscordIncomingWebhookEmbed(
 export async function postDiscordIncomingWebhookContentAndEmbed(
   webhookUrl: string,
   content: string | undefined,
-  embed: DiscordIncomingEmbed
+  embed: DiscordIncomingEmbed,
+  allowedMentionUserIds?: string[]
 ): Promise<boolean> {
   if (!webhookUrl?.trim()) return false
   if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
     console.error('Discord webhook URL rejected for partner post')
     return false
   }
-  const payload = {
+  const allowed = allowedMentionsForUserIds(allowedMentionUserIds ?? [])
+  const payload: IncomingWebhookPayload = {
     username: PLATFORM_NAME,
     content: content?.trim() ? content.trim().slice(0, 1900) : undefined,
     embeds: [embed],
+    ...(allowed ? { allowed_mentions: allowed } : {}),
   }
   const attempt = async (): Promise<{ ok: boolean; retryable: boolean }> => {
     const controller = new AbortController()

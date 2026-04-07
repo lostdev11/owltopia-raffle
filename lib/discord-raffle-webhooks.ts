@@ -1,11 +1,13 @@
 /**
  * Optional Discord webhook notifications for raffle lifecycle events.
  * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER / DISCORD_WEBHOOK_LIVE_RAFFLES,
+ * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER (optional; falls back to raffle winner URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  */
-import type { Raffle } from '@/lib/types'
+import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
+import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -19,6 +21,13 @@ function webhookUrlWinner(): string | undefined {
   const specific = process.env.DISCORD_WEBHOOK_RAFFLE_WINNER?.trim()
   if (specific) return specific
   return process.env.DISCORD_WEBHOOK_URL?.trim() || undefined
+}
+
+/** Pool/community giveaway draw; falls back to raffle winner webhook then global Discord URL. */
+function webhookUrlCommunityGiveawayWinner(): string | undefined {
+  const specific = process.env.DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER?.trim()
+  if (specific) return specific
+  return webhookUrlWinner()
 }
 
 function webhookUrlLiveShare(): string | undefined {
@@ -49,6 +58,11 @@ function prizeSummary(raffle: Raffle): string {
 function rafflePageUrl(raffle: Raffle): string {
   const base = getSiteBaseUrl()
   return `${base}/raffles/${encodeURIComponent(raffle.slug)}`
+}
+
+function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {
+  const base = getSiteBaseUrl()
+  return `${base}/community-giveaway/${encodeURIComponent(g.id)}`
 }
 
 function discordTimestampUnix(iso: string): number | null {
@@ -134,20 +148,30 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+type WebhookExtras = {
+  content?: string
+  allowed_mentions?: { parse: []; users: string[] }
+}
+
 async function postDiscordWebhookOnce(
   webhookUrl: string,
   embed: DiscordEmbed,
-  signal: AbortSignal
+  signal: AbortSignal,
+  extras?: WebhookExtras
 ): Promise<{ ok: boolean; retryable: boolean }> {
   try {
+    const body: Record<string, unknown> = {
+      username: PLATFORM_NAME,
+      embeds: [embed],
+    }
+    if (extras?.content) body.content = extras.content
+    if (extras?.allowed_mentions) body.allowed_mentions = extras.allowed_mentions
+
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,
-      body: JSON.stringify({
-        username: PLATFORM_NAME,
-        embeds: [embed],
-      }),
+      body: JSON.stringify(body),
     })
     if (res.ok) return { ok: true, retryable: false }
     const text = await res.text().catch(() => '')
@@ -160,7 +184,11 @@ async function postDiscordWebhookOnce(
   }
 }
 
-async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Promise<boolean> {
+async function postDiscordWebhook(
+  webhookUrl: string,
+  embed: DiscordEmbed,
+  extras?: WebhookExtras
+): Promise<boolean> {
   if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
     console.error(
       'Discord webhook URL rejected: must be https://discord.com/api/webhooks/{id}/{token} (or canary/ptb/discordapp host)'
@@ -172,7 +200,7 @@ async function postDiscordWebhook(webhookUrl: string, embed: DiscordEmbed): Prom
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
     try {
-      return await postDiscordWebhookOnce(webhookUrl, embed, controller.signal)
+      return await postDiscordWebhookOnce(webhookUrl, embed, controller.signal, extras)
     } finally {
       clearTimeout(timer)
     }
@@ -228,7 +256,8 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
 export async function notifyRaffleWinnerDrawn(
   raffle: Raffle,
   winnerWallet: string,
-  statusAfterDraw: string
+  statusAfterDraw: string,
+  winnerDiscordUserId?: string | null
 ): Promise<void> {
   const url = webhookUrlWinner()
   if (!url) return
@@ -239,23 +268,92 @@ export async function notifyRaffleWinnerDrawn(
       : statusAfterDraw
   const image = resolveDiscordEmbedImageUrl(raffle)
 
-  await postDiscordWebhook(url, {
-    title: 'Raffle ended — winner drawn',
-    description: raffle.title,
-    url: rafflePageUrl(raffle),
-    color: 0xfee75c,
-    fields: [
-      { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true },
-      { name: 'Prize', value: prizeSummary(raffle), inline: true },
-      {
-        name: 'Raffle status',
-        value: statusNote,
-        inline: false,
-      },
-    ],
-    image: image ? { url: image } : undefined,
-    timestamp: new Date().toISOString(),
-  })
+  const discordSnowflake = parseDiscordUserSnowflake(winnerDiscordUserId ?? undefined)
+
+  const winnerField = discordSnowflake
+    ? {
+        name: 'Winner',
+        value: `<@${discordSnowflake}> (\`${shortenWallet(winnerWallet)}\`)`,
+        inline: true,
+      }
+    : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
+
+  const extras: WebhookExtras | undefined = discordSnowflake
+    ? {
+        content: `Winner ping: <@${discordSnowflake}>`,
+        allowed_mentions: { parse: [], users: [discordSnowflake] },
+      }
+    : undefined
+
+  await postDiscordWebhook(
+    url,
+    {
+      title: 'Raffle ended — winner drawn',
+      description: raffle.title,
+      url: rafflePageUrl(raffle),
+      color: 0xfee75c,
+      fields: [
+        winnerField,
+        { name: 'Prize', value: prizeSummary(raffle), inline: true },
+        {
+          name: 'Raffle status',
+          value: statusNote,
+          inline: false,
+        },
+      ],
+      image: image ? { url: image } : undefined,
+      timestamp: new Date().toISOString(),
+    },
+    extras
+  )
+}
+
+/**
+ * Optional: when an admin draws a community (pool) giveaway winner. Uses
+ * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER, else DISCORD_WEBHOOK_RAFFLE_WINNER, else DISCORD_WEBHOOK_URL.
+ */
+export async function notifyCommunityGiveawayWinnerDrawn(
+  giveaway: Pick<CommunityGiveaway, 'id' | 'title'>,
+  winnerWallet: string,
+  winnerDiscordUserId?: string | null
+): Promise<void> {
+  const url = webhookUrlCommunityGiveawayWinner()
+  if (!url) return
+
+  const title = giveaway.title?.trim() || 'Community giveaway'
+  const pageUrl = communityGiveawayPageUrl(giveaway)
+  const discordSnowflake = parseDiscordUserSnowflake(winnerDiscordUserId ?? undefined)
+
+  const winnerField = discordSnowflake
+    ? {
+        name: 'Winner',
+        value: `<@${discordSnowflake}> (\`${shortenWallet(winnerWallet)}\`)`,
+        inline: true,
+      }
+    : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
+
+  const extras: WebhookExtras | undefined = discordSnowflake
+    ? {
+        content: `Winner ping: <@${discordSnowflake}>`,
+        allowed_mentions: { parse: [], users: [discordSnowflake] },
+      }
+    : undefined
+
+  await postDiscordWebhook(
+    url,
+    {
+      title: 'Community giveaway — winner drawn',
+      description: title,
+      url: pageUrl,
+      color: 0xfee75c,
+      fields: [
+        winnerField,
+        { name: 'Giveaway', value: pageUrl, inline: false },
+      ],
+      timestamp: new Date().toISOString(),
+    },
+    extras
+  )
 }
 
 /**
