@@ -46,7 +46,7 @@ export default function TermsPage() {
 
       <div className="prose prose-invert max-w-none">
         <h1 className="text-4xl font-bold mb-2">Terms of Service</h1>
-        <p className="text-muted-foreground mb-8">Last updated: {new Date().toLocaleDateString()}</p>
+        <p className="text-muted-foreground mb-8">Last updated: April 6, 2026</p>
 
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">1. Acceptance of Terms</h2>
@@ -72,14 +72,14 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">3. How the Raffle Works</h2>
           <p className="mb-4">
-            {PLATFORM_NAME} is a decentralized platform that facilitates raffles using blockchain technology:
+            {PLATFORM_NAME} facilitates raffles using Solana and our application services. In summary:
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>Participants purchase entries using cryptocurrency (USDC or SOL)</li>
-            <li>Each entry corresponds to one ticket in the raffle</li>
-            <li>Winners are selected randomly from all valid entries</li>
-            <li>All transactions are recorded on the blockchain for transparency</li>
-            <li>The Platform uses Owl Vision trust scoring to ensure fairness</li>
+            <li>Participants purchase entries using cryptocurrency (SOL, USDC, or OWL, as offered on each raffle)</li>
+            <li>Each purchase corresponds to one or more tickets as shown at checkout</li>
+            <li>Winners are selected by weighted random selection among confirmed entries (see Section 6)</li>
+            <li>Payments and many prize movements are recorded on-chain where applicable</li>
+            <li>Owl Vision is an informational trust score on each raffle; it does not guarantee outcomes or replace your own judgment</li>
           </ul>
         </section>
 
@@ -106,37 +106,33 @@ export default function TermsPage() {
             When you purchase raffle entries:
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>All payments must be made in the accepted cryptocurrencies (USDC or SOL)</li>
-            <li>Transactions are final and cannot be refunded</li>
-            <li>Entry prices are set by raffle creators and displayed before purchase</li>
-            <li>You must ensure you have sufficient balance for gas/transaction fees</li>
-            <li>Failed transactions do not result in entry purchases</li>
-            <li>Raffles may have a maximum ticket limit set by the creator - once this limit is reached, no additional entries can be purchased</li>
-            <li>All entries must be verified on-chain before they are considered valid for the raffle drawing</li>
-            <li>Entries may be in "pending", "confirmed", or "rejected" status - only confirmed entries are eligible for winner selection</li>
-            <li>If an entry is rejected due to verification failure or exceeding maximum ticket limits, the transaction amount will not be refunded</li>
+            <li>Payments must be made in the cryptocurrency shown for that raffle (SOL, USDC, or OWL)</li>
+            <li>For many raffles, ticket proceeds are sent to a platform <strong>funds escrow</strong> address and verified before your entry becomes confirmed; some raffles may use a different recipient address. You are responsible for reading the transaction you approve in your wallet</li>
+            <li>The Platform charges a <strong>platform fee</strong> on ticket sales: <strong>3%</strong> when the raffle creator qualifies as an Owltopia (Owl) NFT holder, and <strong>6%</strong> otherwise. The fee is applied as part of the payment or settlement flow shown in the product</li>
+            <li>Except where a failed minimum-threshold raffle allows refund claims from escrow (see Section 6), completed ticket purchases are final and not refundable</li>
+            <li>Entry prices and limits are set by raffle creators and displayed before purchase</li>
+            <li>You must ensure you have sufficient balance for network transaction fees</li>
+            <li>Failed or abandoned transactions do not create confirmed entries</li>
+            <li>Raffles may have a maximum ticket limit; once reached, no additional entries can be purchased</li>
+            <li>Entries may be in &quot;pending&quot;, &quot;confirmed&quot;, or &quot;rejected&quot; status — only <strong>confirmed</strong> entries count toward minimum thresholds and winner selection</li>
+            <li>If an entry is rejected due to verification failure or policy limits, you may not receive a refund unless these Terms or the Platform expressly provides a refund path for that situation</li>
           </ul>
         </section>
 
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">6. Prize Distribution</h2>
           <p className="mb-4">
-            Winners will be selected according to the rules of each individual raffle:
+            Winners and payouts follow these rules (in addition to anything stated on a specific raffle):
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>Winners are selected randomly using verifiable weighted random selection - each wallet's chance is proportional to their total ticket quantity</li>
-            <li>Only confirmed entries are eligible for winner selection - pending or rejected entries are excluded</li>
-            <li>If a raffle has a minimum ticket requirement set, a winner can only be selected if BOTH conditions are met:
-              <ul className="list-disc pl-6 mt-2 space-y-1">
-                <li>The minimum number of tickets has been sold (based on confirmed entries)</li>
-                <li>At least seven (7) days have passed since the original raffle end time</li>
-              </ul>
-            </li>
-            <li>If no minimum ticket requirement is set, winners can be selected immediately after the raffle end time</li>
-            <li>Prize distribution occurs after winner selection</li>
-            <li>Winners will be notified through the Platform</li>
-            <li>Prizes are distributed directly to the winner's wallet address</li>
-            <li>The Platform is not responsible for prizes after distribution</li>
+            <li>Selection uses <strong>weighted random selection</strong> among <strong>confirmed</strong> entries: each wallet&apos;s probability is proportional to its total confirmed ticket count for that raffle. The draw is performed by Platform software (not an on-chain verifiable randomness beacon)</li>
+            <li>If <strong>no minimum ticket threshold</strong> is set, a winner may be selected after the scheduled end time if there is at least one confirmed entry and other eligibility checks pass</li>
+            <li>If a <strong>minimum ticket threshold</strong> is set, a winner can be selected only after the raffle has ended and <strong>confirmed</strong> ticket sales meet or exceed that threshold. There is <strong>no</strong> separate mandatory multi-day waiting period after the minimum is met solely for that reason</li>
+            <li>If the minimum is <strong>not</strong> met when the raffle ends, the Platform may <strong>extend the end time once</strong>, typically by the same duration as the raffle&apos;s original window (or by seven days if that duration cannot be determined). If the minimum is still not met after that extension, the raffle may be marked failed; participants on <strong>funds-escrow</strong> raffles may be able to <strong>claim refunds</strong> of their ticket payments through the Platform, and escrowed NFT prizes may be returned to the creator when operationally possible</li>
+            <li>For <strong>NFT</strong> prizes, the prize is expected to be held in <strong>prize escrow</strong> before a draw. The winning wallet may need to <strong>claim</strong> the NFT through the Platform after the draw</li>
+            <li>For raffles that route ticket proceeds through funds escrow, the creator&apos;s net share after the platform fee may be available to <strong>claim</strong> after settlement, as shown in the product</li>
+            <li>Winners are reflected on the Platform (e.g. raffle detail, dashboard). You are responsible for monitoring your wallet and the Platform for claim steps</li>
+            <li>The Platform is not responsible for assets after successful on-chain delivery to the wallet you used, or for user error (wrong wallet, failed claim, etc.)</li>
           </ul>
         </section>
 
@@ -217,21 +213,8 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">13. Raffle Policy and Minimum Requirements</h2>
           <p className="mb-4">
-            Raffles may have minimum ticket requirements set by the creator. The following rules apply:
+            Minimum ticket thresholds, automatic end-time extensions, refund eligibility for failed minimums on funds-escrow raffles, NFT escrow and claims, and weighted winner selection are governed by <strong>Section 6 (Prize Distribution)</strong> and <strong>Section 5 (Entry and Payment)</strong>. Only confirmed entries count toward thresholds and draws. The Platform may process ended raffles, extensions, and draws on a schedule and/or through administrative tools.
           </p>
-          <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li><strong>Minimum Ticket Requirements:</strong> If a raffle has a minimum ticket requirement set, the raffle must meet this minimum before a winner can be selected. Only confirmed entries count toward the minimum requirement.</li>
-            <li><strong>7-Day Waiting Period:</strong> For raffles with a minimum ticket requirement, a winner cannot be selected until BOTH of the following conditions are met:
-              <ul className="list-disc pl-6 mt-2 space-y-1">
-                <li>The minimum number of tickets has been sold (based on confirmed entries)</li>
-                <li>At least seven (7) days have passed since the original raffle end time</li>
-              </ul>
-            </li>
-            <li><strong>Raffle Extensions:</strong> In the event that the minimum number of tickets is not sold by the scheduled end date, the raffle will be extended for an additional seven (7) days.</li>
-            <li><strong>Refunds:</strong> If the minimum requirement is still not met after the extension period, all participants will receive a full refund based on their confirmed entries.</li>
-            <li><strong>No Minimum Requirement:</strong> If a raffle does not have a minimum ticket requirement set, winners can be selected immediately after the raffle end time, regardless of the number of tickets sold.</li>
-            <li><strong>Entry Verification:</strong> All entries must be verified on-chain before they are counted toward minimum requirements or winner selection. The Platform reserves the right to verify entries and reject entries that fail verification.</li>
-          </ul>
         </section>
 
         <section className="mb-8">

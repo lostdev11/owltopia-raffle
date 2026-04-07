@@ -61,22 +61,25 @@ export default function HowItWorksPage() {
           </p>
           <ol className="list-decimal pl-6 mb-4 space-y-3">
             <li>
-              <strong>Connect your wallet</strong> — Use a Solana wallet (e.g. Phantom) to participate.
+              <strong>Connect your wallet</strong> — Use a Solana wallet (Phantom, Solflare, or another compatible app — mobile wallets work the same flow).
             </li>
             <li>
-              <strong>Buy tickets</strong> — You pay in SOL or USDC. The payment is a real on-chain transaction to the raffle&apos;s recipient wallet, so it can be verified on the blockchain.
+              <strong>Buy tickets</strong> — You pay in <strong>SOL</strong>, <strong>USDC</strong>, or <strong>OWL</strong>, depending on how the raffle is set up. Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing.
             </li>
             <li>
-              <strong>Entry is recorded</strong> — Your entry is stored with your wallet address and ticket count. Once your payment is verified, your entry counts toward the raffle.
+              <strong>Entry is recorded</strong> — Your entry is stored with your wallet address and ticket count. Once your payment is verified on-chain, your entry counts toward the raffle.
             </li>
             <li>
-              <strong>Raffle ends</strong> — When the end time is reached, the raffle closes to new entries. If a minimum ticket count is set, it must be met (or the raffle may be extended).
+              <strong>NFT prizes (when applicable)</strong> — For NFT raffles, the prize is deposited to a <strong>prize escrow</strong> wallet before the draw can run. After someone wins, they <strong>claim</strong> the NFT from their dashboard when it is ready (on-chain claim).
             </li>
             <li>
-              <strong>Winner is selected</strong> — One winner is chosen by <strong>weighted random selection</strong>: your chance of winning is proportional to how many tickets you hold. More tickets = higher chance, but every ticket counts.
+              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). If the minimum is still not met after that extension, ticket buyers on funds-escrow raffles can <strong>claim refunds</strong> from escrow, and escrowed NFT prizes are returned to the creator when possible.
             </li>
             <li>
-              <strong>Prize delivery</strong> — For NFT prizes, the NFT is transferred to the winner&apos;s wallet and the transaction is recorded for transparency.
+              <strong>Winner is selected</strong> — One winning <strong>wallet</strong> is chosen by <strong>weighted random selection</strong> in our backend: your chance is proportional to how many <strong>confirmed</strong> tickets that wallet holds (tickets from the same wallet are combined). The draw is not an on-chain randomness oracle; it is verifiable in the sense that only confirmed entries participate and the rules are applied consistently. Draws run when the raffle has ended, thresholds are satisfied, and (for NFT prizes) the prize is confirmed in escrow — often on a schedule (cron) or when an admin triggers processing.
+            </li>
+            <li>
+              <strong>Prize delivery</strong> — NFT winners claim from escrow as above. For cash or token prizes, settlement depends on raffle setup; creators on funds-escrow raffles typically <strong>claim net proceeds</strong> (after the platform fee) from the dashboard after the draw.
             </li>
           </ol>
           <p className="text-muted-foreground text-sm">
@@ -136,7 +139,7 @@ export default function HowItWorksPage() {
             Rev Share
           </h2>
           <p className="mb-4">
-            Raffle site revenue is generated from platform fees on ticket sales: <strong>6%</strong> for non-holder creators and <strong>3%</strong> for holder creators. From that site revenue, <strong>50%</strong> goes to holders as rev share (shown in <strong>SOL</strong> and <strong>USDC</strong>).
+            Platform revenue comes from a fee on each ticket sale: <strong>6%</strong> for creators who are not Owltopia (Owl) NFT holders and <strong>3%</strong> for holders. Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
           </p>
         </section>
 
@@ -147,7 +150,7 @@ export default function HowItWorksPage() {
             Who Can Participate
           </h2>
           <p className="mb-4">
-            Anyone with a Solana wallet can buy tickets and create raffles. Raffles are created by holders and non-holders alike; winner selection runs automatically when a raffle ends and minimum requirements are met, or can be triggered by an admin. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
+            Anyone with a Solana wallet can buy tickets and create raffles. Creators can be holders or non-holders (fees differ as above). After a raffle ends, winner selection and deadline extensions are handled by automated jobs and/or admins according to the rules on this page. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
           </p>
         </section>
       </div>
