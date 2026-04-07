@@ -26,7 +26,7 @@ import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
-import type { NftGiveaway } from '@/lib/types'
+import type { CommunityGiveaway, NftGiveaway } from '@/lib/types'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -144,6 +144,7 @@ type DashboardData = {
   }>
   feeTier: FeeTier
   nftGiveaways?: NftGiveaway[]
+  communityGiveaways?: CommunityGiveaway[]
 }
 
 type NftWinnerDashboardRow = {
@@ -219,6 +220,9 @@ export default function DashboardPage() {
   const [claimProceedsLoadingId, setClaimProceedsLoadingId] = useState<string | null>(null)
   const [claimPrizeLoadingId, setClaimPrizeLoadingId] = useState<string | null>(null)
   const [claimGiveawayLoadingId, setClaimGiveawayLoadingId] = useState<string | null>(null)
+  const [claimCommunityGiveawayLoadingId, setClaimCommunityGiveawayLoadingId] = useState<string | null>(
+    null
+  )
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
@@ -506,6 +510,35 @@ export default function DashboardPage() {
         await loadDashboard({ silent: true })
       } finally {
         setClaimGiveawayLoadingId(null)
+      }
+    },
+    [loadDashboard, publicKey]
+  )
+
+  const handleClaimCommunityGiveaway = useCallback(
+    async (giveawayId: string) => {
+      if (!publicKey) return
+      setClaimActionError(null)
+      setClaimCommunityGiveawayLoadingId(giveawayId)
+      try {
+        const addr = publicKey.toBase58()
+        const res = await fetch(`/api/me/community-giveaways/${giveawayId}/claim`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'X-Connected-Wallet': addr },
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not claim community giveaway'
+          )
+          return
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimCommunityGiveawayLoadingId(null)
       }
     },
     [loadDashboard, publicKey]
@@ -1508,6 +1541,104 @@ export default function DashboardPage() {
                             onClick={() => handleClaimGiveaway(g.id)}
                           >
                             {claimGiveawayLoadingId === g.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                Claiming…
+                              </>
+                            ) : (
+                              <>
+                                <Gift className="h-4 w-4 mr-2" />
+                                Claim NFT
+                              </>
+                            )}
+                          </Button>
+                        ) : claimed ? (
+                          <p className="text-sm text-muted-foreground py-2">Claimed</p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-2">Not ready</p>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground mb-2">Community giveaway wins</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Pool giveaways you won after a draw: claim sends the NFT from escrow to this wallet (same as sign-in).
+            </p>
+            {(Array.isArray(data.communityGiveaways) ? data.communityGiveaways : []).length === 0 ? (
+              <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border/70 p-3">
+                No community giveaway wins for this wallet yet.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {(Array.isArray(data.communityGiveaways) ? data.communityGiveaways : []).map((g) => {
+                  const claimed = Boolean(g.claimed_at)
+                  const ready =
+                    g.status === 'drawn' && Boolean(g.prize_deposited_at) && Boolean(g.winner_wallet) && !claimed
+                  const label = g.title?.trim() || 'Community giveaway'
+                  return (
+                    <li
+                      key={g.id}
+                      className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between border-b border-border/40 pb-3 last:border-0 last:pb-0"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <p className="font-medium truncate">{label}</p>
+                        <p className="text-xs text-muted-foreground break-all">
+                          Asset:{' '}
+                          <a
+                            href={solscanTokenUrl(g.nft_mint_address)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            {g.nft_mint_address.length > 12
+                              ? `${g.nft_mint_address.slice(0, 6)}…${g.nft_mint_address.slice(-6)}`
+                              : g.nft_mint_address}
+                          </a>
+                          {g.prize_standard ? (
+                            <span className="text-muted-foreground"> · {g.prize_standard}</span>
+                          ) : null}
+                        </p>
+                        {!g.prize_deposited_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Waiting for the team to confirm the deposit to escrow.
+                          </p>
+                        )}
+                        {g.status === 'open' && (
+                          <p className="text-xs text-muted-foreground">Draw not run yet — check back after the host draws.</p>
+                        )}
+                        {claimed && g.claim_tx_signature && (
+                          <a
+                            href={solscanTxUrl(g.claim_tx_signature)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            View claim transaction
+                          </a>
+                        )}
+                        <Link
+                          href={`/community-giveaway/${g.id}`}
+                          className="text-xs text-muted-foreground hover:text-foreground hover:underline inline-block"
+                        >
+                          Open community giveaway page
+                        </Link>
+                      </div>
+                      <div className="shrink-0 w-full sm:w-auto">
+                        {ready ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                            disabled={claimCommunityGiveawayLoadingId === g.id}
+                            onClick={() => handleClaimCommunityGiveaway(g.id)}
+                          >
+                            {claimCommunityGiveawayLoadingId === g.id ? (
                               <>
                                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
                                 Claiming…

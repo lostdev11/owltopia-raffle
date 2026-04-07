@@ -7,6 +7,48 @@ export type PrizeType = 'crypto' | 'nft'
 /** How the NFT prize is represented on-chain (used for escrow logic). */
 export type PrizeStandard = 'spl' | 'token2022' | 'mpl_core' | 'compressed'
 
+export type CommunityGiveawayAccessGate = 'open' | 'holder_only'
+
+export type CommunityGiveawayStatus = 'draft' | 'open' | 'drawn' | 'cancelled'
+
+/** Pool giveaway: users join; optional holder gate; OWL boost before starts_at; admin draws winner; NFT claim from escrow. */
+export interface CommunityGiveaway {
+  id: string
+  title: string
+  description: string | null
+  access_gate: CommunityGiveawayAccessGate
+  status: CommunityGiveawayStatus
+  /** OWL boost only allowed while server time is strictly before this instant. */
+  starts_at: string
+  /** When set, joins are rejected after this instant (admin may still draw). */
+  ends_at: string | null
+  nft_mint_address: string
+  nft_token_id: string | null
+  prize_standard: PrizeStandard | null
+  deposit_tx_signature: string | null
+  prize_deposited_at: string | null
+  winner_wallet: string | null
+  winner_selected_at: string | null
+  claim_tx_signature: string | null
+  claimed_at: string | null
+  nft_claim_locked_at: string | null
+  nft_claim_locked_wallet: string | null
+  created_by_wallet: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CommunityGiveawayEntry {
+  id: string
+  giveaway_id: string
+  wallet_address: string
+  draw_weight: number
+  owl_boost_tx: string | null
+  owl_boosted_at: string | null
+  created_at: string
+}
+
 /** Admin-created giveaway: NFT in prize escrow, one eligible claimant. */
 export interface NftGiveaway {
   id: string

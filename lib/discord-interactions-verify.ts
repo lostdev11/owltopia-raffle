@@ -6,6 +6,11 @@ import nacl from 'tweetnacl'
 
 const encoder = new TextEncoder()
 
+/** Discord “Public Key” from the portal: hex, sometimes pasted with 0x or spaces. */
+export function normalizeDiscordApplicationPublicKeyHex(hex: string): string {
+  return hex.trim().replace(/^0x/i, '').replace(/\s+/g, '')
+}
+
 export function verifyDiscordInteractionRequest(params: {
   rawBody: string
   signatureHeader: string | null
@@ -13,11 +18,14 @@ export function verifyDiscordInteractionRequest(params: {
   applicationPublicKeyHex: string
 }): boolean {
   const { rawBody, signatureHeader, timestampHeader, applicationPublicKeyHex } = params
-  if (!signatureHeader || !timestampHeader) return false
+  const sigHeader = signatureHeader?.trim() ?? ''
+  const tsHeader = timestampHeader?.trim() ?? ''
+  if (!sigHeader || !tsHeader) return false
+  const keyHex = normalizeDiscordApplicationPublicKeyHex(applicationPublicKeyHex)
   try {
-    const message = encoder.encode(timestampHeader + rawBody)
-    const sig = Buffer.from(signatureHeader, 'hex')
-    const key = Buffer.from(applicationPublicKeyHex, 'hex')
+    const message = encoder.encode(tsHeader + rawBody)
+    const sig = Buffer.from(sigHeader, 'hex')
+    const key = Buffer.from(keyHex, 'hex')
     if (key.length !== nacl.sign.publicKeyLength || sig.length !== nacl.sign.signatureLength) {
       return false
     }

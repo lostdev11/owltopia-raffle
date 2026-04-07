@@ -1820,6 +1820,20 @@ export default function AdminDashboardPage() {
                 </Link>
               </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/community-giveaways">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Community pool giveaways
+                    </CardTitle>
+                    <CardDescription>
+                      Open or holder-gated pools, optional entry deadline, OWL boost for 3× draw weight before start,
+                      admin draw anytime, winner claims NFT from escrow on the dashboard.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/discord-giveaway-partners">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">

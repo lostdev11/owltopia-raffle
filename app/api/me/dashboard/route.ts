@@ -10,6 +10,7 @@ import {
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
+import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
       feeTier,
       profiles,
       nftGiveaways,
+      communityGiveaways,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -77,6 +79,10 @@ export async function GET(request: NextRequest) {
       getDisplayNamesByWallets([wallet]),
       listNftGiveawaysForWallet(wallet).catch((err) => {
         console.error('listNftGiveawaysForWallet:', err)
+        return []
+      }),
+      listCommunityGiveawaysWonByWallet(wallet).catch((err) => {
+        console.error('listCommunityGiveawaysWonByWallet:', err)
         return []
       }),
     ])
@@ -128,6 +134,7 @@ export async function GET(request: NextRequest) {
       creatorRefundRaffles,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
       nftGiveaways,
+      communityGiveaways,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'
