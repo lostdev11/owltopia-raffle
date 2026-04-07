@@ -2,6 +2,7 @@
  * Optional Discord webhook notifications for raffle lifecycle events.
  * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER / DISCORD_WEBHOOK_LIVE_RAFFLES,
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER (optional; falls back to raffle winner URL),
+ * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN (optional; when a pool giveaway is opened for entries; falls back to LIVE_RAFFLES URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
@@ -28,6 +29,13 @@ function webhookUrlCommunityGiveawayWinner(): string | undefined {
   const specific = process.env.DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER?.trim()
   if (specific) return specific
   return webhookUrlWinner()
+}
+
+/** When admin opens a community (pool) giveaway for entries; falls back to live-raffles webhook then global URL. */
+function webhookUrlCommunityGiveawayOpen(): string | undefined {
+  const specific = process.env.DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN?.trim()
+  if (specific) return specific
+  return webhookUrlLiveShare()
 }
 
 function webhookUrlLiveShare(): string | undefined {
@@ -302,6 +310,63 @@ export async function notifyRaffleWinnerDrawn(
         },
       ],
       image: image ? { url: image } : undefined,
+      timestamp: new Date().toISOString(),
+    },
+    extras
+  )
+}
+
+/**
+ * Optional: when an admin opens a community giveaway for entries (draft → open).
+ * Uses DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN, else DISCORD_WEBHOOK_LIVE_RAFFLES, else DISCORD_WEBHOOK_URL.
+ * If `hostDiscordUserId` is set (wallet linked Discord for `created_by_wallet`), pings that user in message content.
+ */
+export async function notifyCommunityGiveawayOpened(
+  giveaway: Pick<CommunityGiveaway, 'id' | 'title' | 'access_gate' | 'starts_at' | 'ends_at'>,
+  hostDiscordUserId?: string | null
+): Promise<void> {
+  const url = webhookUrlCommunityGiveawayOpen()
+  if (!url) return
+
+  const title = giveaway.title?.trim() || 'Community giveaway'
+  const pageUrl = communityGiveawayPageUrl(giveaway)
+  const discordSnowflake = parseDiscordUserSnowflake(hostDiscordUserId ?? undefined)
+  const startTs = discordTimestampUnix(giveaway.starts_at)
+  const owlLine = startTs
+    ? `<t:${startTs}:F> (<t:${startTs}:R>)`
+    : giveaway.starts_at
+  const gateLabel = giveaway.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'
+
+  const endFields: { name: string; value: string; inline?: boolean }[] = []
+  if (giveaway.ends_at) {
+    const e = discordTimestampUnix(giveaway.ends_at)
+    endFields.push({
+      name: 'Entry deadline',
+      value: e ? `<t:${e}:F> (<t:${e}:R>)` : giveaway.ends_at,
+      inline: false,
+    })
+  }
+
+  const extras: WebhookExtras | undefined = discordSnowflake
+    ? {
+        content: `Hosted by: <@${discordSnowflake}>`,
+        allowed_mentions: { parse: [], users: [discordSnowflake] },
+      }
+    : undefined
+
+  await postDiscordWebhook(
+    url,
+    {
+      title: 'Community giveaway — open for entries',
+      description: title,
+      url: pageUrl,
+      color: 0x57f287,
+      fields: [
+        { name: 'Enter here', value: pageUrl, inline: false },
+        { name: 'Access', value: gateLabel, inline: true },
+        { name: 'OWL boost deadline', value: owlLine, inline: true },
+        ...endFields,
+      ],
       timestamp: new Date().toISOString(),
     },
     extras

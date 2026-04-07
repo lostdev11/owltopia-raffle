@@ -115,3 +115,93 @@ export async function verifyPrizeDepositWithRetries(
     ...(lastFrozenDiagnostics ? { frozenEscrowDiagnostics: lastFrozenDiagnostics } : {}),
   }
 }
+
+/**
+ * Admin session: POST community-giveaway verify-deposit (same retry behavior as raffle verify).
+ */
+export async function verifyCommunityGiveawayDepositWithRetries(
+  giveawayId: string,
+  options: {
+    depositTx?: string | null
+    signal?: AbortSignal
+    onAttempt?: (attemptIndex: number, maxAttempts: number) => void
+  } = {}
+): Promise<VerifyPrizeDepositClientResult> {
+  const depositTx = options.depositTx?.trim() || null
+  const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
+  const headers: HeadersInit | undefined = body ? { 'Content-Type': 'application/json' } : undefined
+
+  let lastError = 'Verification failed'
+  let lastStatus: number | undefined
+  let lastFrozenDiagnostics: FrozenEscrowDiagnostics | undefined
+
+  for (let attempt = 0; attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS; attempt++) {
+    if (options.signal?.aborted) {
+      return { ok: false, error: 'Aborted' }
+    }
+
+    options.onAttempt?.(attempt + 1, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
+
+    let res: Response
+    try {
+      res = await fetch(`/api/admin/community-giveaways/${giveawayId}/verify-deposit`, {
+        method: 'POST',
+        headers,
+        body,
+        credentials: 'include',
+        signal: options.signal,
+      })
+    } catch {
+      lastError = 'Network error while verifying deposit'
+      lastStatus = undefined
+      if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+      }
+      continue
+    }
+
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string
+      frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+    }
+    if (res.ok) {
+      return { ok: true }
+    }
+
+    lastStatus = res.status
+    lastError = typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : 'Verification failed'
+    const fd = data?.frozenEscrowDiagnostics
+    if (fd && typeof fd.mint === 'string' && typeof fd.escrowTokenAccount === 'string') {
+      lastFrozenDiagnostics = {
+        mint: fd.mint,
+        escrowTokenAccount: fd.escrowTokenAccount,
+        freezeAuthority:
+          fd.freezeAuthority === null || fd.freezeAuthority === undefined
+            ? null
+            : typeof fd.freezeAuthority === 'string'
+              ? fd.freezeAuthority
+              : null,
+      }
+    }
+
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      return {
+        ok: false,
+        error: lastError,
+        status: res.status,
+        ...(lastFrozenDiagnostics ? { frozenEscrowDiagnostics: lastFrozenDiagnostics } : {}),
+      }
+    }
+
+    if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
+      await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+    }
+  }
+
+  return {
+    ok: false,
+    error: lastError,
+    status: lastStatus,
+    ...(lastFrozenDiagnostics ? { frozenEscrowDiagnostics: lastFrozenDiagnostics } : {}),
+  }
+}

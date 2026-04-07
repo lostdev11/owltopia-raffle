@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getCommunityGiveawayById, updateCommunityGiveaway } from '@/lib/db/community-giveaways'
+import { notifyCommunityGiveawayOpened } from '@/lib/discord-raffle-webhooks'
+import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import type { CommunityGiveawayAccessGate, CommunityGiveawayStatus, PrizeStandard } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -117,6 +119,16 @@ export async function PATCH(
     const updated = await updateCommunityGiveaway(id, patch)
     if (!updated) {
       return NextResponse.json({ error: 'Update failed' }, { status: 500 })
+    }
+
+    if (patch.status === 'open' && existing.status === 'draft') {
+      const host = existing.created_by_wallet?.trim()
+      let hostDiscord: string | null = null
+      if (host) {
+        const m = await getDiscordUserIdsByWallets([host])
+        hostDiscord = m[host] ?? null
+      }
+      await notifyCommunityGiveawayOpened(updated, hostDiscord)
     }
 
     return NextResponse.json({ giveaway: updated })

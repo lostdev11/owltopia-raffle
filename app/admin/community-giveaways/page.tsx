@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -10,12 +10,25 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
+import {
+  logEscrowDepositError,
+  logEscrowDepositVerify,
+} from '@/lib/solana/escrow-deposit-log'
+import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import {
+  verifyCommunityGiveawayDepositWithRetries,
+  isEscrowSplPrizeFrozenVerifyError,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { Users, Loader2, ArrowLeft, Copy, CheckCircle2 } from 'lucide-react'
 import type { CommunityGiveaway, PrizeStandard } from '@/lib/types'
 
 export default function AdminCommunityGiveawaysPage() {
   const router = useRouter()
-  const { publicKey, connected } = useWallet()
+  const { publicKey, connected, sendTransaction, wallet } = useWallet()
+  const { connection } = useConnection()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
@@ -32,6 +45,13 @@ export default function AdminCommunityGiveawaysPage() {
   const [actionId, setActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
+  const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
+  const [loadingWalletNfts, setLoadingWalletNfts] = useState(false)
+  const [walletNftsError, setWalletNftsError] = useState<string | null>(null)
+  const [nftSearchQuery, setNftSearchQuery] = useState('')
+  const [depositingId, setDepositingId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     title: '',
@@ -108,6 +128,119 @@ export default function AdminCommunityGiveawaysPage() {
     }
   }, [])
 
+  const loadWalletNfts = useCallback(async () => {
+    if (!publicKey) return
+    setLoadingWalletNfts(true)
+    setWalletNftsError(null)
+    const walletAddr = publicKey.toBase58()
+    try {
+      const [apiRes, escrowRes] = await Promise.all([
+        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+        fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
+          credentials: 'include',
+        }),
+      ])
+      let nfts: WalletNft[] = []
+      if (apiRes.ok) {
+        const data = await apiRes.json()
+        nfts = Array.isArray(data) ? data : []
+      }
+      if (nfts.length === 0 || apiRes.status === 503) {
+        const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
+        try {
+          nfts = await getWalletNfts(connection, publicKey)
+        } catch (rpcErr) {
+          if (nfts.length === 0) throw rpcErr
+        }
+      }
+      if (escrowRes.ok) {
+        try {
+          const { mints: escrowedMints } = await escrowRes.json()
+          if (Array.isArray(escrowedMints) && escrowedMints.length > 0) {
+            const escrowedSet = new Set(escrowedMints.map((m: string) => m.toLowerCase()))
+            nfts = nfts.filter((n) => !escrowedSet.has(n.mint.toLowerCase()))
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setWalletNfts(nfts)
+      setNftSearchQuery('')
+    } catch (e) {
+      console.error('Load wallet NFTs:', e)
+      setWalletNftsError(e instanceof Error ? e.message : 'Failed to load NFTs')
+      setWalletNfts(null)
+    } finally {
+      setLoadingWalletNfts(false)
+    }
+  }, [publicKey, connection])
+
+  useEffect(() => {
+    if (connected && publicKey && isAdmin && adminRole !== 'raffle_creator') {
+      void loadWalletNfts()
+    }
+  }, [connected, publicKey, isAdmin, adminRole, loadWalletNfts])
+
+  const runDepositAndVerify = useCallback(
+    async (giveawayId: string, prizeMint: string, nft: WalletNft): Promise<boolean> => {
+      if (!publicKey || !escrowAddress) {
+        setActionError('Connect wallet and ensure prize escrow is configured.')
+        return false
+      }
+      const logCtx = {
+        communityGiveawayId: giveawayId,
+        nftMint: prizeMint.trim(),
+        transferAssetId: nft.mint,
+        escrowAddress,
+        fromWallet: publicKey.toBase58(),
+      }
+      try {
+        const dep = await depositPrizeNftToEscrowFromWallet({
+          connection,
+          publicKey,
+          sendTransaction,
+          walletAdapter: wallet?.adapter ?? null,
+          selectedNft: nft,
+          prizeMintAddress: prizeMint.trim(),
+          escrowAddress,
+          logCtx,
+        })
+        if (!dep.ok) {
+          setActionError(dep.error)
+          return false
+        }
+        const verifyResult = await verifyCommunityGiveawayDepositWithRetries(giveawayId, {
+          depositTx: dep.signature,
+        })
+        logEscrowDepositVerify(logCtx, verifyResult.ok, verifyResult.ok ? undefined : verifyResult.error)
+        if (!verifyResult.ok) {
+          if (verifyResult.status === 401) {
+            setActionError('Sign in from Owl Vision, then verify deposit again if needed.')
+          } else if (isEscrowSplPrizeFrozenVerifyError(verifyResult.error)) {
+            const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+            const d = verifyResult.frozenEscrowDiagnostics
+            const links = d
+              ? ` Escrow token account: https://solscan.io/account/${encodeURIComponent(d.escrowTokenAccount)}${q}`
+              : ''
+            setActionError(verifyResult.error + links)
+          } else {
+            setActionError(
+              verifyResult.error ||
+                'Transfer may have succeeded; wait a moment and tap Verify deposit, or check Solscan.'
+            )
+          }
+          return false
+        }
+        return true
+      } catch (err) {
+        logEscrowDepositError(logCtx, err)
+        setActionError(err instanceof Error ? err.message : 'Deposit failed')
+        return false
+      }
+    },
+    [publicKey, escrowAddress, connection, sendTransaction, wallet?.adapter]
+  )
+
   useEffect(() => {
     if (isAdmin && adminRole !== 'raffle_creator') {
       void fetchList()
@@ -117,6 +250,11 @@ export default function AdminCommunityGiveawaysPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreateError(null)
+    const mintTrim = form.nft_mint_address.trim()
+    if (!mintTrim) {
+      setCreateError('Select a prize NFT from your wallet or paste its mint / asset id.')
+      return
+    }
     if (!form.starts_at_local.trim()) {
       setCreateError('starts_at is required (local date & time)')
       return
@@ -152,6 +290,10 @@ export default function AdminCommunityGiveawaysPage() {
         setCreateError(typeof data.error === 'string' ? data.error : 'Create failed')
         return
       }
+      const created = data.giveaway as CommunityGiveaway | undefined
+      const nftForDeposit =
+        selectedNft && selectedNft.mint.trim() === mintTrim ? selectedNft : null
+
       setForm({
         title: '',
         description: '',
@@ -164,9 +306,47 @@ export default function AdminCommunityGiveawaysPage() {
         deposit_tx_signature: '',
         notes: '',
       })
+      setSelectedNft(null)
+      setNftSearchQuery('')
+
+      if (
+        created?.id &&
+        escrowAddress &&
+        nftForDeposit &&
+        !created.prize_deposited_at &&
+        (sendTransaction || wallet?.adapter)
+      ) {
+        setActionError(null)
+        setDepositingId(created.id)
+        try {
+          await runDepositAndVerify(created.id, mintTrim, nftForDeposit)
+        } finally {
+          setDepositingId(null)
+        }
+      }
+
       await fetchList()
+      await loadWalletNfts()
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleSendPrizeToEscrow = async (g: CommunityGiveaway) => {
+    const mint = g.nft_mint_address.trim()
+    const nft = walletNfts?.find((n) => n.mint === mint) ?? null
+    if (!nft) {
+      setActionError('This wallet must hold the prize NFT. Tap Refresh NFTs, then try again.')
+      await loadWalletNfts()
+      return
+    }
+    setDepositingId(g.id)
+    setActionError(null)
+    try {
+      const ok = await runDepositAndVerify(g.id, mint, nft)
+      if (ok) await fetchList()
+    } finally {
+      setDepositingId(null)
     }
   }
 
@@ -309,9 +489,10 @@ export default function AdminCommunityGiveawaysPage() {
         Community pool giveaways
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
-        Deposit the prize NFT to prize escrow (same as raffles), verify, then open for entries. Draw picks a weighted
-        random winner (3× weight if a participant paid 3 OWL before <code className="text-xs">starts_at</code>). Winner
-        claims from the dashboard. Sign in from Owl Vision if API returns 401.
+        Use the same <strong>prize escrow</strong> as NFT raffles: pick the NFT from your connected wallet, create the
+        giveaway, then sign to send it to escrow (or use &quot;Send NFT to escrow&quot; on a draft). Verify, then open
+        for entries. Draw uses weighted entries (OWL boosts before <code className="text-xs">starts_at</code>). Winner
+        claims from the dashboard. Sign in from Owl Vision if the API returns 401.
       </p>
 
       {escrowAddress && (
@@ -330,12 +511,119 @@ export default function AdminCommunityGiveawaysPage() {
           <CardTitle className="text-lg">New community giveaway</CardTitle>
           <CardDescription>
             <code className="text-xs">starts_at</code> closes the OWL boost window (participants can still join after,
-            unless <code className="text-xs">ends_at</code> is set).
+            unless <code className="text-xs">ends_at</code> is set). Choose the prize NFT below (same escrow flow as
+            creating an NFT raffle).
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreate} className="space-y-4">
             {createError && <p className="text-sm text-destructive">{createError}</p>}
+            <div
+              id="cg-nft-prize-section"
+              className="rounded-lg border border-border p-4 space-y-3 touch-manipulation"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                <p className="text-sm font-medium">Prize NFT from wallet</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-[44px] w-full sm:w-auto"
+                  onClick={() => void loadWalletNfts()}
+                  disabled={loadingWalletNfts || !publicKey}
+                >
+                  {loadingWalletNfts ? 'Loading…' : 'Refresh NFTs'}
+                </Button>
+              </div>
+              {walletNftsError && <p className="text-sm text-destructive">{walletNftsError}</p>}
+              {walletNfts && walletNfts.length === 0 && !loadingWalletNfts && (
+                <p className="text-sm text-muted-foreground">
+                  No NFTs in this wallet (check network). You can still paste a mint below and deposit after create.
+                </p>
+              )}
+              {walletNfts && walletNfts.length > 0 && (
+                <>
+                  <div className="space-y-1">
+                    <Label htmlFor="cg-nft-search" className="text-xs">
+                      Search
+                    </Label>
+                    <Input
+                      id="cg-nft-search"
+                      type="text"
+                      placeholder="Name, collection, or mint…"
+                      value={nftSearchQuery}
+                      onChange={(e) => setNftSearchQuery(e.target.value)}
+                      className="text-sm min-h-[44px]"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[240px] overflow-y-auto">
+                    {(() => {
+                      const q = nftSearchQuery.trim().toLowerCase()
+                      const filtered = q
+                        ? walletNfts.filter(
+                            (nft) =>
+                              (nft.name?.toLowerCase().includes(q)) ||
+                              (nft.collectionName?.toLowerCase().includes(q)) ||
+                              nft.mint.toLowerCase().includes(q)
+                          )
+                        : walletNfts
+                      if (filtered.length === 0) {
+                        return (
+                          <p className="col-span-full text-sm text-muted-foreground py-2">
+                            {q ? 'No matches.' : 'No NFTs.'}
+                          </p>
+                        )
+                      }
+                      return filtered.map((nft) => (
+                        <button
+                          key={nft.tokenAccount}
+                          type="button"
+                          onClick={() => {
+                            setSelectedNft(nft)
+                            setForm((f) => ({
+                              ...f,
+                              nft_mint_address: nft.mint,
+                              nft_token_id: f.nft_token_id.trim() ? f.nft_token_id : nft.mint,
+                            }))
+                          }}
+                          className={`rounded-lg border-2 p-2 text-left transition-colors min-h-[44px] ${
+                            selectedNft?.mint === nft.mint
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border hover:border-muted-foreground/50'
+                          }`}
+                        >
+                          <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
+                            {nft.image ? (
+                              <img
+                                src={getRaffleDisplayImageUrl(nft.image) ?? nft.image}
+                                alt={nft.name ?? nft.mint}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const el = e.currentTarget
+                                  if (nft.image && el.src !== nft.image) el.src = nft.image
+                                }}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
+                                No image
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
+                            {nft.name ?? `${nft.mint.slice(0, 4)}…`}
+                          </p>
+                        </button>
+                      ))
+                    })()}
+                  </div>
+                </>
+              )}
+              {selectedNft && (
+                <p className="text-sm text-muted-foreground">
+                  Selected mint: <span className="font-mono text-xs break-all">{selectedNft.mint}</span>
+                </p>
+              )}
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="cg-title">Title</Label>
@@ -397,9 +685,16 @@ export default function AdminCommunityGiveawaysPage() {
                   id="cg-mint"
                   required
                   value={form.nft_mint_address}
-                  onChange={(e) => setForm((f) => ({ ...f, nft_mint_address: e.target.value }))}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setForm((f) => ({ ...f, nft_mint_address: v }))
+                    if (selectedNft && v.trim() !== selectedNft.mint) setSelectedNft(null)
+                  }}
                   className="min-h-[44px] font-mono text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Filled when you tap an NFT above, or paste manually for Core / compressed IDs.
+                </p>
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="cg-tok">NFT token id (optional)</Label>
@@ -446,11 +741,15 @@ export default function AdminCommunityGiveawaysPage() {
                 />
               </div>
             </div>
-            <Button type="submit" disabled={creating} className="touch-manipulation min-h-[44px] w-full sm:w-auto">
+            <Button
+              type="submit"
+              disabled={creating || !!depositingId}
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+            >
               {creating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Creating…
+                  {depositingId ? 'Sign deposit to escrow…' : 'Creating draft…'}
                 </>
               ) : (
                 'Create draft'
@@ -510,24 +809,45 @@ export default function AdminCommunityGiveawaysPage() {
                     </div>
                   </div>
                   {!g.prize_deposited_at && g.status === 'draft' && (
-                    <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                      <Input
-                        placeholder="Deposit tx (optional)"
-                        value={verifyTxById[g.id] ?? ''}
-                        onChange={(e) =>
-                          setVerifyTxById((m) => ({ ...m, [g.id]: e.target.value }))
-                        }
-                        className="font-mono text-sm min-h-[44px]"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="touch-manipulation min-h-[44px]"
-                        disabled={verifyId === g.id}
-                        onClick={() => void handleVerify(g.id)}
-                      >
-                        {verifyId === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify deposit'}
-                      </Button>
+                    <div className="space-y-2">
+                      {escrowAddress && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                          disabled={depositingId === g.id || !publicKey}
+                          onClick={() => void handleSendPrizeToEscrow(g)}
+                        >
+                          {depositingId === g.id ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              Sending to escrow…
+                            </>
+                          ) : (
+                            'Send NFT to escrow (wallet)'
+                          )}
+                        </Button>
+                      )}
+                      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                        <Input
+                          placeholder="Deposit tx (optional)"
+                          value={verifyTxById[g.id] ?? ''}
+                          onChange={(e) =>
+                            setVerifyTxById((m) => ({ ...m, [g.id]: e.target.value }))
+                          }
+                          className="font-mono text-sm min-h-[44px]"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="touch-manipulation min-h-[44px]"
+                          disabled={verifyId === g.id}
+                          onClick={() => void handleVerify(g.id)}
+                        >
+                          {verifyId === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify deposit'}
+                        </Button>
+                      </div>
                     </div>
                   )}
                   {g.prize_deposited_at && g.status === 'draft' && (

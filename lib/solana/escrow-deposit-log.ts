@@ -15,6 +15,8 @@ export interface EscrowDepositLogBase {
   /** Raffle id when known */
   raffleId?: string
   raffleSlug?: string
+  /** Community pool giveaway id when deposit is for that flow */
+  communityGiveawayId?: string
   /** Prize mint from raffle record */
   nftMint: string
   /** Asset id used for Core / compressed (may match mint) */
@@ -46,6 +48,7 @@ export function logEscrowDepositStart(
   emit('start', {
     raffleId: ctx.raffleId,
     raffleSlug: ctx.raffleSlug,
+    communityGiveawayId: ctx.communityGiveawayId,
     nftMint: ctx.nftMint,
     transferAssetId: ctx.transferAssetId,
     escrowAddress: ctx.escrowAddress,
@@ -64,6 +67,7 @@ export function logEscrowDepositPath(
   emit('path', {
     raffleId: ctx.raffleId,
     raffleSlug: ctx.raffleSlug,
+    communityGiveawayId: ctx.communityGiveawayId,
     nftMint: ctx.nftMint,
     transferAssetId: ctx.transferAssetId,
     escrowAddress: ctx.escrowAddress,
@@ -81,6 +85,7 @@ export function logEscrowDepositSigned(
   emit('signed', {
     raffleId: ctx.raffleId,
     raffleSlug: ctx.raffleSlug,
+    communityGiveawayId: ctx.communityGiveawayId,
     nftMint: ctx.nftMint,
     transferAssetId: ctx.transferAssetId,
     escrowAddress: ctx.escrowAddress,
@@ -99,6 +104,7 @@ export function logEscrowDepositVerify(
   emit(ok ? 'verify_ok' : 'verify_fail', {
     raffleId: ctx.raffleId,
     raffleSlug: ctx.raffleSlug,
+    communityGiveawayId: ctx.communityGiveawayId,
     nftMint: ctx.nftMint,
     escrowAddress: ctx.escrowAddress,
     detail,
@@ -126,6 +132,7 @@ export function logEscrowDepositError(
   emit('error', {
     raffleId: ctx.raffleId,
     raffleSlug: ctx.raffleSlug,
+    communityGiveawayId: ctx.communityGiveawayId,
     nftMint: ctx.nftMint,
     transferAssetId: ctx.transferAssetId,
     escrowAddress: ctx.escrowAddress,
