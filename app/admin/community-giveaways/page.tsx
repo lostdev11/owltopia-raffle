@@ -682,7 +682,7 @@ export default function AdminCommunityGiveawaysPage() {
                   }
                 >
                   <option value="open">Everyone</option>
-                  <option value="holder_only">Owl NFT holders only</option>
+                  <option value="holder_only">Owltopia Holders only</option>
                 </select>
               </div>
               <div className="space-y-2">
