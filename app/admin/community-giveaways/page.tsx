@@ -498,12 +498,6 @@ export default function AdminCommunityGiveawaysPage() {
       />
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
-          <Link href="/admin/giveaways">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            NFT giveaways
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
           <Link href="/admin">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Owl Vision
