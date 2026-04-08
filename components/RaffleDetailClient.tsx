@@ -601,12 +601,23 @@ export function RaffleDetailClient({
     )
   }, [connected, publicKey, raffle, entries])
 
-  const buyerLegacyRefundEligible = useMemo(() => {
-    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return false
-    if (raffleUsesFundsEscrow(raffle)) return false
+  const buyerLegacyRefundEntries = useMemo(() => {
+    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
-    return entries.some((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
+    return entries.filter((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
   }, [connected, publicKey, raffle, entries])
+
+  const buyerLegacyRefundEligible = buyerLegacyRefundEntries.length > 0
+
+  const buyerLegacyRefundByCurrency = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of buyerLegacyRefundEntries) {
+      const c = String(e.currency ?? raffle.currency ?? 'SOL').toUpperCase()
+      map.set(c, (map.get(c) ?? 0) + Number(e.amount_paid ?? 0))
+    }
+    return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }))
+  }, [buyerLegacyRefundEntries, raffle.currency])
 
   /** Ended, no winner, min threshold not met after max extension — matches server finalize rules. */
   const minThresholdRefundRules = useMemo(() => {
@@ -3469,34 +3480,38 @@ export function RaffleDetailClient({
                       </div>
                     </div>
                     <ul className="space-y-2">
-                      {buyerRefundableEntries.map((entry) => (
-                        <li
-                          key={entry.id}
-                          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0"
-                        >
-                          <span className="text-sm font-medium tabular-nums">
-                            {Number(entry.amount_paid).toFixed(raffle.currency === 'USDC' ? 2 : 4)}{' '}
-                            {raffle.currency}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
-                            disabled={claimRefundLoadingEntryId === entry.id}
-                            onClick={() => void handleClaimTicketRefund(entry.id)}
+                      {buyerRefundableEntries.map((entry) => {
+                        const cur = String(entry.currency ?? raffle.currency ?? 'SOL').toUpperCase()
+                        const decimals = cur === 'USDC' ? 2 : 4
+                        const amt = Number(entry.amount_paid).toFixed(decimals)
+                        return (
+                          <li
+                            key={entry.id}
+                            className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0"
                           >
-                            {claimRefundLoadingEntryId === entry.id ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                Refunding…
-                              </>
-                            ) : (
-                              'Claim refund'
-                            )}
-                          </Button>
-                        </li>
-                      ))}
+                            <span className="text-sm text-muted-foreground">
+                              {entry.ticket_quantity === 1 ? '1 ticket' : `${entry.ticket_quantity} tickets`}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
+                              disabled={claimRefundLoadingEntryId === entry.id}
+                              onClick={() => void handleClaimTicketRefund(entry.id)}
+                            >
+                              {claimRefundLoadingEntryId === entry.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  Refunding…
+                                </>
+                              ) : (
+                                `Claim ${amt} ${cur}`
+                              )}
+                            </Button>
+                          </li>
+                        )
+                      })}
                     </ul>
                     <p className="text-xs text-muted-foreground">
                       Same action is available on{' '}
@@ -3515,6 +3530,20 @@ export function RaffleDetailClient({
                       <Ticket className="h-6 w-6 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden />
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-foreground">Refund owed (legacy listing)</p>
+                        {buyerLegacyRefundByCurrency.length > 0 && (
+                          <p className="text-sm font-semibold tabular-nums text-foreground mt-2">
+                            {buyerLegacyRefundByCurrency.length === 1
+                              ? `Amount to refund: ${buyerLegacyRefundByCurrency[0].total.toFixed(
+                                  buyerLegacyRefundByCurrency[0].currency === 'USDC' ? 2 : 4
+                                )} ${buyerLegacyRefundByCurrency[0].currency}`
+                              : `Amounts to refund: ${buyerLegacyRefundByCurrency
+                                  .map(
+                                    ({ currency, total }) =>
+                                      `${total.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+                                  )
+                                  .join(' · ')}`}
+                          </p>
+                        )}
                         <p className="text-sm text-muted-foreground mt-1">
                           Ticket payments for this raffle did not use automated funds escrow. Refunds are issued
                           manually—open{' '}

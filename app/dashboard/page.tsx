@@ -947,6 +947,30 @@ export default function DashboardPage() {
     }
   }
 
+  const legacyRefundOwedByRaffle = (() => {
+    const map = new Map<
+      string,
+      { raffle: EntryWithRaffle['raffle']; byCurrency: Map<string, number> }
+    >()
+    for (const x of legacyRefundEligibleEntries) {
+      const id = x.raffle.id
+      let row = map.get(id)
+      if (!row) {
+        row = { raffle: x.raffle, byCurrency: new Map() }
+        map.set(id, row)
+      }
+      const c = String(x.entry.currency || 'SOL').toUpperCase()
+      row.byCurrency.set(c, (row.byCurrency.get(c) ?? 0) + Number(x.entry.amount_paid ?? 0))
+    }
+    return Array.from(map.values()).map((row) => ({
+      raffle: row.raffle,
+      parts: Array.from(row.byCurrency.entries()).map(([currency, total]) => ({
+        currency,
+        total,
+      })),
+    }))
+  })()
+
   const showTicketRefundHub =
     refundableEntries.length > 0 ||
     legacyRefundEligibleEntries.length > 0 ||
@@ -1112,20 +1136,30 @@ export default function DashboardPage() {
                   The platform or host issues these refunds manually. Open the raffle for details and contact support if
                   you need help.
                 </p>
-                <ul className="space-y-2">
-                  {Array.from(
-                    legacyRefundEligibleEntries.reduce((map, x) => {
-                      if (!map.has(x.raffle.id)) map.set(x.raffle.id, x.raffle)
-                      return map
-                    }, new Map<string, EntryWithRaffle['raffle']>())
-                      .values()
-                  ).map((raffle) => (
-                    <li key={raffle.id}>
-                      <Link href={`/raffles/${raffle.slug}`} className="font-medium hover:underline">
-                        {raffle.title}
-                      </Link>
-                    </li>
-                  ))}
+                <ul className="space-y-3">
+                  {legacyRefundOwedByRaffle.map(({ raffle, parts }) => {
+                    const formatted = parts
+                      .map(
+                        ({ currency, total }) =>
+                          `${total.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+                      )
+                      .join(' · ')
+                    return (
+                      <li
+                        key={raffle.id}
+                        className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                      >
+                        <Link href={`/raffles/${raffle.slug}`} className="font-medium hover:underline truncate min-w-0">
+                          {raffle.title}
+                        </Link>
+                        <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
+                          {parts.length === 1
+                            ? `Amount to refund: ${formatted}`
+                            : `Amounts to refund: ${formatted}`}
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             )}

@@ -2,6 +2,7 @@
  * Discord OAuth2 (identify) for linking a Discord user to a wallet profile.
  * Requires DISCORD_OAUTH_CLIENT_SECRET and DISCORD_OAUTH_CLIENT_ID or DISCORD_APPLICATION_ID.
  */
+import type { NextRequest } from 'next/server'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { getSiteBaseUrl } from '@/lib/site-config'
 
@@ -61,7 +62,31 @@ export function getDiscordOAuthClientSecret(): string | null {
   return process.env.DISCORD_OAUTH_CLIENT_SECRET?.trim() || null
 }
 
-/** Must match the redirect URL configured in the Discord Developer Portal for this app. */
+/**
+ * Public origin for the incoming request (Vercel: x-forwarded-*).
+ * Use so OAuth redirect_uri and post-auth redirects match the host the user signed in on (www vs apex, preview URLs).
+ */
+export function getRequestOriginForOAuth(request: NextRequest): string {
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const host = forwardedHost || request.headers.get('host') || request.nextUrl.host
+  let proto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  if (!proto) {
+    proto = request.nextUrl.protocol === 'https:' ? 'https' : 'http'
+  }
+  return `${proto}://${host}`
+}
+
+/**
+ * OAuth callback URL. When DISCORD_OAUTH_REDIRECT_URI is unset, derives from the request so it matches
+ * the host the user used (avoids token exchange failures from www vs non-www mismatch with NEXT_PUBLIC_SITE_URL).
+ */
+export function getDiscordOAuthRedirectUriFromRequest(request: NextRequest): string {
+  const explicit = process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
+  if (explicit) return explicit
+  return `${getRequestOriginForOAuth(request)}/api/me/discord/callback`
+}
+
+/** Fallback when no NextRequest is available (prefer getDiscordOAuthRedirectUriFromRequest in routes). */
 export function getDiscordOAuthRedirectUri(): string {
   const explicit = process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
   if (explicit) return explicit
@@ -69,10 +94,9 @@ export function getDiscordOAuthRedirectUri(): string {
   return `${base}/api/me/discord/callback`
 }
 
-export function getDiscordOAuthAuthorizeUrl(state: string): string | null {
+export function getDiscordOAuthAuthorizeUrl(state: string, redirectUri: string): string | null {
   const clientId = getDiscordOAuthClientId()
   if (!clientId) return null
-  const redirectUri = getDiscordOAuthRedirectUri()
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -84,12 +108,14 @@ export function getDiscordOAuthAuthorizeUrl(state: string): string | null {
   return `https://discord.com/oauth2/authorize?${params.toString()}`
 }
 
-export async function exchangeDiscordOAuthCode(code: string): Promise<{ access_token: string } | null> {
+export async function exchangeDiscordOAuthCode(
+  code: string,
+  redirectUri: string
+): Promise<{ access_token: string } | null> {
   const clientId = getDiscordOAuthClientId()
   const clientSecret = getDiscordOAuthClientSecret()
   if (!clientId || !clientSecret) return null
 
-  const redirectUri = getDiscordOAuthRedirectUri()
   const body = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
@@ -130,11 +156,15 @@ export async function fetchDiscordUserMe(accessToken: string): Promise<DiscordUs
     return null
   }
   const json = (await res.json()) as Partial<DiscordUserMe>
-  if (!json.id || !json.username) return null
+  const id = json.id != null ? String(json.id).trim() : ''
+  if (!id) return null
+  const globalName = json.global_name != null ? String(json.global_name).trim() : ''
+  const usernameRaw = json.username != null ? String(json.username).trim() : ''
+  const username = usernameRaw || globalName || `user_${id.slice(0, 8)}`
   return {
-    id: String(json.id),
-    username: String(json.username),
-    global_name: json.global_name != null ? String(json.global_name) : null,
+    id,
+    username,
+    global_name: globalName || null,
   }
 }
 
