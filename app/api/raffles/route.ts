@@ -29,6 +29,7 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -232,6 +233,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const prizeAssetId = String(nftMintAddress || nftTokenId || '').trim()
+    if (prizeAssetId && (await isNftBurntPerHeliusDas(prizeAssetId))) {
+      return NextResponse.json(
+        {
+          error:
+            'This NFT has been burned and cannot be used as a prize. Refresh your wallet NFT list and choose a different asset.',
+        },
+        { status: 400 }
+      )
+    }
+
     // Only block creation when the prize is SPL/Token-2022 and only held in a delegated (staked) account.
     if (nftMintAddress) {
       try {
@@ -285,10 +297,9 @@ export async function POST(request: NextRequest) {
     // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day). Admins: no limit.
     const adminRole = await getAdminRole(walletAddress)
 
-    const prizeAssetIdForDupCheck = String(nftMintAddress || nftTokenId || '').trim()
-    if (adminRole === null && prizeAssetIdForDupCheck) {
+    if (adminRole === null && prizeAssetId) {
       const existingForPrize = await withTimeout(
-        findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetIdForDupCheck),
+        findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetId),
         SUPABASE_TIMEOUT_MS,
         'supabase error'
       )

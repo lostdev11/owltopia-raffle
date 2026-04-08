@@ -9,6 +9,8 @@ export const revalidate = 0
 /** Helius DAS asset item (NFT) - minimal shape we need */
 interface HeliusAsset {
   id?: string
+  /** When true, the mint was burned; DAS can still return the row until re-indexed. */
+  burnt?: boolean
   content?: {
     json_uri?: string
     metadata?: { name?: string }
@@ -95,6 +97,7 @@ async function getNftsViaRpcFallback(rpcUrl: string, wallet: string): Promise<Wa
 /**
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
+ * Excludes burned NFTs (drops DAS items with burnt === true; indexer can lag briefly).
  * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show.
  * Raffle creation only rejects staked/delegated SPL holdings (see POST /api/raffles); listing is not filtered by blocklist.
  */
@@ -173,7 +176,7 @@ export async function GET(request: NextRequest) {
 
     const items = allItems
     let nfts: WalletNft[] = items
-      .filter((item) => item.id)
+      .filter((item) => item.id && item.burnt !== true)
       .map((item) => {
         const mint = item.id!
         const content = item.content

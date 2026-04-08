@@ -24,6 +24,7 @@ import {
 } from '@/lib/raffles/verify-prize-deposit-client'
 import { Users, Loader2, ArrowLeft, Copy, CheckCircle2 } from 'lucide-react'
 import type { CommunityGiveaway, PrizeStandard } from '@/lib/types'
+import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
 
 export default function AdminCommunityGiveawaysPage() {
   const router = useRouter()
@@ -54,6 +55,11 @@ export default function AdminCommunityGiveawaysPage() {
   const [walletNftsError, setWalletNftsError] = useState<string | null>(null)
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [depositingId, setDepositingId] = useState<string | null>(null)
+  const [escrowDialog, setEscrowDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+  }>({ open: false, title: '', description: '' })
 
   const [form, setForm] = useState({
     title: '',
@@ -196,6 +202,12 @@ export default function AdminCommunityGiveawaysPage() {
         escrowAddress,
         fromWallet: publicKey.toBase58(),
       }
+      setEscrowDialog({
+        open: true,
+        title: 'Community giveaway',
+        description:
+          'Your wallet will open so you can approve sending the prize NFT to escrow. After you sign, we confirm on-chain and register the giveaway. On mobile or busy networks this can take 30–90 seconds — keep this tab open.',
+      })
       try {
         const dep = await depositPrizeNftToEscrowFromWallet({
           connection,
@@ -211,6 +223,11 @@ export default function AdminCommunityGiveawaysPage() {
           setActionError(dep.error)
           return false
         }
+        setEscrowDialog((d) => ({
+          ...d,
+          description:
+            'Transaction signed. Confirming on-chain and registering your giveaway with the server. This step can take up to a minute on slow networks — please wait.',
+        }))
         const verifyResult = await verifyCommunityGiveawayDepositWithRetries(giveawayId, {
           depositTx: dep.signature,
         })
@@ -238,6 +255,8 @@ export default function AdminCommunityGiveawaysPage() {
         logEscrowDepositError(logCtx, err)
         setActionError(err instanceof Error ? err.message : 'Deposit failed')
         return false
+      } finally {
+        setEscrowDialog((d) => ({ ...d, open: false }))
       }
     },
     [publicKey, escrowAddress, connection, sendTransaction, wallet?.adapter]
@@ -472,6 +491,11 @@ export default function AdminCommunityGiveawaysPage() {
 
   return (
     <div className="container mx-auto py-8 px-4 max-w-4xl">
+      <EscrowDepositProgressDialog
+        open={escrowDialog.open}
+        title={escrowDialog.title}
+        description={escrowDialog.description}
+      />
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
           <Link href="/admin/giveaways">

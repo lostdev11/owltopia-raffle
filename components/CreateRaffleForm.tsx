@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
 import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
@@ -82,6 +83,11 @@ export function CreateRaffleForm() {
   const [loading, setLoading] = useState(false)
   /** saving = POST raffle; signing = resolve NFT on RPC + wallet sends prize to escrow */
   const [createStep, setCreateStep] = useState<'idle' | 'saving' | 'signing'>('idle')
+  const [escrowProgress, setEscrowProgress] = useState<{
+    open: boolean
+    title: string
+    description: string
+  }>({ open: false, title: '', description: '' })
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const prizeType = 'nft' as const
@@ -415,6 +421,12 @@ export function CreateRaffleForm() {
         if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && (sendTransaction || wallet?.adapter)) {
           try {
             setCreateStep('signing')
+            setEscrowProgress({
+              open: true,
+              title: 'Finish creating your raffle',
+              description:
+                'Your raffle was saved. Loading escrow settings — your wallet will open next to send the prize NFT.',
+            })
             const mintPk = new PublicKey(raffle.nft_mint_address)
             const walletAdapter = wallet?.adapter ?? null
 
@@ -434,6 +446,11 @@ export function CreateRaffleForm() {
               return
             }
             const escrowPubkey = new PublicKey(escrowAddress)
+            setEscrowProgress((p) => ({
+              ...p,
+              description:
+                'Checking on-chain that your NFT is in this wallet. On mobile or Wi‑Fi this can take 15–45 seconds — please wait.',
+            }))
 
             const depositLogCtx = {
               raffleId: raffle.id,
@@ -504,6 +521,12 @@ export function CreateRaffleForm() {
 
             let depositSig: string | null = null
             let lastMplCoreEscrowError: string | null = null
+
+            setEscrowProgress((p) => ({
+              ...p,
+              description:
+                'When your wallet opens, approve the transaction to send the prize NFT to escrow.',
+            }))
 
             if (resolvedHolder) {
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
@@ -645,6 +668,11 @@ export function CreateRaffleForm() {
               return
             }
 
+            setEscrowProgress((p) => ({
+              ...p,
+              description:
+                'Transaction signed. Confirming on-chain and verifying your raffle so it can go live. This can take up to a minute on slow networks — please wait.',
+            }))
             const verifyResult = await verifyPrizeDepositWithRetries(raffle.id, { depositTx: depositSig })
             logEscrowDepositVerify(
               depositLogCtx,
@@ -722,6 +750,7 @@ export function CreateRaffleForm() {
       createSubmitInFlightRef.current = false
       setLoading(false)
       setCreateStep('idle')
+      setEscrowProgress((p) => ({ ...p, open: false }))
     }
   }
 
@@ -741,7 +770,13 @@ export function CreateRaffleForm() {
   }
 
   return (
-    <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
+    <Fragment>
+      <EscrowDepositProgressDialog
+        open={escrowProgress.open}
+        title={escrowProgress.title}
+        description={escrowProgress.description}
+      />
+      <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
       <CardHeader>
         <CardTitle>Raffle Details</CardTitle>
         <CardDescription>
@@ -1174,5 +1209,6 @@ export function CreateRaffleForm() {
         </form>
       </CardContent>
     </Card>
+    </Fragment>
   )
 }

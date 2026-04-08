@@ -58,6 +58,22 @@ export async function listAllCommunityGiveaways(): Promise<CommunityGiveaway[]> 
   return (data ?? []).map((r) => mapGiveawayRow(r as Record<string, unknown>))
 }
 
+/** Public directory: non-draft giveaways for /raffles Giveaways tab (newest first, capped). */
+export async function listPublicCommunityGiveaways(limit = 80): Promise<CommunityGiveaway[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('community_giveaways')
+    .select('*')
+    .neq('status', 'draft')
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 200))
+
+  if (error) {
+    console.error('listPublicCommunityGiveaways:', error.message)
+    throw new Error(error.message)
+  }
+  return (data ?? []).map((r) => mapGiveawayRow(r as Record<string, unknown>))
+}
+
 export async function getCommunityGiveawayById(id: string): Promise<CommunityGiveaway | null> {
   const { data, error } = await getSupabaseAdmin()
     .from('community_giveaways')

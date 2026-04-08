@@ -19,7 +19,7 @@ import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart } from 'lucide-react'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart, Gift } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -29,6 +29,10 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 import { RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT } from '@/lib/raffles/list-query-statuses'
 import { RAFFLES_PAGE_SERVER_REFRESH_MS } from '@/lib/dev-budget'
+import {
+  CommunityGiveawayBrowseCard,
+  type CommunityGiveawayBrowseItem,
+} from '@/components/CommunityGiveawayBrowseCard'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -317,8 +321,11 @@ export function RafflesPageClient({
     }
   }, [connected, wallet, viewerIsAdmin])
 
-  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
+  type Tab = 'all' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
+  const [giveawaysList, setGiveawaysList] = useState<CommunityGiveawayBrowseItem[] | null>(null)
+  const [giveawaysLoading, setGiveawaysLoading] = useState(false)
+  const [giveawaysError, setGiveawaysError] = useState<string | null>(null)
   const [topProfitableActive, setTopProfitableActive] = useState<RaffleWithEntriesAndProfit[]>([])
 
   const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
@@ -333,6 +340,11 @@ export function RafflesPageClient({
   const [leaderboardPeriodLabel, setLeaderboardPeriodLabel] = useState<string | null>(null)
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t === 'giveaways' || t === 'giveaway') setTab('giveaways')
+  }, [searchParams])
 
   const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
     const touch = e.touches[0]
@@ -610,6 +622,38 @@ export function RafflesPageClient({
     }
   }, [tab, router])
 
+  useEffect(() => {
+    if (tab !== 'giveaways') return
+    let cancelled = false
+    setGiveawaysLoading(true)
+    setGiveawaysError(null)
+    fetch('/api/public/community-giveaways', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (cancelled) return
+        if (!ok && typeof data?.error === 'string') {
+          setGiveawaysList([])
+          setGiveawaysError(data.error)
+          return
+        }
+        const list = Array.isArray(data?.giveaways) ? data.giveaways : []
+        setGiveawaysList(list as CommunityGiveawayBrowseItem[])
+        setGiveawaysError(null)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setGiveawaysList([])
+          setGiveawaysError(err instanceof Error ? err.message : 'Could not load giveaways')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGiveawaysLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [tab])
+
   const isEmpty = active.length === 0 && pausedPending.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
   const recoveredFromError =
@@ -719,6 +763,18 @@ export function RafflesPageClient({
           </button>
           <button
             type="button"
+            onClick={() => setTab('giveaways')}
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
+              tab === 'giveaways'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Gift className="h-4 w-4 shrink-0" />
+            Giveaways
+          </button>
+          <button
+            type="button"
             onClick={() => setTab('my-entries')}
             className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'my-entries'
@@ -773,8 +829,8 @@ export function RafflesPageClient({
         </div>
       </div>
 
-      {/* Error state: visible card with message. 503 = Supabase paused; other connectivity = generic. */}
-      {hasError && (
+      {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
+      {hasError && tab === 'all' && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showPausedMessage ? (
@@ -815,10 +871,44 @@ export function RafflesPageClient({
         </div>
       )}
 
-      {/* Main content: only when no error to show (list or empty state) */}
-      {!hasError && (
+      {/* Main content: All raffles tab hidden on fetch error; other tabs still render. */}
+      {(!hasError || tab !== 'all') && (
         <>
-          {tab === 'owl-vision' ? (
+          {tab === 'giveaways' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold mb-2">Community giveaways</h2>
+                <p className="text-sm text-muted-foreground">
+                  Free pool giveaways — join with your wallet (sign in on the giveaway page). Owl NFT holders can enter
+                  holder-only pools; everyone can join open pools. OWL boosts add extra draw weight before the boost
+                  deadline.
+                </p>
+              </div>
+              {giveawaysLoading && (
+                <div className="flex items-center gap-2 text-muted-foreground py-8">
+                  <Loader2 className="h-6 w-6 animate-spin shrink-0" />
+                  <span>Loading giveaways…</span>
+                </div>
+              )}
+              {!giveawaysLoading && giveawaysError && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                  {giveawaysError}
+                </div>
+              )}
+              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length === 0 && (
+                <p className="text-muted-foreground py-8">No public giveaways right now. Check back soon.</p>
+              )}
+              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
+                <ul className="space-y-4">
+                  {giveawaysList.map((g) => (
+                    <li key={g.id}>
+                      <CommunityGiveawayBrowseCard g={g} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : tab === 'owl-vision' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
               <Card className="border-green-500/30 bg-green-500/5">
                 <CardHeader>
