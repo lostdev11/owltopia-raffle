@@ -134,6 +134,8 @@ type DashboardData = {
     raffleTitle: string
     currency: string
     totalPending: number
+    /** False = legacy host payout; true = platform funds escrow (buyers claim). */
+    ticketPaymentsToFundsEscrow?: boolean
     candidates: Array<{
       wallet: string
       totalAmount: number
@@ -908,6 +910,8 @@ export default function DashboardPage() {
       ? (data.discord as { linked: boolean; username: string | null })
       : { linked: false as const, username: null as string | null }
   const creatorRefundRaffles = Array.isArray(data.creatorRefundRaffles) ? data.creatorRefundRaffles : []
+  const legacyCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow === false)
+  const escrowCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow !== false)
 
   const refundableEntries = myEntries.filter(
     (x) =>
@@ -2214,64 +2218,108 @@ export default function DashboardPage() {
       {creatorRefundRaffles.length > 0 && (
         <Card className="mb-8 border-amber-500/30 bg-amber-500/5">
           <CardHeader>
-            <CardTitle className="text-base sm:text-lg">Users to refund (my raffles)</CardTitle>
+            <CardTitle className="text-base sm:text-lg">Minimum not met — refunds (my raffles)</CardTitle>
             <CardDescription>
-              Raffles that did not meet minimum threshold. Share these exact payout lines with users or use them to send manual refunds.
+              Raffles that did not reach the draw threshold after the extension. New raffles collect ticket payments in
+              platform funds escrow by default, so buyers can claim refunds on-chain without you paying out manually.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {creatorRefundRaffles.map((rr) => {
-              const payoutScript = rr.candidates
-                .filter((c) => c.pendingAmount > 0)
-                .map(
-                  (c, i) =>
-                    `${i + 1}. Send ${c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} ${rr.currency} to ${c.wallet}`
-                )
-                .join('\n')
-              return (
-                <div key={rr.raffleId} className="rounded-lg border border-border/60 bg-background/50 p-3 space-y-2">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <Link href={`/raffles/${rr.raffleSlug}`} className="font-medium hover:underline truncate">
-                      {rr.raffleTitle}
-                    </Link>
-                    <span className="text-sm font-semibold">
-                      Pending:{' '}
-                      {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
-                    </span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="touch-manipulation min-h-[44px] w-full sm:w-auto"
-                    onClick={async () => {
-                      if (!payoutScript) return
-                      try {
-                        await navigator.clipboard.writeText(payoutScript)
-                      } catch {
-                        // best-effort only
-                      }
-                    }}
-                  >
-                    Copy payout script
-                  </Button>
-                  <div className="max-h-56 overflow-auto space-y-2">
-                    {rr.candidates.map((c, idx) => (
-                      <div key={`${rr.raffleId}-${c.wallet}`} className="rounded border border-border/50 bg-muted/30 p-2">
-                        <p className="text-xs text-muted-foreground">User #{idx + 1}</p>
-                        <p className="text-xs font-mono break-all">{c.wallet}</p>
-                        <p className="text-sm mt-1">
-                          <span className="text-muted-foreground">Amount to refund: </span>
-                          <span className="font-mono font-semibold">
-                            {c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
-                          </span>
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+          <CardContent className="space-y-6">
+            {legacyCreatorRefundRaffles.length > 0 && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] p-3">
+                  <p className="text-sm font-medium text-foreground">Legacy refunds — you send these amounts</p>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    These raffles used the older flow where ticket payments went to you and the treasury (not the funds
+                    escrow wallet). Send the pending amounts below from your wallet to each buyer. Copy the payout script
+                    to paste into notes or your wallet app.
+                  </p>
                 </div>
-              )
-            })}
+                {legacyCreatorRefundRaffles.map((rr) => {
+                  const payoutScript = rr.candidates
+                    .filter((c) => c.pendingAmount > 0)
+                    .map(
+                      (c, i) =>
+                        `${i + 1}. Send ${c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} ${rr.currency} to ${c.wallet}`
+                    )
+                    .join('\n')
+                  return (
+                    <div key={rr.raffleId} className="rounded-lg border border-border/60 bg-background/50 p-3 space-y-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <Link href={`/raffles/${rr.raffleSlug}`} className="font-medium hover:underline truncate">
+                          {rr.raffleTitle}
+                        </Link>
+                        <span className="text-sm font-semibold tabular-nums">
+                          Total to send: {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                        disabled={!payoutScript}
+                        onClick={async () => {
+                          if (!payoutScript) return
+                          try {
+                            await navigator.clipboard.writeText(payoutScript)
+                          } catch {
+                            // best-effort only
+                          }
+                        }}
+                      >
+                        Copy payout script
+                      </Button>
+                      <div className="max-h-56 overflow-auto space-y-2">
+                        {rr.candidates.map((c, idx) => (
+                          <div key={`${rr.raffleId}-${c.wallet}`} className="rounded border border-border/50 bg-muted/30 p-2">
+                            <p className="text-xs text-muted-foreground">Buyer #{idx + 1}</p>
+                            <p className="text-xs font-mono break-all">{c.wallet}</p>
+                            <p className="text-sm mt-1">
+                              <span className="text-muted-foreground">Amount to send: </span>
+                              <span className="font-mono font-semibold">
+                                {c.pendingAmount.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                              </span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {escrowCreatorRefundRaffles.length > 0 && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                  <p className="text-sm font-medium text-foreground">Funds escrow — buyers claim</p>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    Ticket payments for these raffles sit in the platform funds escrow wallet. Buyers tap{' '}
+                    <span className="text-foreground font-medium">Claim refund</span> on the raffle page (or their
+                    dashboard). You do not need to send these amounts manually.
+                  </p>
+                </div>
+                {escrowCreatorRefundRaffles.map((rr) => (
+                  <div key={rr.raffleId} className="rounded-lg border border-border/60 bg-background/50 p-3 space-y-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${rr.raffleSlug}`} className="font-medium hover:underline truncate">
+                        {rr.raffleTitle}
+                      </Link>
+                      <span className="text-sm font-semibold tabular-nums text-muted-foreground">
+                        Outstanding (escrow):{' '}
+                        {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {rr.candidates.filter((c) => c.pendingAmount > 0).length} buyer
+                      {rr.candidates.filter((c) => c.pendingAmount > 0).length !== 1 ? 's' : ''} still owed — they claim
+                      from escrow.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

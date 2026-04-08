@@ -13,6 +13,7 @@ import { getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,6 +114,8 @@ export async function GET(request: NextRequest) {
         currency: r.currency,
         candidates,
         totalPending,
+        /** False = legacy split-at-purchase; host must send refunds manually. True = funds escrow; buyers self-claim. */
+        ticketPaymentsToFundsEscrow: raffleUsesFundsEscrow(r),
       }
     })
 
