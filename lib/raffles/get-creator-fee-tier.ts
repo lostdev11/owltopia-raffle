@@ -7,7 +7,7 @@ export type GetCreatorFeeTierOptions = {
 }
 
 /**
- * Fee tier for the raffle creator: 3% if they hold Owltopia (Owl) NFT, 6% otherwise.
+ * Fee tier for the raffle creator: 3% for Owltopia Holders, 6% otherwise.
  * Used to deduct the platform fee from every ticket sale (split at purchase and at settlement).
  */
 export async function getCreatorFeeTier(

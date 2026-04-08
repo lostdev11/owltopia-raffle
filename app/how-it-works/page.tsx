@@ -129,7 +129,7 @@ export default function HowItWorksPage() {
             Rev Share
           </h2>
           <p className="mb-4">
-            Raffle site revenue is generated from platform fees on ticket sales: <strong>6%</strong> for non-holder creators and <strong>3%</strong> for holder creators. From that site revenue, <strong>50%</strong> goes to holders as rev share (shown in <strong>SOL</strong> and <strong>USDC</strong>).
+            Raffle site revenue is generated from platform fees on ticket sales: <strong>6%</strong> for creators who are not Owltopia Holders and <strong>3%</strong> for Owltopia Holders. From that site revenue, <strong>50%</strong> goes to Owltopia Holders as rev share (shown in <strong>SOL</strong> and <strong>USDC</strong>).
           </p>
         </section>
 

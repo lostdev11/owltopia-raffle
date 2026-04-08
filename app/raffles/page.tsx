@@ -131,7 +131,7 @@ export default async function RafflesPage() {
     // Pending NFT raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
-    // Enrich with creator Owl holder status for card badges
+    // Enrich with creator Owltopia Holder status for card badges
     allRaffles = await enrichRafflesWithCreatorHolder(allRaffles)
 
     const now = new Date()

@@ -65,7 +65,7 @@ export interface Raffle {
   prize_return_reason: string | null
   /** Solana tx signature for the return transfer to creator. */
   prize_return_tx: string | null
-  /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
+  /** Enriched at list time: true if creator is an Owltopia Holder. Used for card badge. */
   creator_is_holder?: boolean
   /** When creator requested cancellation (pending admin approval). */
   cancellation_requested_at: string | null

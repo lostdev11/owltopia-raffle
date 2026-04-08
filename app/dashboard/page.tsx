@@ -458,7 +458,7 @@ export default function DashboardPage() {
               {feeTier.feeBps === 300 ? '3%' : feeTier.feeBps === 600 ? '6%' : `${(feeTier.feeBps / 100).toFixed(1)}%`} platform fee
             </p>
             <p className="text-sm text-muted-foreground">
-              {feeTier.reason === 'holder' ? 'Owltopia (Owl NFT) holder' : 'Non-holder'}
+              {feeTier.reason === 'holder' ? 'Owltopia Holder' : 'Non-holder'}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Fee is taken from each ticket sale at purchase time.

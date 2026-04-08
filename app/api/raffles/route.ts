@@ -238,7 +238,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day)
+    // Daily hosting limit: Owltopia Holders 3/day, non-holders 1/day (UTC day)
     const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
     const isHolder = isOwlEnabled() && feeTier.reason === 'holder'
     const maxRafflesPerDay = isHolder ? 3 : 1
@@ -249,8 +249,8 @@ export async function POST(request: NextRequest) {
     )
     if (createdToday >= maxRafflesPerDay) {
       const message = isHolder
-        ? 'Owltopia holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
-        : 'You can host 1 raffle per day. Owltopia (Owl NFT) holders can host up to 3. Try again tomorrow (UTC).'
+        ? 'Owltopia Holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
+        : 'You can host 1 raffle per day. Owltopia Holders can host up to 3. Try again tomorrow (UTC).'
       return NextResponse.json(
         { error: message },
         { status: 429 }

@@ -2169,9 +2169,9 @@ export function RaffleDetailClient({
                 {isOwlEnabled() && raffle.creator_is_holder === true && (
                   <span
                     className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-1"
-                    title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                    title="Hosted by an Owltopia Holder — 3% platform fee on tickets"
                     role="img"
-                    aria-label="Owl holder"
+                    aria-label="Owltopia Holder"
                   >
                     <BadgeCheck className="h-4 w-4 flex-shrink-0" />
                   </span>

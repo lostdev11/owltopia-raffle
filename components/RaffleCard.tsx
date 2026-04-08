@@ -175,7 +175,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const minTickets = getRaffleMinimum(raffle)
   const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
 
-  // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
+  // Owltopia Holder verification: show on card when creator is an Owltopia Holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
 
   // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
@@ -862,9 +862,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   {showHolderBadge && (
                     <span
                       className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                      title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                      title="Hosted by an Owltopia Holder — 3% platform fee on tickets"
                       role="img"
-                      aria-label="Owl holder"
+                      aria-label="Owltopia Holder"
                     >
                       <BadgeCheck className="h-3 w-3 flex-shrink-0" />
                     </span>
@@ -1080,9 +1080,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       {showHolderBadge && (
                         <span
                           className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                          title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                          title="Hosted by an Owltopia Holder — 3% platform fee on tickets"
                           role="img"
-                          aria-label="Owl holder"
+                          aria-label="Owltopia Holder"
                         >
                           <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" />
                         </span>
@@ -1150,9 +1150,9 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     {showHolderBadge && (
                       <span
                         className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                        title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
+                        title="Hosted by an Owltopia Holder — 3% platform fee on tickets"
                         role="img"
-                        aria-label="Owl holder"
+                        aria-label="Owltopia Holder"
                       >
                         <BadgeCheck className="h-3 w-3 flex-shrink-0" />
                       </span>

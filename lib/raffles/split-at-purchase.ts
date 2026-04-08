@@ -1,6 +1,6 @@
 /**
  * Split at purchase: compute creator vs treasury amounts for a ticket payment.
- * Platform fee is deducted from every ticket sale: 3% for Owltopia (Owl NFT) holders, 6% for non-holders.
+ * Platform fee is deducted from every ticket sale: 3% for Owltopia Holders, 6% for non-holders.
  * Fee tier is based on the raffle creator's wallet (holder check at purchase time).
  */
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'

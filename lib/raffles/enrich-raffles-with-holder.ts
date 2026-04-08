@@ -2,7 +2,7 @@ import type { Raffle } from '@/lib/types'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 
 /**
- * Enriches raffles with creator_is_holder (Owltopia Owl NFT holder) for display on cards.
+ * Enriches raffles with creator_is_holder (Owltopia Holder) for display on cards.
  * Batches lookups by unique creator wallet to avoid redundant getCreatorFeeTier calls.
  */
 export async function enrichRafflesWithCreatorHolder(

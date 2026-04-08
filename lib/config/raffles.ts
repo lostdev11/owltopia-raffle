@@ -1,6 +1,6 @@
 /**
  * Platform fee (deducted from every ticket sale).
- * - 3% for raffle creators who hold the Owltopia (Owl) NFT.
+ * - 3% for raffle creators who are Owltopia Holders.
  * - 6% for non-holders.
  * Applied at purchase time via getPaymentSplit and at settlement.
  */

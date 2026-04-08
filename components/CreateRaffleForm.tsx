@@ -412,7 +412,7 @@ export function CreateRaffleForm() {
       </CardHeader>
       <CardContent>
         <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia (Owl NFT) holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
+          <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia Holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
