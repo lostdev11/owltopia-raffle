@@ -176,7 +176,7 @@ export function CommunityGiveawayBrowseCard({
             <li className="leading-snug">
               Access:{' '}
               <span className="text-foreground">
-                {g.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'}
+                {g.access_gate === 'holder_only' ? 'Owltopia Holders' : 'Everyone'}
               </span>
             </li>
             <li className="leading-snug">

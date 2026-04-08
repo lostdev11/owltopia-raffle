@@ -879,9 +879,9 @@ export function RafflesPageClient({
               <div className="max-w-3xl">
                 <h2 className="text-xl sm:text-2xl font-bold mb-2">Community giveaways</h2>
                 <p className="text-sm text-muted-foreground">
-                  Free pool giveaways — join with your wallet (sign in on the giveaway page). Owl NFT holders can enter
-                  holder-only pools; everyone can join open pools. OWL boosts add extra draw weight before the boost
-                  deadline.
+                  Free pool giveaways — join with your wallet (sign in on the giveaway page). Owltopia Holders can
+                  enter holder-only pools; everyone can join open pools. OWL boosts add extra draw weight before the
+                  boost deadline.
                 </p>
               </div>
               {giveawaysLoading && (

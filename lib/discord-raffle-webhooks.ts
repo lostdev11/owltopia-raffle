@@ -382,7 +382,7 @@ export async function notifyCommunityGiveawayOpened(
   const owlLine = startTs
     ? `<t:${startTs}:F> (<t:${startTs}:R>)`
     : giveaway.starts_at
-  const gateLabel = giveaway.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'
+  const gateLabel = giveaway.access_gate === 'holder_only' ? 'Owltopia Holders' : 'Everyone'
 
   const endFields: { name: string; value: string; inline?: boolean }[] = []
   if (giveaway.ends_at) {

@@ -311,7 +311,7 @@ export default function CommunityGiveawayPage() {
                 <li>
                   Access:{' '}
                   <span className="text-foreground font-medium">
-                    {info.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'}
+                    {info.access_gate === 'holder_only' ? 'Owltopia Holders' : 'Everyone'}
                   </span>
                 </li>
                 <li>
