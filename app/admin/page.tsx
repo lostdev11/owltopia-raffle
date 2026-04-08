@@ -1810,25 +1810,11 @@ export default function AdminDashboardPage() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Gift className="h-5 w-5" />
-                      NFT giveaways
+                      Giveaways
                     </CardTitle>
                     <CardDescription>
-                      Escrow a one-off NFT, set the winner wallet, verify deposit, share the claim link. They claim from
-                      the dashboard.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/community-giveaways">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Community pool giveaways
-                    </CardTitle>
-                    <CardDescription>
-                      Open or holder-gated pools, optional entry deadline, OWL boost for 3× draw weight before start,
-                      admin draw anytime, winner claims NFT from escrow on the dashboard.
+                      Community pool giveaways: create draft, send prize NFT to escrow, verify deposit, open for entries,
+                      draw winner, and let them claim from the dashboard.
                     </CardDescription>
                   </CardHeader>
                 </Link>
