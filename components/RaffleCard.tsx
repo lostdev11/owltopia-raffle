@@ -27,6 +27,7 @@ import {
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
+import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { Trophy, Share2, BadgeCheck, Loader2 } from 'lucide-react'
@@ -1029,7 +1030,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 className="text-[11px] sm:text-xs text-muted-foreground line-clamp-2 mb-1 sm:mb-1.5 mt-0 break-words min-w-0"
                 title={raffle.description}
               >
-                <LinkifiedText text={raffle.description} />
+                <RaffleDescriptionText raffle={raffle} />
               </p>
             )}
               <div className="flex flex-wrap items-center justify-between mt-auto gap-x-2 gap-y-1.5">
@@ -1236,7 +1237,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     <div className="flex-1 min-w-0">
                       {raffle.description && (
                         <p className={`${classes.description} text-white/90 line-clamp-3`}>
-                          <LinkifiedText text={raffle.description} />
+                          <RaffleDescriptionText raffle={raffle} />
                         </p>
                       )}
                     </div>

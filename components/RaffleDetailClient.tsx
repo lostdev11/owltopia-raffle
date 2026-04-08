@@ -107,6 +107,7 @@ import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
+import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
@@ -2958,7 +2959,7 @@ export function RaffleDetailClient({
               <div className="flex-1 min-w-0">
                 <CardTitle className={classes.title}>{raffle.title}</CardTitle>
                 <CardDescription className={`${classes.description} break-words`}>
-                  <LinkifiedText text={raffle.description} />
+                  <RaffleDescriptionText raffle={raffle} />
                 </CardDescription>
               </div>
               <div

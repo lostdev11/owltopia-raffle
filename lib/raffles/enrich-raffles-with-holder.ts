@@ -1,6 +1,7 @@
 import type { Raffle } from '@/lib/types'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { devSaveApiCredits } from '@/lib/dev-budget'
+import { getWalletsWithAdminRole } from '@/lib/db/admins'
 
 /** Limit parallel Helius DAS calls so listing many unique creators does not trigger 429s. */
 const HOLDER_LOOKUP_CONCURRENCY = devSaveApiCredits() ? 2 : 3
@@ -47,7 +48,7 @@ async function forEachWithConcurrency<T>(
 export async function enrichRafflesWithCreatorHolder(
   raffles: Raffle[],
   options?: EnrichRafflesWithCreatorHolderOptions
-): Promise<(Raffle & { creator_is_holder: boolean })[]> {
+): Promise<(Raffle & { creator_is_holder: boolean; description_urls_clickable: boolean })[]> {
   if (!raffles.length) return []
 
   const wallets = new Set<string>()
@@ -55,6 +56,8 @@ export async function enrichRafflesWithCreatorHolder(
     const w = (r.creator_wallet || r.created_by || '').trim()
     if (w) wallets.add(w)
   }
+
+  const adminWallets = await getWalletsWithAdminRole(Array.from(wallets))
 
   const budgetMs = options?.budgetMs
   const deadline = budgetMs != null ? Date.now() + budgetMs : Number.POSITIVE_INFINITY
@@ -84,6 +87,7 @@ export async function enrichRafflesWithCreatorHolder(
     return {
       ...r,
       creator_is_holder: holderByWallet.get(w) ?? false,
+      description_urls_clickable: w ? adminWallets.has(w) : false,
     }
   })
 }

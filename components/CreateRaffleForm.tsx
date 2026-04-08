@@ -54,6 +54,8 @@ import {
   parseNftFloorPrice,
   parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
+import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
+import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -103,6 +105,39 @@ export function CreateRaffleForm() {
   const [floorPriceAutoNote, setFloorPriceAutoNote] = useState<string | null>(null)
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
   const [ticketPrice, setTicketPrice] = useState('')
+  const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setViewerIsAdmin(null)
+      return
+    }
+    const addr = publicKey.toBase58()
+    const cached = getCachedAdmin(addr)
+    if (cached !== null) {
+      setViewerIsAdmin(cached)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        const role =
+          admin && (data?.role === 'full' || data?.role === 'raffle_creator')
+            ? (data.role as AdminRole)
+            : null
+        setCachedAdmin(addr, admin, role)
+        setViewerIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setViewerIsAdmin(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
 
   useEffect(() => {
     if (!selectedNft) {
@@ -376,6 +411,17 @@ export function CreateRaffleForm() {
         focusFormField('max_tickets')
         return
       }
+    }
+
+    const descriptionValue = ((formData.get('description') as string) ?? '').trim()
+      ? (formData.get('description') as string)
+      : ''
+    if (viewerIsAdmin === false && descriptionContainsBlockedLinks(descriptionValue)) {
+      alert(
+        'Descriptions cannot include links or web addresses. Remove URLs, typed domains (like example.com), IPs, Discord/Telegram invites, and markdown-style links.'
+      )
+      focusFormField('description')
+      return
     }
 
     createSubmitInFlightRef.current = true
@@ -801,6 +847,11 @@ export function CreateRaffleForm() {
 
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
+            {viewerIsAdmin === false && (
+              <p className="text-xs text-muted-foreground">
+                No links or web addresses (URLs, domains, IPs, Discord/Telegram invites) unless you use an admin wallet.
+              </p>
+            )}
             <textarea
               id="description"
               name="description"

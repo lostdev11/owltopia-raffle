@@ -15,6 +15,38 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
 /**
  * Get admin role for a wallet, or null if not an admin
  */
+const ADMIN_IN_CHUNK = 120
+
+/**
+ * Returns wallets that exist in the admins table (any role). Chunked for PostgREST .in() limits.
+ */
+export async function getWalletsWithAdminRole(walletAddresses: string[]): Promise<Set<string>> {
+  const normalized = [...new Set(walletAddresses.map((w) => (typeof w === 'string' ? w.trim() : '')).filter(Boolean))]
+  if (normalized.length === 0) return new Set()
+
+  const db = getSupabaseForServerRead(supabase)
+  const result = new Set<string>()
+
+  for (let i = 0; i < normalized.length; i += ADMIN_IN_CHUNK) {
+    const chunk = normalized.slice(i, i + ADMIN_IN_CHUNK)
+    const rows = await withRetry(async () => {
+      const { data, error } = await db.from('admins').select('wallet_address').in('wallet_address', chunk)
+      if (error) {
+        console.error('Error batch-checking admins:', error.message || 'Unknown error')
+        return []
+      }
+      return data ?? []
+    }, { maxRetries: 1 })
+
+    for (const row of rows) {
+      const addr = typeof row?.wallet_address === 'string' ? row.wallet_address.trim() : ''
+      if (addr) result.add(addr)
+    }
+  }
+
+  return result
+}
+
 export async function getAdminRole(walletAddress: string): Promise<AdminRole | null> {
   const normalized = typeof walletAddress === 'string' ? walletAddress.trim() : ''
   if (!normalized) {

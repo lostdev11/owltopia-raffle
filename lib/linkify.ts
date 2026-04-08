@@ -4,7 +4,8 @@
  * - Removes zero-width and other invisible characters that break URL detection
  * - Replaces no-break space (U+00A0) with normal space
  */
-function normalizeTextForUrls(text: string): string {
+/** Exported for raffle description validation (same normalization as linkify). */
+export function normalizeTextForUrls(text: string): string {
   if (!text || typeof text !== 'string') return ''
   let out = text
   // Zero-width and similar characters that can appear in pasted content

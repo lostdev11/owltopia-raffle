@@ -30,6 +30,7 @@ import {
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
+import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -333,6 +334,17 @@ export async function POST(request: NextRequest) {
           { status: 429 }
         )
       }
+    }
+
+    const descriptionRaw = typeof body.description === 'string' ? body.description : ''
+    if (adminRole === null && descriptionContainsBlockedLinks(descriptionRaw)) {
+      return NextResponse.json(
+        {
+          error:
+            'Descriptions cannot include links or web addresses. Remove URLs, domains (e.g. example.com), IP addresses, Discord/Telegram invites, and markdown links.',
+        },
+        { status: 400 }
+      )
     }
 
     // Parse optional metadata fields
