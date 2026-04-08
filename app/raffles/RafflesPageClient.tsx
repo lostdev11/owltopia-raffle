@@ -875,8 +875,8 @@ export function RafflesPageClient({
       {(!hasError || tab !== 'all') && (
         <>
           {tab === 'giveaways' ? (
-            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
-              <div>
+            <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6">
+              <div className="max-w-3xl">
                 <h2 className="text-xl sm:text-2xl font-bold mb-2">Community giveaways</h2>
                 <p className="text-sm text-muted-foreground">
                   Free pool giveaways — join with your wallet (sign in on the giveaway page). Owl NFT holders can enter
@@ -899,9 +899,12 @@ export function RafflesPageClient({
                 <p className="text-muted-foreground py-8">No public giveaways right now. Check back soon.</p>
               )}
               {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
-                <ul className="space-y-4">
+                <ul
+                  className="m-0 grid w-full list-none grid-cols-1 gap-4 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                  role="list"
+                >
                   {giveawaysList.map((g) => (
-                    <li key={g.id}>
+                    <li key={g.id} className="min-w-0">
                       <CommunityGiveawayBrowseCard g={g} />
                     </li>
                   ))}
