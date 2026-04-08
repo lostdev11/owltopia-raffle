@@ -140,7 +140,7 @@ export default function HowItWorksPage() {
             Who Can Participate
           </h2>
           <p className="mb-4">
-            Anyone with a Solana wallet can buy tickets and create raffles. Raffles are created by holders and non-holders alike; winner selection runs automatically when a raffle ends and minimum requirements are met, or can be triggered by an admin. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
+            Anyone with a Solana wallet can buy tickets and create raffles. Raffles are created by Owltopia Holders and non-holders alike; winner selection runs automatically when a raffle ends and minimum requirements are met, or can be triggered by an admin. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
           </p>
         </section>
       </div>

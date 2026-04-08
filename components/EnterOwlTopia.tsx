@@ -137,7 +137,7 @@ export function EnterOwlTopia() {
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mb-3">
-            Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators). 50% of that site revenue goes to holders.
+            Site revenue comes from ticket fees (6% for creators who are not Owltopia Holders, 3% for Owltopia Holders). 50% of that site revenue goes to Owltopia Holders.
           </p>
           <div className="space-y-3">
             <div>
@@ -169,12 +169,15 @@ export function EnterOwlTopia() {
         >
           Trusted raffles with full transparency
         </p>
-        <Link
-          href="/raffles"
-          className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-lg px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation opacity-100"
-        >
-          Enter Raffles
-        </Link>
+        {/* Extra vertical room so the glow sits away from scroll/overflow clip edges */}
+        <div className="relative flex w-full justify-center pt-1 pb-14 sm:pb-16">
+          <Link
+            href="/raffles"
+            className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-xl px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-[transform,background-color] hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation opacity-100"
+          >
+            Enter Raffles
+          </Link>
+        </div>
         </div>
       </div>
       {/* Spacer so page can scroll and trigger scroll-based animation */}

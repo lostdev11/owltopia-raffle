@@ -47,6 +47,7 @@ import {
   getAccount,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
@@ -1439,6 +1440,7 @@ export function RaffleDetailClient({
       }
     }
 
+    let tokenMetadataEscrowError: string | null = null
     try {
       const mint = new PublicKey(raffle.nft_mint_address)
       const escrowPubkey = new PublicKey(escrowAddress)
@@ -1551,9 +1553,12 @@ export function RaffleDetailClient({
       }
       const { tokenProgram, tokenAccount: sourceTokenAccount } = holder
 
-      // Try Token Metadata transfer first for Tokenkeg NFTs. This handles many pNFT/token-metadata
-      // assets that can fail plain SPL transfer simulation in some wallets.
-      if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+      // Try Token Metadata transfer first for SPL Token and Token-2022 NFTs. Many pNFT / metadata
+      // assets fail plain SPL ATA transfer in wallets unless we use transferV1.
+      if (
+        walletAdapter &&
+        (tokenProgram.equals(TOKEN_PROGRAM_ID) || tokenProgram.equals(TOKEN_2022_PROGRAM_ID))
+      ) {
         try {
           const sig = await transferTokenMetadataNftToEscrow({
             connection,
@@ -1564,7 +1569,10 @@ export function RaffleDetailClient({
           await confirmAndAssertSuccess(sig)
           await finalizeAfterTransfer(sig)
           return
-        } catch {}
+        } catch (metaErr) {
+          tokenMetadataEscrowError =
+            metaErr instanceof Error ? metaErr.message : String(metaErr)
+        }
       }
 
       const escrowAta = await getAssociatedTokenAddress(
@@ -1604,7 +1612,10 @@ export function RaffleDetailClient({
       await finalizeAfterTransfer(sig)
     } catch (e) {
       const baseMessage = e instanceof Error ? e.message : 'Transfer failed'
-      setDepositEscrowError(baseMessage)
+      const metaHint = tokenMetadataEscrowError
+        ? ` Metaplex Token Metadata transfer was tried first and failed: ${tokenMetadataEscrowError}`
+        : ''
+      setDepositEscrowError(baseMessage + metaHint)
       setShowManualEscrowFallback(true)
     } finally {
       setDepositEscrowLoading(false)

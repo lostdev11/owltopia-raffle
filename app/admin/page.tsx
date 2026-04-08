@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Gift } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1133,6 +1133,22 @@ export default function AdminDashboardPage() {
                   </CardTitle>
                   <CardDescription>
                     Track creators and entrants: raffles created, creator revenue, entries, and total spent per wallet.
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+          )}
+
+          {adminRole === 'full' && (
+            <Card className="hover:border-primary transition-colors cursor-pointer">
+              <Link href="/admin/community-giveaways">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Gift className="h-5 w-5" />
+                    Community giveaways
+                  </CardTitle>
+                  <CardDescription>
+                    Create pool giveaways for the Giveaways tab. Discord webhook when one goes live (if configured).
                   </CardDescription>
                 </CardHeader>
               </Link>

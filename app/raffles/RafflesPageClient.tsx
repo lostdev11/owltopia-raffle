@@ -19,7 +19,20 @@ import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart } from 'lucide-react'
+import {
+  Eye,
+  Shield,
+  Megaphone,
+  Trophy,
+  Ticket,
+  PlusCircle,
+  Medal,
+  Loader2,
+  Crown,
+  ShoppingCart,
+  Gift,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -27,6 +40,9 @@ import { MarkdownContent } from '@/components/MarkdownContent'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
+import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
+import { format } from 'date-fns'
+import { cn } from '@/lib/utils'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -197,6 +213,52 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
   return m.includes('503') || m.includes('service unavailable')
 }
 
+/** Prize NFT hero image for community giveaway cards (proxy URL + raw fallback like raffle cards). */
+function CommunityGiveawayPrizeImage({
+  prizeImageUrl,
+  title,
+  className,
+}: {
+  prizeImageUrl: string | null
+  title: string
+  className?: string
+}) {
+  const displaySrc = getRaffleDisplayImageUrl(prizeImageUrl)
+  const rawFallback = getRaffleImageFallbackRawUrl(displaySrc, prizeImageUrl ?? undefined)
+  const [dead, setDead] = useState(false)
+
+  if (!displaySrc || dead) {
+    return (
+      <div
+        className={cn(
+          'flex min-h-[200px] w-full items-center justify-center bg-muted/70 text-muted-foreground',
+          className || 'relative h-full'
+        )}
+      >
+        <Gift className="h-16 w-16 opacity-35" aria-hidden />
+        <span className="sr-only">Prize artwork unavailable for {title}</span>
+      </div>
+    )
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- list card: proxy + GIF; matches RaffleCard list pattern
+    <img
+      src={displaySrc}
+      alt={`Prize NFT: ${title}`}
+      className={cn('h-full w-full object-cover', className)}
+      loading="lazy"
+      onError={(e) => {
+        if (rawFallback && e.currentTarget.src !== rawFallback) {
+          e.currentTarget.src = rawFallback
+          return
+        }
+        setDead(true)
+      }}
+    />
+  )
+}
+
 export function RafflesPageClient({
   activeRafflesWithEntries,
   pausedPendingRafflesWithEntries,
@@ -259,8 +321,23 @@ export function RafflesPageClient({
     }
   }, [connected, publicKey])
 
-  type Tab = 'all' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
+  type Tab = 'all' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
+  const [giveaways, setGiveaways] = useState<
+    Array<{
+      id: string
+      title: string
+      description: string | null
+      access_gate: 'open' | 'holder_only'
+      starts_at: string
+      ends_at: string | null
+      nft_mint_address?: string | null
+      prize_image_url?: string | null
+      entry_count?: number
+    }>
+  >([])
+  const [giveawaysLoading, setGiveawaysLoading] = useState(false)
+  const [giveawaysFetched, setGiveawaysFetched] = useState(false)
   const [topProfitableActive, setTopProfitableActive] = useState<RaffleWithEntriesAndProfit[]>([])
 
   const [announcementsList, setAnnouncementsList] = useState<AnnouncementItem[]>([])
@@ -326,6 +403,61 @@ export function RafflesPageClient({
       .catch(() => setLeaderboardData(null))
       .finally(() => setLeaderboardLoading(false))
   }, [tab])
+
+  const tabFromSearchParam = useCallback((raw: string | null): Tab | null => {
+    if (!raw) return null
+    const allowed: Tab[] = ['all', 'giveaways', 'my-entries', 'owl-vision', 'announcements', 'leaderboard']
+    return allowed.includes(raw as Tab) ? (raw as Tab) : null
+  }, [])
+
+  useEffect(() => {
+    const raw = searchParams.get('tab')
+    if (!raw) {
+      setTab('all')
+      return
+    }
+    const next = tabFromSearchParam(raw)
+    if (next) setTab(next)
+  }, [searchParams, tabFromSearchParam])
+
+  useEffect(() => {
+    if (tab !== 'giveaways' || giveawaysFetched) return
+    let cancelled = false
+    setGiveawaysLoading(true)
+    fetch('/api/public/community-giveaways', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.resolve({ giveaways: [] })))
+      .then((data) => {
+        if (cancelled) return
+        setGiveaways(Array.isArray(data?.giveaways) ? data.giveaways : [])
+        setGiveawaysFetched(true)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGiveaways([])
+          setGiveawaysFetched(true)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGiveawaysLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [tab, giveawaysFetched])
+
+  const selectTab = useCallback(
+    (next: Tab) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (next === 'all') {
+        params.delete('tab')
+      } else {
+        params.set('tab', next)
+      }
+      const q = params.toString()
+      router.replace(q ? `/raffles?${q}` : '/raffles', { scroll: false })
+    },
+    [router, searchParams]
+  )
 
   // Fetch display names for wallets that appear in the in-page leaderboard
   useEffect(() => {
@@ -608,11 +740,11 @@ export function RafflesPageClient({
             })}
           </div>
         )}
-        {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
+        {/* Tabs: All raffles | Giveaways | Raffles entered | Owl Vision | Announcements | Leaderboard */}
         <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto">
           <button
             type="button"
-            onClick={() => setTab('all')}
+            onClick={() => selectTab('all')}
             className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'all'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
@@ -623,7 +755,19 @@ export function RafflesPageClient({
           </button>
           <button
             type="button"
-            onClick={() => setTab('my-entries')}
+            onClick={() => selectTab('giveaways')}
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
+              tab === 'giveaways'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Gift className="h-4 w-4 shrink-0" />
+            Giveaways
+          </button>
+          <button
+            type="button"
+            onClick={() => selectTab('my-entries')}
             className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'my-entries'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
@@ -634,7 +778,7 @@ export function RafflesPageClient({
           </button>
           <button
             type="button"
-            onClick={() => setTab('owl-vision')}
+            onClick={() => selectTab('owl-vision')}
             className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'owl-vision'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
@@ -646,7 +790,7 @@ export function RafflesPageClient({
           </button>
           <button
             type="button"
-            onClick={() => setTab('announcements')}
+            onClick={() => selectTab('announcements')}
             className={`relative flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'announcements'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
@@ -664,7 +808,7 @@ export function RafflesPageClient({
           </button>
           <button
             type="button"
-            onClick={() => setTab('leaderboard')}
+            onClick={() => selectTab('leaderboard')}
             className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
               tab === 'leaderboard'
                 ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
@@ -719,8 +863,8 @@ export function RafflesPageClient({
         </div>
       )}
 
-      {/* Main content: only when no error to show (list or empty state) */}
-      {!hasError && (
+      {/* Main content: raffle lists hidden on error; Giveaways tab still loads its own feed */}
+      {(!hasError || tab === 'giveaways') && (
         <>
           {tab === 'owl-vision' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
@@ -929,6 +1073,108 @@ export function RafflesPageClient({
                     Open leaderboard page
                   </Link>
                 </p>
+              )}
+            </div>
+          ) : tab === 'giveaways' ? (
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-md mx-auto">
+              <h2 className="text-xl sm:text-2xl font-bold mb-2 flex items-center gap-2">
+                <Gift className="h-7 w-7 text-primary shrink-0" />
+                Community giveaways
+              </h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Pool giveaways with the prize held in platform escrow. Connect your wallet on the giveaway page to join or
+                claim. On mobile, use a stable connection or Wi‑Fi if the page is slow to load.
+              </p>
+              {giveawaysLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground py-8">
+                  <Loader2 className="h-5 w-5 animate-spin shrink-0" />
+                  Loading giveaways…
+                </div>
+              ) : giveaways.length === 0 ? (
+                <p className="text-muted-foreground rounded-lg border border-dashed border-border/70 p-6">
+                  No open community giveaways right now. Check back soon — full admins can create one in{' '}
+                  <Link
+                    href="/admin/community-giveaways"
+                    className="text-primary underline-offset-2 hover:underline touch-manipulation"
+                  >
+                    Owl Vision → Community giveaways
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <ul className="space-y-6">
+                  {giveaways.map((g) => {
+                    const entries = g.entry_count ?? 0
+                    const boostLine = (() => {
+                      try {
+                        return format(new Date(g.starts_at), "MMM d, yyyy 'at' h:mm a")
+                      } catch {
+                        return g.starts_at
+                      }
+                    })()
+                    const entryDeadlineLine = g.ends_at
+                      ? (() => {
+                          try {
+                            return format(new Date(g.ends_at), "MMM d, yyyy 'at' h:mm a")
+                          } catch {
+                            return g.ends_at
+                          }
+                        })()
+                      : null
+                    return (
+                      <li key={g.id}>
+                        <Link
+                          href={`/community-giveaway/${g.id}`}
+                          className="block touch-manipulation rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        >
+                          <Card className="overflow-hidden rounded-xl border-green-500/30 bg-card shadow-sm transition-colors hover:border-green-500/50">
+                            <div className="relative aspect-square w-full max-h-[min(92vw,400px)] bg-muted">
+                              <CommunityGiveawayPrizeImage
+                                prizeImageUrl={g.prize_image_url ?? null}
+                                title={g.title}
+                                className="absolute inset-0 h-full w-full"
+                              />
+                              <div
+                                className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent"
+                                aria-hidden
+                              />
+                              <div className="pointer-events-none absolute bottom-0 left-0 right-0 p-4 space-y-2">
+                                <h3 className="text-lg font-bold text-white drop-shadow-md leading-tight">
+                                  {g.title}
+                                </h3>
+                                <span className="inline-flex rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+                                  Open — enter now
+                                </span>
+                              </div>
+                            </div>
+                            <CardContent className="space-y-2 px-4 py-4 text-sm">
+                              <p className="flex items-center gap-2 text-muted-foreground">
+                                <Users className="h-4 w-4 shrink-0 text-foreground/70" aria-hidden />
+                                <span>
+                                  {entries} {entries === 1 ? 'entry' : 'entries'}
+                                </span>
+                              </p>
+                              <p className="text-muted-foreground">
+                                <span className="text-foreground/80">Access:</span>{' '}
+                                {g.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'}
+                              </p>
+                              <p className="text-muted-foreground">
+                                <span className="text-foreground/80">OWL boost deadline:</span> {boostLine}
+                              </p>
+                              <p className="text-muted-foreground">
+                                <span className="text-foreground/80">Entry deadline:</span>{' '}
+                                {entryDeadlineLine ?? 'No fixed deadline'}
+                              </p>
+                              <p className="inline-flex min-h-[44px] items-center pt-1 text-base font-semibold text-green-500">
+                                Enter giveaway →
+                              </p>
+                            </CardContent>
+                          </Card>
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
               )}
             </div>
           ) : tab === 'my-entries' ? (

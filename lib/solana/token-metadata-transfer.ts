@@ -46,13 +46,24 @@ export async function transferTokenMetadataNftToEscrow({
   const mint = publicKey(mintAddress)
   const destinationOwner = publicKey(escrowAddress)
 
-  const attempts = [
+  const attempts: { name: string; tokenStandard: number }[] = [
     { name: 'NonFungible', tokenStandard: tm.TokenStandard.NonFungible },
     {
       name: 'ProgrammableNonFungible',
       tokenStandard: tm.TokenStandard.ProgrammableNonFungible,
     },
   ]
+  // Extra standards (when present in this mpl-token-metadata build) help some collections / editions.
+  const TS = tm.TokenStandard as Record<string, number | undefined>
+  if (TS.ProgrammableNonFungibleEdition != null) {
+    attempts.push({
+      name: 'ProgrammableNonFungibleEdition',
+      tokenStandard: TS.ProgrammableNonFungibleEdition,
+    })
+  }
+  if (TS.NonFungibleEdition != null) {
+    attempts.push({ name: 'NonFungibleEdition', tokenStandard: TS.NonFungibleEdition })
+  }
 
   let lastError: string | null = null
   for (const attempt of attempts) {

@@ -122,12 +122,16 @@ const config: Config = {
             textShadow: '0 0 28px rgba(0, 255, 136, 1), 0 0 56px rgba(0, 255, 136, 0.7), 0 0 84px rgba(0, 255, 136, 0.4)',
           },
         },
+        /* Moderate blur + slight negative Y offset so most light sits above/side of the
+           button; reduces a clipped “flat line” along the bottom from overflow ancestors. */
         'button-glow-pulse': {
           '0%, 100%': {
-            boxShadow: '0 0 20px rgba(0, 255, 136, 0.35), 0 0 40px rgba(0, 255, 136, 0.2)',
+            boxShadow:
+              '0 -3px 12px rgba(0, 255, 136, 0.48), 0 -2px 22px rgba(0, 255, 136, 0.22), 0 -1px 32px rgba(0, 255, 136, 0.07)',
           },
           '50%': {
-            boxShadow: '0 0 32px rgba(0, 255, 136, 0.8), 0 0 64px rgba(0, 255, 136, 0.5), 0 0 96px rgba(0, 255, 136, 0.25)',
+            boxShadow:
+              '0 -4px 16px rgba(0, 255, 136, 0.78), 0 -3px 28px rgba(0, 255, 136, 0.42), 0 -2px 40px rgba(0, 255, 136, 0.14)',
           },
         },
         /* Hero: gentle rise + fade for landing */

@@ -1,21 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
-import {
-  getEscrowHeldNftMints,
-  getPrizeEscrowPublicKey,
-  getEscrowTokenAccountForMint,
-  isMplCoreAssetInEscrow,
-} from '@/lib/raffles/prize-escrow'
-import { getMintFromDepositTx } from '@/lib/solana/parse-deposit-tx'
-import { getSolanaConnection } from '@/lib/solana/connection'
 import { requireSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
-import { PublicKey } from '@solana/web3.js'
-import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
-import { publicKey as umiPublicKey } from '@metaplex-foundation/umi'
-import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
-import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
+import { verifyNftPrizeDepositCore } from '@/lib/raffles/verify-nft-prize-deposit-core'
+import type { Raffle } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,288 +52,35 @@ export async function POST(
         { status: 400 }
       )
     }
-    if (raffle.prize_deposited_at) {
+
+    const outcome = await verifyNftPrizeDepositCore(
+      {
+        nft_mint_address: raffle.nft_mint_address,
+        nft_token_id: raffle.nft_token_id,
+        prize_standard: raffle.prize_standard ?? undefined,
+      },
+      depositTx,
+      raffle.prize_deposited_at
+    )
+
+    if (outcome.kind === 'already_verified') {
       return NextResponse.json({
         success: true,
         alreadyVerified: true,
-        prizeDepositedAt: raffle.prize_deposited_at,
+        prizeDepositedAt: outcome.prizeDepositedAt,
       })
     }
-
-    // Mpl Core prizes: check asset owner instead of SPL token accounts.
-    if ((raffle as any).prize_standard === 'mpl_core') {
-      if (!raffle.nft_mint_address) {
-        return NextResponse.json({ error: 'Missing NFT mint address' }, { status: 400 })
-      }
-      const inEscrow = await isMplCoreAssetInEscrow(raffle.nft_mint_address)
-      if (!inEscrow) {
-        return NextResponse.json(
-          {
-            error:
-              'Core NFT not found in prize escrow. Complete the transfer, wait for confirmation, then try Verify again.',
-          },
-          { status: 400 }
-        )
-      }
-      const now = new Date().toISOString()
-      // Keep raffle.nft_mint_address in sync with what's actually in escrow for Core prizes.
-      await updateRaffle(id, {
-        prize_deposited_at: now,
-        is_active: true,
-        nft_mint_address: raffle.nft_mint_address,
-      })
-      return NextResponse.json({
-        success: true,
-        prizeDepositedAt: now,
-        nftMintAddress: raffle.nft_mint_address,
-      })
+    if (outcome.kind === 'error') {
+      return NextResponse.json({ error: outcome.message }, { status: outcome.status })
     }
 
-    const held = await getEscrowHeldNftMints()
-
-    // When deposit_tx is provided, parse it to get the mint transferred to escrow.
-    // This identifies which NFT belongs to this raffle even when escrow holds multiple NFTs.
-    if (depositTx) {
-      const escrowAddress = getPrizeEscrowPublicKey()
-      if (escrowAddress) {
-        const connection = getSolanaConnection()
-        const mintFromTx = await getMintFromDepositTx(connection, depositTx, escrowAddress)
-        if (mintFromTx) {
-          // Validate mint is in escrow
-          const ata = await getEscrowTokenAccountForMint(new PublicKey(mintFromTx))
-          const inCoreEscrow = ata ? true : await isMplCoreAssetInEscrow(mintFromTx).catch(() => false)
-          if (ata || inCoreEscrow) {
-            const now = new Date().toISOString()
-            const update: Record<string, unknown> = {
-              prize_deposited_at: now,
-              is_active: true,
-              nft_mint_address: mintFromTx,
-              nft_token_id: mintFromTx,
-              prize_deposit_tx: depositTx,
-            }
-            if (inCoreEscrow && !ata) {
-              update.prize_standard = 'mpl_core'
-            }
-            await updateRaffle(id, update as any)
-            return NextResponse.json({
-              success: true,
-              prizeDepositedAt: now,
-              nftMintAddress: mintFromTx,
-              prizeDepositTx: depositTx,
-            })
-          }
-        }
-      }
-    }
-
-    if (held.length === 0) {
-      // Compressed NFTs (bubblegum) are not represented as SPL/Token-2022 accounts.
-      // For those, verify by checking that the compressed asset's `leafOwner` equals the escrow owner.
-      try {
-        const escrowOwner = getPrizeEscrowPublicKey()
-        const escrowOwnerPk = escrowOwner ? umiPublicKey(escrowOwner) : null
-        if (escrowOwnerPk) {
-          const assetIdCandidates = Array.from(
-            new Set(
-              [raffle.nft_token_id, raffle.nft_mint_address]
-                .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-                .map((v) => v.trim())
-            )
-          )
-          if (assetIdCandidates.length > 0) {
-            const endpoint =
-              process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-              process.env.SOLANA_RPC_URL ||
-              'https://solana.drpc.org'
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
-
-            for (const assetId of assetIdCandidates) {
-              try {
-                const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
-                const leafOwner = asset?.leafOwner
-                if (leafOwner && String(leafOwner) === String(escrowOwnerPk)) {
-                  const now = new Date().toISOString()
-                  await updateRaffle(id, {
-                    prize_deposited_at: now,
-                    is_active: true,
-                    nft_mint_address: assetId,
-                    nft_token_id: assetId,
-                    prize_standard: 'compressed' as any,
-                  } as any)
-                  return NextResponse.json({
-                    success: true,
-                    prizeDepositedAt: now,
-                    nftMintAddress: assetId,
-                    prizeStandard: 'compressed',
-                  })
-                }
-              } catch {
-                // Try other candidate ids
-              }
-            }
-          }
-        }
-      } catch {
-        // Continue to existing SPL/Mpl Core fallback below
-      }
-
-      // Fallback: some raffles are created as SPL but transferred as Mpl Core asset IDs.
-      // If escrow owns the Core asset, treat deposit as verified and sync raffle standard.
-      const coreCandidates = Array.from(
-        new Set(
-          [raffle.nft_token_id, raffle.nft_mint_address]
-            .filter((v): v is string => typeof v === 'string')
-            .map((v) => v.trim())
-            .filter(Boolean)
-        )
-      )
-      for (const assetId of coreCandidates) {
-        try {
-          const inCoreEscrow = await isMplCoreAssetInEscrow(assetId)
-          if (!inCoreEscrow) continue
-          const now = new Date().toISOString()
-          await updateRaffle(id, {
-            prize_deposited_at: now,
-            is_active: true,
-            prize_standard: 'mpl_core' as any,
-            // Keep the canonical on-chain id in nft_mint_address for existing winner-claim flow.
-            nft_mint_address: assetId,
-          })
-          return NextResponse.json({
-            success: true,
-            prizeDepositedAt: now,
-            nftMintAddress: assetId,
-            prizeStandard: 'mpl_core',
-          })
-        } catch {
-          // continue trying other candidates
-        }
-      }
-      return NextResponse.json(
-        {
-          error:
-            'NFT not found in prize escrow. Complete the transfer using the button above, wait for confirmation, then try Verify again.',
-        },
-        { status: 400 }
-      )
-    }
-
-    const preferredMint = (raffle.nft_mint_address || '').trim()
-    let mintToSet: string
-    if (held.length === 1) {
-      const onlyMint = held[0].mint
-      // When escrow has exactly one NFT, use it as the canonical mint (auto-correct wrong link).
-      // The NFT in escrow is the source of truth; creator may have selected wrong NFT or metadata was wrong at creation.
-      mintToSet = onlyMint
-    } else {
-      const match = held.find((h) => h.mint === preferredMint)
-      if (match) {
-        mintToSet = match.mint
-      } else {
-        // We didn't find the expected mint in the SPL/Token-2022 escrow token accounts list.
-        // This can happen when:
-        // - the prize is MPL Core (not represented as SPL token accounts), and escrow also holds some SPL NFTs; or
-        // - the prize is compressed (bubblegum), which is not represented as SPL token accounts.
-        //
-        // Try MPL Core first (by asset owner), then compressed (bubblegum leafOwner) as a fallback.
-        try {
-          // MPL Core verification: escrow may hold a Core asset even if SPL token accounts list doesn't include it.
-          const inCoreEscrow = await isMplCoreAssetInEscrow(preferredMint)
-          if (inCoreEscrow) {
-            const now = new Date().toISOString()
-            await updateRaffle(id, {
-              prize_deposited_at: now,
-              is_active: true,
-              prize_standard: 'mpl_core' as any,
-              // Canonical on-chain id for Core prize
-              nft_mint_address: preferredMint,
-              nft_token_id: preferredMint,
-            } as any)
-            return NextResponse.json({
-              success: true,
-              prizeDepositedAt: now,
-              nftMintAddress: preferredMint,
-              prizeStandard: 'mpl_core',
-            })
-          }
-        } catch {
-          // Ignore and try compressed fallback below
-        }
-
-        // Compressed NFTs are not represented as SPL/Token-2022 token accounts.
-        // If escrow holds a mix (SPL + compressed), `held` may be non-empty but still miss the expected prize.
-        // In that case, verify compressed ownership via bubblegum `leafOwner`.
-        try {
-          const escrowOwner = getPrizeEscrowPublicKey()
-          const escrowOwnerPk = escrowOwner ? umiPublicKey(escrowOwner) : null
-          if (escrowOwnerPk) {
-            const assetIdCandidates = Array.from(
-              new Set(
-                [raffle.nft_token_id, raffle.nft_mint_address]
-                  .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-                  .map((v) => v.trim())
-              )
-            )
-            const endpoint =
-              process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-              process.env.SOLANA_RPC_URL ||
-              'https://solana.drpc.org'
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
-
-            for (const assetId of assetIdCandidates) {
-              try {
-                const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
-                const leafOwner = asset?.leafOwner
-                if (leafOwner && String(leafOwner) === String(escrowOwnerPk)) {
-                  const now = new Date().toISOString()
-                  await updateRaffle(id, {
-                    prize_deposited_at: now,
-                    is_active: true,
-                    nft_mint_address: assetId,
-                    nft_token_id: assetId,
-                    prize_standard: 'compressed' as any,
-                  } as any)
-                  return NextResponse.json({
-                    success: true,
-                    prizeDepositedAt: now,
-                    nftMintAddress: assetId,
-                    prizeStandard: 'compressed',
-                  })
-                }
-              } catch {
-                // Try other candidates
-              }
-            }
-          }
-        } catch {
-          // ignore; fall back to SPL error below
-        }
-
-        return NextResponse.json(
-          {
-            error: `Escrow has multiple NFTs. This raffle expects mint ${preferredMint || '(not set)'}; none of the NFTs in escrow match. Set the raffle prize to the correct mint or leave only one NFT in escrow.`,
-          },
-          { status: 400 }
-        )
-      }
-    }
-
-    const now = new Date().toISOString()
-    const mintChanged = mintToSet !== preferredMint
-    await updateRaffle(id, {
-      prize_deposited_at: now,
-      is_active: true,
-      ...(mintChanged ? { nft_mint_address: mintToSet, nft_token_id: mintToSet } : {}),
-      ...(depositTx ? { prize_deposit_tx: depositTx } : {}),
-    })
+    await updateRaffle(id, outcome.dbPatch as Partial<Raffle>)
     return NextResponse.json({
       success: true,
-      prizeDepositedAt: now,
-      nftMintAddress: mintToSet,
+      prizeDepositedAt: outcome.prizeDepositedAt,
+      nftMintAddress: outcome.nftMintAddress,
+      ...(outcome.prizeDepositTx ? { prizeDepositTx: outcome.prizeDepositTx } : {}),
+      ...(outcome.prizeStandard ? { prizeStandard: outcome.prizeStandard } : {}),
     })
   } catch (error) {
     console.error('Verify prize deposit error:', error)

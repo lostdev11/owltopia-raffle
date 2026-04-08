@@ -39,7 +39,15 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
   }
 }
 
-/** When `/api/proxy-image` fails in the browser, try the original HTTPS URL (detail page pattern). */
+function ipfsUrlToHttpsGateway(decoded: string): string | null {
+  const d = decoded.trim()
+  if (!/^ipfs:\/\//i.test(d)) return null
+  const path = d.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '')
+  if (!path) return null
+  return `https://ipfs.io/ipfs/${path}`
+}
+
+/** When `/api/proxy-image` fails in the browser, try direct HTTPS (or IPFS via gateway). */
 export function getRaffleImageFallbackRawUrl(
   displayImageUrl: string | null | undefined,
   originalImageUrl: string | null | undefined
@@ -51,6 +59,8 @@ export function getRaffleImageFallbackRawUrl(
       const raw = parsed.searchParams.get('url')
       if (!raw) return null
       const decoded = decodeURIComponent(raw)
+      const ipfsGw = ipfsUrlToHttpsGateway(decoded)
+      if (ipfsGw) return ipfsGw
       const u = new URL(decoded)
       if (u.protocol === 'http:' || u.protocol === 'https:') return decoded
     } catch {
