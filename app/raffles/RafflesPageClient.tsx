@@ -875,7 +875,7 @@ export function RafflesPageClient({
       {(!hasError || tab !== 'all') && (
         <>
           {tab === 'giveaways' ? (
-            <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6">
+            <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <div className="max-w-3xl">
                 <h2 className="text-xl sm:text-2xl font-bold mb-2">Community giveaways</h2>
                 <p className="text-sm text-muted-foreground">
@@ -900,12 +900,12 @@ export function RafflesPageClient({
               )}
               {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
                 <ul
-                  className="m-0 grid w-full list-none grid-cols-1 gap-4 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                  className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
                   role="list"
                 >
-                  {giveawaysList.map((g) => (
+                  {giveawaysList.map((g, i) => (
                     <li key={g.id} className="min-w-0">
-                      <CommunityGiveawayBrowseCard g={g} />
+                      <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
                     </li>
                   ))}
                 </ul>
