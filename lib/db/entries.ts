@@ -782,3 +782,39 @@ export async function markEntriesRefundedManual(
   const updatedIds = (data ?? []).map((row) => String((row as { id: string }).id))
   return { updatedIds }
 }
+
+/** Cap how many matching entry rows we scan when aggregating by raffle (dashboard list). */
+const PENDING_MANUAL_REFUND_ENTRY_SCAN_LIMIT = 25_000
+
+export type UnrefundedConfirmedEntryRaffleRow = {
+  raffleId: string
+  unrefundedEntryCount: number
+}
+
+/**
+ * Raffles that have confirmed tickets not yet marked refunded (manual admin record or buyer self-claim).
+ */
+export async function listRaffleUnrefundedConfirmedEntryCounts(): Promise<UnrefundedConfirmedEntryRaffleRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('raffle_id')
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+    .limit(PENDING_MANUAL_REFUND_ENTRY_SCAN_LIMIT)
+
+  if (error) {
+    console.error('listRaffleUnrefundedConfirmedEntryCounts:', error)
+    return []
+  }
+
+  const counts = new Map<string, number>()
+  for (const row of data ?? []) {
+    const rid = String((row as { raffle_id?: string }).raffle_id ?? '').trim()
+    if (!rid) continue
+    counts.set(rid, (counts.get(rid) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .map(([raffleId, unrefundedEntryCount]) => ({ raffleId, unrefundedEntryCount }))
+    .sort((a, b) => b.unrefundedEntryCount - a.unrefundedEntryCount)
+}

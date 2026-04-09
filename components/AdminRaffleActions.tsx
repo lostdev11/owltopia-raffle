@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -19,12 +19,7 @@ import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
-import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
-
-function adminSolscanTxUrl(signature: string): string {
-  const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
-  return `https://solscan.io/tx/${encodeURIComponent(signature.trim())}${q}`
-}
+import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 
 const FULL_REFUND_WINDOW_HOURS = 24
 function isWithinFullRefundWindow(createdAt: string): boolean {
@@ -617,95 +612,6 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
-  const unrefundedConfirmed = useMemo(
-    () =>
-      entries.filter(
-        (e) => e.raffle_id === raffle.id && e.status === 'confirmed' && !e.refunded_at
-      ),
-    [entries, raffle.id]
-  )
-
-  const refundedConfirmed = useMemo(
-    () =>
-      entries.filter(
-        (e) => e.raffle_id === raffle.id && e.status === 'confirmed' && !!e.refunded_at
-      ),
-    [entries, raffle.id]
-  )
-
-  const [recordRefundTx, setRecordRefundTx] = useState('')
-  const [recordingRefunds, setRecordingRefunds] = useState(false)
-  const [selectedRefundEntryIds, setSelectedRefundEntryIds] = useState<string[]>([])
-
-  useEffect(() => {
-    const allowed = new Set(
-      entries
-        .filter(
-          (e) => e.raffle_id === raffle.id && e.status === 'confirmed' && !e.refunded_at
-        )
-        .map((e) => e.id)
-    )
-    setSelectedRefundEntryIds((prev) => prev.filter((id) => allowed.has(id)))
-  }, [entries, raffle.id])
-
-  const toggleRefundEntrySelected = useCallback((entryId: string) => {
-    setSelectedRefundEntryIds((prev) =>
-      prev.includes(entryId) ? prev.filter((id) => id !== entryId) : [...prev, entryId]
-    )
-  }, [])
-
-  const handleRecordManualRefunds = async () => {
-    setMessage(null)
-    const sig = recordRefundTx.trim()
-    if (!sig) {
-      setMessage({ type: 'error', text: 'Paste the Solana transaction signature first.' })
-      return
-    }
-    if (selectedRefundEntryIds.length === 0) {
-      setMessage({ type: 'error', text: 'Select at least one ticket row to mark as refunded.' })
-      return
-    }
-    setRecordingRefunds(true)
-    try {
-      const res = await fetch(`/api/raffles/${raffle.id}/record-refunds`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          entryIds: selectedRefundEntryIds,
-          transactionSignature: sig,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (res.ok && data?.success) {
-        const req = typeof data.requestedCount === 'number' ? data.requestedCount : selectedRefundEntryIds.length
-        const upd = typeof data.updatedCount === 'number' ? data.updatedCount : 0
-        const partial = upd < req
-        setMessage({
-          type: 'success',
-          text: partial
-            ? `Recorded refund on ${upd} of ${req} selected ticket(s). Others were already refunded or did not match. Buyers see refunded/sent for updated rows.`
-            : `Recorded refund for ${upd} ticket row(s). Buyers see refunded/sent; same tx is stored for each row.`,
-        })
-        setRecordRefundTx('')
-        setSelectedRefundEntryIds([])
-        router.refresh()
-      } else {
-        setMessage({
-          type: 'error',
-          text: typeof data?.error === 'string' ? data.error : 'Failed to record refunds',
-        })
-      }
-    } catch (e) {
-      setMessage({
-        type: 'error',
-        text: e instanceof Error ? e.message : 'Failed to record refunds',
-      })
-    } finally {
-      setRecordingRefunds(false)
-    }
-  }
-
   return (
     <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4">
       <div className="max-w-2xl mx-auto space-y-6">
@@ -760,147 +666,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           </div>
         )}
 
-        {unrefundedConfirmed.length > 0 && (
-          <Card className="border-teal-500/30 bg-teal-500/5">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Record manual ticket refunds</CardTitle>
-              <CardDescription>
-                After you send refunds from treasury or funds escrow, select the ticket rows that payment covered and
-                paste the Solana transaction signature. This sets <code className="text-xs">refunded_at</code> so
-                buyers and hosts see refunded/sent and cannot double-claim the same ticket in the app. One chain
-                transaction can cover multiple rows — use the same signature for all of them.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="touch-manipulation min-h-[44px]"
-                  onClick={() => setSelectedRefundEntryIds(unrefundedConfirmed.map((e) => e.id))}
-                >
-                  Select all pending
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="touch-manipulation min-h-[44px]"
-                  onClick={() => setSelectedRefundEntryIds([])}
-                  disabled={selectedRefundEntryIds.length === 0}
-                >
-                  Clear selection
-                </Button>
-              </div>
-              <div className="max-h-72 overflow-auto rounded border border-border bg-muted/30 -mx-1">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-muted-foreground border-b border-border/60">
-                      <th className="py-2 pl-2 w-10" scope="col">
-                        <span className="sr-only">Select</span>
-                      </th>
-                      <th className="py-2 pr-2">Wallet</th>
-                      <th className="py-2 pr-2 text-right whitespace-nowrap">Amount</th>
-                      <th className="py-2 pr-2 w-14">Curr</th>
-                      <th className="py-2 pr-2 font-mono text-xs">Entry ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {unrefundedConfirmed.map((e) => {
-                      const w = (e.wallet_address || '').trim()
-                      const cur = (e.currency || raffle.currency || 'SOL').toUpperCase()
-                      const checked = selectedRefundEntryIds.includes(e.id)
-                      return (
-                        <tr key={e.id} className="border-t border-border/50">
-                          <td className="py-2 pl-2 align-top">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleRefundEntrySelected(e.id)}
-                              className="h-5 w-5 touch-manipulation"
-                              aria-label={`Select ticket ${e.id} for refund recording`}
-                            />
-                          </td>
-                          <td className="py-2 pr-2 font-mono text-xs break-all align-top" title={w}>
-                            {w.length > 8 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w}
-                          </td>
-                          <td className="py-2 pr-2 text-right font-mono whitespace-nowrap align-top">
-                            {cur === 'USDC' ? Number(e.amount_paid).toFixed(2) : Number(e.amount_paid).toFixed(6)}
-                          </td>
-                          <td className="py-2 pr-2 align-top">{cur}</td>
-                          <td className="py-2 pr-2 font-mono text-[10px] sm:text-xs text-muted-foreground break-all align-top">
-                            {e.id}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="admin-record-refund-tx">Transaction signature</Label>
-                <Input
-                  id="admin-record-refund-tx"
-                  value={recordRefundTx}
-                  onChange={(e) => setRecordRefundTx(e.target.value)}
-                  placeholder="Paste Solana transaction signature"
-                  className="font-mono text-sm touch-manipulation min-h-[44px]"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              <Button
-                type="button"
-                className="bg-teal-600 hover:bg-teal-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
-                disabled={recordingRefunds || selectedRefundEntryIds.length === 0 || !recordRefundTx.trim()}
-                onClick={handleRecordManualRefunds}
-              >
-                {recordingRefunds ? 'Recording…' : 'Record refund for selected tickets'}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {refundedConfirmed.length > 0 && (
-          <Card className="border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Tickets already marked refunded</CardTitle>
-              <CardDescription>
-                Rows with <code className="text-xs">refunded_at</code> set (including via buyer self-claim). Use Solscan
-                to audit payouts.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="max-h-48 overflow-auto rounded border border-border bg-muted/20 text-sm -mx-1">
-                <ul className="divide-y divide-border/60">
-                  {refundedConfirmed.map((e) => {
-                    const tx = (e.refund_transaction_signature || '').trim()
-                    return (
-                      <li key={e.id} className="px-2 py-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="font-mono text-xs break-all text-muted-foreground">{e.id}</span>
-                        <span className="font-mono text-xs shrink-0">
-                          {tx ? (
-                            <a
-                              href={adminSolscanTxUrl(tx)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary underline touch-manipulation min-h-[44px] inline-flex items-center"
-                            >
-                              View tx
-                            </a>
-                          ) : (
-                            '—'
-                          )}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <AdminManualRefundRecorder
+          raffleId={raffle.id}
+          raffleCurrency={raffle.currency || 'SOL'}
+          entries={entries}
+          onRecorded={() => router.refresh()}
+        />
 
         <Card>
           <CardHeader>

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -134,6 +134,18 @@ export default function AdminDashboardPage() {
     skippedFailed?: number
     errors?: string[]
   } | null>(null)
+
+  const [pendingManualRefundRaffles, setPendingManualRefundRaffles] = useState<
+    Array<{
+      raffleId: string
+      slug: string
+      title: string
+      status: string | null
+      currency: string | null
+      unrefundedEntryCount: number
+    }>
+  >([])
+  const [loadingPendingManualRefunds, setLoadingPendingManualRefunds] = useState(false)
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
@@ -401,6 +413,35 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (isAdmin && sessionReady) {
       fetchEntriesToConfirm()
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+
+  const fetchPendingManualRefunds = async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) return
+
+    setLoadingPendingManualRefunds(true)
+    try {
+      const response = await fetch('/api/admin/pending-manual-refunds', {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setPendingManualRefundRaffles(Array.isArray(data.raffles) ? data.raffles : [])
+      } else {
+        setPendingManualRefundRaffles([])
+      }
+    } catch (error) {
+      console.error('Error fetching pending manual refunds:', error)
+      setPendingManualRefundRaffles([])
+    } finally {
+      setLoadingPendingManualRefunds(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin && sessionReady) {
+      fetchPendingManualRefunds()
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
@@ -2070,6 +2111,58 @@ export default function AdminDashboardPage() {
                   </details>
                 )}
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="mb-8 border-teal-500/25 bg-teal-500/[0.04]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Banknote className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+              Manual ticket refunds
+            </CardTitle>
+            <CardDescription>
+              After you send refunds from treasury or funds escrow, open a raffle below, select ticket rows, and paste
+              the payout transaction signature so buyers see refunded/sent on their dashboards. Same tool as on each
+              raffle&apos;s Owl Vision tab.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingPendingManualRefunds ? (
+              <p className="text-center text-muted-foreground py-4">Loading…</p>
+            ) : pendingManualRefundRaffles.length === 0 ? (
+              <p className="text-center text-muted-foreground py-4">
+                No cancelled or refund-pending raffles with unmarked ticket refunds. (Live raffles with sales are not
+                listed here.)
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {pendingManualRefundRaffles.map((r) => (
+                  <li
+                    key={r.raffleId}
+                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border/80 bg-background/60 p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate" title={r.title}>
+                        {r.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {r.unrefundedEntryCount} ticket row{r.unrefundedEntryCount === 1 ? '' : 's'} pending mark ·{' '}
+                        <span className="font-mono">{r.status ?? '—'}</span>
+                        {r.currency ? ` · ${r.currency}` : ''}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="default"
+                      className="shrink-0 min-h-11 touch-manipulation bg-teal-600 hover:bg-teal-700"
+                      asChild
+                    >
+                      <Link href={`/admin/raffles/${r.raffleId}#manual-refunds`}>Record refunds</Link>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             )}
           </CardContent>
         </Card>

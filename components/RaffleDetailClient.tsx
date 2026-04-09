@@ -39,7 +39,8 @@ import {
   getThemeAccentColor,
   getThemeAccentRgbChannels,
 } from '@/lib/theme-accent'
-import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
+import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { isOwlEnabled } from '@/lib/tokens'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
@@ -209,6 +210,9 @@ export function RaffleDetailClient({
   const isCreator = connected && walletAddress && creatorWallet === walletAddress
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && walletAddress ? getCachedAdmin(walletAddress) : null
+  )
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(() =>
+    typeof window !== 'undefined' && walletAddress ? getCachedAdminRole(walletAddress) : null
   )
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
@@ -392,12 +396,14 @@ export function RaffleDetailClient({
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
+      setAdminRole(null)
       return
     }
     const addr = publicKey.toBase58()
     const cached = getCachedAdmin(addr)
     if (cached !== null) {
       setIsAdmin(cached)
+      setAdminRole(getCachedAdminRole(addr))
       return
     }
     let cancelled = false
@@ -406,11 +412,17 @@ export function RaffleDetailClient({
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        setCachedAdmin(addr, admin)
+        const role: AdminRole | null =
+          admin && (data?.role === 'full' || data?.role === 'raffle_creator') ? data.role : null
+        setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
+        setAdminRole(role)
       })
       .catch(() => {
-        if (!cancelled) setIsAdmin(false)
+        if (!cancelled) {
+          setIsAdmin(false)
+          setAdminRole(null)
+        }
       })
     return () => { cancelled = true }
   }, [connected, publicKey])
@@ -3723,6 +3735,17 @@ export function RaffleDetailClient({
                       <p className="text-xs text-muted-foreground mt-1">Full points when the raffle wasn’t changed after people entered.</p>
                     </div>
                   </div>
+                  {adminRole === 'full' && (
+                    <AdminManualRefundRecorder
+                      raffleId={raffle.id}
+                      raffleCurrency={raffle.currency || 'SOL'}
+                      entries={entries}
+                      onRecorded={() => {
+                        void fetchEntries()
+                        router.refresh()
+                      }}
+                    />
+                  )}
                 </div>
               </TabsContent>
             </Tabs>
