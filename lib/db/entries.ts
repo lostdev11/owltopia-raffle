@@ -743,3 +743,42 @@ export async function markEntryRefunded(entryId: string, transactionSignature: s
     throw new Error(`Failed to mark entry refunded: ${error.message}`)
   }
 }
+
+/**
+ * Full admin manual refund recording: set refunded_at for confirmed, unrefunded entries in this raffle only.
+ * One on-chain tx may cover multiple rows — the same signature is stored on each updated entry.
+ */
+export async function markEntriesRefundedManual(
+  raffleId: string,
+  entryIds: string[],
+  transactionSignature: string
+): Promise<{ updatedIds: string[] }> {
+  const rid = typeof raffleId === 'string' ? raffleId.trim() : ''
+  const sig = typeof transactionSignature === 'string' ? transactionSignature.trim() : ''
+  const ids = Array.from(new Set(entryIds.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean)))
+  if (!rid || ids.length === 0 || !sig) {
+    return { updatedIds: [] }
+  }
+
+  const now = new Date().toISOString()
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({
+      refunded_at: now,
+      refund_transaction_signature: sig,
+      refund_lock_started_at: null,
+    })
+    .in('id', ids)
+    .eq('raffle_id', rid)
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+    .select('id')
+
+  if (error) {
+    console.error('markEntriesRefundedManual:', error)
+    throw new Error(`Failed to mark entries refunded: ${error.message}`)
+  }
+
+  const updatedIds = (data ?? []).map((row) => String((row as { id: string }).id))
+  return { updatedIds }
+}

@@ -17,6 +17,12 @@ export const claimRefundEntryBody = z.object({
   entryId: z.string().uuid(),
 })
 
+/** Full admin: after a manual treasury/escrow payout, mark ticket rows refunded so buyers see sent/claimed. */
+export const recordManualRefundsBody = z.object({
+  entryIds: z.array(z.string().uuid()).min(1).max(500),
+  transactionSignature: z.string().trim().min(80).max(120),
+})
+
 export const rafflesPostBody = z.object({
   wallet_address: z.string().optional(),
   title: z.string().min(1).max(200),
