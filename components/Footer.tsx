@@ -2,7 +2,9 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Store, LayoutGrid, Coins, Info, Trophy } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy } from 'lucide-react'
+import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
+import { TensorIcon } from '@/components/icons/TensorIcon'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
@@ -19,8 +21,8 @@ const iconByLink: Record<string, React.ReactNode> = {
   Staking: <Coins className="h-6 w-6" />,
   X: <Twitter className="h-6 w-6" />,
   Whitepaper: <FileText className="h-6 w-6" />,
-  ME: <Store className="h-6 w-6" />,
-  Tensor: <LayoutGrid className="h-6 w-6" />,
+  ME: <MagicEdenIcon className="h-6 w-6" />,
+  Tensor: <TensorIcon className="h-6 w-6" />,
   Discord: <MessageCircle className="h-6 w-6" />,
 }
 

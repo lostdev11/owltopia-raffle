@@ -28,6 +28,7 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { Trophy, Share2, BadgeCheck, Loader2 } from 'lucide-react'
@@ -1083,6 +1084,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </span>
               </div>
             )}
+            {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+              <div className="mt-1.5 flex flex-col gap-2 border-t border-border/50 pt-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-1.5">
+                <span className="text-[10px] sm:text-xs text-muted-foreground shrink-0">Floor</span>
+                <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
+              </div>
+            )}
           </div>
           </div>
             {/* Accent strip (theme color) - full width at bottom */}
@@ -1181,6 +1188,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             aria-hidden
           />
           {!listThumbDead && (
+            <>
             <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
               {listThumbMintLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted/60 z-20" aria-hidden>
@@ -1308,6 +1316,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 )}
               </div>
             </div>
+            {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+              <div className="relative z-20 flex flex-col gap-2 px-2 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:px-3 border-t border-border/50 bg-background/90 backdrop-blur-sm">
+                <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
+                <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
+              </div>
+            )}
+            </>
           )}
           {/* Fallback if no usable image */}
           {listThumbDead && (
@@ -1407,6 +1422,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         </span>
                       )}
                     </span>
+                  </div>
+                )}
+                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+                  <div className="mt-2 flex w-full flex-col gap-2 border-t border-border/50 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                    <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
+                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
                   </div>
                 )}
                 {!showQuickBuy && (

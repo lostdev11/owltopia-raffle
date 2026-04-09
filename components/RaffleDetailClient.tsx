@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
+import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
@@ -3314,7 +3315,9 @@ export function RaffleDetailClient({
               </div>
             </div>
 
-            {(raffle.rank || raffle.floor_price) && (
+            {(raffle.rank ||
+              raffle.floor_price ||
+              (raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim())) && (
               <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
                 <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Details</h3>
                 <div className={`grid grid-cols-1 ${raffle.rank && raffle.floor_price ? 'sm:grid-cols-2' : ''} gap-4`}>
@@ -3331,6 +3334,12 @@ export function RaffleDetailClient({
                     </div>
                   )}
                 </div>
+                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+                  <div className="mt-4 pt-4 border-t border-border/60">
+                    <p className={classes.labelText + ' text-muted-foreground mb-2'}>Check collection floor</p>
+                    <NftFloorCheckLinks mintAddress={raffle.nft_mint_address} className="min-w-0" />
+                  </div>
+                )}
               </div>
             )}
 
