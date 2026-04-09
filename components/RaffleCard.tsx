@@ -929,7 +929,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             />
             {!listThumbDead && (
               <div 
-                className="!relative w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1rem] sm:rounded-l-[1.25rem] bg-muted/30"
+                className="!relative w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] bg-muted"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -950,7 +950,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     height={192}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="absolute inset-0 h-full w-full object-contain object-center"
+                    className="absolute inset-0 h-full w-full object-cover object-center"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -981,7 +981,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
             {listThumbDead && (
-              <div className="w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1rem] sm:rounded-l-[1.25rem] z-10 relative">
+              <div className="w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
                 <span className="text-[10px] sm:text-xs text-muted-foreground text-center px-1.5">Image unavailable</span>
               </div>
             )}
