@@ -83,62 +83,62 @@ export function Header() {
           <Link href="/" className="flex-1 min-w-0">
             <Logo className="flex-1 max-w-full h-auto" width={600} height={150} priority />
           </Link>
-          {/* Desktop: full nav + wallet */}
-          <div className="hidden md:flex items-center gap-2 lg:gap-4 flex-shrink-0">
-            <Link href="/leaderboard">
-              <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                <Trophy className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Leaderboard</span>
-              </Button>
-            </Link>
-            {connected && (
-              <Link href="/dashboard">
+          {/* Single right cluster: desktop nav + one wallet button (avoid duplicate WalletMultiButton). Mobile: menu + wallet. */}
+          <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
+            <div className="hidden md:flex items-center gap-2 lg:gap-4">
+              <Link href="/leaderboard">
                 <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                  <LayoutDashboard className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Dashboard</span>
+                  <Trophy className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Leaderboard</span>
                 </Button>
               </Link>
-            )}
-            {showOwlVision && (
-              <Link href="/admin">
-                <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                  <Settings className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Owl Vision</span>
-                  <span className="sm:hidden">Owl Vision</span>
-                </Button>
-              </Link>
-            )}
-            {showOwlVision && (
-              <Link href="/admin/community-giveaways">
-                <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                  <Gift className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Giveaways</span>
-                  <span className="sm:hidden">Giveaways</span>
-                </Button>
-              </Link>
-            )}
-            {showCreateRaffle && (
-              <Link href="/admin/raffles/new">
-                <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                  <Plus className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Create Raffle</span>
-                  <span className="sm:hidden">Create Raffle</span>
-                </Button>
-              </Link>
-            )}
-            <WalletConnectButton />
-          </div>
-          {/* Mobile: hamburger + wallet only (wallet is primary CTA for mobile crypto users) */}
-          <div className="flex md:hidden items-center gap-2 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-10 w-10 p-0 min-h-[44px] min-w-[44px] touch-manipulation"
-              onClick={() => setMobileMenuOpen(true)}
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
+              {connected && (
+                <Link href="/dashboard">
+                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <LayoutDashboard className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Dashboard</span>
+                  </Button>
+                </Link>
+              )}
+              {showOwlVision && (
+                <Link href="/admin">
+                  <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Settings className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Owl Vision</span>
+                    <span className="sm:hidden">Owl Vision</span>
+                  </Button>
+                </Link>
+              )}
+              {showOwlVision && (
+                <Link href="/admin/community-giveaways">
+                  <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Gift className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Giveaways</span>
+                    <span className="sm:hidden">Giveaways</span>
+                  </Button>
+                </Link>
+              )}
+              {showCreateRaffle && (
+                <Link href="/admin/raffles/new">
+                  <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Plus className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Create Raffle</span>
+                    <span className="sm:hidden">Create Raffle</span>
+                  </Button>
+                </Link>
+              )}
+            </div>
+            <div className="flex md:hidden">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-10 w-10 p-0 min-h-[44px] min-w-[44px] touch-manipulation"
+                onClick={() => setMobileMenuOpen(true)}
+                aria-label="Open menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </div>
             <WalletConnectButton />
           </div>
         </div>

@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
+import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { WalletConnectButton } from '@/components/WalletConnectButton'
 import {
   LayoutDashboard,
   Ticket,
@@ -228,6 +228,7 @@ type RaffleEntrySummary = {
 
 export default function DashboardPage() {
   const { publicKey, connected, signMessage } = useWallet()
+  const { setVisible } = useWalletModal()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -808,7 +809,13 @@ export default function DashboardPage() {
         <p className="text-muted-foreground mb-6">
           Connect your wallet to see your raffles, entries, and creator revenue.
         </p>
-        <WalletConnectButton />
+        <Button
+          type="button"
+          className="min-h-[44px] touch-manipulation bg-green-600 hover:bg-green-700 text-white"
+          onClick={() => setVisible(true)}
+        >
+          Connect wallet
+        </Button>
       </main>
     )
   }
