@@ -72,7 +72,7 @@ export function Header() {
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
-    ...(showOwlVision ? [{ href: '/admin/giveaways', label: 'Giveaways', icon: Gift }] : []),
+    ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
     ...(showCreateRaffle ? [{ href: '/admin/raffles/new', label: 'Create Raffle', icon: Plus }] : []),
   ]
 
@@ -109,7 +109,7 @@ export function Header() {
               </Link>
             )}
             {showOwlVision && (
-              <Link href="/admin/giveaways">
+              <Link href="/admin/community-giveaways">
                 <Button variant="outline" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
                   <Gift className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Giveaways</span>

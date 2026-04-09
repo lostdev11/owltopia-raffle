@@ -1806,20 +1806,6 @@ export default function AdminDashboardPage() {
           {adminRole === 'full' && (
             <>
               <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/giveaways">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Gift className="h-5 w-5" />
-                      NFT giveaways
-                    </CardTitle>
-                    <CardDescription>
-                      Escrow a one-off NFT, set the winner wallet, verify deposit, share the claim link. They claim from
-                      the dashboard.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/community-giveaways">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -1827,8 +1813,21 @@ export default function AdminDashboardPage() {
                       Community pool giveaways
                     </CardTitle>
                     <CardDescription>
-                      Open or holder-gated pools, optional entry deadline, OWL boost for 3× draw weight before start,
-                      admin draw anytime, winner claims NFT from escrow on the dashboard.
+                      Primary NFT giveaway flow: open or holder-gated pools, optional entry deadline, OWL boost for 3×
+                      draw weight before start, admin draw, winner claims from the dashboard.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-border transition-colors cursor-pointer border-dashed">
+                <Link href="/admin/legacy-nft-giveaways">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Gift className="h-5 w-5" />
+                      Legacy one-off NFT giveaways
+                    </CardTitle>
+                    <CardDescription>
+                      Eligible-wallet claim links and Discord partner webhooks only. Prefer community pool giveaways above.
                     </CardDescription>
                   </CardHeader>
                 </Link>

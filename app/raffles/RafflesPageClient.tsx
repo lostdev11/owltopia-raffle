@@ -749,7 +749,7 @@ export function RafflesPageClient({
           </div>
         )}
         {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
-        <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto">
+        <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch]">
           <button
             type="button"
             onClick={() => setTab('all')}

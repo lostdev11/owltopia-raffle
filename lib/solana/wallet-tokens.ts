@@ -145,6 +145,24 @@ export interface WalletNft {
   collectionName: string | null
 }
 
+/**
+ * For escrow deposit when the prize was typed/pasted instead of picked from the wallet grid.
+ * `depositPrizeNftToEscrowFromWallet` resolves SPL token accounts on-chain or uses Core/compressed paths.
+ */
+export function minimalWalletNftForEscrowTransfer(mint: string): WalletNft {
+  const m = mint.trim()
+  return {
+    mint: m,
+    tokenAccount: '',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+  }
+}
+
 export interface WalletToken {
   mint: string
   symbol: string

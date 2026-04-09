@@ -3,6 +3,7 @@ import {
   COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
   COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
 } from '@/lib/config/community-giveaways'
+import { tryAutoDrawCommunityGiveaway } from '@/lib/community-giveaways/auto-draw'
 import { countEntriesByGiveawayId, getCommunityGiveawayById } from '@/lib/db/community-giveaways'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -25,7 +26,13 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }
 
-    const g = await getCommunityGiveawayById(id)
+    let g = await getCommunityGiveawayById(id)
+    if (!g || g.status === 'draft') {
+      return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
+    }
+
+    await tryAutoDrawCommunityGiveaway(id)
+    g = await getCommunityGiveawayById(id)
     if (!g || g.status === 'draft') {
       return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
     }

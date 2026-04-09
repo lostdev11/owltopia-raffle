@@ -471,6 +471,25 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
+/* Mobile / touch: visible nudge without filter (hue-rotate is costly; 1px is easy to miss on small screens) */
+@keyframes owl-entered-shake-touch {
+  0%, 90%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  92% {
+    transform: translate3d(-2px, 1px, 0);
+  }
+  94% {
+    transform: translate3d(2px, -1px, 0);
+  }
+  96% {
+    transform: translate3d(-2px, -1px, 0);
+  }
+  98% {
+    transform: translate3d(2px, 1px, 0);
+  }
+}
+
 @keyframes owl-sparkle-shimmer {
   0% {
     background-position: 0% 0%, 100% 100%;
@@ -491,10 +510,12 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   border-color: rgb(var(--entered-rgb, 34 197 94) / 0.55) !important;
 }
 
-/* Touch / small viewports: tighter glow, no glitch */
+/* Touch / small viewports: tighter glow + transform-only shake (no filter glitch) */
 @media (hover: none) and (pointer: coarse), (max-width: 768px) {
   .raffle-entered-card {
-    animation: owl-entered-glow-touch 3s ease-in-out infinite;
+    animation:
+      owl-entered-glow-touch 3s ease-in-out infinite,
+      owl-entered-shake-touch 4s ease-in-out infinite;
   }
 
   .winner-golden-card {

@@ -344,7 +344,11 @@ export default function AdminDiscordGiveawayPartnersPage() {
         <CardHeader>
           <CardTitle className="text-lg">Partners</CardTitle>
           <CardDescription>
-            Link a partner to an NFT giveaway on the Giveaways admin page (dropdown). Endpoint:{' '}
+            Link a partner to a legacy one-off NFT giveaway on the{' '}
+            <Link href="/admin/legacy-nft-giveaways" className="text-primary underline">
+              legacy giveaways
+            </Link>{' '}
+            page (dropdown). Endpoint:{' '}
             <span className="font-mono text-xs break-all">{origin + notifyPath}</span>
           </CardDescription>
         </CardHeader>

@@ -15,7 +15,10 @@ import {
   logEscrowDepositError,
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
-import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import {
+  minimalWalletNftForEscrowTransfer,
+  type WalletNft,
+} from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import {
@@ -25,6 +28,25 @@ import {
 import { Users, Loader2, ArrowLeft, Copy, CheckCircle2 } from 'lucide-react'
 import type { CommunityGiveaway, PrizeStandard } from '@/lib/types'
 import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
+
+function mintsEqual(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+/**
+ * Prefer grid selection, then wallet inventory match, then mint-only (on-chain / Core / CNFT resolution).
+ */
+function resolveWalletNftForDeposit(
+  prizeMint: string,
+  selected: WalletNft | null,
+  walletList: WalletNft[] | null | undefined
+): WalletNft {
+  const m = prizeMint.trim()
+  if (selected && mintsEqual(selected.mint, m)) return selected
+  const fromWallet = walletList?.find((n) => mintsEqual(n.mint, m))
+  if (fromWallet) return fromWallet
+  return minimalWalletNftForEscrowTransfer(m)
+}
 
 export default function AdminCommunityGiveawaysPage() {
   const router = useRouter()
@@ -136,8 +158,8 @@ export default function AdminCommunityGiveawaysPage() {
     }
   }, [])
 
-  const loadWalletNfts = useCallback(async () => {
-    if (!publicKey) return
+  const loadWalletNfts = useCallback(async (): Promise<WalletNft[]> => {
+    if (!publicKey) return []
     setLoadingWalletNfts(true)
     setWalletNftsError(null)
     const walletAddr = publicKey.toBase58()
@@ -174,10 +196,12 @@ export default function AdminCommunityGiveawaysPage() {
       }
       setWalletNfts(nfts)
       setNftSearchQuery('')
+      return nfts
     } catch (e) {
       console.error('Load wallet NFTs:', e)
       setWalletNftsError(e instanceof Error ? e.message : 'Failed to load NFTs')
       setWalletNfts(null)
+      return []
     } finally {
       setLoadingWalletNfts(false)
     }
@@ -312,8 +336,8 @@ export default function AdminCommunityGiveawaysPage() {
         return
       }
       const created = data.giveaway as CommunityGiveaway | undefined
-      const nftForDeposit =
-        selectedNft && selectedNft.mint.trim() === mintTrim ? selectedNft : null
+      const savedSelectedNft = selectedNft
+      const manualDepositSig = form.deposit_tx_signature.trim()
 
       setForm({
         title: '',
@@ -330,10 +354,13 @@ export default function AdminCommunityGiveawaysPage() {
       setSelectedNft(null)
       setNftSearchQuery('')
 
+      const freshWalletNfts = await loadWalletNfts()
+      const nftForDeposit = resolveWalletNftForDeposit(mintTrim, savedSelectedNft, freshWalletNfts)
+
       if (
+        !manualDepositSig &&
         created?.id &&
         escrowAddress &&
-        nftForDeposit &&
         !created.prize_deposited_at &&
         publicKey &&
         wallet?.adapter
@@ -356,12 +383,11 @@ export default function AdminCommunityGiveawaysPage() {
 
   const handleSendPrizeToEscrow = async (g: CommunityGiveaway) => {
     const mint = g.nft_mint_address.trim()
-    const nft = walletNfts?.find((n) => n.mint === mint) ?? null
-    if (!nft) {
-      setActionError('This wallet must hold the prize NFT. Tap Refresh NFTs, then try again.')
-      await loadWalletNfts()
-      return
+    let list = walletNfts
+    if (!list || list.length === 0) {
+      list = await loadWalletNfts()
     }
+    const nft = resolveWalletNftForDeposit(mint, null, list)
     setDepositingId(g.id)
     setActionError(null)
     try {
@@ -498,12 +524,6 @@ export default function AdminCommunityGiveawaysPage() {
       />
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
-          <Link href="/admin/giveaways">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            NFT giveaways
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
           <Link href="/admin">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Owl Vision
@@ -516,10 +536,12 @@ export default function AdminCommunityGiveawaysPage() {
         Community pool giveaways
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
-        Use the same <strong>prize escrow</strong> as NFT raffles: pick the NFT from your connected wallet, create the
-        giveaway, then sign to send it to escrow (or use &quot;Send NFT to escrow&quot; on a draft). Verify, then open
-        for entries. Draw uses weighted entries (OWL boosts before <code className="text-xs">starts_at</code>). Winner
-        claims from the dashboard. Sign in from Owl Vision if the API returns 401.
+        Use the same <strong>prize escrow</strong> as NFT raffles: pick or paste the prize mint / asset id, create the
+        draft, and your wallet opens automatically to send the NFT to escrow (skip this if you filled a deposit tx
+        signature for a manual transfer). You can still use &quot;Send NFT to escrow&quot; on a draft if needed. Verify,
+        then open for entries. Draw uses weighted entries (OWL boosts before{' '}
+        <code className="text-xs">starts_at</code>). Winner claims from the dashboard. Sign in from Owl Vision if the API
+        returns 401.
       </p>
 
       {escrowAddress && (
@@ -776,7 +798,7 @@ export default function AdminCommunityGiveawaysPage() {
               {creating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  {depositingId ? 'Sign deposit to escrow…' : 'Creating draft…'}
+                  {depositingId ? 'Sign to send prize to escrow…' : 'Creating draft…'}
                 </>
               ) : (
                 'Create draft'

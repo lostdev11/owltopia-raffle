@@ -74,6 +74,28 @@ export async function listPublicCommunityGiveaways(limit = 80): Promise<Communit
   return (data ?? []).map((r) => mapGiveawayRow(r as Record<string, unknown>))
 }
 
+/**
+ * Open giveaways past `ends_at` with verified prize — candidates for automatic winner draw (cron / public fetch).
+ * Giveaways without `ends_at` stay manual-only until an admin draws.
+ */
+export async function listOpenCommunityGiveawaysPastEnd(nowIso: string): Promise<CommunityGiveaway[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('community_giveaways')
+    .select('*')
+    .eq('status', 'open')
+    .is('winner_wallet', null)
+    .not('prize_deposited_at', 'is', null)
+    .not('ends_at', 'is', null)
+    .lt('ends_at', nowIso)
+    .order('ends_at', { ascending: true })
+
+  if (error) {
+    console.error('listOpenCommunityGiveawaysPastEnd:', error.message)
+    throw new Error(error.message)
+  }
+  return (data ?? []).map((r) => mapGiveawayRow(r as Record<string, unknown>))
+}
+
 export async function getCommunityGiveawayById(id: string): Promise<CommunityGiveaway | null> {
   const { data, error } = await getSupabaseAdmin()
     .from('community_giveaways')
