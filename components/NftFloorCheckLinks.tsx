@@ -5,7 +5,7 @@ import { TensorIcon } from '@/components/icons/TensorIcon'
 import { magicEdenNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
 import { cn } from '@/lib/utils'
 
-type Variant = 'default' | 'compact' | 'ghost'
+type Variant = 'default' | 'compact' | 'ghost' | 'inline'
 
 export function NftFloorCheckLinks({
   mintAddress,
@@ -22,11 +22,13 @@ export function NftFloorCheckLinks({
   const tensor = tensorNftUrl(mint)
 
   const iconClass =
-    variant === 'ghost'
-      ? 'h-5 w-5'
-      : variant === 'compact'
+    variant === 'inline'
+      ? 'h-3.5 w-3.5 sm:h-4 sm:w-4'
+      : variant === 'ghost'
         ? 'h-5 w-5'
-        : 'h-5 w-5 sm:h-[22px] sm:w-[22px]'
+        : variant === 'compact'
+          ? 'h-5 w-5'
+          : 'h-5 w-5 sm:h-[22px] sm:w-[22px]'
   const pad =
     variant === 'compact'
       ? 'min-h-[44px] min-w-[44px] gap-1.5 px-2 py-2'
@@ -59,11 +61,20 @@ export function NftFloorCheckLinks({
     '[@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
   )
 
+  /** Single-line icon-only links for dense list cards (does not reserve 44px chips). */
+  const inlineLink = cn(
+    'touch-manipulation inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 shadow-none',
+    'text-muted-foreground hover:text-foreground active:opacity-70',
+    '[-webkit-tap-highlight-color:transparent]',
+    '[@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
+  )
+
   return (
     <div
       className={cn(
         'flex max-w-full flex-wrap items-center',
-        variant === 'ghost' ? 'gap-0' : 'gap-2',
+        variant === 'ghost' || variant === 'inline' ? 'gap-0' : 'gap-2',
+        variant === 'inline' && 'flex-nowrap gap-0.5',
         className,
       )}
       role="group"
@@ -76,17 +87,19 @@ export function NftFloorCheckLinks({
         title="Magic Eden — view listing and collection floor"
         aria-label="View prize NFT on Magic Eden"
         className={
-          variant === 'ghost'
-            ? ghostLink
-            : cn(
-                'touch-manipulation inline-flex items-center justify-center text-foreground',
-                floatingChip,
-                pad,
-              )
+          variant === 'inline'
+            ? inlineLink
+            : variant === 'ghost'
+              ? ghostLink
+              : cn(
+                  'touch-manipulation inline-flex items-center justify-center text-foreground',
+                  floatingChip,
+                  pad,
+                )
         }
         onClick={(e) => e.stopPropagation()}
       >
-        <MagicEdenIcon className={iconClass} floatingOverlay={variant !== 'ghost'} />
+        <MagicEdenIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
         {variant === 'default' && (
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Magic Eden</span>
         )}
@@ -98,17 +111,19 @@ export function NftFloorCheckLinks({
         title="Tensor — view listing and collection floor"
         aria-label="View prize NFT on Tensor"
         className={
-          variant === 'ghost'
-            ? ghostLink
-            : cn(
-                'touch-manipulation inline-flex items-center justify-center text-foreground',
-                floatingChip,
-                pad,
-              )
+          variant === 'inline'
+            ? inlineLink
+            : variant === 'ghost'
+              ? ghostLink
+              : cn(
+                  'touch-manipulation inline-flex items-center justify-center text-foreground',
+                  floatingChip,
+                  pad,
+                )
         }
         onClick={(e) => e.stopPropagation()}
       >
-        <TensorIcon className={iconClass} floatingOverlay={variant !== 'ghost'} />
+        <TensorIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
         {variant === 'default' && (
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Tensor</span>
         )}

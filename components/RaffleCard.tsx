@@ -929,7 +929,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             />
             {!listThumbDead && (
               <div 
-                className="!relative w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] bg-muted"
+                className="!relative w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] bg-muted"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -938,7 +938,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               >
                 {listThumbMintLoading ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-muted/60" aria-hidden>
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element -- list row: next/image often fails on proxy/GIF in tight layout */
@@ -946,8 +946,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     key={`${listThumbPhase}-${listThumbSrc}`}
                     src={listThumbSrc}
                     alt=""
-                    width={192}
-                    height={192}
+                    width={160}
+                    height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
                     className="absolute inset-0 h-full w-full object-cover object-center"
@@ -981,16 +981,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
             {listThumbDead && (
-              <div className="w-24 min-w-[96px] sm:w-40 md:w-48 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
-                <span className="text-[10px] sm:text-xs text-muted-foreground text-center px-1.5">Image unavailable</span>
+              <div className="w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
+                <span className="text-[9px] sm:text-[10px] text-muted-foreground text-center px-1">Image unavailable</span>
               </div>
             )}
-            <div className="flex-1 flex flex-col p-2 sm:p-2.5 min-w-0 z-10 relative overflow-hidden">
-              <div className="flex items-center justify-between gap-2 mb-1 sm:mb-1 min-w-0">
-                <CardTitle className="raffle-card-title !text-[0.9375rem] sm:!text-sm !leading-snug line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground pr-1">
+            <div className="flex-1 flex flex-col p-1.5 sm:p-2 min-w-0 z-10 relative overflow-hidden">
+              <div className="flex items-center justify-between gap-1.5 mb-0.5 sm:mb-1 min-w-0">
+                <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.8125rem] !leading-tight line-clamp-1 sm:line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5">
                   {raffle.title}
                 </CardTitle>
-                <div className="flex items-center gap-1 sm:gap-1.5 group/owlvision flex-shrink-0 self-center">
+                <div className="flex items-center gap-0.5 sm:gap-1 group/owlvision flex-shrink-0 self-center">
                   {showHolderBadge && (
                     <span
                       className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
@@ -998,24 +998,27 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       role="img"
                       aria-label="Owl holder"
                     >
-                      <BadgeCheck className="h-3 w-3 flex-shrink-0" />
+                      <BadgeCheck className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
                     </span>
                   )}
-                  <OwlVisionBadge score={owlVisionScore} />
+                  <OwlVisionBadge
+                    score={owlVisionScore}
+                    className="!gap-1 !px-1.5 !py-0 !text-[10px] sm:!text-[11px] !leading-none [&_svg]:!h-2.5 [&_svg]:!w-2.5 sm:[&_svg]:!h-3 sm:[&_svg]:!w-3"
+                  />
                 </div>
               </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mb-1 sm:mb-1 mt-0 sm:gap-x-4">
+            <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 text-[11px] leading-tight mb-0.5 sm:mb-1 mt-0">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <span>
                   <span className="text-muted-foreground">Prize: </span>
                   <span className="font-semibold">{raffle.prize_amount} {raffle.prize_currency}</span>
                 </span>
               )}
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1">
                 <span className="text-muted-foreground">Price: </span>
-                <span className="font-semibold flex items-center gap-1.5">
+                <span className="font-semibold flex items-center gap-1">
                   {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={14} className="inline-block" />
+                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block" />
                 </span>
               </span>
               {totalTicketsSold > 0 && (
@@ -1028,15 +1031,14 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             {/* Raffle description — single secondary text below title */}
             {raffle.description && (
               <p
-                className="text-xs text-muted-foreground line-clamp-3 sm:line-clamp-2 mb-1.5 sm:mb-1.5 mt-0 break-words min-w-0 leading-snug"
+                className="text-[11px] text-muted-foreground line-clamp-2 mb-1 sm:mb-1 mt-0 break-words min-w-0 leading-snug"
                 title={raffle.description}
               >
                 <RaffleDescriptionText raffle={raffle} />
               </p>
             )}
-              <div className="flex flex-col gap-2 mt-auto max-sm:pt-0.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-2 sm:gap-y-1.5">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 sm:flex-1 sm:basis-auto">
-                <span className="text-xs text-muted-foreground min-w-0 max-sm:leading-snug sm:truncate">
+              <div className="mt-auto flex max-sm:pt-0 flex-wrap items-center gap-x-1 gap-y-1 min-w-0 [&_a]:relative [&_a]:z-20">
+                  <span className="text-[11px] text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
                 {isFuture ? (
                   <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                     {serverNow && new Date(raffle.start_time) <= serverNow
@@ -1054,25 +1056,24 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 ) : (
                   <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
                 )}
-                </span>
-                <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
-              </div>
-              {/* Status badge only when not in active section (redundant under "Active raffles") */}
-              {section !== 'active' && (
-                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 transition-opacity duration-200 group-hover/owlvision:opacity-30 flex-shrink-0 min-h-[28px] sm:min-h-[22px] touch-manipulation" style={{ zIndex: 1 }}>
-                  <Badge 
-                    variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
-                    className={`rounded-full text-[10px] sm:text-xs min-h-[28px] sm:min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${statusBadgeClass}`}
-                  >
-                    {statusLabel}
-                  </Badge>
-                </div>
-              )}
+                  </span>
+                  <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
+                  {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+                    <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
+                  )}
+                  {section !== 'active' && (
+                    <Badge 
+                      variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
+                      className={`rounded-full text-[9px] sm:text-[10px] min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${statusBadgeClass}`}
+                    >
+                      {statusLabel}
+                    </Badge>
+                  )}
             </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
-              <div className="mt-1.5 pt-1.5 sm:mt-2 sm:pt-2 border-t flex items-center gap-1.5 min-w-0">
-                <Trophy className="h-3 w-3 text-yellow-500 flex-shrink-0" />
-                <span className="text-xs text-muted-foreground truncate min-w-0">
+              <div className="mt-1 pt-1 sm:mt-1.5 sm:pt-1.5 border-t flex items-center gap-1 min-w-0">
+                <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-500 flex-shrink-0" />
+                <span className="text-[11px] text-muted-foreground truncate min-w-0">
                   Winner:{' '}
                   {winnerDisplayName ? (
                     <span className="font-semibold text-foreground">{winnerDisplayName}</span>
@@ -1082,12 +1083,6 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     </span>
                   )}
                 </span>
-              </div>
-            )}
-            {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-              <div className="mt-1.5 flex flex-row flex-wrap items-center gap-x-1 border-t border-border/30 pt-1.5 sm:mt-1.5 sm:gap-x-2 sm:border-border/50">
-                <span className="text-xs text-muted-foreground shrink-0">Floor</span>
-                <NftFloorCheckLinks variant="ghost" mintAddress={raffle.nft_mint_address} className="min-w-0" />
               </div>
             )}
           </div>
