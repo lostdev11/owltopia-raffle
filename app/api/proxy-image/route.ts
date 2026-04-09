@@ -9,7 +9,7 @@ import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-/** Vercel Pro (60s). Sequential gateway attempts must fit within this wall clock. */
+/** Vercel Pro (60s). Parallel gateway races use one timeout bucket per URL (see FETCH_TIMEOUT_MS). */
 export const maxDuration = 60
 
 /** Max bytes we buffer and return from this route. Vercel Hobby limits response bodies (~4.5MB); stay under to avoid platform 413. */
@@ -21,8 +21,30 @@ const MAX_INLINE_BYTES = (() => {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_INLINE_BYTES
 })()
 
-/** Per upstream URL try; several gateways may be attempted in series. */
+/** Per upstream URL try; multi-gateway races run in parallel so wall time stays ~one timeout. */
 const FETCH_TIMEOUT_MS = 14_000
+
+/** Abort when any of the signals abort (no dependency on AbortSignal.any). */
+function abortWhenAny(signals: AbortSignal[]): AbortController {
+  const out = new AbortController()
+  if (signals.some((s) => s.aborted)) {
+    out.abort()
+    return out
+  }
+  for (const s of signals) {
+    s.addEventListener('abort', () => out.abort(), { once: true })
+  }
+  return out
+}
+
+class ProxyAttemptError extends Error {
+  readonly status: number
+  constructor(status: number, message?: string) {
+    super(message ?? `proxy ${status}`)
+    this.name = 'ProxyAttemptError'
+    this.status = status
+  }
+}
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
@@ -162,6 +184,106 @@ function isArweaveUrl(url: string): boolean {
 }
 
 /**
+ * Single upstream attempt. Throws ProxyAttemptError on failure; returns NextResponse on success or redirect.
+ */
+async function tryProxyOneUrl(tryUrl: string, raceAbort: AbortSignal): Promise<NextResponse> {
+  const timeoutCtrl = new AbortController()
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), FETCH_TIMEOUT_MS)
+  const combined = abortWhenAny([timeoutCtrl.signal, raceAbort])
+  try {
+    let res = await fetch(tryUrl, {
+      signal: combined.signal,
+      headers: { 'User-Agent': 'OwlRaffle/1.0 (Image Proxy)' },
+      cache: 'no-store',
+    })
+    if (!res.ok && res.status === 403 && isArweaveUrl(tryUrl)) {
+      const timeout2 = new AbortController()
+      const timeoutId2 = setTimeout(() => timeout2.abort(), FETCH_TIMEOUT_MS)
+      const combined2 = abortWhenAny([timeout2.signal, raceAbort])
+      try {
+        res = await fetch(tryUrl, {
+          signal: combined2.signal,
+          headers: {
+            'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
+            Referer: new URL(tryUrl).origin + '/',
+          },
+          cache: 'no-store',
+        })
+      } finally {
+        clearTimeout(timeoutId2)
+      }
+    }
+
+    if (!res.ok) {
+      throw new ProxyAttemptError(res.status >= 500 ? 502 : 404)
+    }
+
+    const contentLength = res.headers.get('content-length')
+    const declaredLen = contentLength ? parseInt(contentLength, 10) : NaN
+    if (Number.isFinite(declaredLen) && declaredLen > MAX_INLINE_BYTES) {
+      await res.body?.cancel().catch(() => {})
+      return NextResponse.redirect(tryUrl, 307)
+    }
+
+    const buffer = await readBodyUpTo(res, MAX_INLINE_BYTES)
+    if (buffer === 'too_large') {
+      return NextResponse.redirect(tryUrl, 307)
+    }
+
+    const headerCt = res.headers.get('content-type') ?? ''
+    const contentType = effectiveImageContentType(headerCt, buffer)
+    if (!contentType) {
+      throw new ProxyAttemptError(400)
+    }
+
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+      },
+    })
+  } catch (err) {
+    if (err instanceof ProxyAttemptError) throw err
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new ProxyAttemptError(504)
+    }
+    throw new ProxyAttemptError(502)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+function aggregateProxyFailure(errors: unknown[]): NextResponse {
+  const statuses: number[] = []
+  for (const e of errors) {
+    if (e instanceof ProxyAttemptError) {
+      statuses.push(e.status)
+    } else if (e instanceof Error && e.name === 'AbortError') {
+      statuses.push(504)
+    } else {
+      statuses.push(502)
+    }
+  }
+  if (statuses.length === 0) {
+    return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
+  }
+  if (statuses.every((s) => s === 404)) {
+    return NextResponse.json({ error: 'Image fetch failed' }, { status: 404 })
+  }
+  if (statuses.some((s) => s === 504)) {
+    return NextResponse.json({ error: 'Request timeout' }, { status: 504 })
+  }
+  if (statuses.some((s) => s === 502)) {
+    return NextResponse.json({ error: 'Proxy failed' }, { status: 502 })
+  }
+  if (statuses.some((s) => s === 400)) {
+    return NextResponse.json({ error: 'Not an image' }, { status: 400 })
+  }
+  return NextResponse.json({ error: 'Image fetch failed' }, { status: 404 })
+}
+
+/**
  * GET /api/proxy-image?url=<encoded-image-url>
  *
  * Proxies external image URLs (e.g. IPFS) so the browser loads images from our domain.
@@ -198,82 +320,28 @@ export async function GET(request: NextRequest) {
     const urlsToTry = isArweaveUrl(targetStr)
       ? getArweaveUrls(targetStr)
       : getIpfsGatewayUrls(targetStr)
-    let lastError: NextResponse | null = null
 
-    for (const tryUrl of urlsToTry) {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-      try {
-        let res = await fetch(tryUrl, {
-          signal: controller.signal,
-          headers: { 'User-Agent': 'OwlRaffle/1.0 (Image Proxy)' },
-          cache: 'no-store',
-        })
-        // Arweave sometimes returns 403 when no Referer; retry once with Referer
-        if (!res.ok && res.status === 403 && isArweaveUrl(tryUrl)) {
-          const c2 = new AbortController()
-          const t2 = setTimeout(() => c2.abort(), FETCH_TIMEOUT_MS)
-          res = await fetch(tryUrl, {
-            signal: c2.signal,
-            headers: {
-              'User-Agent': 'OwlRaffle/1.0 (Image Proxy)',
-              Referer: new URL(tryUrl).origin + '/',
-            },
-            cache: 'no-store',
-          })
-          clearTimeout(t2)
-        }
-
-        if (!res.ok) {
-          clearTimeout(timeoutId)
-          lastError = NextResponse.json(
-            { error: 'Image fetch failed' },
-            { status: res.status >= 500 ? 502 : 404 }
-          )
-          continue
-        }
-
-        const contentLength = res.headers.get('content-length')
-        const declaredLen = contentLength ? parseInt(contentLength, 10) : NaN
-        if (Number.isFinite(declaredLen) && declaredLen > MAX_INLINE_BYTES) {
-          clearTimeout(timeoutId)
-          await res.body?.cancel().catch(() => {})
-          return NextResponse.redirect(tryUrl, 307)
-        }
-
-        const buffer = await readBodyUpTo(res, MAX_INLINE_BYTES)
-        if (buffer === 'too_large') {
-          clearTimeout(timeoutId)
-          return NextResponse.redirect(tryUrl, 307)
-        }
-
-        const headerCt = res.headers.get('content-type') ?? ''
-        const contentType = effectiveImageContentType(headerCt, buffer)
-        if (!contentType) {
-          clearTimeout(timeoutId)
-          lastError = NextResponse.json({ error: 'Not an image' }, { status: 400 })
-          continue
-        }
-
-        clearTimeout(timeoutId)
-        return new NextResponse(buffer, {
-          status: 200,
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
-          },
-        })
-      } catch (err) {
-        clearTimeout(timeoutId)
-        if (err instanceof Error && err.name === 'AbortError') {
-          lastError = NextResponse.json({ error: 'Request timeout' }, { status: 504 })
-        } else {
-          lastError = NextResponse.json({ error: 'Proxy failed' }, { status: 502 })
-        }
-      }
+    if (urlsToTry.length === 0) {
+      return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
     }
 
-    return lastError ?? NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
+    /** First successful gateway wins; others are aborted to save time and bandwidth. */
+    const cancelRace = new AbortController()
+    try {
+      return await Promise.any(
+        urlsToTry.map((tryUrl) =>
+          tryProxyOneUrl(tryUrl, cancelRace.signal).then((response) => {
+            cancelRace.abort()
+            return response
+          })
+        )
+      )
+    } catch (err) {
+      if (err instanceof AggregateError && Array.isArray(err.errors) && err.errors.length > 0) {
+        return aggregateProxyFailure(err.errors)
+      }
+      return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
+    }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return NextResponse.json({ error: 'Request timeout' }, { status: 504 })

@@ -5,7 +5,7 @@ import { TensorIcon } from '@/components/icons/TensorIcon'
 import { magicEdenNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
 import { cn } from '@/lib/utils'
 
-type Variant = 'default' | 'compact'
+type Variant = 'default' | 'compact' | 'ghost'
 
 export function NftFloorCheckLinks({
   mintAddress,
@@ -22,8 +22,15 @@ export function NftFloorCheckLinks({
   const tensor = tensorNftUrl(mint)
 
   const iconClass =
-    variant === 'compact' ? 'h-5 w-5' : 'h-5 w-5 sm:h-[22px] sm:w-[22px]'
-  const pad = variant === 'compact' ? 'min-h-[44px] min-w-[44px] gap-1.5 px-2 py-2' : 'min-h-[44px] min-w-[44px] gap-2 px-2.5 py-2.5'
+    variant === 'ghost'
+      ? 'h-5 w-5'
+      : variant === 'compact'
+        ? 'h-5 w-5'
+        : 'h-5 w-5 sm:h-[22px] sm:w-[22px]'
+  const pad =
+    variant === 'compact'
+      ? 'min-h-[44px] min-w-[44px] gap-1.5 px-2 py-2'
+      : 'min-h-[44px] min-w-[44px] gap-2 px-2.5 py-2.5'
 
   /**
    * Glassy floating chip. Hover lift/shadow only when `(hover: hover) and (pointer: fine)` so touch
@@ -45,10 +52,18 @@ export function NftFloorCheckLinks({
     'dark:[@media(hover:hover)_and_(pointer:fine)]:hover:shadow-[0_12px_32px_-4px_rgba(0,0,0,0.65),0_4px_14px_-4px_rgba(0,0,0,0.5)]',
   )
 
+  const ghostLink = cn(
+    'touch-manipulation inline-flex items-center justify-center rounded-md border-0 bg-transparent shadow-none',
+    'p-3 -m-3 text-muted-foreground hover:text-foreground active:opacity-70',
+    '[-webkit-tap-highlight-color:transparent]',
+    '[@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
+  )
+
   return (
     <div
       className={cn(
-        'flex max-w-full flex-wrap items-center gap-2',
+        'flex max-w-full flex-wrap items-center',
+        variant === 'ghost' ? 'gap-0' : 'gap-2',
         className,
       )}
       role="group"
@@ -60,14 +75,18 @@ export function NftFloorCheckLinks({
         rel="noopener noreferrer"
         title="Magic Eden — view listing and collection floor"
         aria-label="View prize NFT on Magic Eden"
-        className={cn(
-          'touch-manipulation inline-flex items-center justify-center text-foreground',
-          floatingChip,
-          pad,
-        )}
+        className={
+          variant === 'ghost'
+            ? ghostLink
+            : cn(
+                'touch-manipulation inline-flex items-center justify-center text-foreground',
+                floatingChip,
+                pad,
+              )
+        }
         onClick={(e) => e.stopPropagation()}
       >
-        <MagicEdenIcon className={iconClass} floatingOverlay />
+        <MagicEdenIcon className={iconClass} floatingOverlay={variant !== 'ghost'} />
         {variant === 'default' && (
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Magic Eden</span>
         )}
@@ -78,14 +97,18 @@ export function NftFloorCheckLinks({
         rel="noopener noreferrer"
         title="Tensor — view listing and collection floor"
         aria-label="View prize NFT on Tensor"
-        className={cn(
-          'touch-manipulation inline-flex items-center justify-center text-foreground',
-          floatingChip,
-          pad,
-        )}
+        className={
+          variant === 'ghost'
+            ? ghostLink
+            : cn(
+                'touch-manipulation inline-flex items-center justify-center text-foreground',
+                floatingChip,
+                pad,
+              )
+        }
         onClick={(e) => e.stopPropagation()}
       >
-        <TensorIcon className={iconClass} floatingOverlay />
+        <TensorIcon className={iconClass} floatingOverlay={variant !== 'ghost'} />
         {variant === 'default' && (
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Tensor</span>
         )}

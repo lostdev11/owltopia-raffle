@@ -1,6 +1,6 @@
  'use client'
  
- import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+ import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { RaffleCard } from '@/components/RaffleCard'
 import { RaffleScrollReveal } from '@/components/RaffleScrollReveal'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
@@ -24,6 +24,8 @@ interface RaffleWithEntriesItem {
 interface RafflesListProps {
   rafflesWithEntries: Array<RaffleWithEntriesItem>
   title?: string
+  /** Shown below the title/sort row (e.g. helper copy for a section). */
+  titleDescription?: ReactNode
   showViewSizeControls?: boolean
   size?: CardSize
   onSizeChange?: (size: CardSize) => void
@@ -67,6 +69,7 @@ function getThresholdProgress(profitInfo?: RaffleProfitInfo): number | null {
 export function RafflesList({
   rafflesWithEntries,
   title,
+  titleDescription,
   showViewSizeControls = true,
   size: controlledSize,
   onSizeChange,
@@ -355,30 +358,42 @@ export function RafflesList({
     return null
   }
 
+  const showSort =
+    otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1
+
   return (
     <div className="w-full min-w-0">
-      <div className="flex flex-wrap items-center justify-between mb-4 sm:mb-6 gap-4">
-        {title && (
-          <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
-        )}
-        {otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1 && (
-          <div className="flex items-center gap-2 ml-auto">
-            <label htmlFor="sort-select" className="text-sm text-muted-foreground whitespace-nowrap">
-              Sort by:
-            </label>
-            <select
-              id="sort-select"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="px-3 py-1.5 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer"
-            >
-              <option value="days-left">Days Left</option>
-              <option value="date">Date</option>
-              <option value="ticket-price">Ticket Price</option>
-            </select>
+      {(title || showSort) && (
+        <div className="mb-4 sm:mb-6 space-y-3">
+          <div
+            className={
+              title
+                ? 'flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-2'
+                : 'flex flex-row flex-wrap items-center justify-end gap-3'
+            }
+          >
+            {title ? <h2 className="text-xl sm:text-2xl font-bold min-w-0">{title}</h2> : null}
+            {showSort && (
+              <div className={`flex items-center gap-2 shrink-0 ${title ? 'sm:ml-auto' : ''}`}>
+                <label htmlFor="sort-select" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Sort by:
+                </label>
+                <select
+                  id="sort-select"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="min-h-[44px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer touch-manipulation"
+                >
+                  <option value="days-left">Days Left</option>
+                  <option value="date">Date</option>
+                  <option value="ticket-price">Ticket Price</option>
+                </select>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+          {titleDescription ? <div className="text-sm text-muted-foreground">{titleDescription}</div> : null}
+        </div>
+      )}
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
         {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
           <RaffleScrollReveal key={raffle.id}>

@@ -1147,54 +1147,61 @@ export function RafflesPageClient({
           ) : (
             <>
           <div className="mb-8 sm:mb-12 w-full min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
             {active.length > 0 ? (
               <RafflesList
                 rafflesWithEntries={active}
-                title={undefined}
+                title="Active Raffles"
                 section="active"
                 serverNow={serverTime}
                 onTopProfitableChange={setTopProfitableActive}
               />
             ) : (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
-              </div>
+              <>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
+                </div>
+              </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
             {future.length > 0 ? (
               <RafflesList
                 rafflesWithEntries={future}
-                title={undefined}
+                title="Future Raffles"
                 section="future"
                 serverNow={serverTime}
               />
             ) : (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
-              </div>
+              <>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
+                </div>
+              </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
-            </p>
             {pausedPending.length > 0 ? (
               <RafflesList
                 rafflesWithEntries={pausedPending}
-                title={undefined}
+                title="Pending / Paused Raffles"
+                titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
                 section="future"
                 serverNow={serverTime}
               />
             ) : (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">No pending or paused raffles right now.</p>
-              </div>
+              <>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
+                </p>
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">No pending or paused raffles right now.</p>
+                </div>
+              </>
             )}
           </div>
 
