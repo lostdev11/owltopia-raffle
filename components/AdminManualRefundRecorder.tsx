@@ -350,7 +350,7 @@ export function AdminManualRefundRecorder({
               <code className="text-xs">FUNDS_ESCROW</code> keypair (same as buyer self-claim). Only for raffles
               marked legacy (ticket sales did not go through funds escrow in the app). Ensure the escrow wallet
               holds enough for the selected rows. Use the checkboxes above, then run this instead of pasting a tx
-              under &quot;Record manual ticket refunds&quot;.
+              under &quot;Record manual ticket refunds&quot;.               Each selected ticket gets its own on-chain transaction, sent one after another (not one batched tx).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

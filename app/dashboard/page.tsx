@@ -2235,11 +2235,15 @@ export default function DashboardPage() {
             {legacyCreatorRefundRaffles.length > 0 && (
               <div className="space-y-3">
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] p-3">
-                  <p className="text-sm font-medium text-foreground">Legacy refunds — you send these amounts</p>
+                  <p className="text-sm font-medium text-foreground">Legacy refunds — host payout list</p>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                     These raffles used the older flow where ticket payments went to you and the treasury (not the funds
-                    escrow wallet). Send the pending amounts below from your wallet to each buyer. Copy the payout script
-                    to paste into notes or your wallet app.
+                    escrow wallet). The platform may still issue some refunds from the funds escrow wallet on your behalf.
+                    Before you send anything manually, confirm with support or Owl Vision so you do not double-pay. If you
+                    are the one paying out,                     send{' '}
+                    <span className="text-foreground font-medium">one separate transaction per line below</span> (not one
+                    combined transfer for the total). You can copy the payout script into your
+                    wallet app or notes.
                   </p>
                 </div>
                 {legacyCreatorRefundRaffles.map((rr) => {
@@ -2257,7 +2261,8 @@ export default function DashboardPage() {
                           {rr.raffleTitle}
                         </Link>
                         <span className="text-sm font-semibold tabular-nums">
-                          Total to send: {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)} {rr.currency}
+                          Total owed (sum of lines): {rr.totalPending.toFixed(rr.currency === 'USDC' ? 2 : 6)}{' '}
+                          {rr.currency}
                         </span>
                       </div>
                       <Button
