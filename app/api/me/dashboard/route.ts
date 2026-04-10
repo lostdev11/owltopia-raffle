@@ -104,20 +104,23 @@ export async function GET(request: NextRequest) {
     const refundCandidatesByRaffle = await getRefundCandidatesByRaffleIds(
       refundEligibleRaffles.map((r) => r.id)
     )
-    const creatorRefundRaffles = refundEligibleRaffles.map((r) => {
-      const candidates = refundCandidatesByRaffle[r.id] ?? []
-      const totalPending = candidates.reduce((sum, c) => sum + c.pendingAmount, 0)
-      return {
-        raffleId: r.id,
-        raffleSlug: r.slug,
-        raffleTitle: r.title,
-        currency: r.currency,
-        candidates,
-        totalPending,
-        /** False = legacy split-at-purchase; host must send refunds manually. True = funds escrow; buyers self-claim. */
-        ticketPaymentsToFundsEscrow: raffleUsesFundsEscrow(r),
-      }
-    })
+    const creatorRefundRaffles = refundEligibleRaffles
+      .map((r) => {
+        const candidates = refundCandidatesByRaffle[r.id] ?? []
+        const totalPending = candidates.reduce((sum, c) => sum + c.pendingAmount, 0)
+        return {
+          raffleId: r.id,
+          raffleSlug: r.slug,
+          raffleTitle: r.title,
+          currency: r.currency,
+          candidates,
+          totalPending,
+          /** False = legacy split-at-purchase; host must send refunds manually. True = funds escrow; buyers self-claim. */
+          ticketPaymentsToFundsEscrow: raffleUsesFundsEscrow(r),
+        }
+      })
+      /** Hide creator refund UI once every confirmed ticket row is refunded (e.g. after platform escrow payouts). */
+      .filter((rr) => rr.totalPending > 0)
 
     return NextResponse.json({
       wallet,
