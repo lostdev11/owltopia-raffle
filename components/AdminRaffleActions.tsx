@@ -19,6 +19,7 @@ import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 
 const FULL_REFUND_WINDOW_HOURS = 24
@@ -671,6 +672,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           raffleCurrency={raffle.currency || 'SOL'}
           entries={entries}
           onRecorded={() => router.refresh()}
+          legacyEscrowRefundEnabled={
+            raffle.status === 'failed_refund_available' && !raffleUsesFundsEscrow(raffle)
+          }
         />
 
         <Card>

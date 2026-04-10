@@ -20,6 +20,11 @@ export type AdminManualRefundRecorderProps = {
   entries: Entry[]
   /** After a successful record, e.g. refresh RSC + refetch client entries */
   onRecorded?: () => void
+  /**
+   * TEMPORARY — remove with /api/admin/legacy-escrow-refund after one-time legacy payouts.
+   * When true (legacy raffle in failed_refund_available), show admin button to send from funds escrow.
+   */
+  legacyEscrowRefundEnabled?: boolean
 }
 
 /**
@@ -31,6 +36,7 @@ export function AdminManualRefundRecorder({
   raffleCurrency,
   entries,
   onRecorded,
+  legacyEscrowRefundEnabled = false,
 }: AdminManualRefundRecorderProps) {
   const router = useRouter()
   const refundTxInputId = useId()
@@ -53,6 +59,7 @@ export function AdminManualRefundRecorder({
 
   const [recordRefundTx, setRecordRefundTx] = useState('')
   const [recordingRefunds, setRecordingRefunds] = useState(false)
+  const [legacyEscrowSending, setLegacyEscrowSending] = useState(false)
   const [selectedRefundEntryIds, setSelectedRefundEntryIds] = useState<string[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -137,6 +144,80 @@ export function AdminManualRefundRecorder({
     }
   }
 
+  /** TEMPORARY — remove with legacy escrow refund API. */
+  const handleLegacyEscrowRefund = async () => {
+    setMessage(null)
+    if (selectedRefundEntryIds.length === 0) {
+      setMessage({ type: 'error', text: 'Select at least one ticket row first.' })
+      return
+    }
+    setLegacyEscrowSending(true)
+    try {
+      const res = await fetch('/api/admin/legacy-escrow-refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ entryIds: selectedRefundEntryIds }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        results?: Array<{
+          entryId: string
+          ok: boolean
+          error?: string
+          transactionSignature?: string
+          alreadyRefunded?: boolean
+        }>
+        okCount?: number
+        requestedCount?: number
+        error?: string
+      }
+      if (res.status === 401) {
+        setMessage({
+          type: 'error',
+          text: 'Sign in to Owl Vision (full admin) on /admin, then try again.',
+        })
+        return
+      }
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Legacy escrow refund request failed',
+        })
+        return
+      }
+      const rows = Array.isArray(data.results) ? data.results : []
+      const lines = rows.map((r) => {
+        if (!r.ok) return `${r.entryId.slice(0, 8)}… — ${r.error ?? 'failed'}`
+        if (r.alreadyRefunded) {
+          const tx = (r.transactionSignature ?? '').trim()
+          return `${r.entryId.slice(0, 8)}… — already refunded${tx ? ` (${tx.slice(0, 8)}…)` : ''}`
+        }
+        return `${r.entryId.slice(0, 8)}… — ok — ${(r.transactionSignature ?? '').slice(0, 12)}…`
+      })
+      const allOk = data.ok === true
+      setMessage({
+        type: allOk ? 'success' : 'error',
+        text: [
+          `Processed ${typeof data.okCount === 'number' ? data.okCount : rows.filter((x) => x.ok).length}/${typeof data.requestedCount === 'number' ? data.requestedCount : selectedRefundEntryIds.length} ticket(s).`,
+          ...lines,
+        ].join('\n'),
+      })
+      if (rows.some((r) => r.ok && !r.alreadyRefunded)) {
+        setSelectedRefundEntryIds([])
+        if (onRecorded) onRecorded()
+        else router.refresh()
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Legacy escrow refund failed',
+      })
+    } finally {
+      setLegacyEscrowSending(false)
+    }
+  }
+
   if (unrefundedConfirmed.length === 0 && refundedConfirmed.length === 0) {
     return null
   }
@@ -145,6 +226,18 @@ export function AdminManualRefundRecorder({
 
   return (
     <div id="manual-refunds" className="space-y-4 scroll-mt-24">
+      {message && (
+        <div
+          className={`p-3 rounded-lg border text-sm whitespace-pre-wrap ${
+            message.type === 'success'
+              ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400'
+              : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
+
       {unrefundedConfirmed.length > 0 && (
         <Card className="border-teal-500/30 bg-teal-500/5">
           <CardHeader className="pb-2">
@@ -158,17 +251,6 @@ export function AdminManualRefundRecorder({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {message && (
-              <div
-                className={`p-3 rounded-lg border text-sm ${
-                  message.type === 'success'
-                    ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400'
-                    : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-                }`}
-              >
-                {message.text}
-              </div>
-            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -254,6 +336,34 @@ export function AdminManualRefundRecorder({
               onClick={handleRecordManualRefunds}
             >
               {recordingRefunds ? 'Recording…' : 'Record refund for selected tickets'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {legacyEscrowRefundEnabled && unrefundedConfirmed.length > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/[0.06]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">One-time: send refunds from funds escrow (legacy)</CardTitle>
+            <CardDescription>
+              TEMPORARY — remove from the codebase after these payouts are done. Uses the server{' '}
+              <code className="text-xs">FUNDS_ESCROW</code> keypair (same as buyer self-claim). Only for raffles
+              marked legacy (ticket sales did not go through funds escrow in the app). Ensure the escrow wallet
+              holds enough for the selected rows. Use the checkboxes above, then run this instead of pasting a tx
+              under &quot;Record manual ticket refunds&quot;.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              type="button"
+              variant="secondary"
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
+              disabled={
+                legacyEscrowSending || recordingRefunds || selectedRefundEntryIds.length === 0
+              }
+              onClick={handleLegacyEscrowRefund}
+            >
+              {legacyEscrowSending ? 'Sending…' : 'Send selected refunds from funds escrow'}
             </Button>
           </CardContent>
         </Card>
