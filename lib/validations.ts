@@ -24,8 +24,8 @@ export const recordManualRefundsBody = z.object({
 })
 
 /**
- * TEMPORARY — remove after one-time legacy refunds from funds escrow are done.
- * Full admin: send payouts from FUNDS_ESCROW keypair for legacy raffles only (ticket_payments_to_funds_escrow off).
+ * TEMPORARY — remove after one-time admin refunds from funds escrow are done.
+ * Full admin: send payouts from FUNDS_ESCROW for failed_refund_available raffles (legacy or standard escrow).
  */
 export const adminLegacyEscrowRefundBody = z.object({
   entryIds: z.array(z.string().uuid()).min(1).max(50),

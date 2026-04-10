@@ -3744,10 +3744,7 @@ export function RaffleDetailClient({
                         void fetchEntries()
                         router.refresh()
                       }}
-                      legacyEscrowRefundEnabled={
-                        raffle.status === 'failed_refund_available' &&
-                        !raffleUsesFundsEscrow(raffle)
-                      }
+                      adminFundsEscrowRefundEnabled={raffle.status === 'failed_refund_available'}
                     />
                   )}
                 </div>

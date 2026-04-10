@@ -21,10 +21,10 @@ export type AdminManualRefundRecorderProps = {
   /** After a successful record, e.g. refresh RSC + refetch client entries */
   onRecorded?: () => void
   /**
-   * TEMPORARY — remove with /api/admin/legacy-escrow-refund after one-time legacy payouts.
-   * When true (legacy raffle in failed_refund_available), show admin button to send from funds escrow.
+   * TEMPORARY — remove with /api/admin/legacy-escrow-refund after one-time payouts.
+   * When true (`failed_refund_available`), show full-admin button to send refunds from FUNDS_ESCROW.
    */
-  legacyEscrowRefundEnabled?: boolean
+  adminFundsEscrowRefundEnabled?: boolean
 }
 
 /**
@@ -36,7 +36,7 @@ export function AdminManualRefundRecorder({
   raffleCurrency,
   entries,
   onRecorded,
-  legacyEscrowRefundEnabled = false,
+  adminFundsEscrowRefundEnabled = false,
 }: AdminManualRefundRecorderProps) {
   const router = useRouter()
   const refundTxInputId = useId()
@@ -341,16 +341,17 @@ export function AdminManualRefundRecorder({
         </Card>
       )}
 
-      {legacyEscrowRefundEnabled && unrefundedConfirmed.length > 0 && (
+      {adminFundsEscrowRefundEnabled && unrefundedConfirmed.length > 0 && (
         <Card className="border-amber-500/40 bg-amber-500/[0.06]">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">One-time: send refunds from funds escrow (legacy)</CardTitle>
+            <CardTitle className="text-base">One-time: send refunds from funds escrow (admin)</CardTitle>
             <CardDescription>
               TEMPORARY — remove from the codebase after these payouts are done. Uses the server{' '}
-              <code className="text-xs">FUNDS_ESCROW</code> keypair (same as buyer self-claim). Only for raffles
-              marked legacy (ticket sales did not go through funds escrow in the app). Ensure the escrow wallet
-              holds enough for the selected rows. Use the checkboxes above, then run this instead of pasting a tx
-              under &quot;Record manual ticket refunds&quot;.               Each selected ticket gets its own on-chain transaction, sent one after another (not one batched tx).
+              <code className="text-xs">FUNDS_ESCROW</code> keypair (same as buyer &quot;Claim refund&quot;). Use for
+              any failed minimum-not-met raffle where refunds should leave escrow to buyers — including standard
+              funds-escrow listings (e.g. when you want to pay everyone out without each wallet connecting).
+              Ensure the escrow wallet holds enough for the selected rows. Use the checkboxes above. Each selected
+              ticket gets its own on-chain transaction, in sequence (not one batched tx).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

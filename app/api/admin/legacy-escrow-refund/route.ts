@@ -9,7 +9,6 @@ import {
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { adminLegacyEscrowRefundBody, parseOr400 } from '@/lib/validations'
-import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { refundEntryFromFundsEscrow } from '@/lib/raffles/funds-escrow'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 
@@ -25,12 +24,11 @@ type LegacyRefundRow =
   | { entryId: string; ok: false; error: string }
 
 /**
- * TEMPORARY — delete this route after legacy ticket refunds have been sent from funds escrow.
+ * TEMPORARY — delete this route after one-time admin-driven refunds are done.
  *
  * POST /api/admin/legacy-escrow-refund
- * Full admin only. For each entry: sends gross from the configured funds escrow wallet (same as buyer
- * self-claim) even when the raffle is legacy (`ticket_payments_to_funds_escrow` false). Use only when
- * escrow is funded for those amounts; normal escrow raffles should keep using buyer claim-refund.
+ * Full admin only. For each entry in a `failed_refund_available` raffle: sends gross from FUNDS_ESCROW
+ * (same on-chain path as buyer self-claim). Works for both legacy raffles and standard funds-escrow raffles.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -76,15 +74,6 @@ export async function POST(request: NextRequest) {
           entryId,
           ok: false,
           error: `Raffle status must be failed_refund_available (got ${raffle.status ?? 'unknown'})`,
-        })
-        continue
-      }
-
-      if (raffleUsesFundsEscrow(raffle)) {
-        results.push({
-          entryId,
-          ok: false,
-          error: 'Raffle uses funds escrow — buyers should use claim-refund; this route is legacy-only',
         })
         continue
       }
