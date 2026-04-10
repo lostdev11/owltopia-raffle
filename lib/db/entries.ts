@@ -793,22 +793,37 @@ export type UnrefundedConfirmedEntryRaffleRow = {
 
 /**
  * Raffles that have confirmed tickets not yet marked refunded (manual admin record or buyer self-claim).
+ * Uses DB aggregation (migration 059) so raffles are not dropped when >25k unrefunded rows exist globally.
  */
 export async function listRaffleUnrefundedConfirmedEntryCounts(): Promise<UnrefundedConfirmedEntryRaffleRow[]> {
-  const { data, error } = await getSupabaseAdmin()
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin.rpc('list_raffle_unrefunded_confirmed_entry_counts')
+
+  if (!error && Array.isArray(data)) {
+    return (data as { raffle_id: string; unrefunded_entry_count: number | string }[]).map((row) => ({
+      raffleId: String(row.raffle_id),
+      unrefundedEntryCount: Number(row.unrefunded_entry_count),
+    }))
+  }
+
+  if (error) {
+    console.error('listRaffleUnrefundedConfirmedEntryCounts rpc:', error)
+  }
+
+  const { data: rows, error: scanError } = await admin
     .from('entries')
     .select('raffle_id')
     .eq('status', 'confirmed')
     .is('refunded_at', null)
     .limit(PENDING_MANUAL_REFUND_ENTRY_SCAN_LIMIT)
 
-  if (error) {
-    console.error('listRaffleUnrefundedConfirmedEntryCounts:', error)
+  if (scanError) {
+    console.error('listRaffleUnrefundedConfirmedEntryCounts scan fallback:', scanError)
     return []
   }
 
   const counts = new Map<string, number>()
-  for (const row of data ?? []) {
+  for (const row of rows ?? []) {
     const rid = String((row as { raffle_id?: string }).raffle_id ?? '').trim()
     if (!rid) continue
     counts.set(rid, (counts.get(rid) ?? 0) + 1)

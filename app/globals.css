@@ -527,6 +527,15 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
+/* Landing / announcements: if motion is reduced, do not leave elements at opacity 0 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-enter-fade-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
 /* Respect reduced motion: no glitch, subtle glow */
 @media (prefers-reduced-motion: reduce) {
   .raffle-entered-card {

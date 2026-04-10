@@ -937,6 +937,14 @@ export default function DashboardPage() {
       !raffleUsesFundsEscrow(x.raffle)
   )
 
+  /** Cancelled listings never reach `failed_refund_available`; treasury refunds are manual. */
+  const cancelledUnrefundedEntries = myEntries.filter(
+    (x) =>
+      x.raffle.status === 'cancelled' &&
+      x.entry.status === 'confirmed' &&
+      !x.entry.refunded_at
+  )
+
   /** Ended, no winner, status not advanced yet — server should move to extension or refunds on refresh. */
   const refundWaitRaffles: EntryWithRaffle['raffle'][] = []
   {
@@ -982,10 +990,35 @@ export default function DashboardPage() {
     }))
   })()
 
+  const cancelledRefundOwedByRaffle = (() => {
+    const map = new Map<
+      string,
+      { raffle: EntryWithRaffle['raffle']; byCurrency: Map<string, number> }
+    >()
+    for (const x of cancelledUnrefundedEntries) {
+      const id = x.raffle.id
+      let row = map.get(id)
+      if (!row) {
+        row = { raffle: x.raffle, byCurrency: new Map() }
+        map.set(id, row)
+      }
+      const c = String(x.entry.currency || 'SOL').toUpperCase()
+      row.byCurrency.set(c, (row.byCurrency.get(c) ?? 0) + Number(x.entry.amount_paid ?? 0))
+    }
+    return Array.from(map.values()).map((row) => ({
+      raffle: row.raffle,
+      parts: Array.from(row.byCurrency.entries()).map(([currency, total]) => ({
+        currency,
+        total,
+      })),
+    }))
+  })()
+
   const showTicketRefundHub =
     refundableEntries.length > 0 ||
     legacyRefundEligibleEntries.length > 0 ||
-    refundWaitRaffles.length > 0
+    refundWaitRaffles.length > 0 ||
+    cancelledUnrefundedEntries.length > 0
 
   const entriesPageSafe = Math.min(entriesPage, entriesListMaxPage)
   const raffleSummariesPage = raffleSummaries.slice(
@@ -1134,6 +1167,41 @@ export default function DashboardPage() {
                       </Button>
                     </li>
                   ))}
+                </ul>
+              </div>
+            )}
+
+            {cancelledUnrefundedEntries.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Cancelled raffle — manual refund</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  These listings were cancelled. Ticket refunds are issued manually by the platform (treasury), not through
+                  Claim refund. If you are still waiting, contact support with the raffle link.
+                </p>
+                <ul className="space-y-3">
+                  {cancelledRefundOwedByRaffle.map(({ raffle, parts }) => {
+                    const formatted = parts
+                      .map(
+                        ({ currency, total }) =>
+                          `${total.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+                      )
+                      .join(' · ')
+                    return (
+                      <li
+                        key={raffle.id}
+                        className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                      >
+                        <Link href={`/raffles/${raffle.slug}`} className="font-medium hover:underline truncate min-w-0">
+                          {raffle.title}
+                        </Link>
+                        <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
+                          {parts.length === 1
+                            ? `Amount owed: ${formatted}`
+                            : `Amounts owed: ${formatted}`}
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             )}

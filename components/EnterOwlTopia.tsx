@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { Coins } from 'lucide-react'
-import { Logo } from '@/components/Logo'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
 
@@ -117,18 +116,14 @@ export function EnterOwlTopia() {
         className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto overflow-x-hidden transition-transform duration-300 ease-out shrink-0"
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
-        <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-8 sm:py-10">
-        <div
-          className="opacity-0 animate-enter-fade-in"
-          style={fadeIn('0.1s')}
-        >
-          <Logo width={280} height={105} priority />
+        <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">
+        <div className="w-full max-w-sm animate-enter-fade-in" style={fadeIn('0.1s')}>
+          <AnnouncementsBlock placement="hero" variant="hero" />
         </div>
-        <AnnouncementsBlock placement="hero" variant="hero" className="opacity-0 animate-enter-fade-in" />
 
         {/* Rev Share card — founder-set next rev share (date + total SOL/USDC) */}
         <div
-          className="rev-share-pool-card w-full max-w-[360px] rounded-xl p-4 sm:p-5 opacity-0 animate-enter-fade-in"
+          className="rev-share-pool-card w-full max-w-[360px] rounded-xl p-4 sm:p-5 animate-enter-fade-in"
           style={fadeIn('0.35s')}
         >
           <div className="flex items-center gap-2 mb-2">
@@ -165,7 +160,7 @@ export function EnterOwlTopia() {
         </div>
 
         <p
-          className="text-muted-foreground text-center text-sm opacity-0 animate-enter-fade-in"
+          className="text-muted-foreground text-center text-sm animate-enter-fade-in"
           style={fadeIn('0.5s')}
         >
           Trusted raffles with full transparency

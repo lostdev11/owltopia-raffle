@@ -70,8 +70,8 @@ export function AnnouncementsBlock({ placement, className = '', variant, preload
         {list.map((a) => (
           <div
             key={a.id}
-            className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-center opacity-0 animate-enter-fade-in"
-            style={{ animationDelay: '0.2s', animationFillMode: 'forwards' as const }}
+            className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-center animate-enter-fade-in"
+            style={{ animationDelay: '0.2s' }}
           >
             <div className="font-medium text-foreground">
               <MarkdownContent content={a.title} compact />

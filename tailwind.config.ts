@@ -173,7 +173,8 @@ const config: Config = {
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
-        'enter-fade-in': 'enter-fade-in 0.8s ease-out forwards',
+        /* `both`: apply 0% keyframe before start (avoids relying on separate opacity-0 + forwards-only). */
+        'enter-fade-in': 'enter-fade-in 0.8s ease-out both',
         'page-enter': 'page-enter 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards',
         'hero-rise': 'hero-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards',
         'hero-float-1': 'hero-float-1 18s ease-in-out infinite',

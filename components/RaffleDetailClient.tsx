@@ -379,7 +379,8 @@ export function RaffleDetailClient({
   const shouldSyncRaffleEntries =
     isActive ||
     raffle.status === 'failed_refund_available' ||
-    raffle.status === 'pending_min_not_met'
+    raffle.status === 'pending_min_not_met' ||
+    raffle.status === 'cancelled'
 
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
     raffleId: raffle.id,
@@ -629,6 +630,26 @@ export function RaffleDetailClient({
   }, [connected, publicKey, raffle, entries])
 
   const buyerLegacyRefundEligible = buyerLegacyRefundEntries.length > 0
+
+  /** Cancelled raffles use `cancelled` status + manual treasury refunds — not `failed_refund_available`, so buyers need explicit copy here and on the dashboard. */
+  const buyerCancelledRefundEntries = useMemo(() => {
+    if (!connected || !publicKey || raffle.status !== 'cancelled') return []
+    const w = publicKey.toBase58()
+    return entries.filter(
+      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+    )
+  }, [connected, publicKey, raffle.status, entries])
+
+  const buyerCancelledRefundEligible = buyerCancelledRefundEntries.length > 0
+
+  const buyerCancelledRefundByCurrency = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of buyerCancelledRefundEntries) {
+      const c = String(e.currency ?? raffle.currency ?? 'SOL').toUpperCase()
+      map.set(c, (map.get(c) ?? 0) + Number(e.amount_paid ?? 0))
+    }
+    return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }))
+  }, [buyerCancelledRefundEntries, raffle.currency])
 
   const buyerLegacyRefundByCurrency = useMemo(() => {
     const map = new Map<string, number>()
@@ -3451,7 +3472,8 @@ export function RaffleDetailClient({
 
             {(showRefundTerminalButton ||
               buyerRefundableEntries.length > 0 ||
-              buyerLegacyRefundEligible) && (
+              buyerLegacyRefundEligible ||
+              buyerCancelledRefundEligible) && (
               <div className="mb-4 space-y-4">
                 {showRefundTerminalButton && (
                   <div
@@ -3579,6 +3601,42 @@ export function RaffleDetailClient({
                             My Dashboard
                           </Link>{' '}
                           or contact support.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {buyerCancelledRefundEligible && (
+                  <div
+                    className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg border border-amber-500/40 bg-amber-500/10 space-y-2`}
+                    role="region"
+                    aria-label="Cancelled raffle refund pending"
+                  >
+                    <div className="flex items-start gap-3">
+                      <Ticket className="h-6 w-6 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">Cancelled raffle — refund pending</p>
+                        {buyerCancelledRefundByCurrency.length > 0 && (
+                          <p className="text-sm font-semibold tabular-nums text-foreground mt-2">
+                            {buyerCancelledRefundByCurrency.length === 1
+                              ? `Amount owed: ${buyerCancelledRefundByCurrency[0].total.toFixed(
+                                  buyerCancelledRefundByCurrency[0].currency === 'USDC' ? 2 : 4
+                                )} ${buyerCancelledRefundByCurrency[0].currency}`
+                              : `Amounts owed: ${buyerCancelledRefundByCurrency
+                                  .map(
+                                    ({ currency, total }) =>
+                                      `${total.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+                                  )
+                                  .join(' · ')}`}
+                          </p>
+                        )}
+                        <p className="text-sm text-muted-foreground mt-1">
+                          This raffle was cancelled. Ticket refunds are sent manually by the platform (treasury), not via
+                          the Claim refund button. If you have not been paid yet, open{' '}
+                          <Link href="/dashboard" className="text-primary underline font-medium">
+                            My Dashboard
+                          </Link>{' '}
+                          or contact support with this listing link.
                         </p>
                       </div>
                     </div>
