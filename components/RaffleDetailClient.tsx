@@ -373,10 +373,17 @@ export function RaffleDetailClient({
     mobileLinkTouchRef.current = null
   }
 
-  // Use real-time entries hook (with polling fallback)
+  // Keep entry rows fresh while sales are open, and after end for refund/min-threshold flows (refunded_at, etc.).
+  // `isActive` alone is false once the raffle ends, which previously froze SSR entry data and stranded buyers on
+  // "Refund owed (legacy listing)" after platform payouts until a manual refresh.
+  const shouldSyncRaffleEntries =
+    isActive ||
+    raffle.status === 'failed_refund_available' ||
+    raffle.status === 'pending_min_not_met'
+
   const { entries, refetch: fetchEntries, isUsingRealtime } = useRealtimeEntries({
     raffleId: raffle.id,
-    enabled: isActive, // Only enable real-time updates for active raffles
+    enabled: shouldSyncRaffleEntries,
     pollingInterval: RAFFLE_DETAIL_ENTRIES_POLL_MS,
     initialEntries, // Initialize with server-side entries
   })
