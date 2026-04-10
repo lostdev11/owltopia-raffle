@@ -80,8 +80,11 @@ export function Header() {
     <header className="w-full bg-black border-b border-green-500/20">
       <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4 header-safe-area-inner">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
-          <Link href="/" className="flex-1 min-w-0">
-            <Logo className="flex-1 max-w-full h-auto" width={600} height={150} priority />
+          <Link
+            href="/"
+            className="flex-1 min-w-[7rem] max-w-[min(100%,calc(100%-11rem))] overflow-hidden"
+          >
+            <Logo className="max-w-full h-auto" width={600} height={150} priority />
           </Link>
           {/* Single right cluster: desktop nav + one wallet button (avoid duplicate WalletMultiButton). Mobile: menu + wallet. */}
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">

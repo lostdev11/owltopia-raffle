@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { Coins } from 'lucide-react'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
+import { Logo } from '@/components/Logo'
 import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
 
 /** Repeated "owltopia" lines for matrix-style scroll (duplicated for seamless loop) */
@@ -117,7 +118,17 @@ export function EnterOwlTopia() {
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
         <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">
-        <div className="w-full max-w-sm animate-enter-fade-in" style={fadeIn('0.1s')}>
+        {/* In-flow brand above announcements (all breakpoints; matches landing layout). */}
+        <div className="w-full flex justify-center animate-enter-fade-in" style={fadeIn('0.05s')}>
+          <Link
+            href="/"
+            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center"
+            aria-label="Owltopia home"
+          >
+            <Logo className="w-full max-w-full h-auto" width={600} height={150} />
+          </Link>
+        </div>
+        <div className="w-full max-w-sm animate-enter-fade-in" style={fadeIn('0.15s')}>
           <AnnouncementsBlock placement="hero" variant="hero" />
         </div>
 
