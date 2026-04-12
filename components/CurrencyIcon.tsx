@@ -5,7 +5,7 @@ import Image from 'next/image'
 import type { RaffleCurrency } from '@/lib/types'
 
 interface CurrencyIconProps {
-  currency: 'SOL' | 'USDC' | 'OWL'
+  currency: 'SOL' | 'USDC' | 'OWL' | 'TRQ'
   className?: string
   size?: number
 }
@@ -16,6 +16,7 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
   const [tryPng, setTryPng] = useState(false)
   const [owlImageError, setOwlImageError] = useState(false)
   const [owlTrySvg, setOwlTrySvg] = useState(false)
+  const [trqImageError, setTrqImageError] = useState(false)
 
   if (currency === 'SOL') {
     return (
@@ -87,6 +88,28 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
               setOwlImageError(true)
             }
           }}
+        />
+      </div>
+    )
+  }
+
+  if (currency === 'TRQ') {
+    if (trqImageError) {
+      return (
+        <span className={`inline-flex items-center justify-center rounded-sm bg-muted px-1 font-bold ${className}`} style={{ fontSize: size * 0.45 }} title="TRQ">
+          T
+        </span>
+      )
+    }
+    return (
+      <div className={`inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+        <Image
+          src="/trq-prize.svg"
+          alt="TRQ"
+          width={size}
+          height={size}
+          className="object-contain"
+          onError={() => setTrqImageError(true)}
         />
       </div>
     )

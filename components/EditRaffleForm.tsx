@@ -21,7 +21,6 @@ import {
   getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
-import { isOwlEnabled } from '@/lib/tokens'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
   computeNftMinTicketsFromFloorAndTicket,
@@ -1105,16 +1104,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
+                      {raffle.currency === 'OWL' && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                        </p>
+                      )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency}
+                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
-                        {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
                       </select>
                     </div>
                     <div className="space-y-2">
@@ -1204,16 +1207,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
+                      {raffle.currency === 'OWL' && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                        </p>
+                      )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency}
+                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
-                        {(isOwlEnabled() || raffle.currency === 'OWL') && <option value="OWL">OWL</option>}
                       </select>
                     </div>
                   </div>

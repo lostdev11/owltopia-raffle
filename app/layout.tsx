@@ -17,6 +17,7 @@ import { ErrorHandler } from '@/components/ErrorHandler'
 import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
+import { MaintenanceBanner } from '@/components/MaintenanceBanner'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -238,6 +239,7 @@ export default function RootLayout({
         <SolflareTouchFix />
         <WalletContextProvider>
           <div className="flex flex-col min-h-screen">
+            <MaintenanceBanner />
             <ConditionalHeader />
             <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
               <PageTransition>{children}</PageTransition>

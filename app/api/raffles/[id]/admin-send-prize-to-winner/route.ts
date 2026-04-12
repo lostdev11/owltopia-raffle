@@ -6,7 +6,9 @@ import {
   transferCompressedPrizeToWinner,
   transferMplCorePrizeToWinner,
   transferNftPrizeToWinner,
+  transferPartnerSplPrizeToWinner,
 } from '@/lib/raffles/prize-escrow'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,9 +36,10 @@ export async function POST(
     if (!raffle) {
       return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
     }
-    if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address) {
+    const isPartnerSpl = isPartnerSplPrizeRaffle(raffle)
+    if (!isPartnerSpl && (raffle.prize_type !== 'nft' || !raffle.nft_mint_address)) {
       return NextResponse.json(
-        { error: 'This raffle does not have an NFT prize to send' },
+        { error: 'This raffle does not have an escrow prize to send' },
         { status: 400 }
       )
     }
@@ -72,14 +75,16 @@ export async function POST(
 
     await clearNftPrizeClaimLock(raffleId)
 
-    let transferResult =
-      raffle.prize_standard === 'mpl_core'
+    let transferResult = isPartnerSpl
+      ? await transferPartnerSplPrizeToWinner(raffleId)
+      : raffle.prize_standard === 'mpl_core'
         ? await transferMplCorePrizeToWinner(raffleId)
         : raffle.prize_standard === 'compressed'
           ? await transferCompressedPrizeToWinner(raffleId)
           : await transferNftPrizeToWinner(raffleId)
 
     if (
+      !isPartnerSpl &&
       raffle.prize_standard !== 'mpl_core' &&
       raffle.prize_standard !== 'compressed' &&
       (!transferResult.ok || !transferResult.signature) &&

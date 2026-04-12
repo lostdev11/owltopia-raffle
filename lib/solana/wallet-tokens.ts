@@ -120,6 +120,68 @@ export async function getNftHolderInWallet(
 }
 
 /**
+ * SPL / Token-2022 token account that holds at least `minAmount` raw units of `mint` (not delegated).
+ */
+export async function getFungibleHolderInWallet(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey,
+  minAmount: bigint,
+  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
+): Promise<NftHolderInWallet | null> {
+  if (minAmount <= 0n) return null
+  const mintStr = mint.toBase58()
+  try {
+    const mintFilterResponse = await connection.getParsedTokenAccountsByOwner(
+      owner,
+      { mint },
+      commitment
+    )
+    for (const { pubkey, account } of mintFilterResponse.value) {
+      const info = account.data?.parsed?.info
+      if (!info || (info.mint as string) !== mintStr) continue
+      const programOwner = account.owner
+      const isTokenProgram = programOwner.equals(TOKEN_PROGRAM_ID)
+      const isToken2022 = programOwner.equals(TOKEN_2022_PROGRAM_ID)
+      if (!isTokenProgram && !isToken2022) continue
+      const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+      const amount = info.tokenAmount?.amount
+      const amountStr = typeof amount === 'string' ? amount : String(amount ?? '0')
+      let amountBn: bigint
+      try {
+        amountBn = BigInt(amountStr)
+      } catch {
+        continue
+      }
+      if (amountBn < minAmount) continue
+      const delegate = info.delegate
+      if (delegate && typeof delegate === 'string' && delegate !== '') continue
+      return { tokenProgram, tokenAccount: pubkey }
+    }
+  } catch {
+    // fall through to ATA checks
+  }
+  for (const programId of NFT_TOKEN_PROGRAM_IDS) {
+    try {
+      const ata = await getAssociatedTokenAddress(
+        mint,
+        owner,
+        false,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      const acc = await getAccount(connection, ata, commitment, programId)
+      if (acc.amount >= minAmount && !acc.delegate) {
+        return { tokenProgram: programId, tokenAccount: ata }
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+/**
  * Detect which token program holds this mint in the given wallet (SPL Token or Token-2022).
  * Prefer getNftHolderInWallet when you need to transfer (so you can use the actual token account).
  */

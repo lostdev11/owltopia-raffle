@@ -81,7 +81,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
@@ -112,6 +112,8 @@ import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -315,7 +317,10 @@ export function RaffleDetailClient({
   // Pending escrow deposit should be based on escrow verification state, not solely on `raffle.status`,
   // since status can drift (e.g. restore/maintenance) while `is_active` remains false.
   const isPendingDraft =
-    raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
+    !raffle.prize_deposited_at &&
+    !raffle.is_active &&
+    ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
+      isPartnerSplPrizeRaffle(raffle))
   // Delay "entered" card styling to avoid flash when wallet/entries resolve on open (mobile)
   const [showEnteredStyle, setShowEnteredStyle] = useState(false)
   useEffect(() => {
@@ -1726,21 +1731,25 @@ export function RaffleDetailClient({
   }, [raffle.id, router])
 
   const showDepositEscrow =
-    raffle.prize_type === 'nft' &&
     !raffle.prize_deposited_at &&
-    !!raffle.nft_mint_address &&
-    (isCreator || isAdmin)
+    (isCreator || isAdmin) &&
+    ((raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()) || isPartnerSplPrizeRaffle(raffle))
 
   const handleTransferNftToEscrow = useCallback(async () => {
-    if (!publicKey || !escrowAddress || !raffle.nft_mint_address) return
-    const transferAssetId =
-      typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
+    if (!publicKey || !escrowAddress) return
+    if (!isPartnerSplPrizeRaffle(raffle) && !raffle.nft_mint_address?.trim()) return
+
+    const partnerRaffle = isPartnerSplPrizeRaffle(raffle)
+    const partnerPrizeMint = partnerRaffle ? getPartnerPrizeMintForCurrency(raffle.prize_currency) : null
+    const transferAssetId = partnerRaffle
+      ? partnerPrizeMint || ''
+      : typeof raffle.nft_token_id === 'string' && raffle.nft_token_id.trim()
         ? raffle.nft_token_id.trim()
-        : raffle.nft_mint_address
+        : (raffle.nft_mint_address as string)
     const depositLogCtx = {
       raffleId: raffle.id,
       raffleSlug: raffle.slug,
-      nftMint: raffle.nft_mint_address,
+      nftMint: partnerRaffle ? partnerPrizeMint || '' : (raffle.nft_mint_address as string),
       transferAssetId,
       escrowAddress,
       fromWallet: publicKey.toBase58(),
@@ -1870,7 +1879,84 @@ export function RaffleDetailClient({
 
     try {
       try {
-      const mint = new PublicKey(raffle.nft_mint_address)
+      if (partnerRaffle) {
+        const prizeCur = String(raffle.prize_currency || '').trim().toUpperCase()
+        const mintStr = getPartnerPrizeMintForCurrency(raffle.prize_currency)
+        const rawNeed = humanPartnerPrizeToRawUnits(raffle.prize_currency, raffle.prize_amount)
+        if (rawNeed == null || !mintStr) {
+          setDepositEscrowError(`This raffle has an invalid ${prizeCur || 'token'} prize amount.`)
+          return
+        }
+        const mintPk = new PublicKey(mintStr)
+        const escrowPubkey = new PublicKey(escrowAddress)
+        logEscrowDepositPath(depositLogCtx, 'spl_transfer', { note: `partner_${prizeCur}` })
+        let resolvedHolder = await getFungibleHolderInWallet(
+          connection,
+          mintPk,
+          publicKey,
+          rawNeed,
+          'processed'
+        )
+        for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+          await new Promise((r) => setTimeout(r, 700))
+          resolvedHolder = await getFungibleHolderInWallet(
+            connection,
+            mintPk,
+            publicKey,
+            rawNeed,
+            'processed'
+          )
+        }
+        if (!resolvedHolder) {
+          setDepositEscrowError(
+            `Your wallet does not show enough ${prizeCur} for this prize yet, or the token account is delegated. Top up ${prizeCur} or fix the account and try again.`
+          )
+          setShowManualEscrowFallback(true)
+          return
+        }
+        const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
+        const escrowAta = await getAssociatedTokenAddress(
+          mintPk,
+          escrowPubkey,
+          false,
+          tokenProgram,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        const tx = new Transaction()
+        try {
+          await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
+        } catch {
+          tx.add(
+            createAssociatedTokenAccountInstruction(
+              publicKey,
+              escrowAta,
+              escrowPubkey,
+              mintPk,
+              tokenProgram,
+              ASSOCIATED_TOKEN_PROGRAM_ID
+            )
+          )
+        }
+        tx.add(
+          createTransferInstruction(
+            sourceTokenAccount,
+            escrowAta,
+            publicKey,
+            rawNeed,
+            [],
+            tokenProgram
+          )
+        )
+        if (!sendTransaction) {
+          setDepositEscrowError('Connect a wallet that can sign token transfers.')
+          return
+        }
+        const sig = await sendTransaction(tx, connection)
+        await afterWalletSignature(sig, 'spl_transfer')
+        return
+      }
+
+      const mint = new PublicKey(raffle.nft_mint_address as string)
       const escrowPubkey = new PublicKey(escrowAddress)
       // Prefer DB value; otherwise default to SPL/Token-2022 path first and fall back to Mpl Core.
       const standard: PrizeStandard = raffle.prize_standard ?? 'spl'
@@ -2014,7 +2100,7 @@ export function RaffleDetailClient({
           const sig = await transferTokenMetadataNftToEscrow({
             connection,
             wallet: walletAdapter,
-            mintAddress: raffle.nft_mint_address,
+            mintAddress: raffle.nft_mint_address as string,
             escrowAddress,
           })
           await afterWalletSignature(sig, 'token_metadata')
@@ -2097,6 +2183,9 @@ export function RaffleDetailClient({
     raffle.title,
     raffle.nft_mint_address,
     raffle.nft_token_id,
+    raffle.prize_type,
+    raffle.prize_currency,
+    raffle.prize_amount,
     raffle.prize_standard,
     connection,
     sendTransaction,
@@ -2597,16 +2686,35 @@ export function RaffleDetailClient({
               <CardHeader>
                 <CardTitle className="text-lg">Prize in escrow required</CardTitle>
                 <CardDescription>
-                  <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
-                  transaction succeeds, we <strong>automatically verify</strong> that the prize is in escrow and activate
-                  the raffle—watch the progress popup. Use <strong>Verify deposit</strong> only if you sent the NFT
-                  manually or the automatic step timed out. <strong>No listing fee</strong> — only network fees. The
-                  prize stays locked until a winner claims it.
+                  {isPartnerSplPrizeRaffle(raffle) ? (
+                    <>
+                      <strong>Flow:</strong> Transfer your{' '}
+                      <strong>{String(raffle.prize_currency || '').trim().toUpperCase() || 'Token'} prize</strong> to escrow
+                      (your wallet will ask you to sign one SPL transaction). After it confirms, we{' '}
+                      <strong>automatically verify</strong> the deposit and activate the raffle. Use <strong>Verify deposit</strong>{' '}
+                      if you sent the prize manually — you must paste the transaction signature (deposit_tx). Tickets are still
+                      paid in {raffle.currency}.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
+                      transaction succeeds, we <strong>automatically verify</strong> that the prize is in escrow and activate
+                      the raffle—watch the progress popup. Use <strong>Verify deposit</strong> only if you sent the NFT
+                      manually or the automatic step timed out. <strong>No listing fee</strong> — only network fees. The
+                      prize stays locked until a winner claims it.
+                    </>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {!connected && (
-                  <p className="text-sm text-amber-600 dark:text-amber-400">Connect your wallet to transfer the NFT to escrow.</p>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    Connect your wallet to transfer the{' '}
+                    {isPartnerSplPrizeRaffle(raffle)
+                      ? `${String(raffle.prize_currency || '').trim().toUpperCase() || 'token'} prize`
+                      : 'NFT'}{' '}
+                    to escrow.
+                  </p>
                 )}
                 {!escrowAddress && connected && (
                   <p className="text-sm text-muted-foreground">Preparing…</p>
@@ -2628,13 +2736,19 @@ export function RaffleDetailClient({
                               : depositEscrowProgressStep === 'chain'
                                 ? 'Confirming on-chain…'
                                 : 'Approve in wallet…'
-                          : 'Transfer NFT to escrow'}
+                          : isPartnerSplPrizeRaffle(raffle)
+                            ? `Transfer ${String(raffle.prize_currency || '').trim().toUpperCase() || 'token'} to escrow`
+                            : 'Transfer NFT to escrow'}
                       </Button>
                       <Button
                         variant="outline"
                         onClick={handleVerifyPrizeDeposit}
                         disabled={depositVerifyLoading}
-                        title="Checks on-chain that the NFT is in platform escrow, then activates the raffle"
+                        title={
+                          isPartnerSplPrizeRaffle(raffle)
+                            ? 'Requires deposit transaction signature in the field below for token prizes'
+                            : 'Checks on-chain that the NFT is in platform escrow, then activates the raffle'
+                        }
                       >
                         {depositVerifyLoading
                           ? depositVerifyAttemptLabel.current > 0
@@ -2645,7 +2759,17 @@ export function RaffleDetailClient({
                     </div>
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                       <p className="text-xs text-muted-foreground">
-                        If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit. Phantom and similar wallets sometimes show &quot;No balance changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change; if you trust this site, confirming is still normal.
+                        {isPartnerSplPrizeRaffle(raffle) ? (
+                          <>
+                            If you send the prize token manually, paste the transaction signature below and tap Verify deposit.
+                            The verify step checks that your tx credits the escrow token account for at least the declared prize
+                            amount.
+                          </>
+                        ) : (
+                          <>
+                            If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit. Phantom and similar wallets sometimes show &quot;No balance changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change; if you trust this site, confirming is still normal.
+                          </>
+                        )}
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         <code className="text-xs break-all rounded bg-background/80 px-2 py-1">{escrowAddress}</code>

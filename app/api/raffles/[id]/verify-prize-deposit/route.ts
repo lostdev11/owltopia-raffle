@@ -7,8 +7,10 @@ import {
   getEscrowTokenAccountForMint,
   isMplCoreAssetInEscrow,
 } from '@/lib/raffles/prize-escrow'
-import { getMintFromDepositTx } from '@/lib/solana/parse-deposit-tx'
+import { getMintFromDepositTx, sumIncomingSplToEscrowForMint } from '@/lib/solana/parse-deposit-tx'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { isPartnerSplPrizeRaffle, getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
+import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { requireSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -59,18 +61,82 @@ export async function POST(
         { status: 403 }
       )
     }
-    if (raffle.prize_type !== 'nft') {
-      return NextResponse.json(
-        { error: 'This raffle does not have an NFT prize' },
-        { status: 400 }
-      )
-    }
     if (raffle.prize_deposited_at) {
       return NextResponse.json({
         success: true,
         alreadyVerified: true,
         prizeDepositedAt: raffle.prize_deposited_at,
       })
+    }
+
+    // Partner SPL (fungible) prizes: require deposit_tx; sum incoming transfers to escrow for the mint.
+    if (isPartnerSplPrizeRaffle(raffle)) {
+      if (!depositTx) {
+        return NextResponse.json(
+          { error: 'Partner token prizes require the deposit transaction signature in the request body (deposit_tx).' },
+          { status: 400 }
+        )
+      }
+      const partner = getPartnerPrizeTokenByCurrency(raffle.prize_currency)
+      if (!partner) {
+        return NextResponse.json({ error: 'Unsupported partner prize currency' }, { status: 400 })
+      }
+      const requiredRaw = humanPartnerPrizeToRawUnits(raffle.prize_currency, raffle.prize_amount)
+      if (requiredRaw == null) {
+        return NextResponse.json({ error: 'Invalid prize amount for partner token verify' }, { status: 400 })
+      }
+      const escrowAddress = getPrizeEscrowPublicKey()
+      if (!escrowAddress) {
+        return NextResponse.json({ error: 'Prize escrow is not configured' }, { status: 503 })
+      }
+      const connection = getSolanaConnection()
+      const incoming = await sumIncomingSplToEscrowForMint(
+        connection,
+        depositTx,
+        escrowAddress,
+        partner.mint
+      )
+      if (incoming == null || incoming < requiredRaw) {
+        return NextResponse.json(
+          {
+            error:
+              incoming == null
+                ? 'Could not read this deposit transaction, or it does not transfer the partner token to escrow.'
+                : `Deposit transfer sum (${incoming.toString()} raw units) is below the declared prize (${requiredRaw.toString()} raw units).`,
+          },
+          { status: 400 }
+        )
+      }
+      try {
+        const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(partner.mint))
+        if (frozen.blocked) {
+          return NextResponse.json(
+            { error: frozen.error, frozenEscrowDiagnostics: frozen.diagnostics },
+            { status: 400 }
+          )
+        }
+      } catch {
+        // ignore invalid mint
+      }
+      const now = new Date().toISOString()
+      await updateRaffle(id, {
+        prize_deposited_at: now,
+        is_active: true,
+        prize_deposit_tx: depositTx,
+        prize_standard: partner.tokenProgram === 'token2022' ? ('token2022' as const) : ('spl' as const),
+      } as any)
+      return NextResponse.json({
+        success: true,
+        prizeDepositedAt: now,
+        prizeDepositTx: depositTx,
+      })
+    }
+
+    if (raffle.prize_type !== 'nft') {
+      return NextResponse.json(
+        { error: 'This raffle does not have a prize that uses escrow verification' },
+        { status: 400 }
+      )
     }
 
     // Mpl Core prizes: check asset owner first. If that fails, fall through — DB may say Core while

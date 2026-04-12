@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import {
   transferNftPrizeToCreator,
+  transferPartnerSplPrizeToCreator,
   PRIZE_RETURN_REASONS,
   type PrizeReturnReason,
 } from '@/lib/raffles/prize-escrow'
+import { getRaffleById } from '@/lib/db/raffles'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -59,7 +62,13 @@ export async function POST(
       )
     }
 
-    const result = await transferNftPrizeToCreator(raffleId, reason as PrizeReturnReason)
+    const raffle = await getRaffleById(raffleId)
+    if (!raffle) {
+      return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
+    }
+    const result = isPartnerSplPrizeRaffle(raffle)
+      ? await transferPartnerSplPrizeToCreator(raffleId, reason as PrizeReturnReason)
+      : await transferNftPrizeToCreator(raffleId, reason as PrizeReturnReason)
 
     if (!result.ok) {
       const status = result.error?.includes('not found') ? 404 : 400

@@ -18,6 +18,7 @@ import {
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -47,7 +48,9 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
   }
   const now = new Date()
   if (new Date(raffle.end_time) > now) return null
-  if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) return null
+  const needsPrizeEscrow =
+    (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+  if (needsPrizeEscrow) return null
   return processOneEndedRaffle(raffle)
 }
 
@@ -67,7 +70,7 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
             success: false,
             winnerWallet: null,
             error:
-              'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; NFT prize is returned to the creator when escrow transfer succeeds.',
+              'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
           }
         }
         // Threshold not met: extend raffle by its original duration (or 7 days fallback)

@@ -169,6 +169,11 @@ const config: Config = {
           from: { opacity: '1', transform: 'translateY(14px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        /* Site-wide maintenance banner (duplicate line; -50% = one loop) */
+        'maintenance-marquee': {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -186,6 +191,7 @@ const config: Config = {
         'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
         'button-glow-pulse': 'button-glow-pulse 2s ease-in-out infinite',
         'raffle-scroll-in': 'raffle-scroll-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards',
+        'maintenance-marquee': 'maintenance-marquee 42s linear infinite',
       },
     },
   },

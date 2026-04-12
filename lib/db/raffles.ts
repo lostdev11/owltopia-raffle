@@ -19,6 +19,7 @@ import {
   rafflesRestStatusInClause,
 } from '@/lib/raffles/list-query-statuses'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -1176,6 +1177,43 @@ export async function findNonTerminalRaffleByCreatorAndPrizeMint(
   }
 }
 
+/**
+ * Fungible partner prizes share one escrow ATA per mint — only one non-terminal TRQ (etc.) raffle
+ * per creator avoids ambiguous escrow attribution.
+ */
+export async function findNonTerminalPartnerCryptoRaffleByCreator(
+  creatorWallet: string,
+  prizeCurrency: string
+): Promise<{ id: string; slug: string; status: RaffleStatus } | null> {
+  const w = creatorWallet?.trim()
+  const cur = prizeCurrency?.trim().toUpperCase()
+  if (!w || !cur) return null
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select('id, slug, status')
+    .eq('creator_wallet', w)
+    .eq('prize_type', 'crypto')
+    .eq('prize_currency', cur)
+    .or(
+      `status.in.(${NON_TERMINAL_DUPLICATE_STATUSES.join(',')}),status.is.null`
+    )
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('findNonTerminalPartnerCryptoRaffleByCreator error:', error)
+    throw new Error(error.message)
+  }
+  if (!data) return null
+  return {
+    id: String(data.id),
+    slug: String(data.slug),
+    status: (data.status as RaffleStatus) ?? null,
+  }
+}
+
 export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>) {
   const hasImageFallbackColumn = await checkImageFallbackColumnApplied()
   // Build insert object conditionally to handle cases where NFT columns might not exist
@@ -1246,6 +1284,9 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.funds_escrow_address_snapshot = raffle.funds_escrow_address_snapshot
   }
   insertData.prize_deposit_tx = raffle.prize_deposit_tx ?? null
+  if (raffle.prize_standard != null && raffle.prize_standard !== undefined) {
+    insertData.prize_standard = raffle.prize_standard
+  }
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
@@ -1465,11 +1506,10 @@ export async function maybeCompleteRaffleAfterClaims(raffleId: string): Promise<
   if (!raffle || raffle.status !== 'successful_pending_claims') return
   if (!raffle.creator_claimed_at) return
 
-  const needsWinnerNftClaim =
-    raffle.prize_type === 'nft' &&
-    !!raffle.nft_mint_address?.trim() &&
-    !raffle.prize_returned_at
-  if (needsWinnerNftClaim && !raffle.nft_transfer_transaction) return
+  const needsWinnerPrizeClaim =
+    !raffle.prize_returned_at &&
+    ((raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()) || isPartnerSplPrizeRaffle(raffle))
+  if (needsWinnerPrizeClaim && !raffle.nft_transfer_transaction) return
 
   const now = new Date().toISOString()
   const { error } = await getSupabaseAdmin()
@@ -1728,8 +1768,10 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const filteredRaffles = raffles.filter(raffle => {
     const endTime = new Date(raffle.end_time)
     if (endTime > now) return false
-    // NFT raffles must not progress to winner selection until the prize is deposited to escrow.
-    if (raffle.prize_type === 'nft' && !raffle.prize_deposited_at) return false
+    // NFT / partner SPL prizes must not progress until escrow deposit is verified.
+    const prizeEscrowPending =
+      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+    if (prizeEscrowPending) return false
     return true
   })
 

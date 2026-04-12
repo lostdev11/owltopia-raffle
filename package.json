@@ -16,6 +16,7 @@
     "lint": "next lint",
     "normalize:nft-economics": "node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs",
     "check:nft-economics": "node --env-file=.env.local scripts/check-nft-economics-compliance.mjs",
+    "audit:owl-tiers": "npx --yes tsx scripts/audit-owl-holder-fee-tiers.ts",
     "postinstall": "node scripts/postinstall-next-global-error.js"
   },
   "dependencies": {

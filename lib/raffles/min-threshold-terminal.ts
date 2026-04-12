@@ -1,5 +1,6 @@
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
-import { transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
+import { transferNftPrizeToCreator, transferPartnerSplPrizeToCreator } from '@/lib/raffles/prize-escrow'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 /**
  * After min_tickets was not met at end and the raffle has used its allowed deadline extension:
@@ -21,9 +22,17 @@ export async function finalizeMinThresholdTerminalFailure(raffleId: string): Pro
     !raffle.prize_returned_at &&
     !(raffle.nft_transfer_transaction?.trim())
 
-  if (!shouldAutoReturnNft) return {}
+  const shouldAutoReturnPartnerSpl =
+    isPartnerSplPrizeRaffle(raffle) &&
+    !!raffle.prize_deposited_at &&
+    !raffle.prize_returned_at &&
+    !(raffle.nft_transfer_transaction?.trim())
 
-  const result = await transferNftPrizeToCreator(raffleId, 'min_threshold_not_met')
+  if (!shouldAutoReturnNft && !shouldAutoReturnPartnerSpl) return {}
+
+  const result = shouldAutoReturnPartnerSpl
+    ? await transferPartnerSplPrizeToCreator(raffleId, 'min_threshold_not_met')
+    : await transferNftPrizeToCreator(raffleId, 'min_threshold_not_met')
   if (!result.ok) {
     console.error(
       `[finalizeMinThresholdTerminalFailure] NFT return failed for raffle ${raffleId}:`,

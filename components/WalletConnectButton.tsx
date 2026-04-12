@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, isSolflareBrowser, redirectToPhantomBrowser, redirectToSolflareBrowser } from '@/lib/utils'
+import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 
 export function WalletConnectButton() {
   const { publicKey, connected, disconnect, wallet, connecting } = useWallet()
@@ -539,40 +540,6 @@ export function WalletConnectButton() {
     sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect, clearWalletSelectionStorage])
 
-  // When connected, clicking should show wallet info or disconnect option
-  // Don't force reconnection - let wallet stay connected until user disconnects
-  useEffect(() => {
-    if (!mounted || !buttonRef.current || !connected) {
-      return
-    }
-
-    const timeoutId = setTimeout(() => {
-      const button = buttonRef.current?.querySelector('button')
-      if (!button) {
-        return
-      }
-
-      // When connected, clicking disconnects (standard behavior)
-      // Don't force reconnection - wallet will remember connection until disconnect
-      const handleClick = (e: Event) => {
-        e.preventDefault()
-        e.stopPropagation()
-        handleDisconnect()
-      }
-
-      // Use capture phase to intercept before WalletMultiButton's handler
-      button.addEventListener('click', handleClick, { capture: true })
-
-      return () => {
-        button.removeEventListener('click', handleClick, { capture: true })
-      }
-    }, 200)
-    
-    return () => {
-      clearTimeout(timeoutId)
-    }
-  }, [mounted, connected, handleDisconnect])
-
   // Ensure button is properly initialized and clickable when not connected
   useEffect(() => {
     if (!mounted || !buttonRef.current || connected) {
@@ -709,9 +676,33 @@ export function WalletConnectButton() {
             setVisible(true)
           }
         }}
-        aria-label={connected ? 'Disconnect wallet' : 'Connect wallet'}
+        aria-label={connected ? 'Wallet and balances' : 'Connect wallet'}
       >
-        {mounted ? (
+        {!mounted ? (
+          <button
+            className="wallet-adapter-button"
+            style={{
+              backgroundColor: 'rgb(34, 197, 94)',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+            disabled
+          >
+            Loading...
+          </button>
+        ) : connected && publicKey ? (
+          <ConnectedWalletBalances
+            walletIcon={(wallet?.adapter as { icon?: string } | undefined)?.icon}
+            walletName={wallet?.adapter?.name ?? 'Wallet'}
+            publicKey={publicKey}
+            onDisconnect={handleDisconnect}
+          />
+        ) : (
           <>
             <WalletMultiButton key={remountKey} />
             {showCancelButton && connecting && !connected && (
@@ -730,23 +721,6 @@ export function WalletConnectButton() {
               </Button>
             )}
           </>
-        ) : (
-          <button
-            className="wallet-adapter-button"
-            style={{
-              backgroundColor: 'rgb(34, 197, 94)',
-              color: 'white',
-              border: 'none',
-              padding: '12px 24px',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 500,
-            }}
-            disabled
-          >
-            Loading...
-          </button>
         )}
       </div>
       

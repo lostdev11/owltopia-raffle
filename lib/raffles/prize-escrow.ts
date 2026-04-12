@@ -41,6 +41,8 @@ import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-c
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Raffle } from '@/lib/types'
+import { getPartnerPrizeTokenByCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 
 const NFT_AMOUNT = 1n
 
@@ -412,6 +414,120 @@ export async function payoutSplFromEscrowToRecipient(
 }
 
 /**
+ * SPL / Token-2022 fungible: send `amount` raw units from prize escrow to recipient.
+ * Skips Token Metadata (NFT) transfer — plain SPL transfer only.
+ */
+export async function payoutFungibleSplFromEscrowToRecipient(
+  mintAddress: string,
+  recipientWallet: string,
+  amount: bigint
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  if (amount <= 0n) {
+    return { ok: false, error: 'Payout amount must be positive.' }
+  }
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  const connection = getSolanaConnection()
+  const mint = new PublicKey(mintAddress)
+  const recipientPubkey = new PublicKey(recipientWallet)
+
+  const tokenProgram = await getEscrowTokenProgramForMint(mint, keypair.publicKey)
+  if (!tokenProgram) {
+    return { ok: false, error: 'Escrow does not hold this token (tried SPL Token and Token-2022)' }
+  }
+
+  const sourceAta = await getAssociatedTokenAddress(
+    mint,
+    keypair.publicKey,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  const destAta = await getAssociatedTokenAddress(
+    mint,
+    recipientPubkey,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  try {
+    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    if (sourceAcc.amount < amount) {
+      return {
+        ok: false,
+        error: 'Escrow token account balance is below the prize amount on-chain.',
+      }
+    }
+  } catch {
+    return {
+      ok: false,
+      error: 'Could not read the escrow token account for this mint on-chain.',
+    }
+  }
+
+  let destAccountExists = false
+  try {
+    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
+    destAccountExists = true
+    if (destAcc.isFrozen) {
+      return {
+        ok: false,
+        error:
+          'Your wallet already has a token account for this mint that is frozen, so the prize cannot be sent there.',
+      }
+    }
+  } catch {
+    destAccountExists = false
+  }
+
+  const tx = new Transaction()
+  if (!destAccountExists) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        keypair.publicKey,
+        destAta,
+        recipientPubkey,
+        mint,
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+  tx.add(
+    createTransferInstruction(
+      sourceAta,
+      destAta,
+      keypair.publicKey,
+      amount,
+      [],
+      tokenProgram
+    )
+  )
+
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+    tx.recentBlockhash = blockhash
+    tx.feePayer = keypair.publicKey
+    tx.sign(keypair)
+
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
+
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: humanizeSplPrizeTransferError(message) }
+  }
+}
+
+/**
  * MPL Core: transfer asset from prize escrow to recipient. No database updates.
  */
 export async function payoutMplCoreFromEscrowToRecipient(
@@ -711,6 +827,82 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
   if (!transferResult.ok || !transferResult.signature) {
     if (!transferResult.ok) {
       console.error(`Prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // ignore
+      }
+    }
+    return transferResult
+  }
+
+  await persistWinnerTransferSig(transferResult.signature)
+  return { ok: true, signature: transferResult.signature }
+}
+
+/**
+ * Partner SPL fungible prize: transfer declared `prize_amount` from escrow to winner.
+ * Reuses `nft_transfer_transaction` / claim lock columns like NFT prizes.
+ */
+export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise<{
+  ok: boolean
+  signature?: string
+  error?: string
+}> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+  if (!isPartnerSplPrizeRaffle(raffle) || !raffle.winner_wallet) {
+    return { ok: false, error: 'Raffle is not a partner token prize raffle or has no winner' }
+  }
+  if (raffle.nft_transfer_transaction) {
+    return { ok: true, signature: raffle.nft_transfer_transaction }
+  }
+
+  const partner = getPartnerPrizeTokenByCurrency(raffle.prize_currency)
+  if (!partner) {
+    return { ok: false, error: 'Unknown partner prize currency' }
+  }
+  const raw = humanPartnerPrizeToRawUnits(raffle.prize_currency, raffle.prize_amount)
+  if (raw == null) {
+    return { ok: false, error: 'Invalid prize amount for this partner token' }
+  }
+
+  const persistWinnerTransferSig = async (sig: string) => {
+    try {
+      await getSupabaseAdmin()
+        .from('raffles')
+        .update({
+          nft_transfer_transaction: sig,
+          nft_claim_locked_at: null,
+          nft_claim_locked_wallet: null,
+        })
+        .eq('id', raffleId)
+    } catch (dbErr) {
+      console.error(`Failed to persist partner SPL prize transfer for raffle ${raffleId}:`, dbErr)
+      try {
+        await getSupabaseAdmin()
+          .from('raffles')
+          .update({ nft_claim_locked_at: null, nft_claim_locked_wallet: null })
+          .eq('id', raffleId)
+      } catch {
+        // swallow
+      }
+    }
+  }
+
+  const transferResult = await payoutFungibleSplFromEscrowToRecipient(
+    partner.mint,
+    raffle.winner_wallet.trim(),
+    raw
+  )
+  if (!transferResult.ok || !transferResult.signature) {
+    if (!transferResult.ok) {
+      console.error(`Partner SPL prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
       try {
         await getSupabaseAdmin()
           .from('raffles')
@@ -1185,6 +1377,56 @@ export async function transferNftPrizeToCreator(
 }
 
 /**
+ * Return a verified partner SPL fungible prize from escrow to the creator.
+ */
+export async function transferPartnerSplPrizeToCreator(
+  raffleId: string,
+  reason: PrizeReturnReason
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+  if (!isPartnerSplPrizeRaffle(raffle)) {
+    return { ok: false, error: 'Raffle is not a partner token prize raffle' }
+  }
+  if (!raffle.prize_deposited_at) {
+    return {
+      ok: false,
+      error:
+        'Prize deposit is not verified for this raffle. Cannot return from escrow before a verified deposit.',
+    }
+  }
+  const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  if (!creatorWallet) {
+    return { ok: false, error: 'Raffle has no creator wallet to return the prize to' }
+  }
+  if (raffle.nft_transfer_transaction) {
+    return { ok: false, error: 'Prize was already sent to winner; cannot return to creator' }
+  }
+  if (raffle.prize_returned_at) {
+    return { ok: true, signature: raffle.prize_return_tx ?? undefined }
+  }
+
+  const partner = getPartnerPrizeTokenByCurrency(raffle.prize_currency)
+  if (!partner) {
+    return { ok: false, error: 'Unknown partner prize currency' }
+  }
+  const raw = humanPartnerPrizeToRawUnits(raffle.prize_currency, raffle.prize_amount)
+  if (raw == null) {
+    return { ok: false, error: 'Invalid prize amount for this partner token' }
+  }
+
+  const transferResult = await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
+  if (!transferResult.ok || !transferResult.signature) {
+    return transferResult
+  }
+
+  await persistPrizeReturnToCreator(raffleId, reason, transferResult.signature)
+  return { ok: true, signature: transferResult.signature }
+}
+
+/**
  * Check if the escrow still holds this raffle's NFT prize.
  * SPL / Token-2022: ATA balance; MPL Core: asset owner; compressed: Bubblegum leaf owner (DAS).
  * Legacy rows may omit `prize_standard` — after SPL fails, tries Core then compressed (same as verify-prize-deposit).
@@ -1194,6 +1436,45 @@ export type NftEscrowHoldProbe = Pick<
   Raffle,
   'prize_type' | 'nft_mint_address' | 'nft_token_id' | 'prize_standard'
 >
+
+/**
+ * Whether prize escrow still holds at least the verified partner SPL prize balance.
+ */
+export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{ holds: boolean; error?: string }> {
+  if (!isPartnerSplPrizeRaffle(raffle)) {
+    return { holds: false, error: 'Not a partner SPL prize raffle' }
+  }
+  const partner = getPartnerPrizeTokenByCurrency(raffle.prize_currency)
+  if (!partner) {
+    return { holds: false, error: 'Unknown partner prize currency' }
+  }
+  const raw = humanPartnerPrizeToRawUnits(raffle.prize_currency, raffle.prize_amount)
+  if (raw == null) {
+    return { holds: false, error: 'Invalid prize amount' }
+  }
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { holds: false, error: 'Prize escrow not configured' }
+  }
+  const connection = getSolanaConnection()
+  const mint = new PublicKey(partner.mint)
+  const tokenProgram =
+    partner.tokenProgram === 'token2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+  try {
+    const ata = await getAssociatedTokenAddress(
+      mint,
+      keypair.publicKey,
+      false,
+      tokenProgram,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+    const acc = await getAccount(connection, ata, 'confirmed', tokenProgram)
+    return { holds: acc.amount >= raw }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { holds: false, error: msg }
+  }
+}
 
 export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{ holds: boolean; error?: string }> {
   if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address) {

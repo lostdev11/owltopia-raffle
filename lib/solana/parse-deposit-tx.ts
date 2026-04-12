@@ -62,6 +62,106 @@ function getAccountKeys(tx: TxResponse): string[] {
  * Extract the mint address from a transaction that transferred an NFT to the escrow.
  * Returns null if the tx doesn't contain a token transfer to escrow, or parsing fails.
  */
+function readU64Le(buf: Uint8Array, offset: number): bigint | null {
+  if (offset + 8 > buf.length) return null
+  let x = 0n
+  for (let i = 0; i < 8; i++) x |= BigInt(buf[offset + i]!) << (8n * BigInt(i))
+  return x
+}
+
+/**
+ * Sum SPL / Token-2022 transfer amounts in a tx that credit the escrow ATA for `expectedMint`.
+ * Used for fungible partner prizes (deposit tx is required for verify).
+ */
+export async function sumIncomingSplToEscrowForMint(
+  connection: Connection,
+  signature: string,
+  escrowOwnerAddress: string,
+  expectedMint: string
+): Promise<bigint | null> {
+  const escrow = escrowOwnerAddress.trim()
+  const wantMint = expectedMint.trim()
+  if (!escrow || !wantMint) return null
+
+  let tx: TxResponse
+  try {
+    tx = (await connection.getTransaction(signature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    })) as TxResponse
+  } catch {
+    return null
+  }
+  if (!tx?.transaction?.message) return null
+
+  const accountKeys = getAccountKeys(tx)
+  if (accountKeys.length === 0) return null
+
+  const instructions = tx.transaction?.message?.instructions ?? []
+  const innerInstructions = (tx.meta as { innerInstructions?: Array<{ instructions: typeof instructions }> })?.innerInstructions ?? []
+
+  const allInstructions: Array<{ programIdIndex: number; accounts: number[]; data: string }> = []
+  for (const ix of instructions) {
+    allInstructions.push({
+      programIdIndex: ix.programIdIndex ?? 0,
+      accounts: ix.accounts ?? [],
+      data: ix.data ?? '',
+    })
+  }
+  for (const inner of innerInstructions) {
+    for (const ix of inner.instructions ?? []) {
+      allInstructions.push({
+        programIdIndex: ix.programIdIndex ?? 0,
+        accounts: ix.accounts ?? [],
+        data: ix.data ?? '',
+      })
+    }
+  }
+
+  let total = 0n
+
+  for (const ix of allInstructions) {
+    const programId = accountKeys[ix.programIdIndex]
+    if (!programId || !TOKEN_PROGRAM_IDS.includes(programId)) continue
+    if (ix.accounts.length < 3 || !ix.data) continue
+
+    const tokenProgram = programId === TOKEN_2022_PROGRAM_ID.toBase58() ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+
+    let disc: number | null
+    try {
+      const bytes = bs58.decode(ix.data)
+      disc = bytes.length > 0 ? bytes[0]! : null
+    } catch {
+      disc = null
+    }
+    if (disc !== TRANSFER && disc !== TRANSFER_CHECKED) continue
+
+    const destIndex = disc === TRANSFER_CHECKED ? 2 : 1
+    const destTokenAccount = accountKeys[ix.accounts[destIndex]!]
+    if (!destTokenAccount) continue
+
+    let amount: bigint | null
+    try {
+      const b = bs58.decode(ix.data)
+      amount = readU64Le(b, 1)
+    } catch {
+      amount = null
+    }
+    if (amount == null || amount <= 0n) continue
+
+    try {
+      const accountInfo = await getAccount(connection, new PublicKey(destTokenAccount), 'confirmed', tokenProgram)
+      if (accountInfo.owner.toBase58() !== escrow) continue
+      if (accountInfo.mint.toBase58() !== wantMint) continue
+      total += amount
+    } catch {
+      continue
+    }
+  }
+
+  return total > 0n ? total : null
+}
+
 export async function getMintFromDepositTx(
   connection: Connection,
   signature: string,

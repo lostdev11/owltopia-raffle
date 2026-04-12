@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -13,7 +13,7 @@ import {
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
@@ -44,7 +44,6 @@ import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
-import { isOwlEnabled } from '@/lib/tokens'
 import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
@@ -53,9 +52,21 @@ import {
   computeNftMinTicketsFromFloorAndTicket,
   parseNftFloorPrice,
   parseNftTicketPrice,
+  validateNftMaxTickets,
+  validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
+import {
+  getPartnerPrizeListingImageUrl,
+  getPartnerPrizeMintForCurrency,
+  getPartnerPrizeTokenByCurrency,
+  isPartnerPrizeCurrency,
+  PARTNER_OWL_PRIZE_UI_ENABLED,
+} from '@/lib/partner-prize-tokens'
+import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+
+type TokenPrizeCurrency = 'SOL' | 'USDC' | 'TRQ'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -92,7 +103,10 @@ export function CreateRaffleForm() {
   }>({ open: false, title: '', description: '' })
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
-  const prizeType = 'nft' as const
+  const [prizeMode, setPrizeMode] = useState<'nft' | 'token'>('nft')
+  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<TokenPrizeCurrency>('TRQ')
+  const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
+  const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
   const [walletTokens, setWalletTokens] = useState<WalletToken[] | null>(null)
@@ -106,6 +120,16 @@ export function CreateRaffleForm() {
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
   const [ticketPrice, setTicketPrice] = useState('')
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (prizeMode === 'token') {
+      setSelectedNft(null)
+      setImageUrl(getPartnerPrizeListingImageUrl(tokenPrizeCurrency))
+      setFloorPrice('')
+      setFloorPriceCurrency(null)
+      setFloorPriceAutoNote(null)
+    }
+  }, [prizeMode, tokenPrizeCurrency])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -139,7 +163,35 @@ export function CreateRaffleForm() {
     }
   }, [connected, publicKey])
 
+  /** Suggest ticket = floor ÷ default ticket count (editable after). */
+  const suggestTicketFromFloor = useCallback((floorValue: string) => {
+    const trimmed = floorValue.trim()
+    if (!trimmed) {
+      setTicketPrice('')
+      return
+    }
+    const floor = parseFloat(trimmed)
+    if (Number.isFinite(floor) && floor > 0) {
+      const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
+      if (!Number.isFinite(calculated)) {
+        setTicketPrice('')
+        return
+      }
+      const formatted =
+        calculated >= 1
+          ? calculated.toFixed(2)
+          : calculated >= 0.01
+            ? calculated.toFixed(4)
+            : calculated.toFixed(6)
+      setTicketPrice(formatted)
+    }
+  }, [])
+
   useEffect(() => {
+    if (prizeMode !== 'nft') {
+      setFloorPriceLoading(false)
+      return
+    }
     if (!selectedNft) {
       setFloorPrice('')
       setFloorPriceLoading(false)
@@ -199,7 +251,94 @@ export function CreateRaffleForm() {
         if (!cancelled) setFloorPriceLoading(false)
       })
     return () => { cancelled = true }
-  }, [selectedNft?.mint])
+  }, [selectedNft?.mint, prizeMode, suggestTicketFromFloor])
+
+  useEffect(() => {
+    if (prizeMode !== 'token') return
+    const amt = partnerPrizeAmount.trim()
+    if (!amt || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
+      setFloorPriceLoading(false)
+      setFloorPriceAutoNote(null)
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setFloorPriceLoading(true)
+      setFloorPriceAutoNote(null)
+      const q = new URLSearchParams({
+        prizeCurrency: tokenPrizeCurrency,
+        prizeAmount: amt,
+        listingCurrency: raffleCurrency,
+      })
+      fetch(`/api/partner-token/suggested-floor?${q.toString()}`, { credentials: 'include' })
+        .then((r) => {
+          if (cancelled) return undefined
+          return r.json().then((data) => ({ ok: r.ok, data }))
+        })
+        .then(
+          (
+            wrapped:
+              | {
+                  ok: boolean
+                  data: {
+                    floorPrice?: string | null
+                    listingCurrency?: string | null
+                    message?: string | null
+                    hint?: string | null
+                  }
+                }
+              | undefined
+          ) => {
+            if (cancelled) return
+            if (!wrapped) {
+              setFloorPriceAutoNote(
+                'Could not load a spot price. Enter the prize value manually in your ticket currency.'
+              )
+              return
+            }
+            const { ok, data } = wrapped
+            if (!ok) {
+              setFloorPriceAutoNote(
+                typeof data?.message === 'string' && data.message
+                  ? data.message
+                  : 'Could not load a spot price. Enter the prize value manually in your ticket currency.'
+              )
+              return
+            }
+            if (data?.floorPrice != null && data.floorPrice !== '') {
+              const fp = String(data.floorPrice)
+              setFloorPrice(fp)
+              setFloorPriceCurrency(data.listingCurrency ?? raffleCurrency)
+              suggestTicketFromFloor(fp)
+              const hint = typeof data?.hint === 'string' && data.hint.trim() ? data.hint.trim() : null
+              const msg = typeof data?.message === 'string' && data.message ? data.message : null
+              setFloorPriceAutoNote(hint ?? msg)
+            } else if (typeof data?.message === 'string' && data.message) {
+              setFloorPriceAutoNote(data.message)
+            } else {
+              setFloorPriceAutoNote(
+                'No automatic price for this token pair. Enter a fair floor price in your ticket currency.'
+              )
+            }
+          }
+        )
+        .catch(() => {
+          if (!cancelled) {
+            setFloorPriceAutoNote(
+              'Could not load a spot price. Enter the prize value manually in your ticket currency.'
+            )
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setFloorPriceLoading(false)
+        })
+    }, 450)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      setFloorPriceLoading(false)
+    }
+  }, [prizeMode, tokenPrizeCurrency, partnerPrizeAmount, raffleCurrency, suggestTicketFromFloor])
 
   const derivedDrawGoal = useMemo(() => {
     const fp = parseNftFloorPrice(floorPrice)
@@ -208,29 +347,11 @@ export function CreateRaffleForm() {
     return computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
   }, [floorPrice, ticketPrice])
 
-  /** Suggest ticket = floor ÷ default ticket count (editable after). */
-  const suggestTicketFromFloor = (floorValue: string) => {
-    const trimmed = floorValue.trim()
-    if (!trimmed) {
-      setTicketPrice('')
-      return
-    }
-    const floor = parseFloat(trimmed)
-    if (Number.isFinite(floor) && floor > 0) {
-      const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
-      if (!Number.isFinite(calculated)) {
-        setTicketPrice('')
-        return
-      }
-      const formatted =
-        calculated >= 1
-          ? calculated.toFixed(2)
-          : calculated >= 0.01
-            ? calculated.toFixed(4)
-            : calculated.toFixed(6)
-      setTicketPrice(formatted)
-    }
-  }
+  const partnerMinTicketsParsed = useMemo(() => {
+    const n = parseInt(String(partnerMinTickets).trim(), 10)
+    if (!Number.isFinite(n) || n < 1) return null
+    return n
+  }, [partnerMinTickets])
 
   const loadWalletAssets = async () => {
     if (!publicKey) return
@@ -317,13 +438,28 @@ export function CreateRaffleForm() {
       return
     }
 
-    if (!selectedNft) {
+    const formData = new FormData(e.currentTarget)
+    const isPartner = prizeMode === 'token'
+
+    if (!isPartner && !selectedNft) {
       alert('Please select an NFT from your wallet for an NFT raffle.')
       focusFormField('nft-prize-section')
       return
     }
 
-    const formData = new FormData(e.currentTarget)
+    if (isPartner) {
+      const tokenMeta = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)
+      const amt = partnerPrizeAmount.trim()
+      if (!amt || !tokenMeta || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
+        const dec = tokenMeta?.decimals ?? 9
+        alert(
+          `Enter a valid ${tokenPrizeCurrency} prize amount (positive number, up to ${dec} decimal place${dec === 1 ? '' : 's'}).`
+        )
+        focusFormField('partner_prize_amount')
+        return
+      }
+    }
+
     const titleTrimmed = ((formData.get('title') as string) ?? '').trim()
     if (!titleTrimmed) {
       alert('Please enter a raffle title (scroll up if you don’t see the title field).')
@@ -342,17 +478,19 @@ export function CreateRaffleForm() {
       return
     }
 
-    try {
-      const mintPk = new PublicKey(selectedNft.mint)
-      const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
-      if (stakedCheck && 'delegated' in stakedCheck && stakedCheck.delegated) {
-        alert(
-          'This NFT is staked or delegated. Unstake it before creating a raffle—it cannot be sent to escrow while staked.'
-        )
-        return
+    if (!isPartner && selectedNft) {
+      try {
+        const mintPk = new PublicKey(selectedNft.mint)
+        const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
+        if (stakedCheck && 'delegated' in stakedCheck && stakedCheck.delegated) {
+          alert(
+            'This NFT is staked or delegated. Unstake it before creating a raffle—it cannot be sent to escrow while staked.'
+          )
+          return
+        }
+      } catch {
+        // Mint parse or RPC: server will re-check on create
       }
-    } catch {
-      // Mint parse or RPC: server will re-check on create
     }
 
     // Validate end after start and 7-day maximum (browser HTML5 checks are skipped — see form noValidate)
@@ -394,7 +532,23 @@ export function CreateRaffleForm() {
       return
     }
 
-    const minDrawGoal = computeNftMinTicketsFromFloorAndTicket(fpNum, tpParsed.value)
+    let drawGoalTickets: number
+    if (isPartner) {
+      if (partnerMinTicketsParsed == null) {
+        alert('Enter draw goal (minimum tickets) as a positive whole number.')
+        focusFormField('partner_min_tickets')
+        return
+      }
+      drawGoalTickets = partnerMinTicketsParsed
+    } else {
+      drawGoalTickets = computeNftMinTicketsFromFloorAndTicket(fpNum, tpParsed.value)
+    }
+    const capTickets = validateNftMinTicketsNotOverCap(drawGoalTickets)
+    if (!capTickets.ok) {
+      alert(capTickets.error)
+      focusFormField(isPartner ? 'partner_min_tickets' : 'floor_price')
+      return
+    }
     const maxTicketsRaw = ((formData.get('max_tickets') as string) ?? '').trim()
     let maxTicketsParsed: number | null = null
     if (maxTicketsRaw) {
@@ -404,13 +558,21 @@ export function CreateRaffleForm() {
         focusFormField('max_tickets')
         return
       }
-      if (maxTicketsParsed < minDrawGoal) {
+      if (maxTicketsParsed < drawGoalTickets) {
         alert(
-          `Max tickets must be at least ${minDrawGoal} (draw goal from floor ÷ ticket price), or leave empty for unlimited.`
+          isPartner
+            ? `Max tickets must be at least ${drawGoalTickets} (your draw goal), or leave empty for unlimited.`
+            : `Max tickets must be at least ${drawGoalTickets} (draw goal from floor ÷ ticket price), or leave empty for unlimited.`
         )
         focusFormField('max_tickets')
         return
       }
+    }
+    const maxCheck = validateNftMaxTickets(maxTicketsParsed, drawGoalTickets)
+    if (!maxCheck.ok) {
+      alert(maxCheck.error)
+      focusFormField('max_tickets')
+      return
     }
 
     const descriptionValue = ((formData.get('description') as string) ?? '').trim()
@@ -447,12 +609,18 @@ export function CreateRaffleForm() {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, ''),
       wallet_address: publicKey.toBase58(),
-      prize_type: prizeType,
+      prize_type: isPartner ? 'crypto' : 'nft',
     }
-    data.nft_mint_address = selectedNft.mint
-    data.nft_token_id = selectedNft.mint
-    data.nft_metadata_uri = selectedNft.metadataUri ?? undefined
-    data.nft_collection_name = selectedNft.collectionName ?? undefined
+    if (isPartner) {
+      data.prize_currency = tokenPrizeCurrency
+      data.prize_amount = parseFloat(partnerPrizeAmount.trim())
+      data.min_tickets = partnerMinTicketsParsed
+    } else {
+      data.nft_mint_address = selectedNft!.mint
+      data.nft_token_id = selectedNft!.mint
+      data.nft_metadata_uri = selectedNft!.metadataUri ?? undefined
+      data.nft_collection_name = selectedNft!.collectionName ?? undefined
+    }
     try {
       const response = await fetch('/api/raffles', {
         method: 'POST',
@@ -464,7 +632,13 @@ export function CreateRaffleForm() {
       if (response.ok) {
         const raffle = await response.json()
         // NFT raffles: one flow — sign transfer to escrow, retry verify until RPC catches up, then redirect
-        if (raffle.prize_type === 'nft' && raffle.nft_mint_address && publicKey && (sendTransaction || wallet?.adapter)) {
+        if (
+          raffle.prize_type === 'nft' &&
+          raffle.nft_mint_address &&
+          selectedNft &&
+          publicKey &&
+          (sendTransaction || wallet?.adapter)
+        ) {
           try {
             setCreateStep('signing')
             setEscrowProgress({
@@ -767,6 +941,147 @@ export function CreateRaffleForm() {
             )
             router.push(`/raffles/${raffle.slug}?deposit=1`)
           }
+        } else if (raffle.prize_type === 'crypto' && isPartnerPrizeCurrency(raffle.prize_currency)) {
+          const prizeCur = String(raffle.prize_currency || '').trim().toUpperCase()
+          const prizeMint = getPartnerPrizeMintForCurrency(prizeCur)
+          if (!publicKey || !sendTransaction || !prizeMint) {
+            router.push(`/raffles/${raffle.slug}?deposit=1`)
+          } else {
+            try {
+              setCreateStep('signing')
+              setEscrowProgress({
+                open: true,
+                title: 'Finish creating your raffle',
+                description:
+                  `Your raffle was saved. Loading escrow settings — your wallet will open next to send the ${prizeCur} prize.`,
+              })
+              const mintPk = new PublicKey(prizeMint)
+              const rawNeed = humanPartnerPrizeToRawUnits(prizeCur, raffle.prize_amount)
+              if (rawNeed == null) {
+                alert(`Invalid ${prizeCur} prize amount from server. Open your raffle to try deposit again.`)
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+              const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
+              const escrowData = await escrowRes.json().catch(() => ({}))
+              const escrowAddress = escrowData?.address
+              if (!escrowRes.ok || !escrowAddress) {
+                const errMsg =
+                  typeof escrowData?.error === 'string' && escrowData.error.trim()
+                    ? escrowData.error.trim()
+                    : 'Prize escrow is not configured on this server.'
+                alert(`${errMsg} Your raffle is saved as a draft.`)
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+              const escrowPubkey = new PublicKey(escrowAddress)
+              setEscrowProgress((p) => ({
+                ...p,
+                description: `Checking your ${prizeCur} balance — please wait.`,
+              }))
+              let resolvedHolder = await getFungibleHolderInWallet(
+                connection,
+                mintPk,
+                publicKey,
+                rawNeed,
+                'processed'
+              )
+              for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+                await new Promise((r) => setTimeout(r, 700))
+                resolvedHolder = await getFungibleHolderInWallet(
+                  connection,
+                  mintPk,
+                  publicKey,
+                  rawNeed,
+                  'processed'
+                )
+              }
+              if (!resolvedHolder) {
+                alert(
+                  `Your wallet does not show enough ${prizeCur} for this prize yet (or the account is delegated). Top up ${prizeCur}, then open your raffle to deposit.`
+                )
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+              const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
+              const escrowAta = await getAssociatedTokenAddress(
+                mintPk,
+                escrowPubkey,
+                false,
+                tokenProgram,
+                ASSOCIATED_TOKEN_PROGRAM_ID
+              )
+              const tx = new Transaction()
+              try {
+                await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
+              } catch {
+                tx.add(
+                  createAssociatedTokenAccountInstruction(
+                    publicKey,
+                    escrowAta,
+                    escrowPubkey,
+                    mintPk,
+                    tokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
+                  )
+                )
+              }
+              tx.add(
+                createTransferInstruction(
+                  sourceTokenAccount,
+                  escrowAta,
+                  publicKey,
+                  rawNeed,
+                  [],
+                  tokenProgram
+                )
+              )
+              setEscrowProgress((p) => ({
+                ...p,
+                description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
+              }))
+              const depositSig = await sendTransaction(tx, connection)
+              await confirmSignatureSuccessOnChain(connection, depositSig)
+              setEscrowProgress((p) => ({
+                ...p,
+                description:
+                  'Confirming on-chain and verifying your raffle. This can take up to a minute on slow networks — please wait.',
+              }))
+              const verifyResult = await verifyPrizeDepositWithRetries(raffle.id, { depositTx: depositSig })
+              if (!verifyResult.ok && verifyResult.status === 401) {
+                alert(
+                  'Your session expired. Sign in from your dashboard, then open your raffle and tap Verify deposit if needed.'
+                )
+                router.push('/dashboard')
+                return
+              }
+              if (!verifyResult.ok) {
+                if (isEscrowSplPrizeFrozenVerifyError(verifyResult.error)) {
+                  const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+                  const d = verifyResult.frozenEscrowDiagnostics
+                  const links = d
+                    ? `\n\nEscrow token account:\nhttps://solscan.io/account/${encodeURIComponent(d.escrowTokenAccount)}${q}`
+                    : ''
+                  alert((verifyResult.error || 'Verify failed') + links)
+                } else {
+                  alert(
+                    'Your transfer may have succeeded, but the server has not confirmed escrow yet. Open your raffle and tap Verify deposit if needed.'
+                  )
+                }
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
+              router.push(`/raffles/${raffle.slug}`)
+            } catch (transferErr) {
+              console.error('Partner token transfer to escrow failed:', transferErr)
+              alert(
+                transferErr instanceof Error
+                  ? transferErr.message
+                  : 'Transfer to escrow failed. You can complete it on the raffle page.'
+              )
+              router.push(`/raffles/${raffle.slug}?deposit=1`)
+            }
+          }
         } else if (raffle.prize_type === 'nft' && raffle.nft_mint_address) {
           router.push(`/raffles/${raffle.slug}?deposit=1`)
         } else {
@@ -808,7 +1123,7 @@ export function CreateRaffleForm() {
         <CardHeader>
           <CardTitle>Create a raffle</CardTitle>
           <CardDescription>
-            Connect your wallet to create an NFT raffle. Sign in from your dashboard first so we can save your raffle.
+            Connect your wallet to create a raffle (NFT or token prize: SOL, USDC, TRQ). Sign in from your dashboard first so we can save your listing.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -859,7 +1174,110 @@ export function CreateRaffleForm() {
             />
           </div>
 
+          <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+            <Label className="text-base">Prize type</Label>
+            <p className="text-xs text-muted-foreground">
+              Tickets are always paid in SOL or USDC. Choose whether the <strong>prize</strong> is an NFT
+              or a token (SOL, USDC, or TRQ — same prize escrow as NFTs). <strong>OWL</strong> as a prize token is off for now.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <Button
+                type="button"
+                variant={prizeMode === 'nft' ? 'default' : 'outline'}
+                className="min-h-[44px] touch-manipulation justify-start"
+                onClick={() => setPrizeMode('nft')}
+              >
+                NFT prize
+              </Button>
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-[240px]">
+                <Label htmlFor="token_prize_select" className="text-sm font-medium">
+                  tokens
+                </Label>
+                <select
+                  id="token_prize_select"
+                  value={prizeMode === 'nft' ? '' : tokenPrizeCurrency}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === 'OWL') return
+                    if (v === 'SOL' || v === 'USDC' || v === 'TRQ') {
+                      setPrizeMode('token')
+                      setTokenPrizeCurrency(v)
+                    }
+                  }}
+                  className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  aria-label="Token prize type"
+                >
+                  {/* Placeholder when NFT prize is selected — hidden so it never appears in the open list */}
+                  <option value="" disabled hidden>
+                    &nbsp;
+                  </option>
+                  <option value="SOL">SOL</option>
+                  <option value="USDC">USDC</option>
+                  <option value="TRQ">TRQ</option>
+                  <option value="OWL" disabled={!PARTNER_OWL_PRIZE_UI_ENABLED}>
+                    OWL
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {prizeMode === 'token' && (
+            <div
+              id="partner-prize-section"
+              tabIndex={-1}
+              className="space-y-3 rounded-md border bg-muted/30 p-4 border-emerald-500/30"
+            >
+              <Label>
+                {tokenPrizeCurrency} prize amount *
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {tokenPrizeCurrency === 'SOL'
+                  ? 'Mainnet wrapped SOL (wSOL) in your wallet — you sign one SPL transfer of this amount to the platform escrow after the raffle is saved.'
+                  : tokenPrizeCurrency === 'USDC'
+                    ? 'Mainnet USDC only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
+                    : 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'}
+              </p>
+              <Input
+                id="partner_prize_amount"
+                name="partner_prize_amount"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder={
+                  tokenPrizeCurrency === 'USDC'
+                    ? 'e.g. 100 or 50.25'
+                    : 'e.g. 1000 or 250.5'
+                }
+                className="min-h-[44px] touch-manipulation text-base sm:text-sm"
+                value={partnerPrizeAmount}
+                onChange={(e) => setPartnerPrizeAmount(e.target.value)}
+              />
+              <div className="space-y-2">
+                <Label htmlFor="partner_min_tickets">Draw goal (min tickets) *</Label>
+                <Input
+                  id="partner_min_tickets"
+                  name="partner_min_tickets"
+                  type="number"
+                  min={1}
+                  step={1}
+                  required
+                  placeholder="e.g. 50"
+                  className="min-h-[44px] touch-manipulation text-base sm:text-sm"
+                  value={partnerMinTickets}
+                  onChange={(e) => setPartnerMinTickets(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The raffle can draw once this many confirmed tickets are sold (same rule as NFT raffles, but you set the
+                  number explicitly).
+                </p>
+              </div>
+            </div>
+          )}
+
           <div id="nft-prize-section" tabIndex={-1} className="space-y-3 rounded-md border bg-muted/30 p-4">
+              {prizeMode === 'nft' ? (
+                <>
               <Label>NFT prize (from your wallet)</Label>
               <p className="text-xs text-muted-foreground">
                 Load your wallet to see NFTs you can use as the raffle prize. The raffle image is taken from the NFT you select.
@@ -975,14 +1393,30 @@ export function CreateRaffleForm() {
                   </div>
                 </>
               )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Switch to &quot;NFT prize&quot; above to pick an NFT from your wallet.
+                </p>
+              )}
             </div>
 
           <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Fair listing</p>
             <p className="mt-1">
-              Floor price is the advertised prize value and revenue threshold. Set ticket price yourself; we suggest
-              floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} as a starting point. Draw goal (min tickets) is computed as
-              round(floor ÷ ticket price) — you cannot set it separately. Misleading listings may be removed.
+              {prizeMode === 'token' ? (
+                <>
+                  Floor price is the advertised prize value in your <strong>ticket currency</strong> (SOL or USDC) and
+                  drives the revenue bar. The token you pick here is only the on-chain prize in escrow. Set ticket price and draw goal yourself;
+                  misleading listings may be removed.
+                </>
+              ) : (
+                <>
+                  Floor price is the advertised prize value and revenue threshold. Set ticket price yourself; we suggest
+                  floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} as a starting point. Draw goal (min tickets) is computed as
+                  round(floor ÷ ticket price) — you cannot set it separately. Misleading listings may be removed.
+                </>
+              )}
             </p>
           </div>
 
@@ -999,7 +1433,6 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
-                {isOwlEnabled() && <option value="OWL">OWL</option>}
               </select>
               <p className="text-xs text-muted-foreground">
                 Choose the currency buyers pay in. Floor price must be in this same currency.
@@ -1030,20 +1463,31 @@ export function CreateRaffleForm() {
               id="max_tickets"
               name="max_tickets"
               type="number"
-              min={derivedDrawGoal ?? 1}
+              min={prizeMode === 'token' ? (partnerMinTicketsParsed ?? 1) : (derivedDrawGoal ?? 1)}
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
             <p className="text-xs text-muted-foreground">
-              Optional cap on total tickets. If set, must be at least your draw goal ({derivedDrawGoal ?? '—'}).
+              Optional cap on total tickets. If set, must be at least your draw goal (
+              {prizeMode === 'token' ? (partnerMinTicketsParsed ?? '—') : (derivedDrawGoal ?? '—')}).
             </p>
           </div>
 
           <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Draw goal (computed):</span>{' '}
-            {derivedDrawGoal != null
-              ? `${derivedDrawGoal} tickets (round(floor ÷ ticket price))`
-              : 'Enter floor and ticket price to see draw goal.'}{' '}
+            <span className="font-medium text-foreground">Draw goal:</span>{' '}
+            {prizeMode === 'token' ? (
+              <>
+                {partnerMinTicketsParsed != null
+                  ? `${partnerMinTicketsParsed} tickets (you set this above)`
+                  : 'Enter draw goal (min tickets) for token prize raffles.'}{' '}
+              </>
+            ) : (
+              <>
+                {derivedDrawGoal != null
+                  ? `${derivedDrawGoal} tickets (round(floor ÷ ticket price))`
+                  : 'Enter floor and ticket price to see draw goal.'}{' '}
+              </>
+            )}
             The raffle can draw once this many confirmed tickets are sold.
           </div>
 
@@ -1064,7 +1508,9 @@ export function CreateRaffleForm() {
               <Label htmlFor="floor_price">
                 Floor price (prize value) *
                 {floorPriceLoading && (
-                  <span className="ml-2 text-muted-foreground font-normal">Checking marketplace…</span>
+                  <span className="ml-2 text-muted-foreground font-normal">
+                    {prizeMode === 'token' ? 'Fetching spot price…' : 'Checking marketplace…'}
+                  </span>
                 )}
               </Label>
               <Input
@@ -1083,9 +1529,19 @@ export function CreateRaffleForm() {
                 required
               />
               <p className="text-xs text-muted-foreground">
-                We try to load a suggested price from the marketplace when you pick an NFT; if none appears, enter a fair
-                value in <strong className="font-medium text-foreground">{raffleCurrency}</strong>. This sets the revenue
-                threshold for rev share.
+                {prizeMode === 'token' ? (
+                  <>
+                    When the prize is a token, we estimate advertised value from a <strong>spot price</strong> (Jupiter,
+                    with Helius as backup) using your <strong>prize amount</strong> and <strong>ticket currency</strong>{' '}
+                    below. Estimates can be wrong on thin markets — always verify before publishing.
+                  </>
+                ) : (
+                  <>
+                    We try to load a suggested price from the marketplace when you pick an NFT; if none appears, enter a
+                    fair value in <strong className="font-medium text-foreground">{raffleCurrency}</strong>.
+                  </>
+                )}{' '}
+                This sets the revenue threshold for rev share.
               </p>
               {floorPriceCurrency &&
                 floorPrice &&

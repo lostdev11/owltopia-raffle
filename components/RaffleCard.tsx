@@ -26,6 +26,7 @@ import {
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
@@ -238,7 +239,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const isActive = section !== undefined
     ? section === 'active'
     : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
-  const isPendingDraft = raffle.status === 'draft' && raffle.prize_type === 'nft' && !raffle.prize_deposited_at && !raffle.is_active
+  const isPendingDraft =
+    raffle.status === 'draft' &&
+    !raffle.prize_deposited_at &&
+    !raffle.is_active &&
+    ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
+      isPartnerSplPrizeRaffle(raffle))
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
@@ -1009,16 +1015,30 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 text-[11px] leading-tight mb-0.5 sm:mb-1 mt-0">
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
-                <span>
+                <span className="inline-flex items-center gap-1">
                   <span className="text-muted-foreground">Prize: </span>
-                  <span className="font-semibold">{raffle.prize_amount} {raffle.prize_currency}</span>
+                  <span className="font-semibold inline-flex items-center gap-1">
+                    {raffle.prize_amount} {raffle.prize_currency}
+                    {(() => {
+                      const u = raffle.prize_currency.trim().toUpperCase()
+                      const cur =
+                        u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
+                          ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
+                          : null
+                      return cur ? <CurrencyIcon currency={cur} size={12} className="inline-block" /> : null
+                    })()}
+                  </span>
                 </span>
               )}
               <span className="flex items-center gap-1">
                 <span className="text-muted-foreground">Price: </span>
                 <span className="font-semibold flex items-center gap-1">
                   {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={12} className="inline-block" />
+                  <CurrencyIcon
+                    currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
+                    size={12}
+                    className="inline-block"
+                  />
                 </span>
               </span>
               {totalTicketsSold > 0 && (
@@ -1345,10 +1365,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               <CardContent className="p-4 pt-0">
                 <div className={classes.content}>
                   {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center gap-2">
                       <span className="text-muted-foreground">Prize</span>
-                      <span className="font-semibold">
+                      <span className="font-semibold inline-flex items-center gap-1.5">
                         {raffle.prize_amount} {raffle.prize_currency}
+                        {(() => {
+                          const u = raffle.prize_currency.trim().toUpperCase()
+                          const cur =
+                            u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
+                              ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
+                              : null
+                          return cur ? <CurrencyIcon currency={cur} size={16} className="inline-block" /> : null
+                        })()}
                       </span>
                     </div>
                   )}

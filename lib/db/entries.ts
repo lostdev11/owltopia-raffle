@@ -550,6 +550,7 @@ export interface RaffleInfoForEntry {
   winner_selected_at: string | null
   ticket_payments_to_funds_escrow?: boolean | null
   prize_type?: string | null
+  prize_currency?: string | null
   nft_mint_address?: string | null
   nft_transfer_transaction?: string | null
   prize_deposited_at?: string | null
@@ -582,7 +583,7 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
     .from('entries')
     .select(`
       *,
-      raffles (id, slug, title, end_time, status, winner_wallet, winner_selected_at, ticket_payments_to_funds_escrow, prize_type, nft_mint_address, nft_transfer_transaction, prize_deposited_at, prize_returned_at, prize_standard)
+      raffles (id, slug, title, end_time, status, winner_wallet, winner_selected_at, ticket_payments_to_funds_escrow, prize_type, prize_currency, nft_mint_address, nft_transfer_transaction, prize_deposited_at, prize_returned_at, prize_standard)
     `)
     .eq('wallet_address', walletAddress)
     .order('created_at', { ascending: false })

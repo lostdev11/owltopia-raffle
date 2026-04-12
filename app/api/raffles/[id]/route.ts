@@ -3,9 +3,14 @@ import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from 
 import type { Raffle } from '@/lib/types'
 import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
-import { isOwlEnabled } from '@/lib/tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
-import { checkEscrowHoldsNft, transferNftPrizeToCreator } from '@/lib/raffles/prize-escrow'
+import {
+  checkEscrowHoldsNft,
+  checkEscrowHoldsPartnerSplPrize,
+  transferNftPrizeToCreator,
+  transferPartnerSplPrizeToCreator,
+} from '@/lib/raffles/prize-escrow'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import {
   parseNftFloorPrice,
   parseNftTicketPrice,
@@ -411,14 +416,15 @@ export async function PATCH(
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
     const isNft = existingRaffle.prize_type === 'nft'
 
-    // Validate currency: SOL, USDC, and OWL when enabled
-    const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
-    if (body.currency && !validCurrencies.includes(body.currency)) {
-      const message = body.currency === 'OWL' && !isOwlEnabled()
-        ? 'OWL is not enabled on this server. Set NEXT_PUBLIC_OWL_MINT_ADDRESS in your environment to use OWL, or choose SOL or USDC.'
-        : `Currency must be one of: ${validCurrencies.join(', ')}`
+    // Ticket currency: SOL or USDC only
+    const validCurrencies = ['USDC', 'SOL']
+    const requestedCurrency =
+      typeof body.currency === 'string' && body.currency.trim()
+        ? body.currency.trim().toUpperCase()
+        : ''
+    if (requestedCurrency && !validCurrencies.includes(requestedCurrency)) {
       return NextResponse.json(
-        { error: message },
+        { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
         { status: 400 }
       )
     }
@@ -583,7 +589,12 @@ export async function PATCH(
       description:
         body.description !== undefined ? (body.description || null) : undefined,
       ticket_price: body.ticket_price,
-      currency: body.currency,
+      currency:
+        body.currency === undefined
+          ? undefined
+          : typeof body.currency === 'string' && body.currency.trim()
+            ? body.currency.trim().toUpperCase()
+            : body.currency,
       max_tickets: body.max_tickets !== undefined ? maxTickets : undefined,
       min_tickets: minTicketsInBody ? minTickets : undefined,
       start_time: body.start_time,
@@ -757,18 +768,16 @@ export async function PATCH(
           }
 
           if (body.currency !== undefined && String(body.currency ?? '').trim() !== '') {
-            if (!validCurrencies.includes(body.currency)) {
+            const cur = String(body.currency).trim().toUpperCase()
+            if (!validCurrencies.includes(cur)) {
               return NextResponse.json(
                 {
-                  error:
-                    body.currency === 'OWL' && !isOwlEnabled()
-                      ? 'OWL is not enabled on this server.'
-                      : `Currency must be one of: ${validCurrencies.join(', ')}`,
+                  error: `Currency must be one of: ${validCurrencies.join(', ')}`,
                 },
                 { status: 400 }
               )
             }
-            updates.currency = body.currency
+            updates.currency = cur
           }
 
           updates.floor_price = fp.string
@@ -932,21 +941,38 @@ export async function DELETE(
         )
       }
       escrowCurrentlyHoldsPrize = escrowCheck.holds
+    } else if (isPartnerSplPrizeRaffle(existingRaffle)) {
+      const escrowCheck = await checkEscrowHoldsPartnerSplPrize(existingRaffle)
+      const deposited = Boolean(existingRaffle.prize_deposited_at)
+      const released =
+        Boolean(existingRaffle.prize_returned_at) ||
+        Boolean(existingRaffle.nft_transfer_transaction)
+      if (!escrowCheck.holds && deposited && !released && escrowCheck.error) {
+        return NextResponse.json(
+          {
+            error: `Escrow wallet check failed. Verify escrow state before deleting: ${escrowCheck.error}`,
+          },
+          { status: 400 }
+        )
+      }
+      escrowCurrentlyHoldsPrize = escrowCheck.holds
     }
 
     // Safety net: only require return when escrow wallet currently holds the NFT.
     // DB flags can be stale; live escrow state is authoritative.
     const requiresPrizeReturnBeforeDelete =
-      existingRaffle.prize_type === 'nft' &&
+      (existingRaffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(existingRaffle)) &&
       escrowCurrentlyHoldsPrize &&
       !existingRaffle.prize_returned_at &&
       !existingRaffle.nft_transfer_transaction
     if (requiresPrizeReturnBeforeDelete) {
-      const returnResult = await transferNftPrizeToCreator(raffleId, 'cancelled')
+      const returnResult = isPartnerSplPrizeRaffle(existingRaffle)
+        ? await transferPartnerSplPrizeToCreator(raffleId, 'cancelled')
+        : await transferNftPrizeToCreator(raffleId, 'cancelled')
       if (!returnResult.ok) {
         return NextResponse.json(
           {
-            error: `Cannot delete raffle until NFT prize is returned to creator: ${returnResult.error ?? 'return failed'}`,
+            error: `Cannot delete raffle until the prize is returned to creator: ${returnResult.error ?? 'return failed'}`,
           },
           { status: 400 }
         )

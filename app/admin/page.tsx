@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -67,6 +67,14 @@ interface LiveRaffleXTemplate {
   label: string
   text: string
   intentUrl: string
+}
+
+function isoToLocalDatetimeValue(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 interface RafflePendingSummary {
@@ -157,6 +165,22 @@ export default function AdminDashboardPage() {
 
   const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
   const [loadingCreatorHealth, setLoadingCreatorHealth] = useState(false)
+
+  const [siteMaint, setSiteMaint] = useState<{
+    starts_at: string | null
+    ends_at: string | null
+    message: string | null
+    updated_at: string
+    updated_by_wallet: string | null
+    publicActive: boolean
+    scheduled: boolean
+  } | null>(null)
+  const [loadingSiteMaint, setLoadingSiteMaint] = useState(false)
+  const [savingSiteMaint, setSavingSiteMaint] = useState(false)
+  const [siteMaintStarts, setSiteMaintStarts] = useState('')
+  const [siteMaintEnds, setSiteMaintEnds] = useState('')
+  const [siteMaintMessage, setSiteMaintMessage] = useState('')
+  const [siteMaintError, setSiteMaintError] = useState<string | null>(null)
 
   const [liveDiscordRaffles, setLiveDiscordRaffles] = useState<LiveRaffleDiscordRow[] | null>(null)
   const [loadingLiveDiscord, setLoadingLiveDiscord] = useState(false)
@@ -605,6 +629,45 @@ export default function AdminDashboardPage() {
     fetchRevShareSchedule()
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    let cancelled = false
+    const run = async () => {
+      setLoadingSiteMaint(true)
+      setSiteMaintError(null)
+      try {
+        const res = await fetch('/api/admin/site-maintenance', { credentials: 'include', cache: 'no-store' })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          setSiteMaintError(typeof data.error === 'string' ? data.error : 'Could not load maintenance status')
+          setSiteMaint(null)
+          return
+        }
+        setSiteMaint({
+          starts_at: data.starts_at ?? null,
+          ends_at: data.ends_at ?? null,
+          message: data.message ?? null,
+          updated_at: data.updated_at ?? '',
+          updated_by_wallet: data.updated_by_wallet ?? null,
+          publicActive: Boolean(data.publicActive),
+          scheduled: Boolean(data.scheduled),
+        })
+        setSiteMaintStarts(isoToLocalDatetimeValue(data.starts_at))
+        setSiteMaintEnds(isoToLocalDatetimeValue(data.ends_at))
+        setSiteMaintMessage(typeof data.message === 'string' ? data.message : '')
+      } catch {
+        if (!cancelled) setSiteMaintError('Network error loading maintenance status')
+      } finally {
+        if (!cancelled) setLoadingSiteMaint(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
+
   const saveRevShareSchedule = async () => {
     if (!publicKey) return
     setRevShareScheduleSaving(true)
@@ -628,6 +691,65 @@ export default function AdminDashboardPage() {
     } finally {
       setRevShareScheduleSaving(false)
     }
+  }
+
+  const applyQuickMaintMinutes = (minutes: number) => {
+    const start = new Date()
+    const end = new Date(start.getTime() + minutes * 60_000)
+    setSiteMaintStarts(isoToLocalDatetimeValue(start.toISOString()))
+    setSiteMaintEnds(isoToLocalDatetimeValue(end.toISOString()))
+  }
+
+  const patchSiteMaint = async (body: Record<string, unknown>) => {
+    setSavingSiteMaint(true)
+    setSiteMaintError(null)
+    try {
+      const res = await fetch('/api/admin/site-maintenance', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSiteMaintError(typeof data.error === 'string' ? data.error : 'Request failed')
+        return
+      }
+      setSiteMaint({
+        starts_at: data.starts_at ?? null,
+        ends_at: data.ends_at ?? null,
+        message: data.message ?? null,
+        updated_at: data.updated_at ?? '',
+        updated_by_wallet: data.updated_by_wallet ?? null,
+        publicActive: Boolean(data.publicActive),
+        scheduled: Boolean(data.scheduled),
+      })
+      setSiteMaintStarts(isoToLocalDatetimeValue(data.starts_at))
+      setSiteMaintEnds(isoToLocalDatetimeValue(data.ends_at))
+      setSiteMaintMessage(typeof data.message === 'string' ? data.message : '')
+    } catch {
+      setSiteMaintError('Network error. Try again.')
+    } finally {
+      setSavingSiteMaint(false)
+    }
+  }
+
+  const saveSiteMaintWindow = async () => {
+    if (!siteMaintStarts || !siteMaintEnds) {
+      setSiteMaintError('Choose a start and end time.')
+      return
+    }
+    const startMs = new Date(siteMaintStarts).getTime()
+    const endMs = new Date(siteMaintEnds).getTime()
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+      setSiteMaintError('Invalid start or end time.')
+      return
+    }
+    await patchSiteMaint({
+      starts_at: new Date(siteMaintStarts).toISOString(),
+      ends_at: new Date(siteMaintEnds).toISOString(),
+      message: siteMaintMessage.trim() || null,
+    })
   }
 
   const clearDevTaskPendingFiles = () => {
@@ -1065,6 +1187,155 @@ export default function AdminDashboardPage() {
             Manage raffles and oversee the {PLATFORM_NAME} platform
           </p>
         </div>
+
+        {adminRole === 'full' && (
+          <Card className="mb-8 border-amber-500/25 bg-amber-500/[0.04]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Construction className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                Public maintenance window
+              </CardTitle>
+              <CardDescription>
+                While the window is active, a scrolling banner appears at the top of the site warning that things may
+                not work as expected. Set start and end in your local time; the optional message is included in the
+                banner after the default notice.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {siteMaintError && <p className="text-sm text-destructive">{siteMaintError}</p>}
+              {loadingSiteMaint ? (
+                <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading maintenance status…
+                </p>
+              ) : siteMaint ? (
+                <>
+                  <div className="rounded-lg border bg-background/60 p-3 text-sm space-y-1">
+                    <p className="font-medium">
+                      {siteMaint.publicActive
+                        ? 'Banner is showing (maintenance window active).'
+                        : siteMaint.scheduled
+                          ? 'A window is scheduled (banner not shown until start time).'
+                          : 'No active or scheduled window.'}
+                    </p>
+                    {siteMaint.starts_at && (
+                      <p className="text-muted-foreground">
+                        Start: {new Date(siteMaint.starts_at).toLocaleString()}
+                      </p>
+                    )}
+                    {siteMaint.ends_at && (
+                      <p className="text-muted-foreground">
+                        End: {new Date(siteMaint.ends_at).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 touch-manipulation"
+                      disabled={savingSiteMaint}
+                      onClick={() => applyQuickMaintMinutes(15)}
+                    >
+                      From now · 15 min
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 touch-manipulation"
+                      disabled={savingSiteMaint}
+                      onClick={() => applyQuickMaintMinutes(60)}
+                    >
+                      From now · 1 hr
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 touch-manipulation"
+                      disabled={savingSiteMaint}
+                      onClick={() => applyQuickMaintMinutes(120)}
+                    >
+                      From now · 2 hr
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="site-maint-start">Start (local)</Label>
+                      <Input
+                        id="site-maint-start"
+                        type="datetime-local"
+                        className="mt-1.5 min-h-11 touch-manipulation"
+                        value={siteMaintStarts}
+                        onChange={(e) => setSiteMaintStarts(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="site-maint-end">End (local)</Label>
+                      <Input
+                        id="site-maint-end"
+                        type="datetime-local"
+                        className="mt-1.5 min-h-11 touch-manipulation"
+                        value={siteMaintEnds}
+                        onChange={(e) => setSiteMaintEnds(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="site-maint-msg">Optional message (appended in the scrolling banner)</Label>
+                    <textarea
+                      id="site-maint-msg"
+                      rows={3}
+                      className="mt-1.5 w-full min-h-[5.5rem] rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
+                      value={siteMaintMessage}
+                      onChange={(e) => setSiteMaintMessage(e.target.value)}
+                      placeholder="e.g. Updating payment verification — back shortly."
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      className="min-h-11 touch-manipulation"
+                      disabled={savingSiteMaint}
+                      onClick={() => void saveSiteMaintWindow()}
+                    >
+                      {savingSiteMaint ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Saving…
+                        </>
+                      ) : (
+                        'Save window'
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 touch-manipulation"
+                      disabled={savingSiteMaint || (!siteMaint.starts_at && !siteMaint.ends_at)}
+                      onClick={() => void patchSiteMaint({ end_early: true })}
+                    >
+                      End early (set end to now)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-11 touch-manipulation text-destructive hover:text-destructive"
+                      disabled={savingSiteMaint}
+                      onClick={() => void patchSiteMaint({ clear: true })}
+                    >
+                      Clear window
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Could not load maintenance settings.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Dev tasks — backlog from Discord / support for platform fixes */}
         <Card className="mb-8 border-green-500/20 bg-green-500/[0.03]">

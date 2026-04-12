@@ -1,5 +1,6 @@
 import { PublicKey } from '@solana/web3.js'
 import type { Raffle } from '@/lib/types'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 function getCreatorWallet(raffle: Raffle): string | null {
   // Creator is duplicated in a couple columns in different parts of the codebase.
@@ -58,6 +59,18 @@ export function nftRaffleExemptFromEscrowRequirement(raffle: Raffle): boolean {
  * verification while already live / draft-past-start. Uses `nowMs` so list bucketing matches server time.
  */
 export function isPendingNftRaffleAtTime(raffle: Raffle, nowMs: number): boolean {
+  if (isPartnerSplPrizeRaffle(raffle)) {
+    const hasBlockedPurchases = Boolean(raffle.purchases_blocked_at)
+    if (hasBlockedPurchases) return true
+    if (nftRaffleExemptFromEscrowRequirement(raffle)) return false
+    const startTimeMs = new Date(raffle.start_time).getTime()
+    const status = (raffle.status ?? '').toLowerCase()
+    const missingDeposit = !raffle.prize_deposited_at
+    const draftHasStarted = status === 'draft' && !isNaN(startTimeMs) && startTimeMs <= nowMs
+    const liveHasStarted = status === 'live'
+    return missingDeposit && (draftHasStarted || liveHasStarted)
+  }
+
   if (raffle.prize_type !== 'nft') return false
 
   const hasBlockedPurchases = Boolean(raffle.purchases_blocked_at)

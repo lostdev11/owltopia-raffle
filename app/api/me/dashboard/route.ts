@@ -13,6 +13,7 @@ import { getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 
 export const dynamic = 'force-dynamic'
@@ -50,7 +51,8 @@ export async function GET(request: NextRequest) {
       }
       const endMs = new Date(r.end_time).getTime()
       if (Number.isNaN(endMs) || endMs > Date.now()) continue
-      if (r.prize_type === 'nft' && !r.prize_deposited_at) continue
+      const partnerFungible = isPartnerSplPrizeRaffle(r)
+      if ((r.prize_type === 'nft' || partnerFungible) && !r.prize_deposited_at) continue
       endedNoWinnerCandidateIds.add(r.id)
     }
     if (endedNoWinnerCandidateIds.size > 0) {

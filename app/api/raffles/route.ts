@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createRaffle,
+  findNonTerminalPartnerCryptoRaffleByCreator,
   findNonTerminalRaffleByCreatorAndPrizeMint,
   generateUniqueSlug,
   getRaffleCreationCountForCreatorToday,
@@ -31,6 +32,13 @@ import {
 } from '@/lib/raffles/nft-raffle-economics'
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
+import {
+  getPartnerPrizeListingImageUrl,
+  getPartnerPrizeTokenByCurrency,
+  isPartnerPrizeCurrency,
+  listPartnerPrizeTokens,
+} from '@/lib/partner-prize-tokens'
+import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -200,69 +208,41 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate currency: SOL, USDC, and OWL when enabled
-    const validCurrencies = ['USDC', 'SOL', ...(isOwlEnabled() ? ['OWL'] : [])]
-    if (body.currency && !validCurrencies.includes(body.currency)) {
-      const message = body.currency === 'OWL' && !isOwlEnabled()
-        ? 'OWL is not enabled on this server. Set NEXT_PUBLIC_OWL_MINT_ADDRESS in your environment to use OWL, or choose SOL or USDC.'
-        : `Currency must be one of: ${validCurrencies.join(', ')}`
+    // Ticket currency: SOL or USDC only
+    const validCurrencies = ['USDC', 'SOL']
+    const requestedCurrency =
+      typeof body.currency === 'string' && body.currency.trim()
+        ? body.currency.trim().toUpperCase()
+        : ''
+    if (requestedCurrency && !validCurrencies.includes(requestedCurrency)) {
       return NextResponse.json(
-        { error: message },
+        { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
         { status: 400 }
       )
     }
 
-    // Creating raffles is NFT-only for now.
-    if (body.prize_type && body.prize_type !== 'nft') {
-      return NextResponse.json(
-        { error: 'Only NFT raffles can be created right now.' },
-        { status: 400 }
-      )
-    }
-    const prizeType: 'nft' = 'nft'
-    const prizeAmount: number | null = null
-    const prizeCurrency: string | null = null
+    const partnerCurrencyRaw =
+      typeof body.prize_currency === 'string' ? body.prize_currency.trim().toUpperCase() : ''
+    const isPartnerCryptoCreate =
+      String(body.prize_type || '').toLowerCase() === 'crypto' &&
+      !!partnerCurrencyRaw &&
+      isPartnerPrizeCurrency(partnerCurrencyRaw)
 
-    // For NFT prizes, ensure at least one identifier is provided
-    const nftMintAddress = body.nft_mint_address || null
-    const nftTokenId = body.nft_token_id || null
-
-    if (!nftMintAddress && !nftTokenId) {
+    if (String(body.prize_type || '').toLowerCase() === 'crypto' && !isPartnerCryptoCreate) {
+      const supported = listPartnerPrizeTokens()
+        .map((t) => t.currencyCode)
+        .join(', ')
       return NextResponse.json(
-        { error: 'NFT prizes require either nft_mint_address or nft_token_id' },
+        { error: `Only partner token prizes (${supported}) are supported for crypto prize raffles right now.` },
         { status: 400 }
       )
     }
 
-    const prizeAssetId = String(nftMintAddress || nftTokenId || '').trim()
-    if (prizeAssetId && (await isNftBurntPerHeliusDas(prizeAssetId))) {
+    if (!isPartnerCryptoCreate && body.prize_type && body.prize_type !== 'nft') {
       return NextResponse.json(
-        {
-          error:
-            'This NFT has been burned and cannot be used as a prize. Refresh your wallet NFT list and choose a different asset.',
-        },
+        { error: 'Only NFT raffles or partner token prize raffles can be created right now.' },
         { status: 400 }
       )
-    }
-
-    // Only block creation when the prize is SPL/Token-2022 and only held in a delegated (staked) account.
-    if (nftMintAddress) {
-      try {
-        const mintPk = new PublicKey(nftMintAddress)
-        const creatorPk = new PublicKey(walletAddress)
-        const holder = await getNftHolderInWallet(getSolanaConnection(), mintPk, creatorPk, 'confirmed')
-        if (holder && 'delegated' in holder && holder.delegated) {
-          return NextResponse.json(
-            {
-              error:
-                'This NFT is staked or delegated. Unstake it before creating a raffle—otherwise it cannot be sent to escrow.',
-            },
-            { status: 400 }
-          )
-        }
-      } catch {
-        // Invalid mint or transient RPC: allow create (deposit flow will surface issues).
-      }
     }
 
     let maxTickets: number | null = null
@@ -275,44 +255,281 @@ export async function POST(request: NextRequest) {
       maxTickets = parsed
     }
 
-    // New NFT raffles only (POST): set min_tickets from floor ÷ ticket. Existing live listings are never updated here.
-    const fpParsed = parseNftFloorPrice(body.floor_price)
-    if (!fpParsed.ok) {
-      return NextResponse.json({ error: fpParsed.error }, { status: 400 })
-    }
-    const tpParsed = parseNftTicketPrice(body.ticket_price)
-    if (!tpParsed.ok) {
-      return NextResponse.json({ error: tpParsed.error }, { status: 400 })
-    }
-    const ticketPriceNum = tpParsed.value
-    const minTickets = computeNftMinTicketsFromFloorAndTicket(fpParsed.value, ticketPriceNum)
-    const capCheck = validateNftMinTicketsNotOverCap(minTickets)
-    if (!capCheck.ok) {
-      return NextResponse.json({ error: capCheck.error }, { status: 400 })
-    }
-    const maxCheck = validateNftMaxTickets(maxTickets, minTickets)
-    if (!maxCheck.ok) {
-      return NextResponse.json({ error: maxCheck.error }, { status: 400 })
-    }
-
-    // Daily hosting limit: holders (Owltopia NFT) 3/day, non-holders 1/day (UTC day). Admins: no limit.
     const adminRole = await getAdminRole(walletAddress)
 
-    if (adminRole === null && prizeAssetId) {
-      const existingForPrize = await withTimeout(
-        findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetId),
-        SUPABASE_TIMEOUT_MS,
-        'supabase error'
-      )
-      if (existingForPrize) {
+    let raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>
+
+    if (isPartnerCryptoCreate) {
+      const prizeCurrency = partnerCurrencyRaw
+      const rawUnits = humanPartnerPrizeToRawUnits(prizeCurrency, body.prize_amount)
+      if (rawUnits == null) {
+        return NextResponse.json(
+          { error: 'prize_amount must be a positive decimal compatible with the partner token (no scientific notation).' },
+          { status: 400 }
+        )
+      }
+      const minTicketsParsed =
+        typeof body.min_tickets === 'number' ? body.min_tickets : parseInt(String(body.min_tickets ?? ''), 10)
+      if (!Number.isFinite(minTicketsParsed) || minTicketsParsed < 1) {
+        return NextResponse.json(
+          { error: 'min_tickets is required for partner token raffles and must be a positive integer.' },
+          { status: 400 }
+        )
+      }
+      const minTickets = minTicketsParsed
+      const capCheck = validateNftMinTicketsNotOverCap(minTickets)
+      if (!capCheck.ok) {
+        return NextResponse.json({ error: capCheck.error }, { status: 400 })
+      }
+      const maxCheck = validateNftMaxTickets(maxTickets, minTickets)
+      if (!maxCheck.ok) {
+        return NextResponse.json({ error: maxCheck.error }, { status: 400 })
+      }
+      const tpParsed = parseNftTicketPrice(body.ticket_price)
+      if (!tpParsed.ok) {
+        return NextResponse.json({ error: tpParsed.error }, { status: 400 })
+      }
+      const ticketPriceNum = tpParsed.value
+      const fpParsed = parseNftFloorPrice(body.floor_price ?? body.prize_amount)
+      if (!fpParsed.ok) {
+        return NextResponse.json({ error: fpParsed.error }, { status: 400 })
+      }
+      const floorPrice = fpParsed.string
+      const prizeAmountNum =
+        typeof body.prize_amount === 'number' ? body.prize_amount : parseFloat(String(body.prize_amount).trim())
+      if (!Number.isFinite(prizeAmountNum) || prizeAmountNum <= 0) {
+        return NextResponse.json({ error: 'prize_amount must be a positive number.' }, { status: 400 })
+      }
+
+      if (adminRole === null) {
+        const existingPartner = await withTimeout(
+          findNonTerminalPartnerCryptoRaffleByCreator(walletAddress, prizeCurrency),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+        if (existingPartner) {
+          return NextResponse.json(
+            {
+              error:
+                'You already have an active partner-token raffle. Finish or cancel it before starting another with the same prize token.',
+              existing_slug: existingPartner.slug,
+            },
+            { status: 409 }
+          )
+        }
+      }
+
+      const listingImage =
+        typeof body.image_url === 'string' && body.image_url.trim()
+          ? body.image_url.trim()
+          : getPartnerPrizeListingImageUrl(prizeCurrency)
+
+      raffleData = {
+        slug,
+        title: body.title,
+        description: body.description || null,
+        image_url: listingImage,
+        image_fallback_url:
+          typeof body.image_fallback_url === 'string' && body.image_fallback_url.trim()
+            ? body.image_fallback_url.trim()
+            : null,
+        prize_type: 'crypto',
+        prize_amount: prizeAmountNum,
+        prize_currency: prizeCurrency,
+        nft_mint_address: null,
+        nft_collection_name: null,
+        nft_token_id: null,
+        nft_metadata_uri: null,
+        ticket_price: ticketPriceNum,
+        currency:
+          (typeof body.currency === 'string' && body.currency.trim()
+            ? body.currency.trim().toUpperCase()
+            : null) || 'SOL',
+        max_tickets: maxTickets,
+        min_tickets: minTickets,
+        start_time: startTime,
+        end_time: body.end_time,
+        original_end_time: body.end_time,
+        time_extension_count: 0,
+        theme_accent: body.theme_accent || 'prime',
+        edited_after_entries: false,
+        created_by: walletAddress,
+        creator_wallet: walletAddress,
+        is_active: false,
+        winner_wallet: null,
+        winner_selected_at: null,
+        status: 'draft',
+        nft_transfer_transaction: null,
+        fee_bps_applied: null,
+        fee_tier_reason: null,
+        platform_fee_amount: null,
+        creator_payout_amount: null,
+        settled_at: null,
+        rank: body.rank && body.rank.trim() ? body.rank.trim() : null,
+        floor_price: floorPrice,
+        prize_deposited_at: null,
+        prize_deposit_tx: null,
+        cancellation_requested_at: null,
+        cancelled_at: null,
+        cancellation_fee_amount: null,
+        cancellation_fee_currency: null,
+        cancellation_refund_policy: null,
+        prize_returned_at: null,
+        prize_return_reason: null,
+        prize_return_tx: null,
+        ticket_payments_to_funds_escrow: true,
+        nft_escrow_address_snapshot: getPrizeEscrowPublicKey(),
+        funds_escrow_address_snapshot: getFundsEscrowPublicKey(),
+        creator_claimed_at: null,
+        creator_claim_tx: null,
+        creator_funds_claim_locked_at: null,
+        prize_standard:
+          getPartnerPrizeTokenByCurrency(prizeCurrency)?.tokenProgram === 'token2022' ? 'token2022' : 'spl',
+      }
+    } else {
+      const prizeType: 'nft' = 'nft'
+      const prizeAmount: number | null = null
+      const prizeCurrency: string | null = null
+
+      const nftMintAddress = body.nft_mint_address || null
+      const nftTokenId = body.nft_token_id || null
+
+      if (!nftMintAddress && !nftTokenId) {
+        return NextResponse.json(
+          { error: 'NFT prizes require either nft_mint_address or nft_token_id' },
+          { status: 400 }
+        )
+      }
+
+      const prizeAssetId = String(nftMintAddress || nftTokenId || '').trim()
+      if (prizeAssetId && (await isNftBurntPerHeliusDas(prizeAssetId))) {
         return NextResponse.json(
           {
             error:
-              'You already have a raffle using this NFT. Open that listing or wait until it is completed or cancelled before creating another with the same prize.',
-            existing_slug: existingForPrize.slug,
+              'This NFT has been burned and cannot be used as a prize. Refresh your wallet NFT list and choose a different asset.',
           },
-          { status: 409 }
+          { status: 400 }
         )
+      }
+
+      if (nftMintAddress) {
+        try {
+          const mintPk = new PublicKey(nftMintAddress)
+          const creatorPk = new PublicKey(walletAddress)
+          const holder = await getNftHolderInWallet(getSolanaConnection(), mintPk, creatorPk, 'confirmed')
+          if (holder && 'delegated' in holder && holder.delegated) {
+            return NextResponse.json(
+              {
+                error:
+                  'This NFT is staked or delegated. Unstake it before creating a raffle—otherwise it cannot be sent to escrow.',
+              },
+              { status: 400 }
+            )
+          }
+        } catch {
+          // Invalid mint or transient RPC: allow create (deposit flow will surface issues).
+        }
+      }
+
+      const fpParsed = parseNftFloorPrice(body.floor_price)
+      if (!fpParsed.ok) {
+        return NextResponse.json({ error: fpParsed.error }, { status: 400 })
+      }
+      const tpParsed = parseNftTicketPrice(body.ticket_price)
+      if (!tpParsed.ok) {
+        return NextResponse.json({ error: tpParsed.error }, { status: 400 })
+      }
+      const ticketPriceNum = tpParsed.value
+      const minTickets = computeNftMinTicketsFromFloorAndTicket(fpParsed.value, ticketPriceNum)
+      const capCheck = validateNftMinTicketsNotOverCap(minTickets)
+      if (!capCheck.ok) {
+        return NextResponse.json({ error: capCheck.error }, { status: 400 })
+      }
+      const maxCheck = validateNftMaxTickets(maxTickets, minTickets)
+      if (!maxCheck.ok) {
+        return NextResponse.json({ error: maxCheck.error }, { status: 400 })
+      }
+
+      if (adminRole === null && prizeAssetId) {
+        const existingForPrize = await withTimeout(
+          findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetId),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+        if (existingForPrize) {
+          return NextResponse.json(
+            {
+              error:
+                'You already have a raffle using this NFT. Open that listing or wait until it is completed or cancelled before creating another with the same prize.',
+              existing_slug: existingForPrize.slug,
+            },
+            { status: 409 }
+          )
+        }
+      }
+
+      const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
+      const floorPrice = fpParsed.string
+
+      raffleData = {
+        slug,
+        title: body.title,
+        description: body.description || null,
+        image_url: body.image_url || null,
+        image_fallback_url:
+          typeof body.image_fallback_url === 'string' && body.image_fallback_url.trim()
+            ? body.image_fallback_url.trim()
+            : null,
+        prize_type: prizeType,
+        prize_amount: prizeAmount,
+        prize_currency: prizeCurrency,
+        nft_mint_address: prizeType === 'nft' ? nftMintAddress : null,
+        nft_collection_name: prizeType === 'nft' ? (body.nft_collection_name || null) : null,
+        nft_token_id: prizeType === 'nft' ? nftTokenId : null,
+        nft_metadata_uri: prizeType === 'nft' ? (body.nft_metadata_uri || null) : null,
+        ticket_price: ticketPriceNum,
+        currency:
+          (typeof body.currency === 'string' && body.currency.trim()
+            ? body.currency.trim().toUpperCase()
+            : null) || 'SOL',
+        max_tickets: maxTickets,
+        min_tickets: minTickets,
+        start_time: startTime,
+        end_time: body.end_time,
+        original_end_time: body.end_time,
+        time_extension_count: 0,
+        theme_accent: body.theme_accent || 'prime',
+        edited_after_entries: false,
+        created_by: walletAddress,
+        creator_wallet: walletAddress,
+        is_active: false,
+        winner_wallet: null,
+        winner_selected_at: null,
+        status: 'draft',
+        nft_transfer_transaction: null,
+        fee_bps_applied: null,
+        fee_tier_reason: null,
+        platform_fee_amount: null,
+        creator_payout_amount: null,
+        settled_at: null,
+        rank,
+        floor_price: floorPrice,
+        prize_deposited_at: null,
+        prize_deposit_tx: null,
+        cancellation_requested_at: null,
+        cancelled_at: null,
+        cancellation_fee_amount: null,
+        cancellation_fee_currency: null,
+        cancellation_refund_policy: null,
+        prize_returned_at: null,
+        prize_return_reason: null,
+        prize_return_tx: null,
+        ticket_payments_to_funds_escrow: true,
+        nft_escrow_address_snapshot: getPrizeEscrowPublicKey(),
+        funds_escrow_address_snapshot: getFundsEscrowPublicKey(),
+        creator_claimed_at: null,
+        creator_claim_tx: null,
+        creator_funds_claim_locked_at: null,
       }
     }
 
@@ -345,71 +562,6 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
-    }
-
-    // Parse optional metadata fields
-    const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
-    const floorPrice = fpParsed.string
-
-    // Build raffle data - only include NFT fields if this is an NFT prize
-    const raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'> = {
-      slug: slug, // Use the generated unique slug
-      title: body.title,
-      description: body.description || null,
-      image_url: body.image_url || null,
-      image_fallback_url:
-        typeof body.image_fallback_url === 'string' && body.image_fallback_url.trim()
-          ? body.image_fallback_url.trim()
-          : null,
-      prize_type: prizeType,
-      prize_amount: prizeAmount,
-      prize_currency: prizeCurrency,
-      // Only include NFT fields if prize_type is 'nft' or if explicitly provided
-      nft_mint_address: prizeType === 'nft' ? nftMintAddress : null,
-      nft_collection_name: prizeType === 'nft' ? (body.nft_collection_name || null) : null,
-      nft_token_id: prizeType === 'nft' ? nftTokenId : null,
-      nft_metadata_uri: prizeType === 'nft' ? (body.nft_metadata_uri || null) : null,
-      ticket_price: ticketPriceNum,
-      currency: body.currency || 'SOL',
-      max_tickets: maxTickets,
-      min_tickets: minTickets,
-      start_time: startTime,
-      end_time: body.end_time,
-      original_end_time: body.end_time, // Store original end time when raffle is created
-      time_extension_count: 0,
-      theme_accent: body.theme_accent || 'prime',
-      edited_after_entries: false,
-      created_by: walletAddress,
-      creator_wallet: walletAddress,
-      // NFT raffles stay inactive until prize is in escrow (verify-prize-deposit sets is_active).
-      is_active: false,
-      winner_wallet: null,
-      winner_selected_at: null,
-      status: 'draft',
-      nft_transfer_transaction: null,
-      fee_bps_applied: null,
-      fee_tier_reason: null,
-      platform_fee_amount: null,
-      creator_payout_amount: null,
-      settled_at: null,
-      rank: rank,
-      floor_price: floorPrice,
-      prize_deposited_at: null,
-      prize_deposit_tx: null,
-      cancellation_requested_at: null,
-      cancelled_at: null,
-      cancellation_fee_amount: null,
-      cancellation_fee_currency: null,
-      cancellation_refund_policy: null,
-      prize_returned_at: null,
-      prize_return_reason: null,
-      prize_return_tx: null,
-      ticket_payments_to_funds_escrow: true,
-      nft_escrow_address_snapshot: getPrizeEscrowPublicKey(),
-      funds_escrow_address_snapshot: getFundsEscrowPublicKey(),
-      creator_claimed_at: null,
-      creator_claim_tx: null,
-      creator_funds_claim_locked_at: null,
     }
 
     const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
