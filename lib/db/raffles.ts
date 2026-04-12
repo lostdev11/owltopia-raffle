@@ -1223,7 +1223,6 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     title: raffle.title,
     description: raffle.description,
     image_url: raffle.image_url,
-    image_fallback_url: raffle.image_fallback_url ?? null,
     prize_type: raffle.prize_type,
     prize_amount: raffle.prize_amount,
     prize_currency: raffle.prize_currency,

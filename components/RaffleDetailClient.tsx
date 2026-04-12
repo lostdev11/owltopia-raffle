@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties }
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -110,6 +111,7 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -144,7 +146,8 @@ export function RaffleDetailClient({
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
-  const { publicKey, sendTransaction, connected, wallet, signMessage } = walletCtx
+  const { publicKey, connected, wallet, signMessage } = walletCtx
+  const sendTransaction = useSendTransactionForWallet()
   // Umi walletAdapterIdentity expects the actual WalletAdapter (with publicKey), not the Wallet metadata wrapper
   const walletAdapter = wallet?.adapter ?? null
   const { connection } = useConnection()
@@ -1947,7 +1950,7 @@ export function RaffleDetailClient({
             tokenProgram
           )
         )
-        if (!sendTransaction) {
+        if (!connected) {
           setDepositEscrowError('Connect a wallet that can sign token transfers.')
           return
         }
@@ -2188,6 +2191,7 @@ export function RaffleDetailClient({
     raffle.prize_amount,
     raffle.prize_standard,
     connection,
+    connected,
     sendTransaction,
     router,
     walletAdapter,
@@ -2543,6 +2547,7 @@ export function RaffleDetailClient({
             <Share2 className="mr-2 h-4 w-4" />
             {shareCopied ? 'Copied!' : 'Share'}
           </Button>
+          <RaffleOwlPlayer enabled={isActive && !purchasesBlocked} />
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
               variant="outline"

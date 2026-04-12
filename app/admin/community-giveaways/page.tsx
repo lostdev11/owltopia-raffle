@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,8 @@ function resolveWalletNftForDeposit(
 
 export default function AdminCommunityGiveawaysPage() {
   const router = useRouter()
-  const { publicKey, connected, sendTransaction, wallet } = useWallet()
+  const { publicKey, connected, wallet } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
   const connectedWallet = publicKey?.toBase58() ?? ''
   const cachedTrue =

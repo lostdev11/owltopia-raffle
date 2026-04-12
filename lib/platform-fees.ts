@@ -1,8 +1,6 @@
-import { Connection, PublicKey } from '@solana/web3.js'
-import { getTokenInfo } from '@/lib/tokens'
+import { PublicKey } from '@solana/web3.js'
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
 import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
-import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 const ownsOwltopiaCache = new Map<string, { value: boolean; expiresAt: number }>()
 
@@ -79,8 +77,7 @@ export type OwnsOwltopiaOptions = {
  * - Uses Helius DAS searchAssets (owner + collection) when HELIUS_API_KEY + collection are set;
  *   if that returns no hit, scans the wallet via getAssetsByOwner with sortBy id + after (keyset), up to 50k–200k NFTs.
  * - Uses mainnet Helius for DAS even when SOLANA_RPC_URL is devnet (Owltopia NFTs are mainnet).
- * - On devnet RPC, skips OWL SPL balance check only; Helius path still runs when configured.
- * - Falls back to Solana RPC OWL SPL token balance when Helius is unavailable or inconclusive (mainnet).
+ * - Positive holder result requires Helius + OWLTOPIA_COLLECTION_ADDRESS; fungible OWL SPL balance is not used.
  * - Validates wallet address format; invalid addresses return false.
  * - Pass { skipCache: true } to force a fresh verification (e.g. dashboard load, creating a raffle).
  */
@@ -99,13 +96,9 @@ export async function ownsOwltopia(
     }
   }
 
-  const rpcUrl = resolveServerSolanaRpcUrl()
-  const isDevnetRpc = /devnet/i.test(rpcUrl)
-
   // Validate wallet address format up front
-  let ownerPubkey: PublicKey
   try {
-    ownerPubkey = new PublicKey(normalized)
+    new PublicKey(normalized)
   } catch {
     return false
   }
@@ -172,7 +165,7 @@ export async function ownsOwltopia(
           if (searchRes.status === 429) {
             skipOwnerScan = true
             console.warn(
-              'Helius searchAssets rate limited after retry; skipping DAS owner scan (SPL fallback may still apply)'
+              'Helius searchAssets rate limited after retry; skipping DAS owner scan (holder check inconclusive → not holder)'
             )
             break
           }
@@ -295,63 +288,15 @@ export async function ownsOwltopia(
         return false
       }
     } catch (err) {
-      console.error('Helius Owltopia ownership check failed, falling back to Solana RPC:', err)
+      console.error('Helius Owltopia NFT ownership check failed:', err)
     }
   }
 
-  // On devnet RPC, OWL mint / token accounts are not mainnet — skip SPL check only.
-  if (isDevnetRpc) {
-    ownsOwltopiaCache.set(normalized, {
-      value: false,
-      expiresAt: Date.now() + OWLTOPIA_DAS_CACHE_TTL_MS,
-    })
-    return false
-  }
-
-  // 2) Fallback: Solana RPC OWL SPL token balance check (mainnet)
-  const owlInfo = getTokenInfo('OWL')
-  if (!owlInfo.mintAddress) return false
-
-  try {
-    const connection = new Connection(rpcUrl, 'confirmed')
-
-    const mint = new PublicKey(owlInfo.mintAddress)
-
-    const accounts = await connection.getParsedTokenAccountsByOwner(ownerPubkey, { mint })
-    for (const acc of accounts.value) {
-      const info = (acc.account.data as any)?.parsed?.info
-      const amountStr: string | undefined = info?.tokenAmount?.amount
-      if (!amountStr) continue
-      try {
-        const raw = BigInt(amountStr)
-        if (raw > 0n) {
-          const value = true
-          ownsOwltopiaCache.set(normalized, {
-            value,
-            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-          })
-          return value
-        }
-      } catch {
-        continue
-      }
-    }
-
-    const value = false
-    ownsOwltopiaCache.set(normalized, {
-      value,
-      expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-    })
-    return value
-  } catch (err) {
-    console.error('Error checking Owltopia ownership via Solana RPC:', err)
-    // On verification failure: log and default to "not a holder"
-    const value = false
-    ownsOwltopiaCache.set(normalized, {
-      value,
-      expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-    })
-    return value
-  }
+  // No NFT proved via DAS (missing Helius/key/collection, errors, rate limits, or wallet has no matching NFT).
+  ownsOwltopiaCache.set(normalized, {
+    value: false,
+    expiresAt: Date.now() + OWLTOPIA_DAS_CACHE_TTL_MS,
+  })
+  return false
 }
 

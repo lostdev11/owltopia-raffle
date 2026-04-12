@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import Link from 'next/link'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -87,7 +88,8 @@ interface RaffleCardProps {
 export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false, serverNow }: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { publicKey, sendTransaction, connected } = useWallet()
+  const { publicKey, connected } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
   const wallet = publicKey?.toBase58() ?? ''
   const [mounted, setMounted] = useState(false)

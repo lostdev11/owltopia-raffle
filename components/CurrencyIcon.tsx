@@ -1,8 +1,9 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import Image from 'next/image'
 import type { RaffleCurrency } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 interface CurrencyIconProps {
   currency: 'SOL' | 'USDC' | 'OWL' | 'TRQ'
@@ -11,7 +12,6 @@ interface CurrencyIconProps {
 }
 
 export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIconProps) {
-  const gradientId = useId()
   const [usdcImageError, setUsdcImageError] = useState(false)
   const [tryPng, setTryPng] = useState(false)
   const [owlImageError, setOwlImageError] = useState(false)
@@ -19,34 +19,18 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
   const [trqImageError, setTrqImageError] = useState(false)
 
   if (currency === 'SOL') {
+    const w = size
+    const h = Math.max(1, Math.round((size * 311) / 397))
     return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 397.7 311.7"
-        className={className}
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="360.879" y1="351.455" x2="141.213" y2="69.8367" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#9945FF" />
-            <stop offset="1" stopColor="#14F195" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z"
-          fill={`url(#${gradientId})`}
-        />
-        <path
-          d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z"
-          fill={`url(#${gradientId})`}
-        />
-        <path
-          d="M333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"
-          fill={`url(#${gradientId})`}
-        />
-      </svg>
+      // eslint-disable-next-line @next/next/no-img-element -- shared asset with SolanaMark; crisp at any list size
+      <img
+        src="/solana-mark.svg"
+        alt=""
+        width={w}
+        height={h}
+        className={cn('block shrink-0 select-none object-contain object-left', className)}
+        draggable={false}
+      />
     )
   }
 

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { useWalletHeaderBalances } from '@/lib/hooks/useWalletHeaderBalances'
 import { isOwlEnabled } from '@/lib/tokens'
+import { SolanaMark } from '@/components/icons/SolanaMark'
 
 function fmtAmount(amount: number | null, loading: boolean, maxFrac: number): string {
   if (loading && amount === null) return '…'
@@ -64,7 +65,7 @@ export function ConnectedWalletBalances({
     <>
       <button
         type="button"
-        className="flex min-h-11 min-w-0 max-w-full touch-manipulation items-center gap-2 rounded-lg border border-green-500/40 bg-black/80 px-2 py-1.5 text-left text-white shadow-sm outline-none ring-green-500/30 transition hover:border-green-500/60 focus-visible:ring-2 sm:gap-2.5 sm:px-2.5"
+        className="flex min-h-11 min-w-0 max-w-full touch-manipulation items-center gap-2 rounded-lg border border-green-500/40 bg-black/80 px-2 py-1.5 text-left text-white shadow-sm outline-none ring-green-500/30 transition hover:border-green-500/60 focus-visible:ring-2 sm:gap-2.5 sm:px-2.5 md:min-h-10 md:gap-3 md:px-3 md:py-2"
         onClick={() => setMenuOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
@@ -77,36 +78,42 @@ export function ConnectedWalletBalances({
             alt=""
             width={28}
             height={28}
-            className="h-7 w-7 shrink-0 rounded-md object-cover"
+            className="h-7 w-7 shrink-0 rounded-md object-cover md:h-8 md:w-8"
             loading="lazy"
           />
         ) : (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-green-600/30">
-            <Wallet className="h-4 w-4 text-green-400" aria-hidden />
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-green-600/30 md:h-8 md:w-8">
+            <Wallet className="h-4 w-4 text-green-400 md:h-5 md:w-5" aria-hidden />
           </span>
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight sm:flex-row sm:items-center sm:gap-2">
-          <span className="truncate text-[10px] font-medium text-green-400/90 sm:text-xs">{walletName}</span>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-200 sm:text-xs">
-            <span className="whitespace-nowrap" title="SOL">
-              <span className="text-zinc-500">SOL </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight sm:flex-row sm:items-center sm:gap-2 md:gap-3">
+          <span className="truncate text-[10px] font-medium text-green-400/90 sm:text-xs md:text-sm">{walletName}</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-200 sm:text-xs md:text-sm md:gap-x-3">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap leading-none" title="SOL">
+              <SolanaMark className="solana-mark-header-compact" />
               {fmtAmount(sol, loading, 4)}
             </span>
-            <span className="hidden h-3 w-px bg-zinc-600 sm:inline" aria-hidden />
-            <span className="inline-flex items-center gap-0.5 whitespace-nowrap" title="USDC">
-              <Image src="/usdc.png" alt="" width={12} height={12} className="inline h-3 w-3 shrink-0" />
+            <span className="hidden h-3 w-px bg-zinc-600 sm:inline md:h-3.5" aria-hidden />
+            <span className="inline-flex items-center gap-1 whitespace-nowrap" title="USDC">
+              <Image
+                src="/usdc.png"
+                alt=""
+                width={12}
+                height={12}
+                className="inline h-3 w-3 shrink-0 md:h-4 md:w-4"
+              />
               {fmtAmount(usdc, loading, 2)}
             </span>
             {owlOn && (
               <>
-                <span className="hidden h-3 w-px bg-zinc-600 sm:inline" aria-hidden />
-                <span className="inline-flex items-center gap-0.5 whitespace-nowrap" title="OWL">
+                <span className="hidden h-3 w-px bg-zinc-600 sm:inline md:h-3.5" aria-hidden />
+                <span className="inline-flex items-center gap-1 whitespace-nowrap" title="OWL">
                   <Image
                     src="/owl%20token%20v1.png"
                     alt=""
                     width={12}
                     height={12}
-                    className="inline h-3 w-3 shrink-0 rounded-full object-cover"
+                    className="inline h-3 w-3 shrink-0 rounded-full object-cover md:h-4 md:w-4"
                   />
                   {fmtAmount(owl, loading, 2)}
                 </span>
@@ -139,7 +146,9 @@ export function ConnectedWalletBalances({
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Balances</div>
               <ul className="space-y-2">
                 <li className="flex justify-between gap-2">
-                  <span className="text-zinc-400">SOL</span>
+                  <span className="inline-flex items-center gap-1.5 text-zinc-400">
+                    <SolanaMark size={20} title="SOL" />
+                  </span>
                   <span className="font-mono text-green-100">{fmtAmount(sol, loading, 6)}</span>
                 </li>
                 <li className="flex justify-between gap-2">

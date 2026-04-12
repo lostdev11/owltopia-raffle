@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import {
   createAssociatedTokenAccountInstruction,
@@ -52,7 +53,8 @@ type MeStatus = {
 export default function CommunityGiveawayPage() {
   const params = useParams()
   const id = typeof params?.id === 'string' ? params.id : ''
-  const { connected, publicKey, signMessage, sendTransaction } = useWallet()
+  const { connected, publicKey, signMessage } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
 
   const [info, setInfo] = useState<PublicInfo | null>(null)
@@ -202,7 +204,7 @@ export default function CommunityGiveawayPage() {
   }
 
   const handleOwlBoost = async () => {
-    if (!publicKey || !id || !info?.owlPayment || !sendTransaction) return
+    if (!publicKey || !id || !info?.owlPayment || !connected) return
     setActionError(null)
     setBoosting(true)
     try {
@@ -437,7 +439,7 @@ export default function CommunityGiveawayPage() {
                           variant="secondary"
                           className="min-h-[44px] w-full"
                           onClick={() => void handleOwlBoost()}
-                          disabled={boosting || !sendTransaction}
+                          disabled={boosting || !connected || !publicKey}
                         >
                           {boosting ? (
                             <>

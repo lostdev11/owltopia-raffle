@@ -15,7 +15,7 @@ import { PublicKey } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import type { Raffle } from '@/lib/types'
+import type { Raffle, ThemeAccent } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getAdminRole } from '@/lib/db/admins'
@@ -47,6 +47,13 @@ export const maxDuration = 60
 
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
+
+const THEME_ACCENTS: readonly ThemeAccent[] = ['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']
+
+function coerceThemeAccent(raw: unknown): ThemeAccent {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  return (THEME_ACCENTS as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
+}
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
 async function withTimeout<T>(
@@ -351,7 +358,7 @@ export async function POST(request: NextRequest) {
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
-        theme_accent: body.theme_accent || 'prime',
+        theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,
         creator_wallet: walletAddress,
@@ -498,7 +505,7 @@ export async function POST(request: NextRequest) {
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
-        theme_accent: body.theme_accent || 'prime',
+        theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,
         creator_wallet: walletAddress,
@@ -573,6 +580,21 @@ export async function POST(request: NextRequest) {
     console.error('Error creating raffle:', error)
     const err = error as Error & { step?: 'timeout' | 'supabase error' }
     const step = err.step ?? 'supabase error'
+    const raw = err instanceof Error ? err.message : String(error)
+    // Legacy DB migration 050 fixed min_tickets at 50 for NFT rows; 051/054 drop that. Without 054, creates fail CHECK.
+    if (
+      raw.includes('raffles_nft_min_tickets_fixed') ||
+      raw.includes('raffles_nft_max_tickets_minimum')
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'New raffles cannot be saved until the database is updated (legacy NFT ticket rules). Please contact the site administrator.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: safeErrorMessage(err), step },
       { status: 502 }

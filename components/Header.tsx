@@ -82,7 +82,7 @@ export function Header() {
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           <Link
             href="/"
-            className="flex-1 min-w-[7rem] max-w-[min(100%,calc(100%-11rem))] overflow-hidden"
+            className="min-w-0 flex-1 max-w-[min(100%,calc(100%-11rem))] overflow-hidden md:max-w-[min(100%,calc(100%-22rem))] lg:max-w-[min(100%,calc(100%-30rem))]"
           >
             <Logo className="max-w-full h-auto" width={600} height={150} priority />
           </Link>
@@ -142,7 +142,9 @@ export function Header() {
                 <Menu className="h-5 w-5" />
               </Button>
             </div>
-            <WalletConnectButton />
+            <div className="shrink-0">
+              <WalletConnectButton />
+            </div>
           </div>
         </div>
       </div>

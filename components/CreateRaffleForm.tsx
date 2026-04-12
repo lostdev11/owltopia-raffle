@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
@@ -74,10 +75,29 @@ function focusFormField(elementId: string) {
   if (el instanceof HTMLElement) el.focus()
 }
 
+/** Production APIs often return a generic 5xx string; expand for humans and mention My raffles (same page). */
+function formatCreateRaffleApiError(status: number, apiMessage: string): string {
+  const m = (apiMessage || '').trim()
+  const lower = m.toLowerCase()
+  if (
+    lower === 'internal server error' ||
+    lower === 'internal service error' ||
+    lower === 'server error' ||
+    lower === 'service error'
+  ) {
+    if (status === 503) {
+      return 'We could not save the raffle just now (service unavailable). Check My raffles above in case it still saved, or try again in a minute.'
+    }
+    return 'We could not save the raffle just now. Check My raffles above in case it still saved, then try again.'
+  }
+  return m || `Something went wrong (HTTP ${status}). Try again in a moment.`
+}
+
 export function CreateRaffleForm() {
   const router = useRouter()
   const createSubmitInFlightRef = useRef(false)
-  const { publicKey, connected, sendTransaction, wallet } = useWallet()
+  const { publicKey, connected, wallet } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
@@ -113,6 +133,8 @@ export function CreateRaffleForm() {
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
+  /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
   const [floorPriceLoading, setFloorPriceLoading] = useState(false)
   const [floorPriceCurrency, setFloorPriceCurrency] = useState<string | null>(null)
@@ -587,6 +609,7 @@ export function CreateRaffleForm() {
     }
 
     createSubmitInFlightRef.current = true
+    setSubmissionError(null)
     setCreateStep('saving')
     setLoading(true)
     const rankValue = formData.get('rank') as string
@@ -637,7 +660,7 @@ export function CreateRaffleForm() {
           raffle.nft_mint_address &&
           selectedNft &&
           publicKey &&
-          (sendTransaction || wallet?.adapter)
+          (connected && wallet?.adapter)
         ) {
           try {
             setCreateStep('signing')
@@ -768,7 +791,7 @@ export function CreateRaffleForm() {
                 }
               }
               if (!depositSig) {
-                if (!sendTransaction) {
+                if (!connected) {
                   logEscrowDepositAbort(depositLogCtx, 'no_send_transaction_after_token_metadata')
                   alert(
                     'Your wallet did not expose a transaction sender. Open your raffle and complete the deposit there, or try another wallet.'
@@ -944,7 +967,7 @@ export function CreateRaffleForm() {
         } else if (raffle.prize_type === 'crypto' && isPartnerPrizeCurrency(raffle.prize_currency)) {
           const prizeCur = String(raffle.prize_currency || '').trim().toUpperCase()
           const prizeMint = getPartnerPrizeMintForCurrency(prizeCur)
-          if (!publicKey || !sendTransaction || !prizeMint) {
+          if (!publicKey || !connected || !prizeMint) {
             router.push(`/raffles/${raffle.slug}?deposit=1`)
           } else {
             try {
@@ -1101,12 +1124,25 @@ export function CreateRaffleForm() {
           alert(`${msg}\n\nOpening your existing raffle…`)
           router.push(`/raffles/${encodeURIComponent(existingSlug)}`)
         } else {
-          alert(msg)
+          const friendly = formatCreateRaffleApiError(response.status, typeof msg === 'string' ? msg : '')
+          setSubmissionError(friendly)
+          requestAnimationFrame(() => {
+            document
+              .getElementById('create-raffle-submit-error')
+              ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+          })
         }
       }
     } catch (error) {
       console.error('Error:', error)
-      alert('Error creating raffle')
+      setSubmissionError(
+        'We could not reach the server to save your raffle. Check your connection, then try again.'
+      )
+      requestAnimationFrame(() => {
+        document
+          .getElementById('create-raffle-submit-error')
+          ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
     } finally {
       createSubmitInFlightRef.current = false
       setLoading(false)
@@ -1689,6 +1725,27 @@ export function CreateRaffleForm() {
               </p>
             </div>
           </div>
+
+          {submissionError ? (
+            <div
+              id="create-raffle-submit-error"
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                <p className="min-w-0 flex-1 leading-relaxed">{submissionError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-[44px] shrink-0 self-start border-destructive/40"
+                  onClick={() => setSubmissionError(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <Button
