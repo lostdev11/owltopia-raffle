@@ -26,6 +26,8 @@ function getDiscriminator(dataB58: string): number | null {
 
 type TxMessage = {
   accountKeys?: Array<{ pubkey?: string } | string>
+  /** Versioned (v0) messages use static keys + meta.loadedAddresses (ALTs). */
+  staticAccountKeys?: Array<{ pubkey?: string } | string | PublicKey>
   instructions?: Array<{
     programIdIndex?: number
     accounts?: number[]
@@ -42,19 +44,57 @@ type TxResponse = {
   }
 }
 
+function accountKeyEntryToBase58(k: unknown): string | null {
+  if (typeof k === 'string' && k.trim()) return k.trim()
+  if (k && typeof k === 'object' && 'pubkey' in k && typeof (k as { pubkey?: string }).pubkey === 'string') {
+    const p = (k as { pubkey: string }).pubkey.trim()
+    return p || null
+  }
+  try {
+    if (k instanceof PublicKey) return k.toBase58()
+    if (k != null) return new PublicKey(k as ConstructorParameters<typeof PublicKey>[0]).toBase58()
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
+ * Full account list for instruction indexing: legacy `accountKeys`, or v0
+ * `staticAccountKeys` + loaded writable + loaded readonly (matches on-chain layout).
+ */
 function getAccountKeys(tx: TxResponse): string[] {
   const msg = tx?.transaction?.message
   if (!msg) return []
-  const keys = msg.accountKeys
-  if (!keys) return []
+
   const resolved: string[] = []
-  for (const k of keys) {
-    const addr = typeof k === 'string' ? k : (k as { pubkey?: string })?.pubkey
-    if (addr) resolved.push(addr)
+  const staticKeys = msg.staticAccountKeys
+  const legacyKeys = msg.accountKeys
+
+  if (Array.isArray(staticKeys) && staticKeys.length > 0) {
+    for (const k of staticKeys) {
+      const a = accountKeyEntryToBase58(k)
+      if (a) resolved.push(a)
+    }
+  } else if (Array.isArray(legacyKeys)) {
+    for (const k of legacyKeys) {
+      const a = accountKeyEntryToBase58(k)
+      if (a) resolved.push(a)
+    }
   }
+
   const loaded = tx.meta?.loadedAddresses
-  if (loaded?.writable) resolved.push(...loaded.writable)
-  if (loaded?.readonly) resolved.push(...loaded.readonly)
+  if (loaded?.writable?.length) {
+    for (const w of loaded.writable) {
+      if (typeof w === 'string' && w.trim()) resolved.push(w.trim())
+    }
+  }
+  if (loaded?.readonly?.length) {
+    for (const r of loaded.readonly) {
+      if (typeof r === 'string' && r.trim()) resolved.push(r.trim())
+    }
+  }
+
   return resolved
 }
 
@@ -82,6 +122,15 @@ export async function sumIncomingSplToEscrowForMint(
   const escrow = escrowOwnerAddress.trim()
   const wantMint = expectedMint.trim()
   if (!escrow || !wantMint) return null
+
+  let escrowPk: PublicKey
+  let wantMintPk: PublicKey
+  try {
+    escrowPk = new PublicKey(escrow)
+    wantMintPk = new PublicKey(wantMint)
+  } catch {
+    return null
+  }
 
   let tx: TxResponse
   try {
@@ -151,8 +200,8 @@ export async function sumIncomingSplToEscrowForMint(
 
     try {
       const accountInfo = await getAccount(connection, new PublicKey(destTokenAccount), 'confirmed', tokenProgram)
-      if (accountInfo.owner.toBase58() !== escrow) continue
-      if (accountInfo.mint.toBase58() !== wantMint) continue
+      if (!accountInfo.owner.equals(escrowPk)) continue
+      if (!accountInfo.mint.equals(wantMintPk)) continue
       total += amount
     } catch {
       continue
@@ -169,6 +218,13 @@ export async function getMintFromDepositTx(
 ): Promise<string | null> {
   const escrow = escrowAddress.trim()
   if (!escrow) return null
+
+  let escrowPk: PublicKey
+  try {
+    escrowPk = new PublicKey(escrow)
+  } catch {
+    return null
+  }
 
   let tx: TxResponse
   try {
@@ -225,8 +281,7 @@ export async function getMintFromDepositTx(
     try {
       const tokenProgram = programId === TOKEN_2022_PROGRAM_ID.toBase58() ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
       const accountInfo = await getAccount(connection, new PublicKey(destTokenAccount), 'confirmed', tokenProgram)
-      const owner = accountInfo.owner.toBase58()
-      if (owner !== escrow) continue
+      if (!accountInfo.owner.equals(escrowPk)) continue
 
       const mint = accountInfo.mint.toBase58()
       return mint

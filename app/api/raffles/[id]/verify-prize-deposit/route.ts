@@ -11,6 +11,7 @@ import { getMintFromDepositTx, sumIncomingSplToEscrowForMint } from '@/lib/solan
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { isPartnerSplPrizeRaffle, getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { normalizeDepositTxSignatureInput } from '@/lib/raffles/verify-prize-deposit-client'
 import { requireSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -46,7 +47,8 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}))
-    const depositTx = typeof body.deposit_tx === 'string' ? body.deposit_tx.trim() : null
+    const depositTx =
+      typeof body.deposit_tx === 'string' ? normalizeDepositTxSignatureInput(body.deposit_tx) : null
 
     const raffle = await getRaffleById(id)
     if (!raffle) {
