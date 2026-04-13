@@ -12,11 +12,18 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
-import { getGovernanceProgramId, MAX_VOTING_SECS, MIN_VOTING_SECS } from '@/lib/governance/config'
+import {
+  getGovernanceInitAuthority,
+  getGovernanceProgramId,
+  isGovernanceOpenInitEnabled,
+  MAX_VOTING_SECS,
+  MIN_VOTING_SECS,
+} from '@/lib/governance/config'
 import { governanceAccountCoder } from '@/lib/governance/coders'
 import {
   buildCastVoteInstruction,
   buildCreateProposalInstruction,
+  buildInitializeInstruction,
   buildStakeInstruction,
   buildUnstakeInstruction,
 } from '@/lib/governance/instructions'
@@ -93,6 +100,8 @@ export function OwlCouncilClient() {
   const sendTransaction = useSendTransactionForWallet()
 
   const programId = useMemo(() => getGovernanceProgramId(), [])
+  const initAuthority = useMemo(() => getGovernanceInitAuthority(), [])
+  const openInit = useMemo(() => isGovernanceOpenInitEnabled(), [])
   const owlInfo = useMemo(() => getTokenInfo('OWL'), [])
   const owlMintPk = useMemo(
     () => (owlInfo.mintAddress ? new PublicKey(owlInfo.mintAddress) : null),
@@ -114,6 +123,9 @@ export function OwlCouncilClient() {
   const [proposalHours, setProposalHours] = useState('72')
   const [voteProposalId, setVoteProposalId] = useState('')
   const [voteSide, setVoteSide] = useState<'0' | '1'>('0')
+
+  const [initMinStakeOwl, setInitMinStakeOwl] = useState('10')
+  const [initVoteMult, setInitVoteMult] = useState('2')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -186,6 +198,12 @@ export function OwlCouncilClient() {
   const stakedRaw = userStake ? BigInt(userStake.amount.toString()) : 0n
   const stakedUi = formatRawOwl(stakedRaw, owlDecimals)
 
+  const canInitializeGovernance = Boolean(
+    connected &&
+      publicKey &&
+      (openInit || (initAuthority !== null && publicKey.equals(initAuthority)))
+  )
+
   const sendIx = async (label: string, addIx: (tx: Transaction) => void) => {
     if (!publicKey) return
     setActionError(null)
@@ -214,6 +232,38 @@ export function OwlCouncilClient() {
     } finally {
       setBusy(null)
     }
+  }
+
+  const onInitializeGovernance = async () => {
+    if (!publicKey || !owlMintPk) return
+    const mult = parseFloat(initVoteMult.trim())
+    if (!Number.isFinite(mult) || mult <= 0) {
+      setActionError('Vote weight multiplier must be a positive number (e.g. 2 for 2× stake voting power).')
+      return
+    }
+    const voteStakeWeightBps = Math.round(mult * 10000)
+    if (voteStakeWeightBps <= 0 || voteStakeWeightBps > 1_000_000) {
+      setActionError('Vote weight multiplier is out of a safe range.')
+      return
+    }
+    let minRaw: bigint
+    try {
+      minRaw = parseUiAmountToRaw(initMinStakeOwl.trim() || '10', owlDecimals)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Invalid min stake amount')
+      return
+    }
+    await sendIx('initialize', (tx) => {
+      tx.add(
+        buildInitializeInstruction({
+          programId,
+          authority: publicKey,
+          owlMint: owlMintPk,
+          minStakeToPropose: new BN(minRaw.toString()),
+          voteStakeWeightBps: new BN(voteStakeWeightBps),
+        })
+      )
+    })
   }
 
   const onStake = async () => {
@@ -400,6 +450,100 @@ export function OwlCouncilClient() {
         </Card>
       )}
 
+      {!loading && global === null && !canInitializeGovernance && (
+        <Card className="border-green-500/15 bg-black/30">
+          <CardHeader>
+            <CardTitle className="text-base">Why Stake OWL is disabled</CardTitle>
+            <CardDescription className="text-muted-foreground space-y-2">
+              <span className="block">
+                The program has no <strong>global config</strong> account on the RPC your browser uses yet, so
+                staking cannot run.
+              </span>
+              <span className="block text-sm">
+                <strong>Option A — from this site:</strong> add to <code className="text-xs">.env.local</code> then
+                restart dev server:{' '}
+                <code className="text-xs break-all">NEXT_PUBLIC_GOVERNANCE_INIT_AUTHORITY=&lt;your wallet&gt;</code>{' '}
+                (base58 of the wallet that will pay rent and sign init). Reload Owl Council while that wallet is
+                connected; an <strong>Initialize governance</strong> section will appear above.
+              </span>
+              <span className="block text-sm">
+                <strong>Option B — dev only:</strong>{' '}
+                <code className="text-xs">NEXT_PUBLIC_GOVERNANCE_ALLOW_OPEN_INIT=true</code> lets any connected wallet
+                initialize (never enable in production).
+              </span>
+              <span className="block text-sm">
+                <strong>Option C:</strong> run <code className="text-xs">initialize</code> via Anchor / Solana CLI
+                against the same cluster as <code className="text-xs">NEXT_PUBLIC_SOLANA_RPC_URL</code>, then tap
+                Refresh.
+              </span>
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
+      {!loading && global === null && canInitializeGovernance && (
+        <Card className="border-primary/40 bg-black/40">
+          <CardHeader>
+            <CardTitle className="text-base">Initialize governance (one-time)</CardTitle>
+            <CardDescription>
+              Creates the global config and OWL vault for program{' '}
+              <code className="text-xs break-all">{programId.toBase58()}</code> using mint{' '}
+              <code className="text-xs break-all">{owlMintPk?.toBase58()}</code>. You pay account rent from this
+              wallet.
+              {openInit && (
+                <span className="block mt-2 text-amber-200/90 text-sm">
+                  Open init is on — any connected wallet can run this. Turn off{' '}
+                  <code className="text-xs">NEXT_PUBLIC_GOVERNANCE_ALLOW_OPEN_INIT</code> after use.
+                </span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="init-min">
+                Min OWL staked to create a proposal
+              </label>
+              <Input
+                id="init-min"
+                inputMode="decimal"
+                className="touch-manipulation min-h-[44px]"
+                value={initMinStakeOwl}
+                onChange={(e) => setInitMinStakeOwl(e.target.value)}
+                disabled={busy !== null}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="init-mult">
+                Vote weight multiplier on staked OWL (e.g. 2 = 2×)
+              </label>
+              <Input
+                id="init-mult"
+                inputMode="decimal"
+                className="touch-manipulation min-h-[44px]"
+                value={initVoteMult}
+                onChange={(e) => setInitVoteMult(e.target.value)}
+                disabled={busy !== null}
+              />
+            </div>
+            <Button
+              type="button"
+              className="w-full touch-manipulation min-h-[44px] font-semibold"
+              onClick={() => void onInitializeGovernance()}
+              disabled={busy !== null}
+            >
+              {busy === 'initialize' ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin inline mr-2" aria-hidden />
+                  Initializing…
+                </>
+              ) : (
+                'Initialize governance'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {!loading && (
         <Card className="border-green-500/20 bg-black/40">
           <CardHeader>
@@ -410,6 +554,11 @@ export function OwlCouncilClient() {
                   Staked in the program vault (voting weight uses this balance at vote time). Min stake to propose:{' '}
                   {formatRawOwl(BigInt(global.min_stake_to_propose.toString()), owlDecimals)} OWL. Vote weight
                   multiplier: {(Number(global.vote_stake_weight_bps.toString()) / 10000).toFixed(2)}× raw stake.
+                  {!connected && (
+                    <span className="block mt-2 text-amber-200/90">
+                      Connect your wallet in the header to enable Stake OWL and Unstake.
+                    </span>
+                  )}
                 </>
               ) : (
                 <>
