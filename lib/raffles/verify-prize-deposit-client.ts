@@ -3,6 +3,37 @@
  * does not strand users after a successful on-chain transfer.
  */
 
+/** Strip whitespace; extract base58 sig from Solscan/explorer URLs; trim query strings. */
+export function normalizeDepositTxSignatureInput(raw: string | null | undefined): string {
+  const s = (raw ?? '').trim()
+  if (!s) return ''
+
+  const tryExtractFromPath = (pathOrUrl: string): string | null => {
+    const m = pathOrUrl.match(/\/(?:tx|transaction)\/([1-9A-HJ-NP-Za-km-z]+)/i)
+    return m?.[1] ?? null
+  }
+
+  try {
+    const u = new URL(s)
+    const fromPath = tryExtractFromPath(u.pathname)
+    if (fromPath) return fromPath
+  } catch {
+    const fromLoose = tryExtractFromPath(s)
+    if (fromLoose) return fromLoose
+  }
+
+  const noQuery = (s.split('?')[0] ?? '').trim()
+  const stripped = noQuery.replace(/^[`"'“”]+|[`"'“”]+$/g, '').trim()
+  if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(stripped)) return stripped
+
+  for (const part of stripped.split(/\s+/)) {
+    const p = part.replace(/^[`'"]|[`'"]$/g, '').split('?')[0]?.trim() ?? ''
+    if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(p)) return p
+  }
+
+  return stripped
+}
+
 export const VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS = 14
 export const VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS = 1000
 
@@ -37,7 +68,8 @@ export async function verifyPrizeDepositWithRetries(
     onAttempt?: (attemptIndex: number, maxAttempts: number) => void
   } = {}
 ): Promise<VerifyPrizeDepositClientResult> {
-  const depositTx = options.depositTx?.trim() || null
+  const depositTx =
+    normalizeDepositTxSignatureInput(options.depositTx?.trim() || '') || null
   const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
   const headers: HeadersInit | undefined = body ? { 'Content-Type': 'application/json' } : undefined
 
@@ -127,7 +159,8 @@ export async function verifyCommunityGiveawayDepositWithRetries(
     onAttempt?: (attemptIndex: number, maxAttempts: number) => void
   } = {}
 ): Promise<VerifyPrizeDepositClientResult> {
-  const depositTx = options.depositTx?.trim() || null
+  const depositTx =
+    normalizeDepositTxSignatureInput(options.depositTx?.trim() || '') || null
   const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
   const headers: HeadersInit | undefined = body ? { 'Content-Type': 'application/json' } : undefined
 

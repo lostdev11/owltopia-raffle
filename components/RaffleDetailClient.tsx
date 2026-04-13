@@ -103,6 +103,7 @@ import {
 import {
   verifyPrizeDepositWithRetries,
   isEscrowSplPrizeFrozenVerifyError,
+  normalizeDepositTxSignatureInput,
   VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS,
   type FrozenEscrowDiagnostics,
 } from '@/lib/raffles/verify-prize-deposit-client'
@@ -2206,13 +2207,26 @@ export function RaffleDetailClient({
   ])
 
   const handleVerifyPrizeDeposit = useCallback(async () => {
+    const depositTxFromUi =
+      manualDepositTx.trim() || (depositLastTxSignature?.trim() ?? '')
+    if (
+      isPartnerSplPrizeRaffle(raffle) &&
+      !normalizeDepositTxSignatureInput(depositTxFromUi)
+    ) {
+      setDepositEscrowError(
+        'Paste the Solana transaction signature (or a Solscan /tx/… link) for the transfer that sent the prize to escrow, then tap Verify deposit. If you used Transfer to escrow here, tap Verify again — we also try your last on-chain transfer from this page.'
+      )
+      setShowManualEscrowFallback(true)
+      return
+    }
+
     setDepositEscrowError(null)
     setDepositEscrowFrozenDiagnostics(null)
     setDepositVerifyLoading(true)
     setDepositEscrowProgressOpen(true)
     setDepositEscrowProgressStep('verify')
     setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
-    const manualTx = manualDepositTx.trim()
+    const manualTx = depositTxFromUi
     try {
       const signInForSession = async (): Promise<boolean> => {
         if (!publicKey || !signMessage) {
@@ -2303,7 +2317,16 @@ export function RaffleDetailClient({
       setDepositEscrowProgressStep('idle')
       setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     }
-  }, [raffle.id, router, publicKey, signMessage, manualDepositTx])
+  }, [
+    raffle.id,
+    raffle.prize_type,
+    raffle.prize_currency,
+    router,
+    publicKey,
+    signMessage,
+    manualDepositTx,
+    depositLastTxSignature,
+  ])
 
   const handleReturnPrizeToCreator = useCallback(async () => {
     const reason = returnPrizeReason as 'cancelled' | 'wrong_nft' | 'dispute' | 'platform_error' | 'testing'
@@ -2830,7 +2853,9 @@ export function RaffleDetailClient({
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.
+                      {isPartnerSplPrizeRaffle(raffle)
+                        ? 'Verify deposit checks on-chain that the prize tokens reached escrow, then opens the raffle for entries.'
+                        : 'Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.'}
                     </p>
                     {depositLastTxSignature &&
                       !(depositEscrowSuccess && !depositEscrowError) && (
@@ -3012,8 +3037,18 @@ export function RaffleDetailClient({
                     )}
                     {showManualEscrowFallback && !isEscrowSplPrizeFrozenVerifyError(depositEscrowError) && (
                       <p className="text-xs text-amber-800 dark:text-amber-200 border-t border-destructive/15 pt-3 leading-relaxed">
-                        <strong>Try manually:</strong> send the NFT to the escrow address above, then tap{' '}
-                        <strong>Verify deposit</strong>.
+                        <strong>Try manually:</strong>{' '}
+                        {isPartnerSplPrizeRaffle(raffle) ? (
+                          <>
+                            send the <strong>prize tokens</strong> to the escrow address above (or confirm you already
+                            did), paste the transfer&apos;s <strong>transaction signature</strong> (raw base58 or a Solscan
+                            /tx/ link) in the field, then tap <strong>Verify deposit</strong>.
+                          </>
+                        ) : (
+                          <>
+                            send the NFT to the escrow address above, then tap <strong>Verify deposit</strong>.
+                          </>
+                        )}
                       </p>
                     )}
                   </div>
