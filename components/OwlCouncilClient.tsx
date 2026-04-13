@@ -393,89 +393,116 @@ export function OwlCouncilClient() {
             <CardDescription>
               No governance config account was found for this program on the RPC cluster you are using (
               {/devnet/i.test(resolvePublicSolanaRpcUrl()) ? 'devnet' : 'mainnet'}-style). Deploy the Anchor program
-              and call <code className="text-xs">initialize</code> with the OWL mint before using this page.
+              and call <code className="text-xs">initialize</code> with the OWL mint, then tap Refresh. Stake buttons
+              below stay visible but stay disabled until this succeeds.
             </CardDescription>
           </CardHeader>
         </Card>
       )}
 
+      {!loading && (
+        <Card className="border-green-500/20 bg-black/40">
+          <CardHeader>
+            <CardTitle className="text-base">Your stake</CardTitle>
+            <CardDescription>
+              {global ? (
+                <>
+                  Staked in the program vault (voting weight uses this balance at vote time). Min stake to propose:{' '}
+                  {formatRawOwl(BigInt(global.min_stake_to_propose.toString()), owlDecimals)} OWL. Vote weight
+                  multiplier: {(Number(global.vote_stake_weight_bps.toString()) / 10000).toFixed(2)}× raw stake.
+                </>
+              ) : (
+                <>
+                  Connect your wallet and run <code className="text-xs">initialize</code> on this program for your
+                  RPC cluster. Stake and unstake stay disabled until the on-chain config exists.
+                </>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-lg font-mono text-green-100">{global ? `${stakedUi} OWL` : '—'}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="stake-amt">
+                  Stake amount
+                </label>
+                <Input
+                  id="stake-amt"
+                  inputMode="decimal"
+                  className="touch-manipulation min-h-[44px]"
+                  placeholder={`0 — ${owlDecimals} decimals`}
+                  value={stakeAmount}
+                  onChange={(e) => setStakeAmount(e.target.value)}
+                  disabled={!connected || !global || busy !== null}
+                />
+                <Button
+                  type="button"
+                  variant="default"
+                  className="w-full touch-manipulation min-h-[44px] font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={() => void onStake()}
+                  disabled={!connected || !global || busy !== null}
+                  title={
+                    !global
+                      ? 'Initialize the governance program on this cluster first'
+                      : !connected
+                        ? 'Connect your wallet to stake'
+                        : undefined
+                  }
+                >
+                  {busy === 'staking' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin inline mr-2" aria-hidden />
+                      Staking…
+                    </>
+                  ) : (
+                    'Stake OWL'
+                  )}
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="unstake-amt">
+                  Unstake amount
+                </label>
+                <Input
+                  id="unstake-amt"
+                  inputMode="decimal"
+                  className="touch-manipulation min-h-[44px]"
+                  placeholder={`0 — ${owlDecimals} decimals`}
+                  value={unstakeAmount}
+                  onChange={(e) => setUnstakeAmount(e.target.value)}
+                  disabled={!connected || !global || busy !== null}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full touch-manipulation min-h-[44px]"
+                  onClick={() => void onUnstake()}
+                  disabled={!connected || !global || busy !== null}
+                  title={
+                    !global
+                      ? 'Initialize the governance program on this cluster first'
+                      : !connected
+                        ? 'Connect your wallet to unstake'
+                        : undefined
+                  }
+                >
+                  {busy === 'unstaking' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin inline mr-2" aria-hidden />
+                      Unstaking…
+                    </>
+                  ) : (
+                    'Unstake'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {!loading && global && (
         <>
-          <Card className="border-green-500/20 bg-black/40">
-            <CardHeader>
-              <CardTitle className="text-base">Your stake</CardTitle>
-              <CardDescription>
-                Staked in the program vault (voting weight uses this balance at vote time). Min stake to propose:{' '}
-                {formatRawOwl(BigInt(global.min_stake_to_propose.toString()), owlDecimals)} OWL. Vote weight
-                multiplier: {(Number(global.vote_stake_weight_bps.toString()) / 10000).toFixed(2)}× raw stake.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-lg font-mono text-green-100">{stakedUi} OWL</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium" htmlFor="stake-amt">
-                    Stake amount
-                  </label>
-                  <Input
-                    id="stake-amt"
-                    inputMode="decimal"
-                    className="touch-manipulation min-h-[44px]"
-                    placeholder={`0 — ${owlDecimals} decimals`}
-                    value={stakeAmount}
-                    onChange={(e) => setStakeAmount(e.target.value)}
-                    disabled={!connected || busy !== null}
-                  />
-                  <Button
-                    type="button"
-                    className="w-full touch-manipulation min-h-[44px]"
-                    onClick={() => void onStake()}
-                    disabled={!connected || busy !== null}
-                  >
-                    {busy === 'staking' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin inline mr-2" aria-hidden />
-                        Staking…
-                      </>
-                    ) : (
-                      'Stake OWL'
-                    )}
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium" htmlFor="unstake-amt">
-                    Unstake amount
-                  </label>
-                  <Input
-                    id="unstake-amt"
-                    inputMode="decimal"
-                    className="touch-manipulation min-h-[44px]"
-                    placeholder={`0 — ${owlDecimals} decimals`}
-                    value={unstakeAmount}
-                    onChange={(e) => setUnstakeAmount(e.target.value)}
-                    disabled={!connected || busy !== null}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full touch-manipulation min-h-[44px]"
-                    onClick={() => void onUnstake()}
-                    disabled={!connected || busy !== null}
-                  >
-                    {busy === 'unstaking' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin inline mr-2" aria-hidden />
-                        Unstaking…
-                      </>
-                    ) : (
-                      'Unstake'
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="border-green-500/20 bg-black/40">
             <CardHeader>
               <CardTitle className="text-base">Create proposal</CardTitle>
