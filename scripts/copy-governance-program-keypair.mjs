@@ -41,6 +41,23 @@ function loadDotEnvLocal() {
 loadDotEnvLocal()
 
 const fromEnv = process.env.GOVERNANCE_PROGRAM_KEYPAIR_PATH?.trim()
+
+/** Env must be a path to a .json file — not the raw Solana keypair array pasted as the value. */
+function looksLikeKeypairJsonNotPath(s) {
+  const t = s.trim()
+  if (!t.startsWith('[')) return false
+  return /^\[\s*\d/.test(t)
+}
+
+if (fromEnv && looksLikeKeypairJsonNotPath(fromEnv)) {
+  console.error(
+    '[copy-governance-program-keypair] GOVERNANCE_PROGRAM_KEYPAIR_PATH looks like keypair JSON, not a file path.\n' +
+      '  Put the array in a file, e.g. governance-anchor/keys/owltopia_governance-keypair.json\n' +
+      '  Then either remove GOVERNANCE_PROGRAM_KEYPAIR_PATH (default uses that file) or set it to that path.'
+  )
+  process.exit(1)
+}
+
 const src = fromEnv
   ? path.isAbsolute(fromEnv)
     ? fromEnv
@@ -52,7 +69,10 @@ const dest = path.join(destDir, 'owltopia_governance-keypair.json')
 
 if (!fs.existsSync(src)) {
   console.error(`[copy-governance-program-keypair] File not found:\n  ${src}`)
-  console.error('Set GOVERNANCE_PROGRAM_KEYPAIR_PATH in .env.local or place the keypair at the default path.')
+  console.error(
+    'GOVERNANCE_PROGRAM_KEYPAIR_PATH must be a path to your keypair .json file (not the secret pasted inline).'
+  )
+  console.error('Default file: governance-anchor/keys/owltopia_governance-keypair.json')
   process.exit(1)
 }
 
