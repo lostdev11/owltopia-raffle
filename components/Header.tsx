@@ -12,9 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
+import { isOwlEnabled } from '@/lib/tokens'
 
 export function Header() {
   const { publicKey, connected } = useWallet()
@@ -70,6 +71,7 @@ export function Header() {
 
   const navLinks = [
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+    ...(isOwlEnabled() ? [{ href: '/owl-council', label: 'Owl Council', icon: Landmark }] : []),
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -95,6 +97,15 @@ export function Header() {
                   <span className="hidden sm:inline">Leaderboard</span>
                 </Button>
               </Link>
+              {isOwlEnabled() && (
+                <Link href="/owl-council">
+                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Landmark className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Owl Council</span>
+                    <span className="sm:hidden">Council</span>
+                  </Button>
+                </Link>
+              )}
               {connected && (
                 <Link href="/dashboard">
                   <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
