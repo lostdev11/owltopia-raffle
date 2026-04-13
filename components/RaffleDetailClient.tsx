@@ -459,9 +459,17 @@ export function RaffleDetailClient({
       })
   }, [creatorWallet])
 
-  // Fetch prize escrow address when NFT raffle needs deposit
+  // Fetch prize escrow address when an NFT or partner SPL (e.g. USDC) prize raffle needs a deposit.
+  // Partner crypto raffles use the same escrow config endpoint; previously only NFT ran this effect,
+  // so `escrowAddress` stayed null and creators saw endless "Preparing…" with no Verify button.
   useEffect(() => {
-    if (raffle.prize_type !== 'nft' || raffle.prize_deposited_at) return
+    if (raffle.prize_deposited_at) return
+
+    const isNftNeedingEscrow =
+      raffle.prize_type === 'nft' && Boolean(raffle.nft_mint_address?.trim())
+    const isPartnerNeedingEscrow = isPartnerSplPrizeRaffle(raffle)
+    if (!isNftNeedingEscrow && !isPartnerNeedingEscrow) return
+
     let cancelled = false
     fetch('/api/config/prize-escrow', { credentials: 'include' })
       .then(async (r) => {
@@ -485,7 +493,7 @@ export function RaffleDetailClient({
         setDepositEscrowError(e instanceof Error ? e.message : 'Failed to load prize escrow address.')
       })
     return () => { cancelled = true }
-  }, [raffle.prize_type, raffle.prize_deposited_at])
+  }, [raffle.prize_type, raffle.prize_currency, raffle.prize_deposited_at, raffle.nft_mint_address])
 
   // Fetch block explorer URL to check NFT in escrow (only once prize is deposited)
   useEffect(() => {
