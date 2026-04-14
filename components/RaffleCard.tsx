@@ -972,8 +972,8 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    /* Below md: cover fills thumb. md+: centered contain (avoids CSS order fights between m-auto and max-md). */
-                    className="pointer-events-none absolute inset-0 max-md:m-0 max-md:size-full max-md:object-cover max-md:object-center md:m-auto md:max-h-full md:max-w-full md:object-contain md:object-center"
+                    /* object-cover at all widths so the thumb strip stays filled inside rounded corners (contain letterboxes on md+). */
+                    className="pointer-events-none absolute inset-0 size-full object-cover object-center"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1264,7 +1264,7 @@ export function RaffleCard({
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-cover object-center md:object-contain"
+                  className="object-cover object-center"
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
