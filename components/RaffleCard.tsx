@@ -972,8 +972,8 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    /* max-sm: cover fills thumb frame. sm+: centered contain (full art) like desktop. */
-                    className="pointer-events-none absolute inset-0 max-sm:h-full max-sm:w-full max-sm:object-cover max-sm:object-center m-auto max-h-full max-w-full object-contain object-center max-sm:m-0"
+                    /* Below md: cover fills thumb. md+: centered contain (avoids CSS order fights between m-auto and max-md). */
+                    className="pointer-events-none absolute inset-0 max-md:m-0 max-md:size-full max-md:object-cover max-md:object-center md:m-auto md:max-h-full md:max-w-full md:object-contain md:object-center"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1264,7 +1264,7 @@ export function RaffleCard({
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-cover object-center sm:object-contain"
+                  className="object-cover object-center md:object-contain"
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
