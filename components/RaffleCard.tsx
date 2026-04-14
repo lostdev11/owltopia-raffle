@@ -936,7 +936,6 @@ export function RaffleCard({
           >
             {/* Clip inner content only; outer Card keeps theme / entered box-shadow uncropped */}
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem]">
-            <div className="flex min-h-0 flex-1 flex-row items-stretch">
             {isWinner && (
               <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
             )}
@@ -949,9 +948,12 @@ export function RaffleCard({
               style={{ background: themeColor }}
               aria-hidden
             />
+            {/* Grid (not flex row): thumb must span main + footer rows or flex leaves a gap under the image on mobile */}
+            <div className="grid min-h-0 flex-1 auto-rows-auto grid-cols-[96px_minmax(0,1fr)] sm:grid-cols-[128px_minmax(0,1fr)] md:grid-cols-[160px_minmax(0,1fr)]">
             {!listThumbDead && (
-              <div 
-                className="!relative z-10 m-0 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 cursor-pointer items-center justify-center self-stretch overflow-hidden rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card p-0 sm:w-32 md:w-40"
+              <div
+                style={{ gridRow: '1 / -1' }}
+                className="!relative z-10 col-start-1 min-h-0 min-w-0 flex w-full cursor-pointer items-center justify-center overflow-hidden rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card p-0"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1006,13 +1008,14 @@ export function RaffleCard({
             {listThumbDead && (
               <Link
                 href={smallRaffleHref}
-                className="relative z-10 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 items-center justify-center self-stretch rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card sm:w-32 md:w-40"
+                style={{ gridRow: '1 / -1' }}
+                className="relative z-10 col-start-1 flex min-h-0 min-w-0 w-full items-center justify-center rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card"
                 onClick={(e) => handleLinkClick(e)}
               >
                 <span className="text-[9px] sm:text-[10px] text-muted-foreground text-center px-1">Image unavailable</span>
               </Link>
             )}
-            <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="relative z-10 col-start-2 min-h-0 min-w-0 flex flex-col overflow-hidden">
               <Link
                 href={smallRaffleHref}
                 className="flex min-h-0 min-w-0 flex-col overflow-hidden p-1.5 sm:p-2"
@@ -1096,7 +1099,8 @@ export function RaffleCard({
             )}
                 </LinkifiedTextInsideLinkProvider>
               </Link>
-              <div className="flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 px-1.5 pb-1.5 pt-0.5 sm:px-2 sm:pb-2 sm:pt-1">
+            </div>
+              <div className="relative z-10 col-start-2 flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 px-1.5 pb-1.5 pt-0.5 sm:px-2 sm:pb-2 sm:pt-1">
                 <Link
                   href={smallRaffleHref}
                   className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1"
@@ -1138,7 +1142,7 @@ export function RaffleCard({
             {!isActive && !isFuture && raffle.winner_wallet && (
               <Link
                 href={smallRaffleHref}
-                className="mt-1 flex items-center gap-1 border-t border-border/40 px-1.5 pt-1 min-w-0 sm:mt-1.5 sm:px-2 sm:pt-1.5"
+                className="relative z-10 col-start-2 mt-1 flex items-center gap-1 border-t border-border/40 px-1.5 pt-1 min-w-0 sm:mt-1.5 sm:px-2 sm:pt-1.5"
                 onClick={(e) => handleLinkClick(e)}
               >
                 <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0 text-yellow-500" />
@@ -1154,8 +1158,7 @@ export function RaffleCard({
                 </span>
               </Link>
             )}
-          </div>
-          </div>
+            </div>
             </div>
         </Card>
       {isAdmin && (
