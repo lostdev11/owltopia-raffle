@@ -9,7 +9,7 @@
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
  * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -18,8 +18,22 @@ import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import { normalizeRaffleTicketCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart, Gift, Users } from 'lucide-react'
+import { normalizeRaffleTicketCurrency, revenueInCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
+import {
+  Eye,
+  Shield,
+  Megaphone,
+  Flame,
+  Trophy,
+  Ticket,
+  PlusCircle,
+  Medal,
+  Loader2,
+  Crown,
+  ShoppingCart,
+  Gift,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -34,6 +48,7 @@ import {
   type CommunityGiveawayBrowseItem,
 } from '@/components/CommunityGiveawayBrowseCard'
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
+import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -226,6 +241,23 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
   return m.includes('503') || m.includes('service unavailable')
 }
 
+type RafflesPageTab =
+  | 'all'
+  | 'partner-raffles'
+  | 'giveaways'
+  | 'my-entries'
+  | 'owl-vision'
+  | 'announcements'
+  | 'leaderboard'
+
+/** URL ?tab=… for deep links; must stay in sync with tab buttons below. */
+function tabFromSearchParams(sp: { get(name: string): string | null }): RafflesPageTab {
+  const t = sp.get('tab')
+  if (t === 'giveaways' || t === 'giveaway') return 'giveaways'
+  if (t === 'partners' || t === 'partner' || t === 'partner-raffles') return 'partner-raffles'
+  return 'all'
+}
+
 export function RafflesPageClient({
   activeRafflesWithEntries,
   pausedPendingRafflesWithEntries,
@@ -336,8 +368,7 @@ export function RafflesPageClient({
     }
   }, [connected, wallet, viewerIsAdmin])
 
-  type Tab = 'all' | 'partner-raffles' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
-  const [tab, setTab] = useState<Tab>('all')
+  const [tab, setTab] = useState<RafflesPageTab>(() => tabFromSearchParams(searchParams))
   const [giveawaysList, setGiveawaysList] = useState<CommunityGiveawayBrowseItem[] | null>(null)
   const [giveawaysLoading, setGiveawaysLoading] = useState(false)
   const [giveawaysError, setGiveawaysError] = useState<string | null>(null)
@@ -356,11 +387,12 @@ export function RafflesPageClient({
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    const t = searchParams.get('tab')
-    if (t === 'giveaways' || t === 'giveaway') setTab('giveaways')
-    if (t === 'partners' || t === 'partner' || t === 'partner-raffles') setTab('partner-raffles')
-  }, [searchParams])
+  const tabQueryKey = searchParams.get('tab') ?? ''
+  useLayoutEffect(() => {
+    setTab(tabFromSearchParams(searchParams))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when `?tab=` changes; including
+    // `searchParams` by identity would reset Owl Vision / Leaderboard after in-app tab clicks.
+  }, [tabQueryKey])
 
   const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
     const touch = e.touches[0]
@@ -598,8 +630,13 @@ export function RafflesPageClient({
 
   const partnerOnly = tab === 'partner-raffles'
   const creatorWalletKey = (r: Raffle) => (r.creator_wallet || r.created_by || '').trim()
+  /** Match RafflesList / RaffleCard: DB flag or allowlisted partner wallet. */
+  const isPartnerCommunityRaffle = (raffle: Raffle) => {
+    const w = creatorWalletKey(raffle)
+    return raffle.creator_is_partner === true || (w ? partnerWalletSet.has(w) : false)
+  }
   const filterPartnerBucket = (items: RaffleWithEntries[]) =>
-    partnerOnly ? items.filter(({ raffle }) => partnerWalletSet.has(creatorWalletKey(raffle))) : items
+    partnerOnly ? items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)) : items
 
   const activeView = filterPartnerBucket(active)
   const pausedPendingView = filterPartnerBucket(pausedPending)
@@ -607,7 +644,7 @@ export function RafflesPageClient({
   const pastView = filterPartnerBucket(past)
 
   const partnerFeaturedActive = useMemo(
-    () => active.filter(({ raffle }) => partnerWalletSet.has(creatorWalletKey(raffle))),
+    () => active.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)),
     [active, partnerWalletSet]
   )
 
@@ -746,14 +783,12 @@ export function RafflesPageClient({
           <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
               const threshold = profitInfo?.threshold ?? null
-              const cur = normalizeRaffleTicketCurrency(profitInfo?.thresholdCurrency ?? raffle.currency)
-              let revenueValue: number | null = null
-              if (profitInfo) {
-                const thCur = normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
-                if (thCur === 'USDC') revenueValue = profitInfo.revenue.usdc
-                else if (thCur === 'SOL') revenueValue = profitInfo.revenue.sol
-                else if (thCur === 'OWL') revenueValue = profitInfo.revenue.owl
-              }
+              const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
+              const thresholdCur = profitInfo?.thresholdCurrency
+                ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
+                : ticketCur
+              const revenueValue =
+                profitInfo != null ? revenueInCurrency(profitInfo.revenue, ticketCur) : null
               return (
                 <Link
                   key={raffle.id}
@@ -777,11 +812,13 @@ export function RafflesPageClient({
                       <p className="text-[11px] sm:text-xs text-emerald-100/80">
                         Revenue:{' '}
                         <span className="font-semibold">
-                          {revenueValue.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                          {revenueValue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
                         </span>{' '}
                         · {raffle.prize_type === 'nft' ? 'Floor' : 'Threshold'}:{' '}
                         <span className="font-semibold">
-                          {threshold != null ? threshold.toFixed(cur === 'USDC' ? 2 : 4) : '0.0000'} {cur}
+                          {threshold != null
+                            ? `${threshold.toFixed(thresholdCur === 'USDC' ? 2 : 4)} ${thresholdCur}`
+                            : `0.0000 ${thresholdCur}`}
                         </span>
                       </p>
                     )}
@@ -967,67 +1004,74 @@ export function RafflesPageClient({
               )}
             </div>
           ) : tab === 'owl-vision' ? (
-            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
-              <Card className="border-green-500/30 bg-green-500/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Eye className="h-5 w-5 text-green-500" />
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-3">
+              <OwlVisionDisclosure
+                variant="accent"
+                defaultOpen
+                contentClassName="text-sm text-muted-foreground"
+                title={
+                  <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                    <Eye className="h-5 w-5 shrink-0 text-green-500" />
                     What is Owl Vision?
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-muted-foreground">
+                  </span>
+                }
+              >
+                <div className="space-y-2">
                   <p>
                     Owl Vision is a <strong className="text-foreground">trust score (0–100)</strong> shown on each raffle. It helps you see how transparent and fair a raffle is — before you buy a ticket.
                   </p>
                   <p>
                     We believe on-chain raffles should be verifiable. Owl Vision summarizes three things that matter for trust: verified payments, wallet diversity, and time integrity.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Verified Payments (up to 60 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Verified Payments (up to 60 points)</span>}
+              >
+                <p>
                   What share of entries have been confirmed by on-chain verification? A high percentage means most tickets are backed by real, verified transactions.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Wallet Diversity (up to 30 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Wallet Diversity (up to 30 points)</span>}
+              >
+                <p>
                   Are many different wallets participating, or is it a few wallets with lots of tickets? Higher diversity suggests a broader, more organic participation.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Time Integrity (up to 10 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Time Integrity (up to 10 points)</span>}
+              >
+                <p>
                   Was the raffle edited after people had already entered? If not, the raffle gets full integrity points; if it was edited after entries, it gets fewer points so you&apos;re aware.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card className="border-green-500/30 bg-green-500/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Shield className="h-4 w-4 text-green-500" />
+              <OwlVisionDisclosure
+                variant="accent"
+                contentClassName="text-sm text-muted-foreground"
+                title={
+                  <span className="flex items-center gap-2 text-base font-semibold tracking-tight">
+                    <Shield className="h-4 w-4 shrink-0 text-green-500" />
                     How to read the score
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground space-y-2">
+                  </span>
+                }
+              >
+                <div className="space-y-2">
                   <p>
                     Hover or tap the <strong className="text-foreground">Owl Vision</strong> badge on any raffle card to see the breakdown. On a raffle&apos;s detail page, use the <strong className="text-foreground">Owl Vision</strong> tab for the full breakdown.
                   </p>
                   <p>
                     A higher score means more verified entries, better diversity, and no (or minimal) edits after entries — all signals of a trustworthy raffle.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </OwlVisionDisclosure>
 
               <p className="text-sm text-muted-foreground pt-2">
                 <Link href="/how-it-works" className="text-green-500 hover:underline">How it works</Link> — full guide to raffles, winner selection, and Owl Vision.
@@ -1200,6 +1244,35 @@ export function RafflesPageClient({
               )}
             </div>
           ) : (tab === 'all' || tab === 'partner-raffles') ? (
+            partnerOnly && isEmptyPartnerView ? (
+              <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
+                {clientFetchStarted && !clientBuckets && !clientFetchError ? (
+                  <p className="text-xl text-muted-foreground">Loading raffles…</p>
+                ) : (
+                  <>
+                    <p className="text-xl text-muted-foreground mb-4">No partner raffles to show yet</p>
+                    <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                      Raffles from verified partner communities (2% platform fee on tickets). Switch to{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('all')}
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                      >
+                        All raffles
+                      </button>{' '}
+                      to see the full list.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
+                    >
+                      Refresh
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
             <>
               {tab === 'all' && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
@@ -1307,16 +1380,14 @@ export function RafflesPageClient({
             </div>
           )}
 
-          {/* Empty state: no raffles at all — show message + refresh (or loading while client fallback runs) */}
-          {(partnerOnly ? isEmptyPartnerView : isEmpty) && (
+          {/* Empty state on All tab only (partner empty uses consolidated block above). */}
+          {tab === 'all' && isEmpty && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>
               ) : (
                 <>
-                  <p className="text-xl text-muted-foreground mb-4">
-                    {partnerOnly ? 'No partner raffles to show yet' : 'No active raffles yet'}
-                  </p>
+                  <p className="text-xl text-muted-foreground mb-4">No active raffles yet</p>
                   <button
                     type="button"
                     onClick={handleRefresh}
@@ -1329,6 +1400,7 @@ export function RafflesPageClient({
             </div>
           )}
             </>
+          )
           ) : null}
         </>
       )}

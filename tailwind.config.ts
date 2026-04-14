@@ -124,10 +124,12 @@ const config: Config = {
         },
         'button-glow-pulse': {
           '0%, 100%': {
-            boxShadow: '0 0 20px rgba(0, 255, 136, 0.35), 0 0 40px rgba(0, 255, 136, 0.2)',
+            boxShadow:
+              '0 0 10px rgba(0, 255, 136, 0.22), 0 0 24px rgba(0, 255, 136, 0.12), 0 0 44px rgba(0, 255, 136, 0.06)',
           },
           '50%': {
-            boxShadow: '0 0 32px rgba(0, 255, 136, 0.8), 0 0 64px rgba(0, 255, 136, 0.5), 0 0 96px rgba(0, 255, 136, 0.25)',
+            boxShadow:
+              '0 0 14px rgba(0, 255, 136, 0.32), 0 0 32px rgba(0, 255, 136, 0.18), 0 0 56px rgba(0, 255, 136, 0.09)',
           },
         },
         /* Hero: gentle rise + fade for landing */

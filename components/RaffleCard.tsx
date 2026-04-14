@@ -24,6 +24,7 @@ import {
   getThemeAccentClasses,
   getThemeAccentColor,
   getThemeAccentRgbChannels,
+  softOuterGlowFromChannels,
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -266,11 +267,11 @@ export function RaffleCard({
   // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
   const borderStyle = isPendingDraft
-    ? { borderColor: '#f59e0b', boxShadow: '0 0 20px rgba(245, 158, 11, 0.45)' }
+    ? { borderColor: '#f59e0b', boxShadow: softOuterGlowFromChannels('245 158 11') }
     : isFuture
-    ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
+    ? { borderColor: '#ef4444', boxShadow: softOuterGlowFromChannels('239 68 68') }
     : !isActive
-      ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' } // blue-500, blue glow
+      ? { borderColor: '#3b82f6', boxShadow: softOuterGlowFromChannels('59 130 246') }
       : baseBorderStyle
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const cardSurfaceStyle: CSSProperties =
@@ -913,29 +914,29 @@ export function RaffleCard({
 
   // Small size - List format (horizontal)
   if (size === 'small') {
+    const smallRaffleHref = `/raffles/${raffle.slug}`
     return (
-      <div className="relative z-10 md:hover:z-50">
-        <Link 
-          href={`/raffles/${raffle.slug}`}
-          onTouchStart={(e) => {
-            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            scrollDetectedRef.current = false
-          }}
-          onTouchMove={(e) => {
-            const { x, y } = touchStartRef.current
-            if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
-              scrollDetectedRef.current = true
-            }
-          }}
-          onTouchEnd={handleTouchEnd}
-          onClick={(e) => handleLinkClick(e)}
-        >
-          <LinkifiedTextInsideLinkProvider>
+      <div
+        className="relative z-10 flex h-full min-h-0 flex-col md:hover:z-50"
+        onTouchStart={(e) => {
+          touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+          scrollDetectedRef.current = false
+        }}
+        onTouchMove={(e) => {
+          const { x, y } = touchStartRef.current
+          if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+            scrollDetectedRef.current = true
+          }
+        }}
+        onTouchEnd={handleTouchEnd}
+      >
           <Card
-            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-col p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
+            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex h-full min-h-0 flex-col p-0 rounded-[1.25rem]')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
             style={cardSurfaceStyle}
           >
-            <div className="flex flex-row items-stretch flex-1 min-h-0">
+            {/* Clip inner content only; outer Card keeps theme / entered box-shadow uncropped */}
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem]">
+            <div className="flex min-h-0 flex-1 flex-row items-stretch">
             {isWinner && (
               <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
             )}
@@ -950,7 +951,7 @@ export function RaffleCard({
             />
             {!listThumbDead && (
               <div 
-                className="!relative w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] bg-muted"
+                className="!relative h-full min-h-0 w-24 min-w-[96px] shrink-0 self-stretch overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] rounded-bl-[1.25rem] bg-muted sm:w-32 md:w-40"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1002,13 +1003,23 @@ export function RaffleCard({
               </div>
             )}
             {listThumbDead && (
-              <div className="w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
+              <Link
+                href={smallRaffleHref}
+                className="relative z-10 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 self-stretch items-center justify-center border bg-muted sm:w-32 md:w-40 rounded-l-[1.25rem] rounded-bl-[1.25rem]"
+                onClick={(e) => handleLinkClick(e)}
+              >
                 <span className="text-[9px] sm:text-[10px] text-muted-foreground text-center px-1">Image unavailable</span>
-              </div>
+              </Link>
             )}
-            <div className="flex-1 flex flex-col p-1.5 sm:p-2 min-w-0 z-10 relative overflow-hidden">
+            <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <Link
+                href={smallRaffleHref}
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-1.5 sm:p-2"
+                onClick={(e) => handleLinkClick(e)}
+              >
+                <LinkifiedTextInsideLinkProvider>
               <div className="flex items-center justify-between gap-1.5 mb-0.5 sm:mb-1 min-w-0">
-                <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.8125rem] !leading-tight line-clamp-1 sm:line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5">
+                <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.875rem] !leading-snug line-clamp-3 sm:line-clamp-4 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5 break-words">
                   {raffle.title}
                 </CardTitle>
                 <div className="flex items-center gap-0.5 sm:gap-1 group/owlvision flex-shrink-0 self-center">
@@ -1076,49 +1087,61 @@ export function RaffleCard({
             {/* Raffle description — single secondary text below title */}
             {raffle.description && (
               <p
-                className="text-[11px] text-muted-foreground line-clamp-2 mb-1 sm:mb-1 mt-0 break-words min-w-0 leading-snug"
+                className="text-[11px] text-muted-foreground line-clamp-2 sm:line-clamp-3 mb-1 sm:mb-1 mt-0 break-words min-w-0 leading-snug"
                 title={raffle.description}
               >
                 <RaffleDescriptionText raffle={raffle} />
               </p>
             )}
-              <div className="mt-auto flex max-sm:pt-0 flex-wrap items-center gap-x-1 gap-y-1 min-w-0 [&_a]:relative [&_a]:z-20">
+                </LinkifiedTextInsideLinkProvider>
+              </Link>
+              <div className="mt-auto flex max-sm:pt-0 flex-wrap items-center gap-x-1 gap-y-1 min-w-0 border-t border-border/40 px-1.5 pb-1.5 pt-1 sm:px-2 sm:pb-2 sm:pt-1.5">
+                <Link
+                  href={smallRaffleHref}
+                  className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1"
+                  onClick={(e) => handleLinkClick(e)}
+                >
                   <span className="text-[11px] text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
-                {isFuture ? (
-                  <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                    {serverNow && new Date(raffle.start_time) <= serverNow
-                      ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
-                      : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
-                  </span>
-                ) : isActive ? (
-                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                    {serverNow && new Date(raffle.end_time) <= serverNow
-                      ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
-                      : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
-                  </span>
-                ) : isPendingDraft ? (
-                  <span>Pending escrow deposit</span>
-                ) : (
-                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
-                )}
+                    {isFuture ? (
+                      <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                        {serverNow && new Date(raffle.start_time) <= serverNow
+                          ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
+                      </span>
+                    ) : isActive ? (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>
+                        {serverNow && new Date(raffle.end_time) <= serverNow
+                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                          : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
+                      </span>
+                    ) : isPendingDraft ? (
+                      <span>Pending escrow deposit</span>
+                    ) : (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
+                    )}
                   </span>
                   <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
-                  {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-                    <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
-                  )}
                   {section !== 'active' && (
-                    <Badge 
-                      variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
+                    <Badge
+                      variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'}
                       className={`rounded-full text-[9px] sm:text-[10px] min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${statusBadgeClass}`}
                     >
                       {statusLabel}
                     </Badge>
                   )}
-            </div>
+                </Link>
+                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+                  <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
+                )}
+              </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
-              <div className="mt-1 pt-1 sm:mt-1.5 sm:pt-1.5 border-t flex items-center gap-1 min-w-0">
-                <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-500 flex-shrink-0" />
-                <span className="text-[11px] text-muted-foreground truncate min-w-0">
+              <Link
+                href={smallRaffleHref}
+                className="mt-1 flex items-center gap-1 border-t border-border/40 px-1.5 pt-1 min-w-0 sm:mt-1.5 sm:px-2 sm:pt-1.5"
+                onClick={(e) => handleLinkClick(e)}
+              >
+                <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0 text-yellow-500" />
+                <span className="truncate text-[11px] text-muted-foreground min-w-0">
                   Winner:{' '}
                   {winnerDisplayName ? (
                     <span className="font-semibold text-foreground">{winnerDisplayName}</span>
@@ -1128,19 +1151,12 @@ export function RaffleCard({
                     </span>
                   )}
                 </span>
-              </div>
+              </Link>
             )}
           </div>
           </div>
-            {/* Accent strip (theme color) - full width at bottom */}
-            <div
-              className="raffle-card-accent-strip flex-shrink-0"
-              style={{ color: themeColor }}
-              aria-hidden
-            />
+            </div>
         </Card>
-          </LinkifiedTextInsideLinkProvider>
-      </Link>
       {isAdmin && (
         <>
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
@@ -1192,29 +1208,29 @@ export function RaffleCard({
 
   const displaySize = size === 'medium' ? 'medium' : 'large'
   const classes = sizeClasses[displaySize]
+  const mediumRaffleHref = `/raffles/${raffle.slug}`
 
   return (
-    <div className="relative z-10 md:hover:z-50">
-      <Link 
-        href={`/raffles/${raffle.slug}`}
-        onTouchStart={(e) => {
-          touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-          scrollDetectedRef.current = false
-        }}
-        onTouchMove={(e) => {
-          const { x, y } = touchStartRef.current
-          if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
-            scrollDetectedRef.current = true
-          }
-        }}
-        onTouchEnd={handleTouchEnd}
-        onClick={(e) => handleLinkClick(e, isFuture)}
-      >
-        <LinkifiedTextInsideLinkProvider>
+    <div
+      className="relative z-10 flex h-full min-h-0 flex-col md:hover:z-50"
+      onTouchStart={(e) => {
+        touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        scrollDetectedRef.current = false
+      }}
+      onTouchMove={(e) => {
+        const { x, y } = touchStartRef.current
+        if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+          scrollDetectedRef.current = true
+        }
+      }}
+      onTouchEnd={handleTouchEnd}
+    >
         <Card
-          className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-[1.02] cursor-pointer p-0 overflow-hidden ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
+          className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} flex h-full min-h-0 flex-col rounded-[1.25rem] hover:scale-[1.02] cursor-pointer p-0 ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
           style={cardSurfaceStyle}
         >
+          {/* Inner clip: keep overflow off the shadowed shell so theme / entered glow is not cut to a hard box */}
+          <div className="relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem]">
           {isWinner && (
             <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
           )}
@@ -1229,6 +1245,12 @@ export function RaffleCard({
           />
           {!listThumbDead && (
             <>
+            <Link
+              href={mediumRaffleHref}
+              className="block min-h-0 w-full shrink-0 rounded-t-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              onClick={(e) => handleLinkClick(e, isFuture)}
+            >
+              <LinkifiedTextInsideLinkProvider>
             <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
               {listThumbMintLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted/60 z-20" aria-hidden>
@@ -1366,6 +1388,8 @@ export function RaffleCard({
                 )}
               </div>
             </div>
+              </LinkifiedTextInsideLinkProvider>
+            </Link>
             {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
               <div className="relative z-20 flex flex-col gap-2 px-2 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:px-3 border-t border-border/50 bg-background/90 backdrop-blur-sm">
                 <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
@@ -1377,6 +1401,8 @@ export function RaffleCard({
           {/* Fallback if no usable image */}
           {listThumbDead && (
             <>
+              <Link href={mediumRaffleHref} className="block min-h-0" onClick={(e) => handleLinkClick(e, isFuture)}>
+                <LinkifiedTextInsideLinkProvider>
               <CardHeader className="p-3 sm:p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className={`raffle-card-title-soft ${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>
@@ -1495,7 +1521,7 @@ export function RaffleCard({
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
                   <div className="mt-2 flex w-full flex-col gap-2 border-t border-border/50 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                     <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
-                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
+                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" insideNextLink />
                   </div>
                 )}
                 {!showQuickBuy && (
@@ -1609,6 +1635,7 @@ export function RaffleCard({
             style={{ color: themeColor }}
             aria-hidden
           />
+          </div>
         </Card>
         </LinkifiedTextInsideLinkProvider>
       </Link>

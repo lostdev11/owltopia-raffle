@@ -74,7 +74,7 @@ export function EnterOwlTopia() {
   return (
     <div
       ref={scrollRef}
-      className="relative min-h-screen flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8 overflow-auto overflow-x-hidden"
+      className="relative min-h-screen flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8 overflow-y-auto"
     >
       {/* Background: matrix-style falling "owltopia" columns */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden>
@@ -114,7 +114,7 @@ export function EnterOwlTopia() {
 
       {/* Hero content: scrollable so button is always reachable */}
       <div
-        className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto overflow-x-hidden transition-transform duration-300 ease-out shrink-0"
+        className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto transition-transform duration-300 ease-out shrink-0"
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
         <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">

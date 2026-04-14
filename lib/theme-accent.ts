@@ -23,28 +23,6 @@ export function getThemeAccentColor(theme: ThemeAccent): string {
   }
 }
 
-/**
- * Get theme accent glow color (rgba)
- */
-export function getThemeAccentGlow(theme: ThemeAccent): string {
-  switch (theme) {
-    case 'prime':
-      return 'rgba(0, 255, 136, 0.5)'
-    case 'midnight':
-      return 'rgba(0, 212, 255, 0.5)'
-    case 'dawn':
-      return 'rgba(168, 255, 0, 0.5)'
-    case 'ember':
-      return 'rgba(249, 115, 22, 0.5)'
-    case 'violet':
-      return 'rgba(168, 85, 247, 0.5)'
-    case 'coral':
-      return 'rgba(244, 63, 94, 0.5)'
-    default:
-      return 'rgba(0, 255, 136, 0.5)'
-  }
-}
-
 /** Space-separated R G B for `rgb(var(--entered-rgb) / a)` in CSS */
 export function getThemeAccentRgbChannels(theme: ThemeAccent): string {
   switch (theme) {
@@ -66,15 +44,26 @@ export function getThemeAccentRgbChannels(theme: ThemeAccent): string {
 }
 
 /**
+ * Soft multi-layer outer glow (follows the element's border-radius).
+ * Single tight `0 0 20px` reads as a rectangular ring; layered low-alpha blurs read rounder and gentler.
+ */
+export function softOuterGlowFromChannels(channels: string): string {
+  return [
+    `0 0 10px rgb(${channels} / 0.2)`,
+    `0 0 26px rgb(${channels} / 0.12)`,
+    `0 0 48px rgb(${channels} / 0.07)`,
+    `0 0 72px rgb(${channels} / 0.035)`,
+  ].join(', ')
+}
+
+/**
  * Get theme accent border style object
  */
 export function getThemeAccentBorderStyle(theme: ThemeAccent): { borderColor: string; boxShadow: string } {
   const color = getThemeAccentColor(theme)
-  const glow = getThemeAccentGlow(theme)
-  
   return {
     borderColor: color,
-    boxShadow: `0 0 20px ${glow}`,
+    boxShadow: softOuterGlowFromChannels(getThemeAccentRgbChannels(theme)),
   }
 }
 

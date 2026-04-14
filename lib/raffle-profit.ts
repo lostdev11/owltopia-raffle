@@ -126,9 +126,11 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
 }
 
 /**
- * Revenue in a specific currency (from RaffleRevenue).
+ * Ticket gross in one bucket (from {@link getRaffleRevenue}).
+ * Use the raffle’s **ticket** currency for display; the profit threshold may use
+ * {@link getRaffleThreshold}’s currency (e.g. SOL prize on a USDC-ticket raffle).
  */
-function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): number {
+export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): number {
   switch (currency) {
     case 'USDC': return revenue.usdc
     case 'SOL': return revenue.sol

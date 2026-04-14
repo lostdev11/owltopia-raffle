@@ -29,7 +29,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getRaffleProfitInfo, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
+import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
@@ -3557,9 +3557,12 @@ export function RaffleDetailClient({
 
             {(() => {
               const profitInfo = getRaffleProfitInfo(raffle, entries)
-              const cur = normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency ?? raffle.currency)
-              const revenueInCur =
-                cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
+              const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
+              const thresholdCur =
+                profitInfo.thresholdCurrency != null
+                  ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
+                  : ticketCur
+              const ticketRevenue = revenueInCurrency(profitInfo.revenue, ticketCur)
               const threshold = profitInfo.threshold
               const amountOver = profitInfo.surplusOverThreshold
               const thresholdLabel =
@@ -3571,14 +3574,14 @@ export function RaffleDetailClient({
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>Revenue (from tickets)</p>
                       <p className={classes.contentText + ' font-semibold'}>
-                        {revenueInCur.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                        {ticketRevenue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
                       </p>
                     </div>
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>{thresholdLabel}</p>
                       <p className={classes.contentText + ' font-semibold'}>
                         {threshold != null && threshold > 0
-                          ? `${threshold.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`
+                          ? `${threshold.toFixed(thresholdCur === 'USDC' ? 2 : 4)} ${thresholdCur}`
                           : 'Not set'}
                       </p>
                     </div>
@@ -3586,7 +3589,7 @@ export function RaffleDetailClient({
                       <div>
                         <p className={classes.labelText + ' text-muted-foreground'}>Amount over threshold</p>
                         <p className={classes.contentText + ' font-semibold text-emerald-600 dark:text-emerald-400'}>
-                          +{amountOver.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                          +{amountOver.toFixed(thresholdCur === 'USDC' ? 2 : 4)} {thresholdCur}
                         </p>
                         <p className={classes.labelText + ' text-muted-foreground mt-1.5'}>
                           That surplus is profit you keep above the cost side you set (prize, floor, or draw minimum). Net

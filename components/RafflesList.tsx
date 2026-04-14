@@ -69,6 +69,30 @@ function getThresholdProgress(profitInfo?: RaffleProfitInfo): number | null {
   return progress
 }
 
+/**
+ * `/raffles` server props always send `entries: []` (see `toRaffleWithEntries`); entries load via poll below.
+ * Without this merge, `router.refresh()` replaces props and wipes fetched entries until the next poll → flicker.
+ */
+function mergeRafflesListProps(
+  prev: RaffleWithEntriesItem[],
+  next: RaffleWithEntriesItem[]
+): RaffleWithEntriesItem[] {
+  const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
+  return next.map((item) => {
+    const prevItem = prevById.get(item.raffle.id)
+    const nextEmpty = !item.entries?.length
+    const prevHas = !!(prevItem?.entries?.length)
+    if (nextEmpty && prevHas && prevItem) {
+      return {
+        raffle: item.raffle,
+        entries: prevItem.entries,
+        profitInfo: getRaffleProfitInfo(item.raffle, prevItem.entries),
+      }
+    }
+    return item
+  })
+}
+
 export function RafflesList({
   rafflesWithEntries,
   title,
@@ -157,8 +181,11 @@ export function RafflesList({
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
     const next = rafflesWithEntries ?? []
-    setFilteredRaffles(next)
-    rafflesRef.current = next
+    setFilteredRaffles((prev) => {
+      const merged = mergeRafflesListProps(prev, next)
+      rafflesRef.current = merged
+      return merged
+    })
   }, [rafflesWithEntries])
 
   // Keep ref in sync with state changes (e.g., from handleRaffleDeleted or fetch updates)
