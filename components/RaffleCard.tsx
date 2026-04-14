@@ -972,7 +972,8 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="max-h-full max-w-full object-contain object-center"
+                    /* WebKit mobile: max-h/w % inside flex often mis-resolves; absolute + m-auto keeps contain reliable */
+                    className="pointer-events-none absolute inset-0 m-auto max-h-full max-w-full object-contain object-center"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1251,7 +1252,7 @@ export function RaffleCard({
               onClick={(e) => handleLinkClick(e, isFuture)}
             >
               <LinkifiedTextInsideLinkProvider>
-            <div className="!relative z-10 m-0 flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-[1.25rem] bg-muted p-0">
+            <div className="!relative z-10 m-0 flex aspect-square w-full min-h-0 items-center justify-center overflow-hidden rounded-t-[1.25rem] bg-muted p-0">
               {listThumbMintLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted/60 z-20" aria-hidden>
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
@@ -1262,8 +1263,9 @@ export function RaffleCard({
                   src={listThumbSrc}
                   alt={raffle.title}
                   fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
-                  className="!h-full !w-full object-contain object-center"
+                  sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
+                  className="object-contain object-center"
+                  style={{ objectFit: 'contain' }}
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
