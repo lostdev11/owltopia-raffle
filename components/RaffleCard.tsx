@@ -972,8 +972,8 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    /* WebKit mobile: max-h/w % inside flex often mis-resolves; absolute + m-auto keeps contain reliable */
-                    className="pointer-events-none absolute inset-0 m-auto max-h-full max-w-full object-contain object-center"
+                    /* max-sm: cover fills thumb frame. sm+: centered contain (full art) like desktop. */
+                    className="pointer-events-none absolute inset-0 max-sm:h-full max-sm:w-full max-sm:object-cover max-sm:object-center m-auto max-h-full max-w-full object-contain object-center max-sm:m-0"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1264,8 +1264,7 @@ export function RaffleCard({
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-contain object-center"
-                  style={{ objectFit: 'contain' }}
+                  className="object-cover object-center sm:object-contain"
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
