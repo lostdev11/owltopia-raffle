@@ -1,5 +1,6 @@
 import { ownsOwltopia } from '@/lib/platform-fees'
-import { HOLDER_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import { HOLDER_FEE_BPS, PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import { getActivePartnerCommunityWalletSet } from '@/lib/raffles/partner-communities'
 
 export type GetCreatorFeeTierOptions = {
   /** When true, always verify holder status (skip cache). Use for dashboard and when creating/updating a raffle. */
@@ -12,7 +13,7 @@ export type GetCreatorFeeTierOptions = {
 }
 
 /**
- * Fee tier for the raffle creator: 3% if they hold Owltopia (Owl) NFT, 6% otherwise.
+ * Fee tier for the raffle creator: 2% partner allowlist, else 3% Owl holder / 6% standard.
  * Used to deduct the platform fee from every ticket sale (split at purchase and at settlement).
  */
 export async function getCreatorFeeTier(
@@ -20,13 +21,21 @@ export async function getCreatorFeeTier(
   options?: GetCreatorFeeTierOptions
 ): Promise<{
   feeBps: number
-  reason: 'holder' | 'standard'
+  reason: 'holder' | 'standard' | 'partner_community'
 }> {
   const normalized = walletAddress.trim()
   if (!normalized) {
     return {
       feeBps: STANDARD_FEE_BPS,
       reason: 'standard',
+    }
+  }
+
+  const partners = await getActivePartnerCommunityWalletSet()
+  if (partners.has(normalized)) {
+    return {
+      feeBps: PARTNER_COMMUNITY_FEE_BPS,
+      reason: 'partner_community',
     }
   }
 

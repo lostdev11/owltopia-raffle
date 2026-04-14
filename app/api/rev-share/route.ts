@@ -1,18 +1,29 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { HOLDER_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import { HOLDER_FEE_BPS, PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { ownsOwltopia } from '@/lib/platform-fees'
+import { getActivePartnerCommunityWalletSet } from '@/lib/raffles/partner-communities'
 
 export const dynamic = 'force-dynamic'
 
-type FeeTierReason = 'holder' | 'standard'
+type FeeTierReason = 'holder' | 'standard' | 'partner_community'
 type FeeTier = { feeBps: number; reason: FeeTierReason }
 
-async function resolveCreatorFeeTier(creatorWallet: string, cache: Map<string, FeeTier>): Promise<FeeTier> {
+async function resolveCreatorFeeTier(
+  creatorWallet: string,
+  cache: Map<string, FeeTier>,
+  partnerSet: Set<string>
+): Promise<FeeTier> {
   const normalized = creatorWallet.trim()
   if (!normalized) return { feeBps: STANDARD_FEE_BPS, reason: 'standard' }
   const cached = cache.get(normalized)
   if (cached) return cached
+
+  if (partnerSet.has(normalized)) {
+    const tier: FeeTier = { feeBps: PARTNER_COMMUNITY_FEE_BPS, reason: 'partner_community' }
+    cache.set(normalized, tier)
+    return tier
+  }
 
   const isHolder = await ownsOwltopia(normalized, { skipCache: true, deepWalletScan: true })
   const tier: FeeTier = isHolder
@@ -64,6 +75,7 @@ export async function GET() {
     }
 
     const feeTierByCreator = new Map<string, FeeTier>()
+    const partnerSet = await getActivePartnerCommunityWalletSet()
     let siteRevenueSol = 0
     let siteRevenueUsdc = 0
 
@@ -75,7 +87,7 @@ export async function GET() {
 
       const raffleId = String(row.raffle_id || '')
       const creatorWallet = raffleCreatorById.get(raffleId) || ''
-      const { feeBps } = await resolveCreatorFeeTier(creatorWallet, feeTierByCreator)
+      const { feeBps } = await resolveCreatorFeeTier(creatorWallet, feeTierByCreator, partnerSet)
       const feeAmount = Math.floor(Math.round(amount * 1_000_000_000) * feeBps / 10_000) / 1_000_000_000
 
       if (c === 'SOL') siteRevenueSol += feeAmount

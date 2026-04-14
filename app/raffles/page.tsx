@@ -18,6 +18,7 @@ import {
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
+import { getActivePartnerCommunityCreatorWallets } from '@/lib/raffles/partner-communities'
 import type { Raffle, Entry } from '@/lib/types'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
@@ -86,6 +87,13 @@ export default async function RafflesPage() {
     const viewerWallet = session?.wallet ?? null
     const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
 
+    let partnerCreatorWallets: string[] = []
+    try {
+      partnerCreatorWallets = await getActivePartnerCommunityCreatorWallets()
+    } catch {
+      partnerCreatorWallets = []
+    }
+
     const requestStartedAt = Date.now()
 
     // Promote any draft raffles whose start_time has passed to live (so they show as active)
@@ -131,6 +139,7 @@ export default async function RafflesPage() {
             pastRafflesWithEntries={[]}
             fetchStatus="error"
             initialError={{ message: fetchError.message, code: fetchError.code }}
+            partnerCreatorWallets={partnerCreatorWallets}
           />
         </Suspense>
       )
@@ -200,6 +209,7 @@ export default async function RafflesPage() {
           pastRafflesWithEntries={pastRafflesWithEntries}
           fetchStatus={fetchStatus}
           rafflesTotalCount={totalCount}
+          partnerCreatorWallets={partnerCreatorWallets}
         />
       </Suspense>
     )
@@ -214,6 +224,7 @@ export default async function RafflesPage() {
           pastRafflesWithEntries={[]}
           fetchStatus="error"
           initialError={{ message, code: 'PAGE_ERROR' }}
+          partnerCreatorWallets={[]}
         />
       </Suspense>
     )

@@ -14,7 +14,7 @@ Transparency and anti-spam scoring system that calculates a trust score (0-100) 
 The score is displayed as a badge on each raffle card with a detailed tooltip showing the breakdown.
 
 ### 2. Hoot Boost Entry Multiplier
-A cosmetic animation that displays when users select ticket quantities. The meter animates based on the number of tickets selected, but **does not affect winner odds** - each ticket equals one entry. This is purely for visual engagement.
+A cosmetic animation that displays when users select ticket quantities. The meter animates based on the number of tickets selected, but **does not affect winner odds** — the draw picks uniformly among wallets with at least one confirmed ticket (ticket quantity does not change win probability). This is purely for visual engagement.
 
 ### 3. Night Mode Scheduling Presets
 Quick preset buttons in the Create Raffle form that set both the end time and theme accent:

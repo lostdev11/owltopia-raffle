@@ -13,7 +13,8 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
-import { PLATFORM_NAME, OG_ALT, getSiteBaseUrl } from '@/lib/site-config'
+import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
+import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
@@ -23,19 +24,6 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const SITE_URL = getSiteBaseUrl()
-
-/** Per-raffle OG image URL (generated when raffle has no image_url). */
-function raffleOgImageUrl(slug: string) {
-  return `${SITE_URL}/raffles/${slug}/opengraph-image`
-}
-
-function absoluteImageUrl(imageUrl: string | null): string | null {
-  if (!imageUrl) return null
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl
-  const base = SITE_URL.replace(/\/$/, '')
-  const path = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`
-  return `${base}${path}`
-}
 
 export async function generateMetadata({
   params,
@@ -53,12 +41,7 @@ export async function generateMetadata({
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
   const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
-  // Absolute URL required so Discord/X and other crawlers can fetch the image for link previews.
-  // Use raffle image when set; otherwise use per-raffle generated OG image (title + prize).
-  const imageUrl = absoluteImageUrl(raffle.image_url ?? raffle.image_fallback_url)
-  const ogImage = imageUrl
-    ? { url: imageUrl, width: 1200, height: 630, alt: raffle.title }
-    : { url: raffleOgImageUrl(raffle.slug), width: 1200, height: 630, alt: raffle.title, type: 'image/png' as const }
+  const ogImage = resolveRaffleShareOgImage(raffle)
 
   return {
     title,

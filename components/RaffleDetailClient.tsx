@@ -29,7 +29,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getRaffleProfitInfo } from '@/lib/raffle-profit'
+import { getRaffleProfitInfo, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
@@ -3557,8 +3557,9 @@ export function RaffleDetailClient({
 
             {(() => {
               const profitInfo = getRaffleProfitInfo(raffle, entries)
-              const cur = profitInfo.thresholdCurrency ?? raffle.currency
-              const revenueInCur = cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
+              const cur = normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency ?? raffle.currency)
+              const revenueInCur =
+                cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
               const threshold = profitInfo.threshold
               const amountOver = profitInfo.surplusOverThreshold
               const thresholdLabel =

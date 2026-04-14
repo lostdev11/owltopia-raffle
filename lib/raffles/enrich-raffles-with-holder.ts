@@ -1,5 +1,8 @@
 import type { Raffle } from '@/lib/types'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
+import { ownsOwltopia } from '@/lib/platform-fees'
+import { isOwlEnabled } from '@/lib/tokens'
+import { getActivePartnerCommunityWalletSet } from '@/lib/raffles/partner-communities'
 import { devSaveApiCredits } from '@/lib/dev-budget'
 import { getWalletsWithAdminRole } from '@/lib/db/admins'
 
@@ -48,7 +51,13 @@ async function forEachWithConcurrency<T>(
 export async function enrichRafflesWithCreatorHolder(
   raffles: Raffle[],
   options?: EnrichRafflesWithCreatorHolderOptions
-): Promise<(Raffle & { creator_is_holder: boolean; description_urls_clickable: boolean })[]> {
+): Promise<
+  (Raffle & {
+    creator_is_holder: boolean
+    creator_is_partner: boolean
+    description_urls_clickable: boolean
+  })[]
+> {
   if (!raffles.length) return []
 
   const wallets = new Set<string>()
@@ -57,6 +66,7 @@ export async function enrichRafflesWithCreatorHolder(
     if (w) wallets.add(w)
   }
 
+  const partnerWallets = await getActivePartnerCommunityWalletSet()
   const adminWallets = await getWalletsWithAdminRole(Array.from(wallets))
 
   const budgetMs = options?.budgetMs
@@ -74,7 +84,15 @@ export async function enrichRafflesWithCreatorHolder(
           wallet,
           listDisplayOnly ? { listDisplayOnly: true } : undefined
         )
-        holderByWallet.set(wallet, tier.reason === 'holder')
+        let isHolder = tier.reason === 'holder'
+        if (tier.reason === 'partner_community' && isOwlEnabled()) {
+          isHolder = await ownsOwltopia(wallet, {
+            skipCache: false,
+            listMode: listDisplayOnly,
+            deepWalletScan: !listDisplayOnly && options?.holderLookupMode === 'full',
+          })
+        }
+        holderByWallet.set(wallet, isHolder)
       } catch {
         holderByWallet.set(wallet, false)
       }
@@ -87,6 +105,7 @@ export async function enrichRafflesWithCreatorHolder(
     return {
       ...r,
       creator_is_holder: holderByWallet.get(w) ?? false,
+      creator_is_partner: w ? partnerWallets.has(w) : false,
       description_urls_clickable: w ? adminWallets.has(w) : false,
     }
   })

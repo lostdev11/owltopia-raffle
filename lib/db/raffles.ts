@@ -4,7 +4,7 @@ import type { Raffle, Entry, RaffleStatus } from '@/lib/types'
 import { withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
-import { getRaffleRevenue } from '@/lib/raffle-profit'
+import { getRaffleRevenue, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   raffleCountsTowardLiveFundsEscrowBreakdown,
@@ -37,6 +37,7 @@ function normalizeEntryRow(row: Entry): Entry {
     ...row,
     ticket_quantity: Number.isFinite(ticketQuantity) ? ticketQuantity : 0,
     amount_paid: Number.isFinite(amountPaid) ? amountPaid : 0,
+    currency: normalizeRaffleTicketCurrency((row as any)?.currency),
   }
 }
 
@@ -702,6 +703,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
       : Math.max(0, Math.floor(Number(extRaw ?? 0)) || 0)
   return {
     ...row,
+    currency: normalizeRaffleTicketCurrency(row.currency as string | null | undefined),
     image_fallback_url: (row.image_fallback_url as string | null | undefined) ?? null,
     prize_returned_at: (row.prize_returned_at as string | null) ?? null,
     prize_return_reason: (row.prize_return_reason as string | null) ?? null,
@@ -1546,8 +1548,8 @@ export async function deleteRaffle(id: string) {
 }
 
 /**
- * Select a winner for a raffle based on weighted random selection.
- * Each wallet's chance is proportional to their total ticket quantity.
+ * Select a winner for a raffle by uniform random choice among wallets with at least one confirmed ticket.
+ * Total tickets per wallet do not change win probability (equal luck per participant).
  * Only considers confirmed entries.
  * Checks if raffle meets minimum requirements before drawing.
  * 
@@ -1594,25 +1596,22 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     walletTickets.set(entry.wallet_address, current + Number(entry.ticket_quantity ?? 0))
   }
 
-  // Convert to arrays for weighted random selection
-  const wallets = Array.from(walletTickets.keys())
-  const weights = Array.from(walletTickets.values())
+  // One chance per wallet (ticket totals are ignored for the draw)
+  const wallets = Array.from(walletTickets.keys()).filter(
+    (w) => Math.max(0, Math.floor(Number(walletTickets.get(w)) || 0)) > 0,
+  )
+  const totalDrawWeight = wallets.length
 
-  // Calculate total tickets
-  const totalTickets = weights.reduce((sum, weight) => sum + weight, 0)
-
-  if (totalTickets === 0) {
-    console.warn(`Total ticket count is 0 for raffle ${raffleId}`)
+  if (totalDrawWeight <= 0) {
+    console.warn(`No wallets with positive ticket totals for raffle ${raffleId}`)
     return null
   }
 
-  // Weighted random selection
-  // Generate a random number between 0 and totalTickets
-  let random = Math.random() * totalTickets
+  let random = Math.random() * totalDrawWeight
 
-  // Find which wallet wins by iterating through weighted ranges
+  // Uniform pick: each wallet with tickets has weight 1
   for (let i = 0; i < wallets.length; i++) {
-    random -= weights[i]
+    random -= 1
     if (random <= 0) {
       const winnerWallet = wallets[i]
       
@@ -1656,7 +1655,10 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
         throw new Error(`Failed to update raffle with winner: ${error.message}`)
       }
 
-      console.log(`Winner selected for raffle ${raffleId}: ${winnerWallet} (${weights[i]} tickets)`)
+      const rawTickets = walletTickets.get(winnerWallet) ?? 0
+      console.log(
+        `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets held; equal odds among ${totalDrawWeight} wallets)`,
+      )
       const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
       await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
       return winnerWallet

@@ -15,6 +15,7 @@ import { PublicKey } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
+import { ownsOwltopia } from '@/lib/platform-fees'
 import type { Raffle, ThemeAccent } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -542,15 +543,20 @@ export async function POST(request: NextRequest) {
 
     if (adminRole === null) {
       const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
-      const isHolder = isOwlEnabled() && feeTier.reason === 'holder'
-      const maxRafflesPerDay = isHolder ? 3 : 1
+      // Partner tier skips holder check in getCreatorFeeTier; still grant holder daily limit if they own the Owl NFT.
+      const isHolderForLimit =
+        isOwlEnabled() &&
+        (feeTier.reason === 'holder' ||
+          (feeTier.reason === 'partner_community' &&
+            (await ownsOwltopia(walletAddress, { skipCache: true, listMode: true }))))
+      const maxRafflesPerDay = isHolderForLimit ? 3 : 1
       const createdToday = await withTimeout(
         getRaffleCreationCountForCreatorToday(walletAddress),
         SUPABASE_TIMEOUT_MS,
         'supabase error'
       )
       if (createdToday >= maxRafflesPerDay) {
-        const message = isHolder
+        const message = isHolderForLimit
           ? 'Owltopia holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
           : 'You can host 1 raffle per day. Owltopia (Owl NFT) holders can host up to 3. Try again tomorrow (UTC).'
         return NextResponse.json(

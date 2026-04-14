@@ -1,6 +1,7 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import type { Entry, Raffle } from '@/lib/types'
+import { normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
 import { getTokenInfo } from '@/lib/tokens'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
@@ -164,7 +165,7 @@ export async function verifyTransaction(
     })
     
     const expectedAmount = entry.amount_paid
-    const expectedCurrency = entry.currency
+    const expectedCurrency = normalizeRaffleTicketCurrency(entry.currency)
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
     const useSplit = !useFundsEscrow && !!creatorWallet && !!treasuryWallet
 

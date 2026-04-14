@@ -55,6 +55,7 @@ export default async function Image({
   const viewerWallet = session?.wallet ?? null
   const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
   if (!canViewerSeeRafflePending(raffle, viewerWallet, viewerIsAdmin)) {
+    // Public crawlers (X/Twitter) have no session — still return a valid raster card so previews work.
     return new ImageResponse(
       (
         <div
@@ -62,13 +63,16 @@ export default async function Image({
             width: '100%',
             height: '100%',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             fontFamily: 'system-ui, sans-serif',
           }}
         >
-          <div style={{ fontSize: 48, color: 'rgba(255,255,255,0.9)' }}>Raffle not found</div>
+          <div style={{ fontSize: 52, fontWeight: 800, color: 'white', marginBottom: 16 }}>{PLATFORM_NAME}</div>
+          <div style={{ fontSize: 28, color: 'rgba(255,255,255,0.82)' }}>Raffle preview unavailable</div>
+          <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.65)', marginTop: 20 }}>Open the link in your browser to view</div>
         </div>
       ),
       { ...size }

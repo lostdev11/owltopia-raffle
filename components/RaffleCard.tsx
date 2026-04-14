@@ -33,7 +33,7 @@ import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { Trophy, Share2, BadgeCheck, Loader2 } from 'lucide-react'
+import { Trophy, Share2, BadgeCheck, Loader2, Users } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -83,9 +83,21 @@ interface RaffleCardProps {
   priority?: boolean
   /** Server time for consistent "Starts in X" / "Starts X ago" (avoids wrong PC clock) */
   serverNow?: Date
+  /** Partner community creator (2% platform fee); show badge on card */
+  isPartnerCommunity?: boolean
 }
 
-export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false, serverNow }: RaffleCardProps) {
+export function RaffleCard({
+  raffle,
+  entries,
+  size = 'medium',
+  section,
+  profitInfo,
+  onDeleted,
+  priority = false,
+  serverNow,
+  isPartnerCommunity = false,
+}: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
   const { publicKey, connected } = useWallet()
@@ -291,6 +303,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
+  const showPartnerBadge = isPartnerCommunity
 
   // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
   useEffect(() => {
@@ -1009,6 +1022,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <BadgeCheck className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
                     </span>
                   )}
+                  {showPartnerBadge && (
+                    <span
+                      className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                      title="Partner community — 2% platform fee on ticket sales"
+                      role="img"
+                      aria-label="Partner community"
+                    >
+                      <Users className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                    </span>
+                  )}
                   <OwlVisionBadge
                     score={owlVisionScore}
                     className="!gap-1 !px-1.5 !py-0 !text-[10px] sm:!text-[11px] !leading-none [&_svg]:!h-2.5 [&_svg]:!w-2.5 sm:[&_svg]:!h-3 sm:[&_svg]:!w-3"
@@ -1277,6 +1300,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                           <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" />
                         </span>
                       )}
+                      {showPartnerBadge && (
+                        <span
+                          className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                          title="Partner community — 2% platform fee on ticket sales"
+                          role="img"
+                          aria-label="Partner community"
+                        >
+                          <Users className="h-3.5 w-3.5 flex-shrink-0" />
+                        </span>
+                      )}
                       <OwlVisionBadge score={owlVisionScore} />
                     </div>
                   </div>
@@ -1358,6 +1391,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         aria-label="Owl holder"
                       >
                         <BadgeCheck className="h-3 w-3 flex-shrink-0" />
+                      </span>
+                    )}
+                    {showPartnerBadge && (
+                      <span
+                        className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                        title="Partner community — 2% platform fee on ticket sales"
+                        role="img"
+                        aria-label="Partner community"
+                      >
+                        <Users className="h-3 w-3 flex-shrink-0" />
                       </span>
                     )}
                     <OwlVisionBadge score={owlVisionScore} />

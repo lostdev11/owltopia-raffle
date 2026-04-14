@@ -9,7 +9,7 @@
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
  * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -18,8 +18,8 @@ import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart, Gift } from 'lucide-react'
+import { normalizeRaffleTicketCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
+import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart, Gift, Users } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -33,6 +33,7 @@ import {
   CommunityGiveawayBrowseCard,
   type CommunityGiveawayBrowseItem,
 } from '@/components/CommunityGiveawayBrowseCard'
+import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -47,6 +48,8 @@ interface RafflesPageClientProps {
   initialError?: { message: string; code?: string }
   /** Total raffles returned by server (for debug panel) */
   rafflesTotalCount?: number
+  /** Partner community creator wallets (2% fee tier); used for tab + carousel + badges */
+  partnerCreatorWallets?: string[]
 }
 
 function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntries[]; pausedPending: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
@@ -94,7 +97,13 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
 
-function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
+function PastRafflesCarousel({
+  items,
+  partnerWalletSet,
+}: {
+  items: RaffleWithEntries[]
+  partnerWalletSet?: Set<string>
+}) {
   const list = items ?? []
   const [index, setIndex] = useState(0)
   const [rotationVersion, setRotationVersion] = useState(0)
@@ -174,6 +183,10 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
           size="small"
           section="past"
           priority
+          isPartnerCommunity={(() => {
+            const w = (current.raffle.creator_wallet || current.raffle.created_by || '').trim()
+            return w ? partnerWalletSet?.has(w) ?? false : false
+          })()}
         />
       </div>
     </div>
@@ -221,6 +234,7 @@ export function RafflesPageClient({
   fetchStatus = 'success',
   initialError,
   rafflesTotalCount = 0,
+  partnerCreatorWallets = [],
 }: RafflesPageClientProps) {
   const featuredCardTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Defensive: coerce null/undefined to [] so we never read .length on null (e.g. after serialization)
@@ -302,6 +316,7 @@ export function RafflesPageClient({
         const list = (data || []) as Partial<Raffle>[]
         const normalized = list.map((r: Partial<Raffle>) => ({
           ...r,
+          currency: normalizeRaffleTicketCurrency(r.currency as string | null | undefined),
           prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
           nft_mint_address: r.nft_mint_address ?? null,
           nft_collection_name: r.nft_collection_name ?? null,
@@ -321,7 +336,7 @@ export function RafflesPageClient({
     }
   }, [connected, wallet, viewerIsAdmin])
 
-  type Tab = 'all' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
+  type Tab = 'all' | 'partner-raffles' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
   const [tab, setTab] = useState<Tab>('all')
   const [giveawaysList, setGiveawaysList] = useState<CommunityGiveawayBrowseItem[] | null>(null)
   const [giveawaysLoading, setGiveawaysLoading] = useState(false)
@@ -344,6 +359,7 @@ export function RafflesPageClient({
   useEffect(() => {
     const t = searchParams.get('tab')
     if (t === 'giveaways' || t === 'giveaway') setTab('giveaways')
+    if (t === 'partners' || t === 'partner' || t === 'partner-raffles') setTab('partner-raffles')
   }, [searchParams])
 
   const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
@@ -575,6 +591,32 @@ export function RafflesPageClient({
     ...past.map((item) => item.raffle),
   ]
 
+  const partnerWalletSet = useMemo(
+    () => new Set((partnerCreatorWallets ?? []).map((w) => w.trim()).filter(Boolean)),
+    [partnerCreatorWallets]
+  )
+
+  const partnerOnly = tab === 'partner-raffles'
+  const creatorWalletKey = (r: Raffle) => (r.creator_wallet || r.created_by || '').trim()
+  const filterPartnerBucket = (items: RaffleWithEntries[]) =>
+    partnerOnly ? items.filter(({ raffle }) => partnerWalletSet.has(creatorWalletKey(raffle))) : items
+
+  const activeView = filterPartnerBucket(active)
+  const pausedPendingView = filterPartnerBucket(pausedPending)
+  const futureView = filterPartnerBucket(future)
+  const pastView = filterPartnerBucket(past)
+
+  const partnerFeaturedActive = useMemo(
+    () => active.filter(({ raffle }) => partnerWalletSet.has(creatorWalletKey(raffle))),
+    [active, partnerWalletSet]
+  )
+
+  const isEmptyPartnerView =
+    activeView.length === 0 &&
+    pausedPendingView.length === 0 &&
+    futureView.length === 0 &&
+    pastView.length === 0
+
   // Client-only logging: only when ?debug=1. No secrets (no env, no full keys).
   useEffect(() => {
     if (!debug || typeof window === 'undefined') return
@@ -593,7 +635,7 @@ export function RafflesPageClient({
 
   // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
   useEffect(() => {
-    if (tab !== 'all') return
+    if (tab !== 'all' && tab !== 'partner-raffles') return
     const interval = setInterval(() => {
       router.refresh()
     }, RAFFLES_PAGE_SERVER_REFRESH_MS)
@@ -602,7 +644,7 @@ export function RafflesPageClient({
 
   // Refresh when user returns to the tab so threshold/raffle edits are visible
   useEffect(() => {
-    if (tab !== 'all') return
+    if (tab !== 'all' && tab !== 'partner-raffles') return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const handler = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -704,12 +746,13 @@ export function RafflesPageClient({
           <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
               const threshold = profitInfo?.threshold ?? null
-              const cur = profitInfo?.thresholdCurrency ?? raffle.currency
+              const cur = normalizeRaffleTicketCurrency(profitInfo?.thresholdCurrency ?? raffle.currency)
               let revenueValue: number | null = null
               if (profitInfo) {
-                if (profitInfo.thresholdCurrency === 'USDC') revenueValue = profitInfo.revenue.usdc
-                else if (profitInfo.thresholdCurrency === 'SOL') revenueValue = profitInfo.revenue.sol
-                else if (profitInfo.thresholdCurrency === 'OWL') revenueValue = profitInfo.revenue.owl
+                const thCur = normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
+                if (thCur === 'USDC') revenueValue = profitInfo.revenue.usdc
+                else if (thCur === 'SOL') revenueValue = profitInfo.revenue.sol
+                else if (thCur === 'OWL') revenueValue = profitInfo.revenue.owl
               }
               return (
                 <Link
@@ -760,6 +803,18 @@ export function RafflesPageClient({
             }`}
           >
             All raffles
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('partner-raffles')}
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
+              tab === 'partner-raffles'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Users className="h-4 w-4 shrink-0" aria-hidden />
+            Partner raffles
           </button>
           <button
             type="button"
@@ -830,7 +885,7 @@ export function RafflesPageClient({
       </div>
 
       {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
-      {hasError && tab === 'all' && (
+      {hasError && (tab === 'all' || tab === 'partner-raffles') && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showPausedMessage ? (
@@ -872,7 +927,7 @@ export function RafflesPageClient({
       )}
 
       {/* Main content: All raffles tab hidden on fetch error; other tabs still render. */}
-      {(!hasError || tab !== 'all') && (
+      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles')) && (
         <>
           {tab === 'giveaways' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -1144,91 +1199,124 @@ export function RafflesPageClient({
                 </div>
               )}
             </div>
-          ) : (
+          ) : (tab === 'all' || tab === 'partner-raffles') ? (
             <>
+              {tab === 'all' && partnerFeaturedActive.length > 0 && (
+                <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
+              )}
+              {partnerOnly && (
+                <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+                  Raffles from verified partner communities (2% platform fee on tickets).{' '}
+                  <span className="text-foreground/90">All raffles</span> shows the full list.
+                </p>
+              )}
           <div className="mb-8 sm:mb-12 w-full min-w-0">
-            {active.length > 0 ? (
+            {activeView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={active}
-                title="Active Raffles"
+                rafflesWithEntries={activeView}
+                title={partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
                 section="active"
                 serverNow={serverTime}
-                onTopProfitableChange={setTopProfitableActive}
+                onTopProfitableChange={partnerOnly ? undefined : setTopProfitableActive}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
+                </h2>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly
+                      ? 'No active raffles from partner communities right now.'
+                      : 'No active raffles at the moment. Check back soon!'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            {future.length > 0 ? (
+            {futureView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={future}
-                title="Future Raffles"
+                rafflesWithEntries={futureView}
+                title={partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
                 section="future"
                 serverNow={serverTime}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
+                </h2>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly
+                      ? 'No upcoming partner raffles scheduled.'
+                      : 'No upcoming raffles scheduled at this time'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            {pausedPending.length > 0 ? (
+            {pausedPendingView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={pausedPending}
-                title="Pending / Paused Raffles"
+                rafflesWithEntries={pausedPendingView}
+                title={partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
                 titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
                 section="future"
                 serverNow={serverTime}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
+                </h2>
                 <p className="text-sm text-muted-foreground mb-4">
                   NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
                 </p>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No pending or paused raffles right now.</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly ? 'No pending partner raffles right now.' : 'No pending or paused raffles right now.'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
-          {past.length > 0 && (
+          {pastView.length > 0 && (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
-              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
-              {past.length > 3 ? (
-                <PastRafflesCarousel items={past} />
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                {partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
+              </h2>
+              {pastView.length > 3 ? (
+                <PastRafflesCarousel items={pastView} partnerWalletSet={partnerWalletSet} />
               ) : (
                 <RafflesList
-                  rafflesWithEntries={past}
+                  rafflesWithEntries={pastView}
                   title={undefined}
                   section="past"
                   serverNow={serverTime}
+                  partnerWalletSet={partnerWalletSet}
                 />
               )}
             </div>
           )}
 
           {/* Empty state: no raffles at all — show message + refresh (or loading while client fallback runs) */}
-          {isEmpty && (
+          {(partnerOnly ? isEmptyPartnerView : isEmpty) && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>
               ) : (
                 <>
-                  <p className="text-xl text-muted-foreground mb-4">No active raffles yet</p>
+                  <p className="text-xl text-muted-foreground mb-4">
+                    {partnerOnly ? 'No partner raffles to show yet' : 'No active raffles yet'}
+                  </p>
                   <button
                     type="button"
                     onClick={handleRefresh}
@@ -1241,7 +1329,7 @@ export function RafflesPageClient({
             </div>
           )}
             </>
-          )}
+          ) : null}
         </>
       )}
     </div>

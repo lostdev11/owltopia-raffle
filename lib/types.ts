@@ -160,6 +160,8 @@ export interface Raffle {
   prize_return_tx: string | null
   /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
   creator_is_holder?: boolean
+  /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
+  creator_is_partner?: boolean
   /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
