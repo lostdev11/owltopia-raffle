@@ -1468,33 +1468,39 @@ export function RaffleCard({
                   )}
                 </div>
               </CardContent>
+              </LinkifiedTextInsideLinkProvider>
+              </Link>
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
                 <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
-                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                  <Link
+                    href={mediumRaffleHref}
+                    className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+                    onClick={(e) => handleLinkClick(e, isFuture)}
+                  >
                     <span className="min-w-0">
-                    {isFuture ? (
-                      <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                        {serverNow && new Date(raffle.start_time) <= serverNow
-                          ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
-                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
-                      </span>
-                    ) : isActive ? (
-                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                        {serverNow && new Date(raffle.end_time) <= serverNow
-                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
-                          : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
-                      </span>
-                    ) : isPendingDraft ? (
-                      <span>Pending escrow deposit</span>
-                    ) : (
-                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
-                    )}
+                      {isFuture ? (
+                        <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                          {serverNow && new Date(raffle.start_time) <= serverNow
+                            ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                            : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
+                        </span>
+                      ) : isActive ? (
+                        <span title={formatDateTimeWithTimezone(raffle.end_time)}>
+                          {serverNow && new Date(raffle.end_time) <= serverNow
+                            ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                            : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
+                        </span>
+                      ) : isPendingDraft ? (
+                        <span>Pending escrow deposit</span>
+                      ) : (
+                        <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
+                      )}
                     </span>
                     <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
-                  </div>
+                  </Link>
                   {section !== 'active' && (
                     <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                      <Badge 
+                      <Badge
                         variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'}
                         className={statusBadgeClass}
                       >
@@ -1504,8 +1510,12 @@ export function RaffleCard({
                   )}
                 </div>
                 {!isActive && !isFuture && raffle.winner_wallet && (
-                  <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
-                    <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />
+                  <Link
+                    href={mediumRaffleHref}
+                    className={`mt-2 flex w-full items-center gap-2 border-t pt-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}
+                    onClick={(e) => handleLinkClick(e, isFuture)}
+                  >
+                    <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} flex-shrink-0 text-yellow-500`} />
                     <span className="text-muted-foreground">
                       Winner:{' '}
                       {winnerDisplayName ? (
@@ -1516,12 +1526,12 @@ export function RaffleCard({
                         </span>
                       )}
                     </span>
-                  </div>
+                  </Link>
                 )}
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
                   <div className="mt-2 flex w-full flex-col gap-2 border-t border-border/50 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                     <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
-                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" insideNextLink />
+                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
                   </div>
                 )}
                 {!showQuickBuy && (
@@ -1637,8 +1647,6 @@ export function RaffleCard({
           />
           </div>
         </Card>
-        </LinkifiedTextInsideLinkProvider>
-      </Link>
     {isAdmin && (
       <>
         <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>

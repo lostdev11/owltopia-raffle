@@ -70,7 +70,8 @@ export function Logo({
         width={width || 600}
         height={height || 150}
         priority={priority}
-        className="max-w-full h-auto"
+        sizes="(max-width: 640px) 85vw, 280px"
+        className="h-auto max-w-full w-auto"
         style={{ width: 'auto', height: 'auto' }}
         unoptimized={isGif} // GIFs may need unoptimized for animations
         onError={() => setHasError(true)}
