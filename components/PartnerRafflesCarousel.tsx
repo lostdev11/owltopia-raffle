@@ -24,31 +24,39 @@ export function PartnerRafflesCarousel({
       className="w-full min-w-0 mb-6 sm:mb-8"
       aria-labelledby="partner-raffles-carousel-heading"
     >
-      <div className="flex items-center gap-2 min-w-0 mb-3">
-        <Users className="h-5 w-5 text-violet-400 shrink-0" aria-hidden />
-        <h2 id="partner-raffles-carousel-heading" className="text-lg sm:text-xl font-bold truncate">
-          Partner communities
-        </h2>
+      <div className="mb-3 min-w-0 sm:mb-4">
+        <div className="mb-1 flex min-w-0 items-center gap-2">
+          <Users className="h-5 w-5 shrink-0 text-violet-400" aria-hidden />
+          <h2 id="partner-raffles-carousel-heading" className="truncate text-lg font-bold sm:text-xl">
+            Partner communities
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground sm:text-base">
+          Featured partner raffles · swipe sideways on mobile
+        </p>
       </div>
       <div
-        className="flex items-stretch gap-5 overflow-x-auto pt-6 pb-10 snap-x snap-mandatory scroll-pl-5 scroll-pr-5 -mx-1 px-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex items-stretch gap-4 overflow-x-auto pt-4 pb-8 snap-x snap-mandatory scroll-pl-3 scroll-pr-3 -mx-1 px-3 sm:gap-5 sm:pt-6 sm:pb-10 sm:scroll-pl-5 sm:scroll-pr-5 sm:px-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ touchAction: 'pan-x manipulation', WebkitOverflowScrolling: 'touch' as const }}
         aria-label="Featured partner raffles carousel"
       >
         {items.map(({ raffle, entries }, i) => (
           <div
             key={raffle.id}
-            className="flex h-full min-h-0 w-[min(100%,26rem)] max-w-[min(100%,32rem)] shrink-0 snap-start min-w-0 sm:w-[25rem] md:w-[26rem]"
+            className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 snap-start self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
           >
-            <RaffleCard
-              raffle={raffle}
-              entries={entries}
-              size="small"
-              section="active"
-              serverNow={serverNow}
-              priority={i === 0}
-              isPartnerCommunity
-            />
+            {/* self-stretch + h-full chain: all slides match tallest row (avoid h-full on slide — breaks with auto-height scroller) */}
+            <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+              <RaffleCard
+                raffle={raffle}
+                entries={entries}
+                size="small"
+                section="active"
+                serverNow={serverNow}
+                priority={i === 0}
+                isPartnerCommunity
+              />
+            </div>
           </div>
         ))}
       </div>

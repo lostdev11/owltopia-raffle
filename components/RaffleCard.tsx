@@ -917,7 +917,7 @@ export function RaffleCard({
     const smallRaffleHref = `/raffles/${raffle.slug}`
     return (
       <div
-        className="relative z-10 flex h-full min-h-0 flex-col md:hover:z-50"
+        className="relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col md:hover:z-50"
         onTouchStart={(e) => {
           touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
           scrollDetectedRef.current = false
@@ -931,7 +931,7 @@ export function RaffleCard({
         onTouchEnd={handleTouchEnd}
       >
           <Card
-            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex h-full min-h-0 flex-col p-0 rounded-[1.25rem]')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
+            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex h-full min-h-0 w-full min-w-0 flex-col p-0 rounded-[1.25rem]')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
             style={cardSurfaceStyle}
           >
             {/* Clip inner content only; outer Card keeps theme / entered box-shadow uncropped */}
@@ -951,7 +951,7 @@ export function RaffleCard({
             />
             {!listThumbDead && (
               <div 
-                className="!relative h-full min-h-0 w-24 min-w-[96px] shrink-0 self-stretch overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] rounded-bl-[1.25rem] bg-muted sm:w-32 md:w-40"
+                className="!relative z-10 m-0 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 cursor-pointer items-center justify-center self-stretch overflow-hidden rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card p-0 sm:w-32 md:w-40"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -959,7 +959,7 @@ export function RaffleCard({
                 }}
               >
                 {listThumbMintLoading ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-muted/60" aria-hidden>
+                  <div className="absolute inset-0 flex items-center justify-center bg-card/80" aria-hidden>
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
@@ -972,7 +972,7 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="absolute inset-0 h-full w-full object-cover object-center"
+                    className="max-h-full max-w-full object-contain object-center"
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1005,7 +1005,7 @@ export function RaffleCard({
             {listThumbDead && (
               <Link
                 href={smallRaffleHref}
-                className="relative z-10 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 self-stretch items-center justify-center border bg-muted sm:w-32 md:w-40 rounded-l-[1.25rem] rounded-bl-[1.25rem]"
+                className="relative z-10 flex h-full min-h-0 w-24 min-w-[96px] shrink-0 items-center justify-center self-stretch rounded-bl-[1.25rem] rounded-l-[1.25rem] bg-card sm:w-32 md:w-40"
                 onClick={(e) => handleLinkClick(e)}
               >
                 <span className="text-[9px] sm:text-[10px] text-muted-foreground text-center px-1">Image unavailable</span>
@@ -1014,7 +1014,7 @@ export function RaffleCard({
             <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <Link
                 href={smallRaffleHref}
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-1.5 sm:p-2"
+                className="flex min-h-0 min-w-0 flex-col overflow-hidden p-1.5 sm:p-2"
                 onClick={(e) => handleLinkClick(e)}
               >
                 <LinkifiedTextInsideLinkProvider>
@@ -1095,7 +1095,7 @@ export function RaffleCard({
             )}
                 </LinkifiedTextInsideLinkProvider>
               </Link>
-              <div className="mt-auto flex max-sm:pt-0 flex-wrap items-center gap-x-1 gap-y-1 min-w-0 border-t border-border/40 px-1.5 pb-1.5 pt-1 sm:px-2 sm:pb-2 sm:pt-1.5">
+              <div className="flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 px-1.5 pb-1.5 pt-0.5 sm:px-2 sm:pb-2 sm:pt-1">
                 <Link
                   href={smallRaffleHref}
                   className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1"
@@ -1251,7 +1251,7 @@ export function RaffleCard({
               onClick={(e) => handleLinkClick(e, isFuture)}
             >
               <LinkifiedTextInsideLinkProvider>
-            <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
+            <div className="!relative z-10 m-0 flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-[1.25rem] bg-muted p-0">
               {listThumbMintLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted/60 z-20" aria-hidden>
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
@@ -1263,7 +1263,7 @@ export function RaffleCard({
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-cover !w-full !h-full"
+                  className="!h-full !w-full object-contain object-center"
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
