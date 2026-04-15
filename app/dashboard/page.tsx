@@ -201,6 +201,8 @@ function formatMultiCurrencyTotals(by: Record<string, number>): string {
 
 function discordOAuthReturnMessage(code: string): string {
   switch (code) {
+    case 'sign_in_required':
+      return 'Your site session expired or was reset. Connect your wallet, use Sign in, then try Connect Discord again.'
     case 'access_denied':
       return 'Discord connection was cancelled.'
     case 'discord_taken':

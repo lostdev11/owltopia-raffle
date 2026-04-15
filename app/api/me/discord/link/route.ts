@@ -16,7 +16,10 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   try {
     const session = await requireSession(request)
-    if (session instanceof NextResponse) return session
+    if (session instanceof NextResponse) {
+      const base = getRequestOriginForOAuth(request)
+      return NextResponse.redirect(`${base}/dashboard?discord_error=sign_in_required`)
+    }
 
     const redirectUri = getDiscordOAuthRedirectUriFromRequest(request)
     const url = getDiscordOAuthAuthorizeUrl(generateDiscordOAuthState(session.wallet), redirectUri)

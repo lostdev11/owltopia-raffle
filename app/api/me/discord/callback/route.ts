@@ -28,7 +28,10 @@ function redirectWith(request: NextRequest, query: Record<string, string>): Next
 export async function GET(request: NextRequest) {
   try {
     const session = await requireSession(request)
-    if (session instanceof NextResponse) return session
+    if (session instanceof NextResponse) {
+      // Browser OAuth return: show a clear message on the dashboard instead of a raw 401 JSON body.
+      return redirectWith(request, { discord_error: 'sign_in_required' })
+    }
 
     const { searchParams } = new URL(request.url)
     const oauthErr = searchParams.get('error')
