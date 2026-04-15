@@ -10,6 +10,7 @@ import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
+import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -270,33 +271,69 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
   const image = resolveDiscordEmbedImageUrl(raffle)
 
-  await postDiscordWebhook(url, {
-    title: 'New raffle created',
-    description: raffle.title,
-    url: rafflePageUrl(raffle),
-    color: 0x57f287,
-    fields: [
-      { name: 'Prize', value: prizeSummary(raffle), inline: true },
-      {
-        name: 'Ticket price',
-        value: `${raffle.ticket_price} ${raffle.currency}`,
-        inline: true,
-      },
-      { name: 'Ends', value: endLine, inline: false },
-      {
-        name: 'Creator',
-        value: raffle.creator_wallet
-          ? `\`${shortenWallet(raffle.creator_wallet)}\``
-          : raffle.created_by
-            ? `\`${shortenWallet(String(raffle.created_by))}\``
-            : '—',
-        inline: true,
-      },
-      { name: 'Status', value: raffle.status ?? 'draft', inline: true },
-    ],
-    image: image ? { url: image } : undefined,
-    timestamp: new Date().toISOString(),
-  })
+  const creatorWallet = (
+    raffle.creator_wallet?.trim() ||
+    (typeof raffle.created_by === 'string' ? raffle.created_by.trim() : '')
+  ).trim()
+  let creatorDiscordId: string | undefined
+  if (creatorWallet) {
+    try {
+      const map = await getDiscordUserIdsByWallets([creatorWallet])
+      const id = map[creatorWallet]?.trim()
+      if (id) creatorDiscordId = id
+    } catch (e) {
+      console.error('[notifyRaffleCreated] creator Discord lookup:', e)
+    }
+  }
+  const creatorSnowflake = parseDiscordUserSnowflake(creatorDiscordId)
+
+  const creatorField =
+    creatorWallet && creatorSnowflake
+      ? {
+          name: 'Creator',
+          value: `<@${creatorSnowflake}> (\`${shortenWallet(creatorWallet)}\`)`,
+          inline: true,
+        }
+      : {
+          name: 'Creator',
+          value: creatorWallet
+            ? `\`${shortenWallet(creatorWallet)}\``
+            : raffle.created_by
+              ? `\`${shortenWallet(String(raffle.created_by))}\``
+              : '—',
+          inline: true,
+        }
+
+  const extras: WebhookExtras | undefined = creatorSnowflake
+    ? {
+        content: `Raffle creator: <@${creatorSnowflake}>`,
+        allowed_mentions: { parse: [], users: [creatorSnowflake] },
+      }
+    : undefined
+
+  await postDiscordWebhook(
+    url,
+    {
+      title: 'New raffle created',
+      description: raffle.title,
+      url: rafflePageUrl(raffle),
+      color: 0x57f287,
+      fields: [
+        { name: 'Prize', value: prizeSummary(raffle), inline: true },
+        {
+          name: 'Ticket price',
+          value: `${raffle.ticket_price} ${raffle.currency}`,
+          inline: true,
+        },
+        { name: 'Ends', value: endLine, inline: false },
+        creatorField,
+        { name: 'Status', value: raffle.status ?? 'draft', inline: true },
+      ],
+      image: image ? { url: image } : undefined,
+      timestamp: new Date().toISOString(),
+    },
+    extras
+  )
 }
 
 /** Logs errors, never throws. Await from selectWinner (or any serverless handler) so the outgoing webhook finishes before the invocation freezes. */
