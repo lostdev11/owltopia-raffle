@@ -163,6 +163,11 @@ export interface Raffle {
   /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
   creator_is_partner?: boolean
   /**
+   * Enriched at list time for partner creators: `wallet_profiles.display_name` when set, else optional
+   * `partner_community_creators.display_label`. Used for partner badge copy / accessibility.
+   */
+  creator_partner_display_name?: string | null
+  /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */
@@ -209,6 +214,13 @@ export interface Entry {
   refunded_at?: string | null
   refund_transaction_signature?: string | null
   refund_lock_started_at?: string | null
+  /** Owltopia referral attribution (active code at purchase time). */
+  referrer_wallet?: string | null
+  referral_code_used?: string | null
+  /** Promotional free ticket via referral (amount_paid 0); confirm with token RPC. */
+  referral_complimentary?: boolean
+  complimentary_confirm_token?: string | null
+  complimentary_token_expires_at?: string | null
 }
 
 export interface OwlVisionScore {

@@ -1,7 +1,10 @@
+import { randomBytes } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createEntry,
   getPendingEntryIdsForWalletAndRaffle,
+  hasConfirmedEntryForWalletInRaffle,
+  hasConfirmedReferralComplimentaryGlobally,
 } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId, upgradeRaffleToFundsEscrowIfEligible } from '@/lib/db/raffles'
 import { hasAnyInVerification } from '@/lib/verify-in-flight'
@@ -12,6 +15,9 @@ import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { resolveReferralForPurchase } from '@/lib/db/referrals'
+import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
+import { isReferralAttributionEnabled, isReferralComplimentaryTicketEnabled } from '@/lib/referrals/config'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -50,6 +56,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
     const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum } = parsed.data
+
+    // Attribution uses httpOnly cookie only (set by GET /api/referrals/capture); never trust JSON body.
+    let referralRaw: string | undefined
+    if (isReferralAttributionEnabled()) {
+      const cookieRaw = request.cookies.get(REFERRAL_COOKIE_NAME)?.value?.trim()
+      if (cookieRaw) {
+        try {
+          referralRaw = decodeURIComponent(cookieRaw)
+        } catch {
+          referralRaw = cookieRaw
+        }
+      }
+    }
 
     const walletRl = rateLimit(`entries-create:wallet:${walletAddressStr}`, 10, 60_000)
     if (!walletRl.allowed) {
@@ -119,10 +138,46 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const finalAmountPaid = ticketPrice * ticketQuantityNum
-    if (!Number.isFinite(finalAmountPaid) || finalAmountPaid <= 0) {
+    const fullPrice = ticketPrice * ticketQuantityNum
+    if (!Number.isFinite(fullPrice) || fullPrice <= 0) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
+
+    if (referralRaw) {
+      const refIpRl = rateLimit(`entries-create:ref-ip:${ip}`, 8, 60_000)
+      if (!refIpRl.allowed) {
+        return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+      }
+      const refWalletRl = rateLimit(`entries-create:ref-wallet:${walletAddressStr}`, 8, 60_000)
+      if (!refWalletRl.allowed) {
+        return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+      }
+    }
+
+    const hadConfirmed = await hasConfirmedEntryForWalletInRaffle(raffleIdStr, walletAddressStr)
+    const alreadyUsedGlobalFreeTicket =
+      await hasConfirmedReferralComplimentaryGlobally(walletAddressStr)
+    const eligibleComplimentary =
+      isReferralComplimentaryTicketEnabled() &&
+      isReferralAttributionEnabled() &&
+      ticketQuantityNum === 1 &&
+      Boolean(referralRaw) &&
+      !hadConfirmed &&
+      !alreadyUsedGlobalFreeTicket
+
+    const referralResolution = await resolveReferralForPurchase(referralRaw, walletAddressStr, {
+      amountPaid: fullPrice,
+      currency: String(raffle.currency || 'SOL'),
+      complimentary: eligibleComplimentary,
+    })
+
+    const useComplimentary = Boolean(eligibleComplimentary && referralResolution)
+    const finalAmountPaid = useComplimentary ? 0 : fullPrice
+
+    const complimentaryTokenPlain = useComplimentary ? randomBytes(24).toString('base64url') : null
+    const complimentaryExpiresAt = useComplimentary
+      ? new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      : null
 
     // Do not invalidate (reset) a pending entry that is currently being verified.
     // Entry must only be "released" after verification completes (race-condition hardening).
@@ -146,10 +201,32 @@ export async function POST(request: NextRequest) {
       status: 'pending',
       amount_paid: finalAmountPaid,
       currency: raffle.currency,
+      ...(referralResolution
+        ? {
+            referrer_wallet: referralResolution.referrerWallet,
+            referral_code_used: referralResolution.referralCodeUsed,
+          }
+        : {}),
+      ...(useComplimentary && complimentaryTokenPlain && complimentaryExpiresAt
+        ? {
+            referral_complimentary: true,
+            complimentary_confirm_token: complimentaryTokenPlain,
+            complimentary_token_expires_at: complimentaryExpiresAt,
+          }
+        : {}),
     })
 
     if (!entry) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
+    }
+
+    if (useComplimentary && complimentaryTokenPlain) {
+      return NextResponse.json({
+        success: true,
+        entryId: entry.id,
+        complimentary: true,
+        complimentaryToken: complimentaryTokenPlain,
+      })
     }
 
     const treasuryWallet = process.env.RAFFLE_RECIPIENT_WALLET || process.env.NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET

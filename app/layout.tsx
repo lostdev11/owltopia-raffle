@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
@@ -18,6 +19,7 @@ import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 import { MaintenanceBanner } from '@/components/MaintenanceBanner'
+import { ReferralCapture } from '@/components/ReferralCapture'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -238,6 +240,9 @@ export default function RootLayout({
         <ErrorHandler />
         <SolflareTouchFix />
         <WalletContextProvider>
+          <Suspense fallback={null}>
+            <ReferralCapture />
+          </Suspense>
           <div className="flex flex-col min-h-screen">
             <MaintenanceBanner />
             <ConditionalHeader />

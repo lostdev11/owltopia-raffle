@@ -3,7 +3,8 @@ import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin
 
 const DISPLAY_NAME_MAX_LENGTH = 32
 
-function defaultDisplayNameFromWallet(walletAddress: string): string {
+/** Default label when no custom name is set (e.g. Discord link). Used for XP milestone eligibility. */
+export function defaultDisplayNameFromWallet(walletAddress: string): string {
   const w = walletAddress.trim()
   if (w.length <= DISPLAY_NAME_MAX_LENGTH) return w
   return `${w.slice(0, 4)}…${w.slice(-4)}`

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
@@ -28,11 +29,17 @@ export function PartnerRafflesCarousel({
         <div className="mb-1 flex min-w-0 items-center gap-2">
           <Users className="h-5 w-5 shrink-0 text-violet-400" aria-hidden />
           <h2 id="partner-raffles-carousel-heading" className="truncate text-lg font-bold sm:text-xl">
-            Partner communities
+            Owltopia Partner Program
           </h2>
         </div>
         <p className="text-sm text-muted-foreground sm:text-base">
-          Featured partner raffles · swipe sideways on mobile
+          Featured partner raffles (2% platform fee on tickets) · swipe sideways on mobile ·{' '}
+          <Link
+            href="/partner-program"
+            className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
+          >
+            About the program
+          </Link>
         </p>
       </div>
       <div

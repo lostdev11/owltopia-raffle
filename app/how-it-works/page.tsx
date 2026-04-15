@@ -139,7 +139,11 @@ export default function HowItWorksPage() {
             Rev Share
           </h2>
           <p className="mb-4">
-            Platform revenue comes from a fee on each ticket sale: <strong>6%</strong> for creators who are not Owltopia (Owl) NFT holders and <strong>3%</strong> for holders. Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
+            Platform revenue comes from a fee on each ticket sale: <strong>6%</strong> for creators who are not Owltopia (Owl) NFT holders and <strong>3%</strong> for holders. Verified{' '}
+            <Link href="/partner-program" className="text-green-500 hover:underline">
+              partner program
+            </Link>{' '}
+            creators pay <strong>2%</strong>. Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
           </p>
         </section>
 

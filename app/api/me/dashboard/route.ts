@@ -9,7 +9,13 @@ import {
 } from '@/lib/db/raffles'
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import { getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
+import { defaultDisplayNameFromWallet, getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
+import {
+  getEmptyEngagementPayload,
+  syncEngagementMilestonesAndGetPayload,
+} from '@/lib/db/wallet-milestones'
+import { ownsOwltopia } from '@/lib/platform-fees'
+import { getReferralSummaryForWallet, syncReferralStateForWallet } from '@/lib/db/referrals'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
@@ -39,6 +45,12 @@ export async function GET(request: NextRequest) {
     }
 
     const wallet = session.wallet
+
+    try {
+      await syncReferralStateForWallet(wallet)
+    } catch (e) {
+      console.error('[me/dashboard] referral sync:', e instanceof Error ? e.message : e)
+    }
 
     let entriesWithRaffles = await getEntriesByWallet(wallet)
     const endedNoWinnerCandidateIds = new Set<string>()
@@ -72,6 +84,8 @@ export async function GET(request: NextRequest) {
       walletProfile,
       nftGiveaways,
       communityGiveaways,
+      referralSummary,
+      canSetVanityReferral,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -88,6 +102,11 @@ export async function GET(request: NextRequest) {
         console.error('listCommunityGiveawaysWonByWallet:', err)
         return []
       }),
+      getReferralSummaryForWallet(wallet).catch((err) => {
+        console.error('getReferralSummaryForWallet:', err)
+        return null
+      }),
+      ownsOwltopia(wallet, { skipCache: true }),
     ])
 
     // Earned = completed settlement totals (net) + live raffles (creator share after platform fee).
@@ -106,6 +125,37 @@ export async function GET(request: NextRequest) {
     const refundCandidatesByRaffle = await getRefundCandidatesByRaffleIds(
       refundEligibleRaffles.map((r) => r.id)
     )
+
+    const confirmedRows = entriesWithRaffles.filter((row) => row.entry.status === 'confirmed')
+    const uniqueConfirmedRaffleIds = new Set(
+      confirmedRows
+        .map((row) => row.raffle?.id)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    )
+    const confirmedTicketQuantitySum = confirmedRows.reduce(
+      (sum, row) => sum + (Number(row.entry.ticket_quantity) || 0),
+      0
+    )
+    const displayTrim = walletProfile.displayName?.trim() ?? null
+    const customDisplayName =
+      displayTrim != null &&
+      displayTrim.length > 0 &&
+      displayTrim !== defaultDisplayNameFromWallet(wallet)
+
+    let engagement = getEmptyEngagementPayload()
+    try {
+      engagement = await syncEngagementMilestonesAndGetPayload(wallet, {
+        customDisplayName,
+        discordLinked: walletProfile.discord.linked,
+        uniqueConfirmedRaffleCount: uniqueConfirmedRaffleIds.size,
+        confirmedTicketQuantitySum,
+        hostedRaffleCount: raffles.length,
+      })
+    } catch (e) {
+      console.error('[me/dashboard] engagement milestones:', e instanceof Error ? e.message : e)
+      engagement = getEmptyEngagementPayload()
+    }
+
     const creatorRefundRaffles = refundEligibleRaffles
       .map((r) => {
         const candidates = refundCandidatesByRaffle[r.id] ?? []
@@ -144,6 +194,11 @@ export async function GET(request: NextRequest) {
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
       nftGiveaways,
       communityGiveaways,
+      referral:
+        referralSummary != null
+          ? { ...referralSummary, canSetVanity: canSetVanityReferral }
+          : null,
+      engagement,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'

@@ -8,9 +8,19 @@ export const entriesCreateBody = z.object({
   ticketQuantity: z.coerce.number().int().min(1).max(1000),
 })
 
+export const referralVanityBody = z.object({
+  slug: z.string().min(1).max(48),
+})
+
 export const entriesVerifyBody = z.object({
   entryId: z.string().uuid(),
   transactionSignature: z.string().min(80).max(120),
+})
+
+export const entriesConfirmComplimentaryBody = z.object({
+  entryId: z.string().uuid(),
+  token: z.string().min(16).max(200),
+  walletAddress: solanaAddress,
 })
 
 export const claimRefundEntryBody = z.object({

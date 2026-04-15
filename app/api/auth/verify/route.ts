@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { consumeNonce, verifySignIn, setSessionCookieInResponse } from '@/lib/auth-server'
 import { authVerifyBody } from '@/lib/validations'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { syncReferralStateForWallet } from '@/lib/db/referrals'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,6 +62,11 @@ export async function POST(request: NextRequest) {
 
     const response = NextResponse.json({ ok: true })
     setSessionCookieInResponse(response, walletStr)
+    try {
+      await syncReferralStateForWallet(walletStr)
+    } catch (e) {
+      console.error('[auth/verify] referral sync:', e instanceof Error ? e.message : e)
+    }
     return response
   } catch (error) {
     // Don't log full error object which might contain wallet addresses

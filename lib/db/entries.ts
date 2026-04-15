@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Entry } from '@/lib/types'
+import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
 import { withRetry } from '@/lib/db-retry'
 import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 
@@ -33,6 +34,14 @@ export class ConfirmEntryInvalidStateError extends Error {
   constructor(message = 'Invalid entry state for confirmation') {
     super(message)
     this.name = 'ConfirmEntryInvalidStateError'
+  }
+}
+
+/** Referral free ticket already redeemed for this wallet (lifetime, all raffles). */
+export class ComplimentaryQuotaExceededError extends Error {
+  constructor() {
+    super('Referral complimentary ticket already used for this wallet')
+    this.name = 'ComplimentaryQuotaExceededError'
   }
 }
 
@@ -95,6 +104,9 @@ function mapRpcError(message: string): never {
   if (message.includes('tx_already_used')) throw new TxAlreadyUsedError()
   if (message.includes('insufficient_tickets')) throw new InsufficientTicketsError()
   if (message.includes('invalid_state')) throw new ConfirmEntryInvalidStateError(message)
+  if (message.includes('invalid_token')) throw new ConfirmEntryInvalidStateError(message)
+  if (message.includes('token_expired')) throw new ConfirmEntryInvalidStateError(message)
+  if (message.includes('complimentary_quota_exceeded')) throw new ComplimentaryQuotaExceededError()
   if (message.includes('entry_not_found')) throw new Error('Entry not found')
   if (message.includes('raffle_not_found')) throw new Error('Raffle not found')
   throw new Error(message)
@@ -130,6 +142,95 @@ export async function confirmEntryWithTx(
   if (!data || typeof data !== 'object' || !('entry' in data) || data.success !== true) {
     console.error('Unexpected confirm_entry_with_tx response:', data)
     throw new Error('Invalid response from confirm_entry_with_tx')
+  }
+
+  return { success: true, entry: data.entry as Entry }
+}
+
+export async function hasConfirmedEntryForWalletInRaffle(
+  raffleId: string,
+  walletAddress: string
+): Promise<boolean> {
+  const rid = raffleId.trim()
+  const w = walletAddress.trim()
+  if (!rid || !w) return false
+
+  const { count, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('*', { count: 'exact', head: true })
+    .eq('raffle_id', rid)
+    .eq('wallet_address', w)
+    .eq('status', 'confirmed')
+
+  if (error) {
+    console.error('hasConfirmedEntryForWalletInRaffle:', error.message)
+    return true
+  }
+  return (count ?? 0) > 0
+}
+
+/** True if this wallet has already confirmed a referral complimentary (free) ticket on any raffle. */
+export async function hasConfirmedReferralComplimentaryGlobally(
+  walletAddress: string
+): Promise<boolean> {
+  const w = walletAddress.trim()
+  if (!w) return false
+
+  const { count, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('*', { count: 'exact', head: true })
+    .eq('wallet_address', w)
+    .eq('referral_complimentary', true)
+    .eq('status', 'confirmed')
+
+  if (error) {
+    console.error('hasConfirmedReferralComplimentaryGlobally:', error.message)
+    return true
+  }
+  return (count ?? 0) > 0
+}
+
+/**
+ * Reject any other pending referral complimentary rows for this wallet (any raffle).
+ * Ensures only one in-flight free ticket and avoids orphan pendings blocking UX.
+ */
+export async function invalidatePendingReferralComplimentaryEntriesForWallet(
+  walletAddress: string
+): Promise<void> {
+  const w = walletAddress.trim()
+  if (!w) return
+
+  const { error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({ status: 'rejected' })
+    .eq('wallet_address', w)
+    .eq('referral_complimentary', true)
+    .eq('status', 'pending')
+
+  if (error) {
+    console.error('invalidatePendingReferralComplimentaryEntriesForWallet:', error.message)
+  }
+}
+
+/**
+ * Confirm a referral complimentary row (0 paid) using one-time token + DB RPC.
+ */
+export async function confirmComplimentaryReferralEntry(
+  entryId: string,
+  token: string
+): Promise<ConfirmEntryWithTxResult> {
+  const { data, error } = await getSupabaseAdmin().rpc('confirm_complimentary_referral_entry', {
+    p_entry_id: entryId,
+    p_token: token.trim(),
+  })
+
+  if (error) {
+    mapRpcError(error.message)
+  }
+
+  if (!data || typeof data !== 'object' || !('entry' in data) || data.success !== true) {
+    console.error('Unexpected confirm_complimentary_referral_entry response:', data)
+    throw new Error('Invalid response from confirm_complimentary_referral_entry')
   }
 
   return { success: true, entry: data.entry as Entry }
@@ -221,6 +322,9 @@ export async function createEntry(
   }
 
   return withRetry(async () => {
+    if (entry.referral_complimentary === true) {
+      await invalidatePendingReferralComplimentaryEntriesForWallet(entry.wallet_address)
+    }
     // Invalidate first so only one pending per wallet+raffle (eliminates race)
     await invalidateAllPendingEntriesForWallet(entry.raffle_id, entry.wallet_address)
 
@@ -561,6 +665,8 @@ export interface RaffleInfoForEntry {
 export interface EntryWithRaffle {
   entry: Entry
   raffle: RaffleInfoForEntry
+  /** Buyer-facing label for `entry.referrer_wallet` (My Dashboard). */
+  referred_by_label?: string | null
 }
 
 export interface RefundCandidateByWallet {
@@ -605,6 +711,25 @@ export async function getEntriesByWallet(walletAddress: string): Promise<EntryWi
       raffle: raffle as RaffleInfoForEntry,
     })
   }
+
+  const referrers = new Set<string>()
+  for (const r of result) {
+    const rw = r.entry.referrer_wallet?.trim()
+    if (rw) referrers.add(rw)
+  }
+  if (referrers.size > 0) {
+    const names = await getDisplayNamesByWallets([...referrers])
+    const shortWallet = (w: string) => {
+      const t = w.trim()
+      if (t.length <= 12) return t
+      return `${t.slice(0, 4)}…${t.slice(-4)}`
+    }
+    for (const r of result) {
+      const rw = r.entry.referrer_wallet?.trim()
+      r.referred_by_label = rw ? (names[rw] || shortWallet(rw)) : null
+    }
+  }
+
   return result
 }
 

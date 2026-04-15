@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
@@ -36,6 +36,11 @@ const glassCardItems = [
     label: 'Leaderboard',
     href: '/leaderboard',
     icon: <Trophy className="h-6 w-6" />,
+  },
+  {
+    label: 'Partner program',
+    href: '/partner-program',
+    icon: <HeartHandshake className="h-6 w-6" />,
   },
   ...externalLinks.map((link) => ({
     label: link.name,

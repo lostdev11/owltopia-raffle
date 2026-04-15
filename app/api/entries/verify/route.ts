@@ -59,6 +59,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
     }
 
+    if (entry.referral_complimentary && Number(entry.amount_paid) === 0) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
     const walletRl = rateLimit(
       `entries-verify:wallet:${entry.wallet_address}`,
       VERIFY_WALLET_LIMIT,

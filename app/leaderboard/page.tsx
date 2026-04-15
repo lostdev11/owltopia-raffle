@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   ChevronLeft,
   ChevronRight,
+  Users,
 } from 'lucide-react'
 
 const LEADERBOARD_MIN_YEAR = 2024
@@ -31,6 +32,11 @@ type LeaderboardData = {
   rafflesCreated: LeaderboardEntry[]
   ticketsSold: LeaderboardEntry[]
   rafflesWon: LeaderboardEntry[]
+}
+
+type ReferralLeaderboardApiResponse = {
+  entries: Array<{ rank: number; wallet: string; referredUsers: number; referredTickets: number }>
+  displayNames: Record<string, string>
 }
 
 type PeriodKind = 'all' | 'month' | 'year'
@@ -213,6 +219,8 @@ export default function LeaderboardPage() {
   const [data, setData] = useState<LeaderboardData | null>(null)
   const [periodMeta, setPeriodMeta] = useState<LeaderboardPeriodMeta | null>(null)
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({})
+  const [referralLb, setReferralLb] = useState<ReferralLeaderboardApiResponse | null>(null)
+  const [referralLbLoading, setReferralLbLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -246,6 +254,25 @@ export default function LeaderboardPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    setReferralLbLoading(true)
+    fetch('/api/referrals/leaderboard', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('referral lb'))))
+      .then((json: ReferralLeaderboardApiResponse) => {
+        if (!cancelled) setReferralLb(json)
+      })
+      .catch(() => {
+        if (!cancelled) setReferralLb({ entries: [], displayNames: {} })
+      })
+      .finally(() => {
+        if (!cancelled) setReferralLbLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const shiftMonth = (delta: number) => {
     setMonthScope(({ year: y, month: m }) => {
@@ -462,6 +489,41 @@ export default function LeaderboardPage() {
           />
         </div>
       )}
+
+      <div className="mt-10 sm:mt-12 space-y-3 max-w-5xl">
+        <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+          <Users className="h-5 w-5 sm:h-6 sm:w-6 text-green-500 shrink-0" />
+          Most users referred
+        </h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          All-time (UTC). Top 10 referrers by how many different wallets bought at least one confirmed ticket using their
+          link (refunded purchases excluded; dust purchases below minimum per currency do not count). Counts are aggregated on
+          the server. Referral links set an httpOnly cookie so checkout cannot read or override the code from normal
+          page JavaScript.
+        </p>
+        {referralLbLoading && (
+          <div className="flex items-center gap-2 text-muted-foreground py-6">
+            <Loader2 className="h-5 w-5 animate-spin shrink-0" />
+            Loading referral leaderboard…
+          </div>
+        )}
+        {!referralLbLoading && referralLb && (
+          <div className="max-w-md">
+            <LeaderboardTable
+              title="Distinct buyers referred"
+              description="Same rules as above including minimum purchase; ties broken by total referred ticket rows."
+              entries={referralLb.entries.map((e) => ({
+                rank: e.rank,
+                wallet: e.wallet,
+                value: e.referredUsers,
+              }))}
+              valueLabel="Users"
+              icon={Users}
+              displayNames={{ ...displayNames, ...referralLb.displayNames }}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

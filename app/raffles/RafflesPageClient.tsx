@@ -49,6 +49,7 @@ import {
 } from '@/components/CommunityGiveawayBrowseCard'
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
+import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -752,6 +753,7 @@ export function RafflesPageClient({
 
   return (
   <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4">
+      <RaffleOwlPlayer enabled />
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
@@ -1252,7 +1254,14 @@ export function RafflesPageClient({
                   <>
                     <p className="text-xl text-muted-foreground mb-4">No partner raffles to show yet</p>
                     <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
-                      Raffles from verified partner communities (2% platform fee on tickets). Switch to{' '}
+                      Raffles from verified partner communities (2% platform fee on tickets). See the{' '}
+                      <Link
+                        href="/partner-program"
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
+                      >
+                        Owltopia Partner Program
+                      </Link>
+                      {' '}or switch to{' '}
                       <button
                         type="button"
                         onClick={() => setTab('all')}
@@ -1280,7 +1289,10 @@ export function RafflesPageClient({
               {partnerOnly && (
                 <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
                   Raffles from verified partner communities (2% platform fee on tickets).{' '}
-                  <span className="text-foreground/90">All raffles</span> shows the full list.
+                  <Link href="/partner-program" className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
+                    Owltopia Partner Program
+                  </Link>
+                  . <span className="text-foreground/90">All raffles</span> shows the full list.
                 </p>
               )}
           <div className="mb-8 sm:mb-12 w-full min-w-0">

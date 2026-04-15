@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -1183,7 +1184,14 @@ export function CreateRaffleForm() {
       </CardHeader>
       <CardContent>
         <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia (Owl NFT) holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
+          <p>
+            <strong>Platform fee (deducted from every ticket sale):</strong> 2% for verified{' '}
+            <Link href="/partner-program" className="text-primary underline-offset-4 hover:underline touch-manipulation">
+              partner program
+            </Link>{' '}
+            creators, 3% for Owltopia (Owl NFT) holders, 6% for other non-holders. The fee is taken from each ticket
+            payment at purchase time.
+          </p>
         </div>
 
         <form

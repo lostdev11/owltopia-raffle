@@ -11,6 +11,10 @@ import { Badge } from '@/components/ui/badge'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
+import {
+  ReferralComplimentaryHint,
+  clearReferralComplimentarySessionCache,
+} from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { WinnerModal } from '@/components/WinnerModal'
@@ -112,7 +116,6 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
-import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -734,12 +737,12 @@ export function RaffleDetailClient({
           // Create AbortController for timeout (30 seconds for mobile)
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 30000)
-          
           createResponse = await fetch('/api/entries/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
+            credentials: 'include',
             body: JSON.stringify({
               raffleId: raffle.id,
               walletAddress: publicKey.toBase58(),
@@ -817,6 +820,38 @@ export function RaffleDetailClient({
       }
       try {
         const data = await createResponse.json()
+        if (data?.complimentary === true && data?.complimentaryToken && data?.entryId && publicKey) {
+          const confRes = await fetch('/api/entries/confirm-complimentary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              entryId: data.entryId,
+              token: data.complimentaryToken,
+              walletAddress: publicKey.toBase58(),
+            }),
+          })
+          if (!confRes.ok) {
+            let msg = 'Could not activate your free referral ticket. Try again in a moment.'
+            try {
+              const j = await confRes.json()
+              if (typeof j?.error === 'string') msg = j.error
+            } catch {
+              /* ignore */
+            }
+            throw new Error(msg)
+          }
+          clearReferralComplimentarySessionCache()
+          setSuccess(true)
+          requestAnimationFrame(() => fireGreenConfetti())
+          router.refresh()
+          setTimeout(() => {
+            setSuccess(false)
+            setTicketQuantity(1)
+            setTicketQuantityDisplay('1')
+          }, 2000)
+          return
+        }
         entryId = data?.entryId
         paymentDetails = data?.paymentDetails
       } catch {
@@ -2578,7 +2613,6 @@ export function RaffleDetailClient({
             <Share2 className="mr-2 h-4 w-4" />
             {shareCopied ? 'Copied!' : 'Share'}
           </Button>
-          <RaffleOwlPlayer enabled={isActive && !purchasesBlocked} />
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
               variant="outline"
@@ -3831,6 +3865,15 @@ export function RaffleDetailClient({
                     Ticket purchases are temporarily blocked. Please check back later.
                   </p>
                 )}
+                <ReferralComplimentaryHint
+                  variant="compact"
+                  walletAddress={walletAddress || undefined}
+                  show={
+                    !purchasesBlocked &&
+                    (availableTickets === null || availableTickets > 0) &&
+                    userTickets === 0
+                  }
+                />
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
                   disabled={purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
@@ -4217,6 +4260,16 @@ export function RaffleDetailClient({
             
             <HootBoostMeter quantity={ticketQuantity} />
             
+            <ReferralComplimentaryHint
+              variant="dialog"
+              walletAddress={walletAddress || undefined}
+              show={
+                ticketQuantity === 1 &&
+                userTickets === 0 &&
+                (availableTickets === null || availableTickets > 0)
+              }
+            />
+
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">

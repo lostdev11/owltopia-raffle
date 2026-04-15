@@ -2,7 +2,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 const CACHE_TTL_MS = 45_000
 
-let cache: { wallets: string[]; fetchedAt: number } | null = null
+export type ActivePartnerCommunityRow = {
+  creator_wallet: string
+  display_label: string | null
+}
+
+let cache: { rows: ActivePartnerCommunityRow[]; fetchedAt: number } | null = null
 
 async function getSupabaseForPartnerRead(): Promise<SupabaseClient | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
@@ -18,43 +23,54 @@ async function getSupabaseForPartnerRead(): Promise<SupabaseClient | null> {
 }
 
 /**
- * Active partner community creator wallets (2% fee tier, spotlight).
- * Cached briefly to avoid hammering Supabase from getCreatorFeeTier / enrich loops.
+ * Active partner rows (2% fee tier, spotlight). Cached briefly.
  */
-export async function getActivePartnerCommunityCreatorWallets(): Promise<string[]> {
+export async function getActivePartnerCommunityCreatorRows(): Promise<ActivePartnerCommunityRow[]> {
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
-    return cache.wallets
+    return cache.rows
   }
 
   const sb = await getSupabaseForPartnerRead()
   if (!sb) {
-    cache = { wallets: [], fetchedAt: Date.now() }
+    cache = { rows: [], fetchedAt: Date.now() }
     return []
   }
 
   const { data, error } = await sb
     .from('partner_community_creators')
-    .select('creator_wallet')
+    .select('creator_wallet, display_label')
     .eq('is_active', true)
     .order('sort_order', { ascending: true })
 
   if (error) {
     console.error('[partner-communities] fetch failed:', error.message)
-    cache = { wallets: [], fetchedAt: Date.now() }
+    cache = { rows: [], fetchedAt: Date.now() }
     return []
   }
 
-  const wallets = (data ?? [])
-    .map((r: { creator_wallet: string }) => String(r.creator_wallet ?? '').trim())
-    .filter(Boolean)
+  const rows: ActivePartnerCommunityRow[] = (data ?? [])
+    .map((r: { creator_wallet: string; display_label: string | null }) => ({
+      creator_wallet: String(r.creator_wallet ?? '').trim(),
+      display_label: r.display_label != null && String(r.display_label).trim() ? String(r.display_label).trim() : null,
+    }))
+    .filter((r) => r.creator_wallet)
 
-  cache = { wallets, fetchedAt: Date.now() }
-  return wallets
+  cache = { rows, fetchedAt: Date.now() }
+  return rows
+}
+
+/**
+ * Active partner community creator wallets (2% fee tier, spotlight).
+ * Cached briefly to avoid hammering Supabase from getCreatorFeeTier / enrich loops.
+ */
+export async function getActivePartnerCommunityCreatorWallets(): Promise<string[]> {
+  const rows = await getActivePartnerCommunityCreatorRows()
+  return rows.map((r) => r.creator_wallet)
 }
 
 export async function getActivePartnerCommunityWalletSet(): Promise<Set<string>> {
-  const list = await getActivePartnerCommunityCreatorWallets()
-  return new Set(list)
+  const rows = await getActivePartnerCommunityCreatorRows()
+  return new Set(rows.map((r) => r.creator_wallet))
 }
 
 /** For tests or admin after mutating the table. */

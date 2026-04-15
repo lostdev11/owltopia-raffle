@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -2173,6 +2173,20 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Paid communities: channel webhook + API secret, optional pings on NFT giveaway verify/claim, or
                       they POST custom embeds to your API.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/partner-creators">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <HeartHandshake className="h-5 w-5" />
+                      Partner program creators
+                    </CardTitle>
+                    <CardDescription>
+                      Allowlist creator wallets for the 2% partner fee tier and partner raffles spotlight — add, edit,
+                      activate, or remove without running SQL.
                     </CardDescription>
                   </CardHeader>
                 </Link>

@@ -998,3 +998,41 @@ input[type="submit"] {
     width: 44px;
   }
 }
+
+@layer utilities {
+  /**
+   * Dark-surface scrollbar using theme tokens (primary green thumb, muted track).
+   * Use on overflow-auto regions so default OS scrollbars don’t clash with the UI.
+   */
+  .scrollbar-themed {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.55) hsl(var(--muted) / 0.35);
+  }
+  .scrollbar-themed::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  .scrollbar-themed::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.35);
+    border-radius: 9999px;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.5);
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--card) / 0.9);
+    background-clip: padding-box;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.72);
+    border: 2px solid hsl(var(--card) / 0.9);
+    background-clip: padding-box;
+  }
+  .scrollbar-themed::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .scrollbar-themed::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

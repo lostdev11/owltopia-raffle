@@ -31,6 +31,10 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import {
+  ReferralComplimentaryHint,
+  clearReferralComplimentarySessionCache,
+} from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
@@ -305,6 +309,11 @@ export function RaffleCard({
   // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
   const showPartnerBadge = isPartnerCommunity
+  const partnerDisplayName = raffle.creator_partner_display_name?.trim() ?? ''
+  const partnerBadgeTitle = partnerDisplayName
+    ? `Partner: ${partnerDisplayName} — 2% platform fee on ticket sales`
+    : 'Partner community — 2% platform fee on ticket sales'
+  const partnerBadgeAria = partnerDisplayName ? `Partner: ${partnerDisplayName}` : 'Partner community'
 
   // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
   useEffect(() => {
@@ -378,12 +387,12 @@ export function RaffleCard({
           // Create AbortController for timeout (30 seconds for mobile)
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 30000)
-          
           createResponse = await fetch('/api/entries/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
+            credentials: 'include',
             body: JSON.stringify({
               raffleId: raffle.id,
               walletAddress: publicKey.toBase58(),
@@ -440,8 +449,45 @@ export function RaffleCard({
         throw new Error(errorData.error || 'Failed to create entry')
       }
 
-      const { entryId, paymentDetails } = await createResponse.json()
-      if (!entryId) throw new Error('Invalid create response')
+      const createData = await createResponse.json()
+
+      if (createData.complimentary === true && createData.complimentaryToken && createData.entryId) {
+        const confRes = await fetch('/api/entries/confirm-complimentary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            entryId: createData.entryId,
+            token: createData.complimentaryToken,
+            walletAddress: publicKey.toBase58(),
+          }),
+        })
+        if (!confRes.ok) {
+          let msg = 'Could not activate your free referral ticket. Try again in a moment.'
+          try {
+            const j = await confRes.json()
+            if (typeof j?.error === 'string') msg = j.error
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg)
+        }
+        clearReferralComplimentarySessionCache()
+        setSuccess(true)
+        requestAnimationFrame(() => fireGreenConfetti())
+        router.refresh()
+        setTimeout(() => {
+          setShowQuickBuy(false)
+          setSuccess(false)
+          setTicketQuantity(1)
+          setTicketQuantityDisplay('1')
+        }, 2000)
+        return
+      }
+
+      const entryId = createData.entryId as string
+      const paymentDetails = createData.paymentDetails
+      if (!entryId || !paymentDetails) throw new Error('Invalid create response')
 
       // Step 2: Build transaction
       let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
@@ -1037,9 +1083,9 @@ export function RaffleCard({
                   {showPartnerBadge && (
                     <span
                       className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
-                      title="Partner community — 2% platform fee on ticket sales"
+                      title={partnerBadgeTitle}
                       role="img"
-                      aria-label="Partner community"
+                      aria-label={partnerBadgeAria}
                     >
                       <Users className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
                     </span>
@@ -1326,9 +1372,9 @@ export function RaffleCard({
                       {showPartnerBadge && (
                         <span
                           className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
-                          title="Partner community — 2% platform fee on ticket sales"
+                          title={partnerBadgeTitle}
                           role="img"
-                          aria-label="Partner community"
+                          aria-label={partnerBadgeAria}
                         >
                           <Users className="h-3.5 w-3.5 flex-shrink-0" />
                         </span>
@@ -1423,9 +1469,9 @@ export function RaffleCard({
                     {showPartnerBadge && (
                       <span
                         className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
-                        title="Partner community — 2% platform fee on ticket sales"
+                        title={partnerBadgeTitle}
                         role="img"
-                        aria-label="Partner community"
+                        aria-label={partnerBadgeAria}
                       >
                         <Users className="h-3 w-3 flex-shrink-0" />
                       </span>
@@ -1561,6 +1607,18 @@ export function RaffleCard({
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
                     </Button>
+                    <ReferralComplimentaryHint
+                      variant="compact"
+                      className="mt-2"
+                      walletAddress={wallet || undefined}
+                      show={
+                        isActive &&
+                        !isFuture &&
+                        !purchasesBlocked &&
+                        (availableTickets === null || availableTickets > 0) &&
+                        !userHasEntered
+                      }
+                    />
                   </>
                 )}
                 {showQuickBuy && isActive && !isFuture && !purchasesBlocked && (
@@ -1594,9 +1652,18 @@ export function RaffleCard({
                   </p>
                 )}
               </div>
-              {displaySize === 'large' && (
+                {displaySize === 'large' && (
                 <HootBoostMeter quantity={ticketQuantity} />
               )}
+              <ReferralComplimentaryHint
+                variant="dialog"
+                walletAddress={wallet || undefined}
+                show={
+                  ticketQuantity === 1 &&
+                  !userHasEntered &&
+                  (availableTickets === null || availableTickets > 0)
+                }
+              />
               <div className="flex items-center justify-between pt-2 border-t">
                 <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
                 <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
