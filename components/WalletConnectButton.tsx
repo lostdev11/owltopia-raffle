@@ -676,7 +676,7 @@ export function WalletConnectButton() {
             setVisible(true)
           }
         }}
-        aria-label={connected ? 'Wallet and balances' : 'Connect wallet'}
+        aria-label={connected ? 'Wallet' : 'Connect wallet'}
       >
         {!mounted ? (
           <button

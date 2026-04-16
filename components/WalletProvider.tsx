@@ -21,7 +21,7 @@ import {
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
-import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -38,7 +38,7 @@ interface WalletContextProviderProps {
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const network = WalletAdapterNetwork.Mainnet
   const shouldAutoConnect = typeof window !== 'undefined' && isMobileDevice()
-  const endpoint = useMemo(() => resolvePublicSolanaRpcUrl(), [])
+  const endpoint = useMemo(() => resolveWalletAdapterRpcUrl(), [])
 
   // Build wallets only on client so extension/Standard Wallet is available and no SSR mismatch
   const wallets = useMemo(

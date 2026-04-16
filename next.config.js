@@ -2,6 +2,10 @@ const path = require('path')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Expose Vercel deploy type at build time so preview URLs can run in the browser without burning prod Helius credits.
+  env: {
+    NEXT_PUBLIC_VERCEL_DEPLOY_ENV: process.env.VERCEL_ENV ?? '',
+  },
   // Strip console.log / console.debug / console.info from production bundles; keep warn + error for ops.
   compiler: {
     removeConsole:

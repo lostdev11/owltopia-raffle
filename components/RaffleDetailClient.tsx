@@ -47,6 +47,7 @@ import {
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { isOwlEnabled } from '@/lib/tokens'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
@@ -920,10 +921,11 @@ export function RaffleDetailClient({
             errorMessage.includes('CORS') ||
             errorMessage.includes('network')
           
-          // Check for retryable errors: 403 (rate limit), 19 (temporary internal error), 500, network issues
+          // Check for retryable errors: 403/429 (RPC quota), -32429, 19, 500, network issues
           if (isFetchError ||
               errorMessage.includes('403') || 
               errorMessage.includes('Access forbidden') ||
+              isSolanaRpcRateLimitError(rpcError) ||
               errorCode === 19 ||
               errorMessage.includes('Temporary internal error') ||
               errorMessage.includes('500') ||
@@ -938,9 +940,13 @@ export function RaffleDetailClient({
                   'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
                   'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                 )
-              } else if (errorMessage.includes('403') || errorMessage.includes('Access forbidden')) {
+              } else if (
+                errorMessage.includes('403') ||
+                errorMessage.includes('Access forbidden') ||
+                isSolanaRpcRateLimitError(rpcError)
+              ) {
                 throw new Error(
-                  'RPC endpoint is rate-limited or requires authentication. ' +
+                  'RPC endpoint is rate-limited or over quota (balances and purchases need a reliable RPC). ' +
                   'Please set NEXT_PUBLIC_SOLANA_RPC_URL in your .env.local file to a private RPC endpoint ' +
                   '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
                 )

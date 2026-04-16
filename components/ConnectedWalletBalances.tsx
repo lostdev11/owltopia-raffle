@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import type { PublicKey } from '@solana/web3.js'
 import { Wallet } from 'lucide-react'
-import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,18 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useWalletHeaderBalances } from '@/lib/hooks/useWalletHeaderBalances'
-import { isOwlEnabled } from '@/lib/tokens'
-import { SolanaMark } from '@/components/icons/SolanaMark'
-
-function fmtAmount(amount: number | null, loading: boolean, maxFrac: number): string {
-  if (loading && amount === null) return '…'
-  if (amount === null || !Number.isFinite(amount)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: maxFrac,
-    minimumFractionDigits: 0,
-  }).format(amount)
-}
 
 export interface ConnectedWalletBalancesProps {
   walletIcon?: string | null
@@ -41,8 +28,6 @@ export function ConnectedWalletBalances({
 }: ConnectedWalletBalancesProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [copyDone, setCopyDone] = useState(false)
-  const { sol, usdc, owl, loading, error, refresh } = useWalletHeaderBalances()
-  const owlOn = isOwlEnabled()
   const address = publicKey.toBase58()
   const shortAddress = `${address.slice(0, 4)}…${address.slice(-4)}`
 
@@ -69,7 +54,7 @@ export function ConnectedWalletBalances({
         onClick={() => setMenuOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
-        aria-label={`Wallet ${walletName}, balances and options`}
+        aria-label={`Wallet ${walletName}, ${shortAddress}, options`}
       >
         {walletIcon ? (
           // eslint-disable-next-line @next/next/no-img-element -- adapter icons are often data: URLs
@@ -88,40 +73,8 @@ export function ConnectedWalletBalances({
         )}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight sm:flex-row sm:items-center sm:gap-2 md:gap-3">
           <span className="truncate text-[10px] font-medium text-green-400/90 sm:text-xs md:text-sm">{walletName}</span>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-200 sm:text-xs md:text-sm md:gap-x-3">
-            <span className="inline-flex items-center gap-1 whitespace-nowrap leading-none" title="SOL">
-              <SolanaMark className="solana-mark-header-compact" />
-              {fmtAmount(sol, loading, 4)}
-            </span>
-            <span className="hidden h-3 w-px bg-zinc-600 sm:inline md:h-3.5" aria-hidden />
-            <span className="inline-flex items-center gap-1 whitespace-nowrap" title="USDC">
-              <Image
-                src="/usdc.png"
-                alt=""
-                width={12}
-                height={12}
-                className="inline h-3 w-3 shrink-0 md:h-4 md:w-4"
-              />
-              {fmtAmount(usdc, loading, 2)}
-            </span>
-            {owlOn && (
-              <>
-                <span className="hidden h-3 w-px bg-zinc-600 sm:inline md:h-3.5" aria-hidden />
-                <span className="inline-flex items-center gap-1 whitespace-nowrap" title="OWL">
-                  <Image
-                    src="/owl%20token%20v1.png"
-                    alt=""
-                    width={12}
-                    height={12}
-                    className="inline h-3 w-3 shrink-0 rounded-full object-cover md:h-4 md:w-4"
-                  />
-                  {fmtAmount(owl, loading, 2)}
-                </span>
-              </>
-            )}
-          </div>
+          <span className="font-mono text-[10px] text-zinc-300 sm:text-xs md:text-sm">{shortAddress}</span>
         </div>
-        {error && <span className="sr-only">Balances could not be loaded</span>}
       </button>
 
       <Dialog open={menuOpen} onOpenChange={setMenuOpen}>
@@ -137,52 +90,14 @@ export function ConnectedWalletBalances({
               {walletName}
             </DialogTitle>
             <DialogDescription className="text-left text-zinc-400">
-              <span className="font-mono text-sm text-zinc-200">{address}</span>
+              <span className="font-mono text-sm text-zinc-200 break-all">{address}</span>
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-3 py-2">
-            <div className="rounded-lg border border-green-500/20 bg-black/50 p-3 text-sm">
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Balances</div>
-              <ul className="space-y-2">
-                <li className="flex justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-zinc-400">
-                    <SolanaMark size={20} title="SOL" />
-                  </span>
-                  <span className="font-mono text-green-100">{fmtAmount(sol, loading, 6)}</span>
-                </li>
-                <li className="flex justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-zinc-400">
-                    <Image src="/usdc.png" alt="" width={16} height={16} className="h-4 w-4" />
-                    USDC
-                  </span>
-                  <span className="font-mono text-green-100">{fmtAmount(usdc, loading, 6)}</span>
-                </li>
-                {owlOn && (
-                  <li className="flex justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-zinc-400">
-                      <Image
-                        src="/owl%20token%20v1.png"
-                        alt=""
-                        width={16}
-                        height={16}
-                        className="h-4 w-4 rounded-full object-cover"
-                      />
-                      OWL
-                    </span>
-                    <span className="font-mono text-green-100">{fmtAmount(owl, loading, 6)}</span>
-                  </li>
-                )}
-              </ul>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" className="touch-manipulation" onClick={() => void refresh()}>
-                Refresh
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="touch-manipulation" onClick={() => void copyAddress()}>
-                {copyDone ? 'Copied' : 'Copy address'}
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-2 py-2">
+            <Button type="button" variant="outline" size="sm" className="touch-manipulation" onClick={() => void copyAddress()}>
+              {copyDone ? 'Copied' : 'Copy address'}
+            </Button>
           </div>
 
           <DialogFooter className="flex-col gap-2 sm:flex-col">

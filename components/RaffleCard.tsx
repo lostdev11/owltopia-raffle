@@ -28,6 +28,7 @@ import {
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
@@ -549,9 +550,15 @@ export function RaffleCard({
                 'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
                 'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
               )
-            } else {
-              throw new Error('Failed to get blockhash. Please try again.')
             }
+            if (isSolanaRpcRateLimitError(rpcError)) {
+              throw new Error(
+                'RPC endpoint is rate-limited or over quota (balances and purchases need a reliable RPC). ' +
+                'Please set NEXT_PUBLIC_SOLANA_RPC_URL to a private RPC endpoint ' +
+                '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
+              )
+            }
+            throw new Error('Failed to get blockhash. Please try again.')
           }
           // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
           const backoffDelay = isFetchError ? 2000 * (3 - retries) : 1000 * (3 - retries)

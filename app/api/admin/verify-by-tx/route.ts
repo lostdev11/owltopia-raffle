@@ -7,6 +7,7 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -449,13 +450,15 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
       { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
       { commitment: 'finalized' as const },
     ]
-    let transaction = null
-    for (const opts of fetchOptions) {
-      transaction = await connection.getTransaction(transactionSignature, opts)
-      if (transaction) break
-      await new Promise(r => setTimeout(r, 500))
-    }
-    
+    const transaction = await getTransactionCached(transactionSignature, async () => {
+      for (const opts of fetchOptions) {
+        const tx = await connection.getTransaction(transactionSignature, opts)
+        if (tx) return tx
+        await new Promise(r => setTimeout(r, 500))
+      }
+      return null
+    })
+
     if (!transaction) {
       return { ok: false, reason: 'NOT_FOUND' }
     }

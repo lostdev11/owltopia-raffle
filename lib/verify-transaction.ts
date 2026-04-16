@@ -7,6 +7,7 @@ import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 
 function asPublicKey(k: PublicKey | string): PublicKey {
   return k instanceof PublicKey ? k : new PublicKey(k)
@@ -81,31 +82,32 @@ export async function verifyTransaction(
     const recipientWallet = useFundsEscrow ? fundsEscrowConfigured : treasuryWallet
     const recipientPubkey = new PublicKey(recipientWallet)
     
-    // Wait a moment for transaction to be fully confirmed on RPC
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // Get transaction details - try with versioned transactions first
-    let transaction = await connection.getTransaction(transactionSignature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0
-    })
-    
-    // If not found, try without versioned transaction support (legacy transaction)
-    if (!transaction) {
-      transaction = await connection.getTransaction(transactionSignature, {
-        commitment: 'confirmed'
-      })
-    }
-    
-    // Retry once more if still not found (RPC might be slow)
-    if (!transaction) {
+    const transaction = await getTransactionCached(transactionSignature, async () => {
+      // Wait a moment for transaction to be fully confirmed on RPC
       await new Promise(resolve => setTimeout(resolve, 1000))
-      transaction = await connection.getTransaction(transactionSignature, {
+
+      let tx = await connection.getTransaction(transactionSignature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0
+        maxSupportedTransactionVersion: 0,
       })
-    }
-    
+
+      if (!tx) {
+        tx = await connection.getTransaction(transactionSignature, {
+          commitment: 'confirmed',
+        })
+      }
+
+      if (!tx) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        tx = await connection.getTransaction(transactionSignature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0,
+        })
+      }
+
+      return tx
+    })
+
     if (!transaction) {
       const error = `Transaction not found: ${transactionSignature}. It may still be confirming. Please try again in a moment. Raffle: ${raffle.slug} (${raffle.title})`
       console.error(error)
