@@ -7,21 +7,11 @@ import {
   listDevTasks,
   updateDevTask,
 } from '@/lib/db/dev-tasks'
+import { readFormDataFileParts } from '@/lib/form-data-file-parts'
 import { uploadDevTaskScreenshots } from '@/lib/dev-task-storage'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
-
-async function filesFromFormData(form: FormData): Promise<Array<{ buffer: Buffer; type: string; name: string }>> {
-  const out: Array<{ buffer: Buffer; type: string; name: string }> = []
-  for (const value of form.getAll('screenshots')) {
-    if (value instanceof File && value.size > 0) {
-      const buffer = Buffer.from(await value.arrayBuffer())
-      out.push({ buffer, type: value.type, name: value.name })
-    }
-  }
-  return out
-}
 
 /**
  * GET /api/admin/dev-tasks — list backlog (full admin session).
@@ -66,7 +56,7 @@ export async function POST(request: NextRequest) {
       const rawBody = form.get('body')
       const taskBody = typeof rawBody === 'string' ? rawBody : null
 
-      const files = await filesFromFormData(form)
+      const files = await readFormDataFileParts(form, 'screenshots')
       if (files.length > DEV_TASK_MAX_SCREENSHOTS_TOTAL) {
         return NextResponse.json(
           { error: `At most ${DEV_TASK_MAX_SCREENSHOTS_TOTAL} images per task (use Add more photos for the rest).` },

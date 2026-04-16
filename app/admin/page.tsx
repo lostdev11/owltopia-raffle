@@ -779,15 +779,14 @@ export default function AdminDashboardPage() {
       for (let i = 0; i < list.length; i++) {
         if (next.length >= DEV_TASK_SCREENSHOT_MAX_FILES) break
         const file = list[i]
-        const okType = file.type.startsWith('image/')
-        const okName = /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
-        if (!okType && !okName) continue
+        if (file.size < 1) continue
         if (file.size > DEV_TASK_SCREENSHOT_MAX_BYTES) {
           setDevTaskPhotoError(
             `Skipped "${file.name}" — larger than ${DEV_TASK_SCREENSHOT_MAX_BYTES / (1024 * 1024)}MB.`
           )
           continue
         }
+        // Do not filter by MIME/filename here: mobile often sends empty type or odd names; the API validates.
         next.push({ file, url: URL.createObjectURL(file) })
       }
       return next
