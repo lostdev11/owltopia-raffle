@@ -152,7 +152,7 @@ export interface Raffle {
   prize_deposited_at: string | null
   /** Tx signature when creator deposited NFT to escrow. Used to identify mint when escrow holds multiple NFTs. */
   prize_deposit_tx: string | null
-  /** Set when prize was returned from escrow to creator (admin-only, controlled reasons). */
+  /** Set when prize was returned from escrow to creator (admin, terminal min-threshold flow, or creator retry). */
   prize_returned_at: string | null
   /** Reason for return (includes min_threshold_not_met after terminal extension exhaustion). */
   prize_return_reason: string | null

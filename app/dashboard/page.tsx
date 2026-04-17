@@ -32,7 +32,8 @@ import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
-import type { CommunityGiveaway, NftGiveaway } from '@/lib/types'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle } from '@/lib/types'
 import {
   getEmptyEngagementPayload,
   type DashboardEngagementPayload,
@@ -44,12 +45,20 @@ type Raffle = {
   slug: string
   title: string
   status: string | null
+  created_by?: string | null
+  creator_wallet?: string | null
   creator_payout_amount: number | null
   platform_fee_amount?: number | null
   currency: string
+  prize_currency?: string | null
+  prize_amount?: number | null
   end_time: string
   prize_type?: string | null
+  nft_mint_address?: string | null
+  nft_transfer_transaction?: string | null
   prize_deposited_at?: string | null
+  prize_returned_at?: string | null
+  prize_return_tx?: string | null
   winner_wallet?: string | null
   winner_selected_at?: string | null
   cancellation_requested_at?: string | null
@@ -106,6 +115,23 @@ function canClaimNftPrize(raffle: EntryWithRaffle['raffle'], wallet: string): bo
   if (raffle.nft_transfer_transaction?.trim()) return false
   if (!raffleEndedOrCompleted(raffle)) return false
   return true
+}
+
+/** Creator can pull prize back from escrow after terminal min-threshold failure (matches claim-failed-min-prize-return API). */
+function canCreatorClaimFailedMinThresholdPrize(raffle: Raffle, wallet: string): boolean {
+  const w = wallet.trim()
+  if (!w) return false
+  const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
+  if (!creator || creator !== w) return false
+  if (raffle.status !== 'failed_refund_available') return false
+  if (raffle.winner_wallet?.trim() || (raffle.winner_selected_at && String(raffle.winner_selected_at).trim())) {
+    return false
+  }
+  if (!raffle.prize_deposited_at) return false
+  if (raffle.prize_returned_at) return false
+  if (raffle.nft_transfer_transaction?.trim()) return false
+  if (isPartnerSplPrizeRaffle(raffle as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)) return true
+  return raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()
 }
 
 function solscanTxUrl(signature: string): string {
@@ -266,6 +292,7 @@ export default function DashboardPage() {
   const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
   const [claimProceedsLoadingId, setClaimProceedsLoadingId] = useState<string | null>(null)
   const [claimPrizeLoadingId, setClaimPrizeLoadingId] = useState<string | null>(null)
+  const [claimFailedMinPrizeReturnLoadingId, setClaimFailedMinPrizeReturnLoadingId] = useState<string | null>(null)
   const [claimGiveawayLoadingId, setClaimGiveawayLoadingId] = useState<string | null>(null)
   const [claimCommunityGiveawayLoadingId, setClaimCommunityGiveawayLoadingId] = useState<string | null>(
     null
@@ -567,6 +594,32 @@ export default function DashboardPage() {
     [loadDashboard]
   )
 
+  const handleClaimFailedMinPrizeReturn = useCallback(
+    async (raffleId: string) => {
+      setClaimActionError(null)
+      setClaimFailedMinPrizeReturnLoadingId(raffleId)
+      try {
+        const res = await fetch(`/api/raffles/${raffleId}/claim-failed-min-prize-return`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not return prize from escrow'
+          )
+          return
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimFailedMinPrizeReturnLoadingId(null)
+      }
+    },
+    [loadDashboard]
+  )
+
   const handleClaimGiveaway = useCallback(
     async (giveawayId: string) => {
       if (!publicKey) return
@@ -712,6 +765,11 @@ export default function DashboardPage() {
       return raffleUsesFundsEscrow(r)
     })
   }, [myRafflesForMemo, data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds])
+
+  const creatorFailedMinPrizeReturnClaimable = useMemo(
+    () => myRafflesForMemo.filter((r) => canCreatorClaimFailedMinThresholdPrize(r, walletForMemo)),
+    [myRafflesForMemo, walletForMemo]
+  )
 
   /** End time passed, still live/ready_to_draw, no winner — claim button cannot appear until draw runs. */
   const creatorRafflesEndedAwaitingDraw = useMemo(() => {
@@ -2056,6 +2114,53 @@ export default function DashboardPage() {
               {claimActionError}
             </p>
           )}
+          {creatorFailedMinPrizeReturnClaimable.length > 0 && (
+            <div
+              className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/[0.07] p-3 space-y-2"
+              role="status"
+            >
+              <p className="text-sm font-medium text-foreground">
+                Claim your prize back (minimum not met after extension)
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                For these raffles, ticket buyers can request refunds and your escrowed prize should return to your
+                wallet. If the automatic return did not finish, use the button on each raffle (same wallet you used to
+                create the listing; sign-in required).
+              </p>
+              <ul className="space-y-2">
+                {creatorFailedMinPrizeReturnClaimable.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/60 p-2 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <Link href={`/raffles/${r.slug}`} className="text-sm font-medium text-primary hover:underline">
+                      {r.title}
+                    </Link>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="touch-manipulation min-h-[44px] w-full shrink-0 sm:w-auto"
+                      disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                      onClick={() => void handleClaimFailedMinPrizeReturn(r.id)}
+                    >
+                      {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Wallet className="h-4 w-4 sm:mr-1" />
+                          <span className="sm:inline">
+                            {isPartnerSplPrizeRaffle(r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)
+                              ? 'Claim tokens from escrow'
+                              : 'Claim NFT from escrow'}
+                          </span>
+                        </>
+                      )}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {myRaffles.length === 0 ? (
             <p className="text-muted-foreground">You haven’t created any raffles yet.</p>
           ) : (
@@ -2119,6 +2224,32 @@ export default function DashboardPage() {
                               )}
                             </Button>
                           )}
+                        {canCreatorClaimFailedMinThresholdPrize(r, wallet) && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="touch-manipulation min-h-[44px] h-9"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleClaimFailedMinPrizeReturn(r.id)
+                            }}
+                            disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                          >
+                            {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Wallet className="h-4 w-4 sm:mr-1" />
+                                <span className="hidden sm:inline">
+                                  {isPartnerSplPrizeRaffle(r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)
+                                    ? 'Claim prize'
+                                    : 'Claim NFT'}
+                                </span>
+                              </>
+                            )}
+                          </Button>
+                        )}
                         {r.creator_payout_amount != null &&
                           (r.status === 'completed' ||
                             (r.status === 'successful_pending_claims' && r.creator_claimed_at)) && (
@@ -2302,6 +2433,76 @@ export default function DashboardPage() {
                           <p className="text-amber-600 dark:text-amber-400 text-xs">
                             Cancellation requested. Waiting for admin approval in Owl Vision.
                           </p>
+                        )}
+                        {r.status === 'failed_refund_available' && (
+                          <div className="rounded-md border border-amber-500/35 bg-amber-500/[0.06] p-3 space-y-2 mt-2">
+                            <p className="text-xs font-medium text-foreground">Minimum tickets not met (after extension)</p>
+                            {canCreatorClaimFailedMinThresholdPrize(r, wallet) ? (
+                              <>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                  Your prize is still in platform escrow. Claim it back to this wallet (no ticket
+                                  purchase needed; one on-chain transfer). If this fails on mobile data, try Wi‑Fi or
+                                  again in a few minutes.
+                                </p>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="touch-manipulation min-h-[44px]"
+                                  disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handleClaimFailedMinPrizeReturn(r.id)
+                                  }}
+                                >
+                                  {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                      Returning…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Wallet className="h-4 w-4 mr-2" />
+                                      {isPartnerSplPrizeRaffle(
+                                        r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>
+                                      )
+                                        ? 'Claim prize tokens from escrow'
+                                        : 'Claim NFT back from escrow'}
+                                    </>
+                                  )}
+                                </Button>
+                              </>
+                            ) : r.prize_returned_at?.trim() && r.prize_return_tx?.trim() ? (
+                              <p className="text-xs text-muted-foreground">
+                                Prize returned to your creator wallet.{' '}
+                                <a
+                                  href={solscanTxUrl(r.prize_return_tx.trim())}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary underline underline-offset-2 inline-flex items-center gap-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  View transaction
+                                  <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                                </a>
+                              </p>
+                            ) : (r.prize_type === 'nft' ||
+                                isPartnerSplPrizeRaffle(
+                                  r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>
+                                )) &&
+                              r.prize_deposited_at &&
+                              !r.prize_returned_at ? (
+                              <p className="text-xs text-muted-foreground leading-relaxed">
+                                The site already tried to return your prize when this raffle became refund-available.
+                                If your wallet still does not show it, wait a minute, refresh this page, or use the
+                                claim button if it appears above.
+                              </p>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                No verified escrow deposit is on file for this listing. Contact support with the
+                                raffle link if you believe the prize should be in escrow.
+                              </p>
+                            )}
+                          </div>
                         )}
                         {r.prize_type === 'nft' && (
                           <p>
