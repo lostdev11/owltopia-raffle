@@ -15,6 +15,7 @@ import {
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
@@ -46,7 +47,7 @@ import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
-import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
+import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
@@ -130,7 +131,6 @@ export function CreateRaffleForm() {
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
-  const [walletTokens, setWalletTokens] = useState<WalletToken[] | null>(null)
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
@@ -394,7 +394,7 @@ export function CreateRaffleForm() {
       }
       // Fallback to client RPC when API is unavailable (e.g. no HELIUS_API_KEY) or fails
       if (nfts.length === 0 || apiRes.status === 503) {
-        const { getWalletNfts, getWalletTokens } = await import('@/lib/solana/wallet-tokens')
+        const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)
         } catch (rpcErr) {
@@ -413,21 +413,12 @@ export function CreateRaffleForm() {
           // ignore
         }
       }
-      let tokens: WalletToken[] = []
-      try {
-        const { getWalletTokens } = await import('@/lib/solana/wallet-tokens')
-        tokens = await getWalletTokens(connection, publicKey)
-      } catch {
-        // tokens are optional for raffle creation
-      }
       setWalletNfts(nfts)
-      setWalletTokens(tokens)
       setNftSearchQuery('')
     } catch (e) {
       console.error('Load wallet assets:', e)
       setWalletAssetsError(e instanceof Error ? e.message : 'Failed to load wallet assets')
       setWalletNfts(null)
-      setWalletTokens(null)
     } finally {
       setLoadingWalletAssets(false)
     }
@@ -743,8 +734,7 @@ export function CreateRaffleForm() {
                 // Fall through to holder lookup retries.
               }
             }
-            const maxHolderAttempts = 10
-            for (let attempt = 0; attempt < maxHolderAttempts; attempt++) {
+            for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
               if (resolvedHolder) break
               const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
               if (h && 'delegated' in h && h.delegated) {
@@ -758,7 +748,7 @@ export function CreateRaffleForm() {
                 resolvedHolder = h
                 break
               }
-              if (attempt < maxHolderAttempts - 1) {
+              if (attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1) {
                 await new Promise((r) => setTimeout(r, 700))
               }
             }
@@ -1010,7 +1000,11 @@ export function CreateRaffleForm() {
                 rawNeed,
                 'processed'
               )
-              for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+              for (
+                let attempt = 0;
+                attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+                attempt++
+              ) {
                 await new Promise((r) => setTimeout(r, 700))
                 resolvedHolder = await getFungibleHolderInWallet(
                   connection,
@@ -1338,7 +1332,7 @@ export function CreateRaffleForm() {
                 onClick={loadWalletAssets}
                 disabled={loadingWalletAssets || !publicKey}
               >
-                {loadingWalletAssets ? 'Loading…' : 'Load NFTs & tokens from wallet'}
+                {loadingWalletAssets ? 'Loading…' : 'Load NFTs from wallet'}
               </Button>
               {walletAssetsError && (
                 <p className="text-sm text-destructive">{walletAssetsError}</p>

@@ -87,6 +87,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
@@ -1950,7 +1951,11 @@ export function RaffleDetailClient({
           rawNeed,
           'processed'
         )
-        for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+        for (
+          let attempt = 0;
+          attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+          attempt++
+        ) {
           await new Promise((r) => setTimeout(r, 700))
           resolvedHolder = await getFungibleHolderInWallet(
             connection,
@@ -2056,7 +2061,11 @@ export function RaffleDetailClient({
 
       // SPL / Token‑2022 path (existing behavior)
       let holder = await getNftHolderInWallet(connection, mint, publicKey)
-      for (let attempt = 0; attempt < 4 && !holder; attempt++) {
+      for (
+        let attempt = 0;
+        attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !holder;
+        attempt++
+      ) {
         await new Promise((r) => setTimeout(r, 800))
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }

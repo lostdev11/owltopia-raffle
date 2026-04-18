@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -78,25 +78,6 @@ function isoToLocalDatetimeValue(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-interface RafflePendingSummary {
-  raffleId: string
-  raffle: { id: string; slug: string; title: string }
-  pendingEntries: Array<{
-    id: string
-    wallet_address: string
-    ticket_quantity: number
-    transaction_signature: string | null
-    amount_paid: number
-    currency: string
-    created_at: string
-  }>
-  withTx: Array<{ id: string; transaction_signature: string | null }>
-  withoutTx: Array<{ id: string }>
-  currentScore: number
-  potentialScore: number
-  scoreImprovement: number
-}
-
 export default function AdminDashboardPage() {
   const router = useRouter()
   const { publicKey, connected, signMessage: walletSignMessage } = useWallet()
@@ -125,15 +106,6 @@ export default function AdminDashboardPage() {
   const [verifyErrorMessage, setVerifyErrorMessage] = useState<string | null>(null)
   const [verifyErrorSuggestion, setVerifyErrorSuggestion] = useState<string | null>(null)
 
-  // Entries to confirm (Owl Vision) state
-  const [entriesToConfirm, setEntriesToConfirm] = useState<{
-    byRaffle: RafflePendingSummary[]
-    summary: { totalPending: number; withTx: number; withoutTx: number; raffleCount: number }
-  } | null>(null)
-  const [loadingEntriesToConfirm, setLoadingEntriesToConfirm] = useState(false)
-  const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
-  const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
-  const [removingEntryId, setRemovingEntryId] = useState<string | null>(null)
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
     message?: string
@@ -404,40 +376,6 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (isAdmin && sessionReady) {
       fetchRestoredEntries()
-    }
-  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
-
-  const fetchEntriesToConfirm = async () => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady) return
-
-    setLoadingEntriesToConfirm(true)
-    try {
-      const response = await fetch(
-        `/api/admin/entries-to-confirm?wallet=${publicKey.toBase58()}`,
-        { credentials: 'include', cache: 'no-store' }
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setEntriesToConfirm({
-          byRaffle: data.byRaffle || [],
-          summary: data.summary || {
-            totalPending: 0,
-            withTx: 0,
-            withoutTx: 0,
-            raffleCount: 0,
-          },
-        })
-      }
-    } catch (error) {
-      console.error('Error fetching entries to confirm:', error)
-    } finally {
-      setLoadingEntriesToConfirm(false)
-    }
-  }
-
-  useEffect(() => {
-    if (isAdmin && sessionReady) {
-      fetchEntriesToConfirm()
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
@@ -946,61 +884,11 @@ export default function AdminDashboardPage() {
         })
       } else {
         setBulkReverifyResult(data)
-        fetchEntriesToConfirm()
       }
     } catch {
       setBulkReverifyResult({ message: 'Network error', errors: [] })
     } finally {
       setBulkReverifyRunning(false)
-    }
-  }
-
-  const handleBatchVerifyRaffle = async (raffleId: string) => {
-    if (!publicKey) return
-
-    setVerifyingRaffleId(raffleId)
-    try {
-      const response = await fetch('/api/admin/verify-entries', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raffleId,
-          adminWallet: publicKey.toBase58(),
-        }),
-      })
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        fetchEntriesToConfirm()
-      }
-    } catch (error) {
-      console.error('Error batch verifying:', error)
-    } finally {
-      setVerifyingRaffleId(null)
-    }
-  }
-
-  const handleRemovePendingEntry = async (entryId: string) => {
-    if (!confirm('Remove this pending entry? It will be deleted and cannot be recovered.')) return
-    setRemovingEntryId(entryId)
-    try {
-      const response = await fetch(`/api/entries/${entryId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (response.ok) {
-        fetchEntriesToConfirm()
-      } else {
-        const data = await response.json().catch(() => ({}))
-        alert(data.error || 'Failed to remove entry')
-      }
-    } catch (error) {
-      console.error('Error removing entry:', error)
-      alert('Failed to remove entry')
-    } finally {
-      setRemovingEntryId(null)
     }
   }
 
@@ -1034,11 +922,10 @@ export default function AdminDashboardPage() {
         // Clear the input on success
         setTxSignature('')
         
-        // If entry was restored, refresh the restored entries and entries-to-confirm lists
+        // If entry was restored, refresh the restored entries list
         if (data.restored) {
           setTimeout(() => {
             fetchRestoredEntries()
-            fetchEntriesToConfirm()
           }, 500)
         }
       }
@@ -2473,156 +2360,6 @@ export default function AdminDashboardPage() {
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-        </OwlVisionDisclosure>
-
-        {/* Entries to Confirm - Owl Vision Section */}
-        <OwlVisionDisclosure
-          className="mb-8"
-          variant="default"
-          title={
-            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-              <Eye className="h-5 w-5 shrink-0" />
-              Entries to Confirm
-            </span>
-          }
-        >
-          <CardDescription className="mb-4">
-            Pending entries that improve Owl Vision scores when verified
-          </CardDescription>
-          <div>
-            {loadingEntriesToConfirm ? (
-              <p className="text-center text-muted-foreground py-4">Loading...</p>
-            ) : !entriesToConfirm || entriesToConfirm.summary.totalPending === 0 ? (
-              <p className="text-center text-muted-foreground py-4">All entries confirmed</p>
-            ) : (
-              <div className="space-y-4">
-                {entriesToConfirm.byRaffle.map((row) => {
-                  const isExpanded = expandedConfirmRaffles.has(row.raffleId)
-                  const toggleExpand = () => {
-                    setExpandedConfirmRaffles((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(row.raffleId)) next.delete(row.raffleId)
-                      else next.add(row.raffleId)
-                      return next
-                    })
-                  }
-                  return (
-                    <div
-                      key={row.raffleId}
-                      className="rounded-lg border overflow-hidden"
-                    >
-                      <div
-                        className="flex items-center justify-between gap-4 p-3 cursor-pointer hover:bg-muted/50"
-                        onClick={toggleExpand}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            toggleExpand()
-                          }
-                        }}
-                        aria-expanded={isExpanded}
-                        aria-label={isExpanded ? `Collapse ${row.raffle.title}` : `Expand ${row.raffle.title}`}
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {isExpanded ? (
-                            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          )}
-                          <Link
-                            href={`/admin/raffles/${row.raffleId}`}
-                            className="font-medium hover:underline text-sm truncate"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {row.raffle.title}
-                          </Link>
-                        </div>
-                        <span className="text-sm text-muted-foreground shrink-0">
-                          {row.pendingEntries.length} pending
-                        </span>
-                        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {row.withTx.length > 0 ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleBatchVerifyRaffle(row.raffleId)}
-                              disabled={verifyingRaffleId === row.raffleId}
-                            >
-                              {verifyingRaffleId === row.raffleId ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <>
-                                  <CheckCircle2 className="h-4 w-4 mr-1" />
-                                  Verify
-                                </>
-                              )}
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              Use TX tool above
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {isExpanded && (
-                        <div className="border-t bg-muted/30 px-3 py-2 text-xs space-y-1">
-                          {row.pendingEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1"
-                            >
-                              <span className="font-mono text-muted-foreground break-all" title={entry.wallet_address}>
-                                {entry.wallet_address}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {entry.ticket_quantity} tickets · {entry.amount_paid} {entry.currency}
-                              </span>
-                              {entry.transaction_signature ? (
-                                <a
-                                  href={`https://solscan.io/tx/${entry.transaction_signature}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-primary hover:underline font-mono"
-                                >
-                                  Solscan ↗
-                                </a>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400">
-                                  No TX — use TX tool above
-                                </span>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleRemovePendingEntry(entry.id)
-                                }}
-                                disabled={removingEntryId === entry.id}
-                              >
-                                {removingEntryId === entry.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                                    Remove
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
             )}
           </div>
         </OwlVisionDisclosure>

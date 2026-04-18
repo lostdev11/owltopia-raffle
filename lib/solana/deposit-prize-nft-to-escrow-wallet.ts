@@ -28,6 +28,7 @@ import {
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getNftHolderInWallet, type NftHolderInWallet, type WalletNft } from '@/lib/solana/wallet-tokens'
 
 export type SendTxFn = (
@@ -105,8 +106,7 @@ export async function depositPrizeNftToEscrowFromWallet(
     }
   }
 
-  const maxHolderAttempts = 10
-  for (let attempt = 0; attempt < maxHolderAttempts; attempt++) {
+  for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
     if (resolvedHolder) break
     const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
     if (h && 'delegated' in h && h.delegated) {
@@ -116,7 +116,7 @@ export async function depositPrizeNftToEscrowFromWallet(
       resolvedHolder = h
       break
     }
-    if (attempt < maxHolderAttempts - 1) {
+    if (attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1) {
       await new Promise((r) => setTimeout(r, 700))
     }
   }
