@@ -181,9 +181,7 @@ export default async function RaffleDetailPage({
 
   const entries = await getEntriesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
-  const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle], {
-    holderLookupMode: 'full',
-  })
+  const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle])
 
   return (
     <RaffleDetailClient

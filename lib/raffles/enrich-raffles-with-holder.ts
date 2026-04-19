@@ -1,7 +1,5 @@
 import type { Raffle } from '@/lib/types'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import { ownsOwltopia } from '@/lib/platform-fees'
-import { isOwlEnabled } from '@/lib/tokens'
 import { getActivePartnerCommunityCreatorRows } from '@/lib/raffles/partner-communities'
 import { devSaveApiCredits } from '@/lib/dev-budget'
 import { getWalletsWithAdminRole } from '@/lib/db/admins'
@@ -94,14 +92,7 @@ export async function enrichRafflesWithCreatorHolder(
           wallet,
           listDisplayOnly ? { listDisplayOnly: true } : undefined
         )
-        let isHolder = tier.reason === 'holder'
-        if (tier.reason === 'partner_community' && isOwlEnabled()) {
-          isHolder = await ownsOwltopia(wallet, {
-            skipCache: false,
-            listMode: listDisplayOnly,
-            deepWalletScan: !listDisplayOnly && options?.holderLookupMode === 'full',
-          })
-        }
+        const isHolder = tier.reason === 'holder'
         holderByWallet.set(wallet, isHolder)
       } catch {
         holderByWallet.set(wallet, false)

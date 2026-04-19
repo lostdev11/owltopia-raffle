@@ -29,5 +29,5 @@ export const RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS = devSaveApiCredits()
   ? 120_000
   : 20_000
 
-/** Enter Owltopia page: GET /api/rev-share (runs ownsOwltopia per creator) */
+/** Enter Owltopia page: poll interval for GET /api/rev-share-schedule (not /api/rev-share). */
 export const ENTER_OWLTOPIA_REVSHARE_POLL_MS = devSaveApiCredits() ? 180_000 : 30_000

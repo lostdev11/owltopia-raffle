@@ -14,7 +14,6 @@ import {
   getEmptyEngagementPayload,
   syncEngagementMilestonesAndGetPayload,
 } from '@/lib/db/wallet-milestones'
-import { ownsOwltopia } from '@/lib/platform-fees'
 import { getReferralSummaryForWallet, syncReferralStateForWallet } from '@/lib/db/referrals'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
@@ -85,7 +84,6 @@ export async function GET(request: NextRequest) {
       nftGiveaways,
       communityGiveaways,
       referralSummary,
-      canSetVanityReferral,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -106,8 +104,10 @@ export async function GET(request: NextRequest) {
         console.error('getReferralSummaryForWallet:', err)
         return null
       }),
-      ownsOwltopia(wallet, { skipCache: true }),
     ])
+
+    /** Custom referral codes require Owltopia holder fee tier (partners use partner tier only; no extra DAS check). */
+    const canSetVanityReferral = feeTier.reason === 'holder'
 
     // Earned = completed settlement totals (net) + live raffles (creator share after platform fee).
     const creatorRevenueByCurrency: Record<string, number> = {}
