@@ -63,7 +63,7 @@ export function Header() {
   }, [connected, publicKey, visibilityTick])
 
   // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
-  const showOwlVision = isAdmin && (adminRole === 'full' || adminRole === null)
+  const showOwlVision = Boolean(isAdmin)
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)

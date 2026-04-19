@@ -2,27 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Gift, Loader2, ArrowLeft, Copy, CheckCircle2 } from 'lucide-react'
 import type { NftGiveaway, PrizeStandard } from '@/lib/types'
 
 type ApiRow = NftGiveaway
 
 export default function AdminGiveawaysPage() {
-  const router = useRouter()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [list, setList] = useState<ApiRow[]>([])
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
@@ -51,14 +47,12 @@ export default function AdminGiveawaysPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -72,7 +66,6 @@ export default function AdminGiveawaysPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -84,12 +77,6 @@ export default function AdminGiveawaysPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
@@ -127,11 +114,11 @@ export default function AdminGiveawaysPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin && adminRole !== 'raffle_creator') {
+    if (isAdmin) {
       void fetchList()
       void fetchDiscordPartners()
     }
-  }, [isAdmin, adminRole, fetchList, fetchDiscordPartners])
+  }, [isAdmin, fetchList, fetchDiscordPartners])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -270,10 +257,6 @@ export default function AdminGiveawaysPage() {
         </Button>
       </div>
     )
-  }
-
-  if (adminRole === 'raffle_creator') {
-    return null
   }
 
   return (

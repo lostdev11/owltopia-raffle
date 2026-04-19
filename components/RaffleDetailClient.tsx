@@ -434,8 +434,7 @@ export function RaffleDetailClient({
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const role: AdminRole | null =
-          admin && (data?.role === 'full' || data?.role === 'raffle_creator') ? data.role : null
+        const role: AdminRole | null = admin && data?.role === 'full' ? 'full' : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
         setAdminRole(role)

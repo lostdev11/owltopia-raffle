@@ -171,10 +171,7 @@ export function CreateRaffleForm() {
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const role =
-          admin && (data?.role === 'full' || data?.role === 'raffle_creator')
-            ? (data.role as AdminRole)
-            : null
+        const role: AdminRole | null = admin && data?.role === 'full' ? 'full' : null
         setCachedAdmin(addr, admin, role)
         setViewerIsAdmin(admin)
       })

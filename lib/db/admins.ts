@@ -2,10 +2,10 @@ import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { withRetry } from '@/lib/db-retry'
 
-export type AdminRole = 'full' | 'raffle_creator'
+export type AdminRole = 'full'
 
 /**
- * Check if a wallet address is an admin (any role)
+ * Check if a wallet address is an admin
  */
 export async function isAdmin(walletAddress: string): Promise<boolean> {
   const role = await getAdminRole(walletAddress)
@@ -18,7 +18,7 @@ export async function isAdmin(walletAddress: string): Promise<boolean> {
 const ADMIN_IN_CHUNK = 120
 
 /**
- * Returns wallets that exist in the admins table (any role). Chunked for PostgREST .in() limits.
+ * Returns wallets that exist in the admins table. Chunked for PostgREST .in() limits.
  */
 export async function getWalletsWithAdminRole(walletAddresses: string[]): Promise<Set<string>> {
   const normalized = [...new Set(walletAddresses.map((w) => (typeof w === 'string' ? w.trim() : '')).filter(Boolean))]
@@ -70,8 +70,8 @@ export async function getAdminRole(walletAddress: string): Promise<AdminRole | n
     }
 
     const role = data?.role
-    if (role === 'full' || role === 'raffle_creator') {
-      return role
+    if (role === 'full') {
+      return 'full'
     }
     return 'full'
   }, { maxRetries: 0 })
@@ -95,21 +95,14 @@ export async function getAdmins() {
   return data || []
 }
 
-/**
- * Add a new admin (admin only function).
- * role: 'full' = Owl Vision + all actions; 'raffle_creator' = create raffles only
- */
-export async function addAdmin(
-  walletAddress: string,
-  createdBy?: string,
-  role: AdminRole = 'full'
-) {
+/** Add a new admin (admin only function). */
+export async function addAdmin(walletAddress: string, createdBy?: string) {
   const { data, error } = await getSupabaseAdmin()
     .from('admins')
     .insert({
       wallet_address: walletAddress,
       created_by: createdBy || null,
-      role: role === 'raffle_creator' ? 'raffle_creator' : 'full',
+      role: 'full',
     })
     .select()
     .single()

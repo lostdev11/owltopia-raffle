@@ -2,27 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Loader2, ArrowLeft, Copy, CheckCircle2, Radio } from 'lucide-react'
 import type { DiscordGiveawayPartnerTenant } from '@/lib/types'
 
 type PartnerRow = Omit<DiscordGiveawayPartnerTenant, 'api_secret_hash'>
 
 export default function AdminDiscordGiveawayPartnersPage() {
-  const router = useRouter()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [partners, setPartners] = useState<PartnerRow[]>([])
   const [loadingList, setLoadingList] = useState(true)
@@ -44,14 +40,12 @@ export default function AdminDiscordGiveawayPartnersPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -65,7 +59,6 @@ export default function AdminDiscordGiveawayPartnersPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -77,12 +70,6 @@ export default function AdminDiscordGiveawayPartnersPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
@@ -102,8 +89,8 @@ export default function AdminDiscordGiveawayPartnersPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin && adminRole !== 'raffle_creator') void fetchList()
-  }, [isAdmin, adminRole, fetchList])
+    if (isAdmin) void fetchList()
+  }, [isAdmin, fetchList])
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -196,7 +183,7 @@ export default function AdminDiscordGiveawayPartnersPage() {
     )
   }
 
-  if (!isAdmin || adminRole === 'raffle_creator') {
+  if (!isAdmin) {
     return (
       <div className="container mx-auto py-8 px-4">
         <p className="text-muted-foreground">Access denied.</p>

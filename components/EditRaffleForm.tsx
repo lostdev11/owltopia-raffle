@@ -71,7 +71,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(null)
+  const [adminRole, setAdminRole] = useState<'full' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [adminHardDeleteReason, setAdminHardDeleteReason] = useState('')
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
@@ -159,12 +159,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const roleRaw = data?.role
-        const role: 'full' | 'raffle_creator' | null =
-          roleRaw === 'full' || roleRaw === 'raffle_creator' ? roleRaw : null
-        setCachedAdmin(addr, admin)
+        const role: 'full' | null = admin ? 'full' : null
+        setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(admin ? role : null)
+        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) {
@@ -248,7 +246,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       data.min_tickets = minTicketsValue ? parseInt(minTicketsValue, 10) : null
       data.floor_price = floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null
     }
-    if (adminRole === 'full') {
+    if (adminRole !== null) {
       const fb = (formData.get('image_fallback_url') as string)?.trim()
       data.image_fallback_url = fb ? fb : null
     }
@@ -290,17 +288,15 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
 
     const reasonTrimmed = adminHardDeleteReason.trim()
-    if (adminRole === 'full') {
-      if (reasonTrimmed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
-        alert(
-          `Enter a delete reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters). Required for permanent admin deletes.`
-        )
-        return
-      }
-      if (reasonTrimmed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
-        alert(`Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`)
-        return
-      }
+    if (reasonTrimmed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
+      alert(
+        `Enter a delete reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters). Required for permanent admin deletes.`
+      )
+      return
+    }
+    if (reasonTrimmed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
+      alert(`Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`)
+      return
     }
 
     setDeleting(true)
@@ -314,7 +310,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         },
         body: JSON.stringify({
           wallet_address: publicKey.toBase58(),
-          ...(adminRole === 'full' ? { delete_reason: reasonTrimmed } : {}),
+          delete_reason: reasonTrimmed,
         }),
       })
 
@@ -1078,7 +1074,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 ) : (
                   <p className="text-sm text-muted-foreground">No image stored for this raffle.</p>
                 )}
-                {adminRole === 'full' && (
+                {adminRole !== null && (
                   <div className="space-y-2 pt-2 border-t border-border mt-2">
                     <Label htmlFor="image_fallback_url">Fallback listing image (optional)</Label>
                     <p className="text-xs text-muted-foreground">
@@ -1434,30 +1430,26 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         <DialogTitle>Delete Raffle</DialogTitle>
                         <DialogDescription>
                           Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
-                          {adminRole === 'full' && (
-                            <span className="block mt-2 font-medium text-foreground">
-                              Full admin: you must enter a short reason (audit log). Creator-only deletes stay in your dashboard as cancelled drafts without this.
-                            </span>
-                          )}
+                          <span className="block mt-2 font-medium text-foreground">
+                            Enter a short reason for the audit log (required).
+                          </span>
                         </DialogDescription>
                       </DialogHeader>
-                      {adminRole === 'full' ? (
-                        <div className="space-y-2 py-2">
-                          <Label htmlFor="edit-raffle-delete-reason">Delete reason (required)</Label>
-                          <textarea
-                            id="edit-raffle-delete-reason"
-                            value={adminHardDeleteReason}
-                            onChange={(e) => setAdminHardDeleteReason(e.target.value)}
-                            placeholder="e.g. Duplicate NFT prize listing — removing extra draft."
-                            maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
-                            rows={4}
-                            className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.
-                          </p>
-                        </div>
-                      ) : null}
+                      <div className="space-y-2 py-2">
+                        <Label htmlFor="edit-raffle-delete-reason">Delete reason (required)</Label>
+                        <textarea
+                          id="edit-raffle-delete-reason"
+                          value={adminHardDeleteReason}
+                          onChange={(e) => setAdminHardDeleteReason(e.target.value)}
+                          placeholder="e.g. Duplicate NFT prize listing — removing extra draft."
+                          maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
+                          rows={4}
+                          className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.
+                        </p>
+                      </div>
                       <DialogFooter>
                         <Button
                           type="button"
@@ -1474,9 +1466,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                           disabled={
                             deleting ||
                             adminRole === null ||
-                            (adminRole === 'full' &&
-                              adminHardDeleteReason.trim().length <
-                                ADMIN_HARD_DELETE_REASON_MIN_CHARS)
+                            adminHardDeleteReason.trim().length < ADMIN_HARD_DELETE_REASON_MIN_CHARS
                           }
                         >
                           {deleting ? 'Deleting...' : 'Delete Raffle'}

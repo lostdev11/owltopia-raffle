@@ -3,14 +3,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
 import {
   logEscrowDepositError,
@@ -50,17 +49,13 @@ function resolveWalletNftForDeposit(
 }
 
 export default function AdminCommunityGiveawaysPage() {
-  const router = useRouter()
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
   const connectedWallet = publicKey?.toBase58() ?? ''
   const cachedTrue =
     typeof window !== 'undefined' && connectedWallet && getCachedAdmin(connectedWallet) === true
-  const cachedRole =
-    typeof window !== 'undefined' && connectedWallet ? getCachedAdminRole(connectedWallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [list, setList] = useState<CommunityGiveaway[]>([])
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
@@ -101,14 +96,12 @@ export default function AdminCommunityGiveawaysPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -122,7 +115,6 @@ export default function AdminCommunityGiveawaysPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -134,12 +126,6 @@ export default function AdminCommunityGiveawaysPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
@@ -210,10 +196,10 @@ export default function AdminCommunityGiveawaysPage() {
   }, [publicKey, connection])
 
   useEffect(() => {
-    if (connected && publicKey && isAdmin && adminRole !== 'raffle_creator') {
+    if (connected && publicKey && isAdmin) {
       void loadWalletNfts()
     }
-  }, [connected, publicKey, isAdmin, adminRole, loadWalletNfts])
+  }, [connected, publicKey, isAdmin, loadWalletNfts])
 
   const runDepositAndVerify = useCallback(
     async (giveawayId: string, prizeMint: string, nft: WalletNft): Promise<boolean> => {
@@ -289,10 +275,10 @@ export default function AdminCommunityGiveawaysPage() {
   )
 
   useEffect(() => {
-    if (isAdmin && adminRole !== 'raffle_creator') {
+    if (isAdmin) {
       void fetchList()
     }
-  }, [isAdmin, adminRole, fetchList])
+  }, [isAdmin, fetchList])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -511,10 +497,6 @@ export default function AdminCommunityGiveawaysPage() {
         </Button>
       </div>
     )
-  }
-
-  if (adminRole === 'raffle_creator') {
-    return null
   }
 
   return (

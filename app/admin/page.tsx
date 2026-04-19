@@ -86,7 +86,7 @@ export default function AdminDashboardPage() {
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
+  const [adminRole, setAdminRole] = useState<'full' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -248,13 +248,6 @@ export default function AdminDashboardPage() {
     }
     runAdminCheck()
   }, [connected, publicKey, runAdminCheck, visibilityTick])
-
-  // Junior admin (raffle_creator) must not see Owl Vision dashboard; redirect to create raffle
-  useEffect(() => {
-    if (isAdmin && sessionReady === true && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, sessionReady, adminRole, router])
 
   // Re-check session when connection/admin change or user returns to tab.
   useEffect(() => {

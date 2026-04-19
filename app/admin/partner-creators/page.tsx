@@ -2,27 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Loader2, ArrowLeft, HeartHandshake, Trash2 } from 'lucide-react'
 import type { PartnerCommunityCreatorRow } from '@/lib/db/partner-community-creators-admin'
 
 type PartnerCreatorAdminRow = PartnerCommunityCreatorRow & { profile_display_name: string | null }
 
 export default function AdminPartnerCreatorsPage() {
-  const router = useRouter()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [rows, setRows] = useState<PartnerCreatorAdminRow[]>([])
   const [loadingList, setLoadingList] = useState(true)
@@ -41,14 +37,12 @@ export default function AdminPartnerCreatorsPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -62,7 +56,6 @@ export default function AdminPartnerCreatorsPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -74,12 +67,6 @@ export default function AdminPartnerCreatorsPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
@@ -99,8 +86,8 @@ export default function AdminPartnerCreatorsPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin && adminRole === 'full') void fetchList()
-  }, [isAdmin, adminRole, fetchList])
+    if (isAdmin) void fetchList()
+  }, [isAdmin, fetchList])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -179,7 +166,7 @@ export default function AdminPartnerCreatorsPage() {
     )
   }
 
-  if (!isAdmin || adminRole !== 'full') {
+  if (!isAdmin) {
     return (
       <div className="container mx-auto max-w-lg py-12 px-4 text-center">
         <p className="text-muted-foreground mb-6">Full Owl Vision access is required.</p>

@@ -15,7 +15,7 @@ export const revalidate = 0
 export default async function AdminRafflesPage() {
   const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
   const role = session ? await getAdminRole(session.wallet) : null
-  if (role !== 'full') {
+  if (!role) {
     redirect('/admin/raffles/new')
   }
 

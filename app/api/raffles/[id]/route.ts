@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
-import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
   checkEscrowHoldsNft,
@@ -415,7 +414,6 @@ export async function PATCH(
       return NextResponse.json(raffle)
     }
 
-    const role = await getAdminRole(session.wallet)
     const status = (existingRaffle.status ?? '').toLowerCase()
     const isDraft = status === 'draft'
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
@@ -446,21 +444,12 @@ export async function PATCH(
     const isTimeEdit = isStartTimeChanged || isEndTimeChanged
 
     const isNftEconomicsAdminOverride =
-      role === 'full' &&
-      isNft &&
-      body.nft_economics_admin_override === true
+      isNft && body.nft_economics_admin_override === true
 
     // Non-draft edits are restricted:
-    // - raffle_creator: cannot edit non-draft raffles (this route requires full admin session)
-    // - full admin: may edit time for live/ready_to_draw only when there are no confirmed entries
-    // - full admin: may override NFT floor/ticket/min/max on active NFT raffles (nft_economics_admin_override)
+    // - may edit time for live/ready_to_draw only when there are no confirmed entries
+    // - may override NFT floor/ticket/min/max on active NFT raffles (nft_economics_admin_override)
     if (!isDraft) {
-      if (role !== 'full') {
-        return NextResponse.json(
-          { error: 'Only draft raffles can be edited' },
-          { status: 403 }
-        )
-      }
       if (isNftEconomicsAdminOverride) {
         const st = (existingRaffle.status ?? '').toLowerCase()
         const allowedNftEconomicsStatuses = [
@@ -653,8 +642,8 @@ export async function PATCH(
 
     // Preserve Owl Vision integrity signal:
     // - any edit after confirmed entries
-    // - any full-admin time edit on live/ready_to_draw raffles
-    if (hasConfirmedEntries || (!isDraft && role === 'full' && isLiveLike && isTimeEdit)) {
+    // - any time edit on live/ready_to_draw raffles
+    if (hasConfirmedEntries || (!isDraft && isLiveLike && isTimeEdit)) {
       updates.edited_after_entries = true
     }
 
@@ -904,7 +893,7 @@ export async function DELETE(
         deleteReasonParsed = String((raw as Record<string, unknown>).delete_reason).trim()
       }
     } catch {
-      // No JSON body (or empty) — ok for raffle_creator soft delete
+      // No JSON body (or empty)
     }
 
     // Check if raffle exists
@@ -916,41 +905,17 @@ export async function DELETE(
       )
     }
 
-    const role = await getAdminRole(session.wallet)
-
-    if (role === 'full') {
-      if (
-        !deleteReasonParsed ||
-        deleteReasonParsed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS ||
-        deleteReasonParsed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS
-      ) {
-        return NextResponse.json(
-          {
-            error: `Full admin delete requires delete_reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters).`,
-          },
-          { status: 400 }
-        )
-      }
-    }
-    if (role === 'raffle_creator') {
-      const wallet = session.wallet.trim()
-      const createdBy = (existingRaffle.created_by ?? '').trim()
-      const creatorWallet = (existingRaffle.creator_wallet ?? '').trim()
-      const isCreator = createdBy === wallet || creatorWallet === wallet
-      if (!isCreator) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
-      // Only draft raffles can be deleted by raffle_creator
-      if ((existingRaffle.status ?? '').toLowerCase() !== 'draft') {
-        return NextResponse.json(
-          { error: 'Only draft raffles can be deleted' },
-          { status: 403 }
-        )
-      }
-    } else if (role === 'full') {
-      // Full admin can delete any raffle (any status)
-    } else {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (
+      !deleteReasonParsed ||
+      deleteReasonParsed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS ||
+      deleteReasonParsed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS
+    ) {
+      return NextResponse.json(
+        {
+          error: `Admin delete requires delete_reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters).`,
+        },
+        { status: 400 }
+      )
     }
 
     let escrowCurrentlyHoldsPrize = false
@@ -1013,18 +978,7 @@ export async function DELETE(
       }
     }
 
-    if (role === 'raffle_creator') {
-      // Creator delete = soft delete so creators can review deleted raffles in dashboard history.
-      const now = new Date().toISOString()
-      await updateRaffle(raffleId, {
-        status: 'cancelled',
-        cancelled_at: now,
-        is_active: false,
-      })
-      return NextResponse.json({ success: true, message: 'Raffle moved to deleted section' })
-    }
-
-    // Full admin delete = hard delete (entries cascade delete).
+    // Hard delete (entries cascade delete).
     try {
       await recordRaffleAdminDeletion({
         raffle: existingRaffle,

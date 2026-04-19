@@ -5,7 +5,7 @@
 
 const CACHE_TTL_MS = 60_000 // 1 minute
 
-export type AdminRole = 'full' | 'raffle_creator'
+export type AdminRole = 'full'
 
 type CacheEntry = { wallet: string; isAdmin: boolean; role: AdminRole | null; ts: number }
 
