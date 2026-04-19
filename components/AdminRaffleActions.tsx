@@ -52,6 +52,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
+  const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null)
   const [returning, setReturning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [returnReason, setReturnReason] = useState<string>('cancelled')
@@ -593,18 +594,17 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const handleDelete = async () => {
     const trimmedReason = deleteReason.trim()
+    setDeleteDialogError(null)
     if (trimmedReason.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
-      setMessage({
-        type: 'error',
-        text: `Enter a delete reason (at least ${ADMIN_HARD_DELETE_REASON_MIN_CHARS} characters), e.g. duplicate NFT listing cleanup.`,
-      })
+      const msg = `Enter a delete reason (at least ${ADMIN_HARD_DELETE_REASON_MIN_CHARS} characters), e.g. duplicate NFT listing cleanup.`
+      setDeleteDialogError(msg)
+      setMessage({ type: 'error', text: msg })
       return
     }
     if (trimmedReason.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
-      setMessage({
-        type: 'error',
-        text: `Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`,
-      })
+      const msg = `Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`
+      setDeleteDialogError(msg)
+      setMessage({ type: 'error', text: msg })
       return
     }
     setDeleting(true)
@@ -616,19 +616,27 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
         credentials: 'include',
         body: JSON.stringify({ delete_reason: trimmedReason }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
       if (res.ok) {
         setDeleteDialogOpen(false)
         setDeleteReason('')
+        setDeleteDialogError(null)
         router.push('/admin/raffles')
         router.refresh()
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to delete raffle' })
+        const errText =
+          typeof data?.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : `Delete failed (${res.status}).`
+        setDeleteDialogError(errText)
+        setMessage({ type: 'error', text: errText })
       }
     } catch (e) {
+      const errText = e instanceof Error ? e.message : 'Failed to delete raffle'
+      setDeleteDialogError(errText)
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Failed to delete raffle',
+        text: errText,
       })
     } finally {
       setDeleting(false)
@@ -1337,7 +1345,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             ) : null}
 
             <div className="pt-2">
-              <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <Dialog
+                open={deleteDialogOpen}
+                onOpenChange={(open) => {
+                  setDeleteDialogOpen(open)
+                  if (!open) setDeleteDialogError(null)
+                }}
+              >
                 <Button
                   type="button"
                   variant="destructive"
@@ -1362,6 +1376,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       )}
                     </DialogDescription>
                   </DialogHeader>
+                  {deleteDialogError ? (
+                    <div
+                      role="alert"
+                      className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      {deleteDialogError}
+                    </div>
+                  ) : null}
                   <div className="space-y-2 py-2">
                     <Label htmlFor="admin-delete-reason">Delete reason (required)</Label>
                     <textarea
@@ -1374,12 +1396,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                     <p className="text-xs text-muted-foreground">
-                      {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters. Logged for audit.
+                      {deleteReason.trim().length}/{ADMIN_HARD_DELETE_REASON_MIN_CHARS}+ characters (max{' '}
+                      {ADMIN_HARD_DELETE_REASON_MAX_CHARS}). Logged for audit.
                     </p>
                   </div>
                   <DialogFooter className="gap-2">
                     <Button
                       variant="outline"
+                      type="button"
                       onClick={() => setDeleteDialogOpen(false)}
                       disabled={deleting}
                       className="touch-manipulation min-h-[44px] w-full sm:w-auto"
@@ -1388,6 +1412,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     </Button>
                     <Button
                       variant="destructive"
+                      type="button"
                       onClick={handleDelete}
                       disabled={
                         deleting ||

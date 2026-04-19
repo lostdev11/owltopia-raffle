@@ -3,6 +3,7 @@
  * Uses RPC getParsedTokenAccountsByOwner; optionally fetches Metaplex metadata for NFTs.
  */
 
+import type { AccountInfo } from '@solana/web3.js'
 import { Connection, PublicKey } from '@solana/web3.js'
 import {
   TOKEN_PROGRAM_ID,
@@ -196,6 +197,12 @@ export async function getTokenProgramForMintInWallet(
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 
+/** Solana RPC typically allows ~100 accounts per `getMultipleAccounts`; one request replaces N `getAccountInfo`s. */
+const METADATA_ACCOUNT_FETCH_CHUNK = 100
+
+/** Limit parallel off-chain metadata JSON fetches (not Helius, but avoids flooding the browser tab). */
+const METADATA_JSON_FETCH_CONCURRENCY = 8
+
 export interface WalletNft {
   mint: string
   tokenAccount: string
@@ -233,31 +240,22 @@ export interface WalletToken {
   tokenAccount: string
 }
 
-/** Parse Metaplex Token Metadata account to get URI (and optionally name/symbol). */
-async function fetchMetaplexMetadata(
-  connection: Connection,
-  mint: PublicKey
-): Promise<{ uri: string; name: string; symbol: string } | null> {
-  const [metadataPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-    METADATA_PROGRAM_ID
-  )
+/** Parse Metaplex Token Metadata account data (on-chain buffer) to URI / name / symbol. */
+function parseMetaplexMetadataAccountData(data: Uint8Array): { uri: string; name: string; symbol: string } | null {
+  if (!data || data.length < 69) return null
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  let offset = 1 + 32 + 32 // key + update_authority + mint
+  const readU32 = () => {
+    const v = view.getUint32(offset, true)
+    offset += 4
+    return v
+  }
+  const readString = (len: number) => {
+    const slice = data.subarray(offset, offset + len)
+    offset += len
+    return new TextDecoder().decode(slice)
+  }
   try {
-    const accountInfo = await connection.getAccountInfo(metadataPda)
-    if (!accountInfo?.data || accountInfo.data.length < 69) return null
-    const data = accountInfo.data as Uint8Array
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 1 + 32 + 32 // key + update_authority + mint
-    const readU32 = () => {
-      const v = view.getUint32(offset, true)
-      offset += 4
-      return v
-    }
-    const readString = (len: number) => {
-      const slice = data.subarray(offset, offset + len)
-      offset += len
-      return new TextDecoder().decode(slice)
-    }
     const nameLen = readU32()
     const name = nameLen > 0 ? readString(nameLen) : ''
     const symbolLen = readU32()
@@ -268,6 +266,39 @@ async function fetchMetaplexMetadata(
   } catch {
     return null
   }
+}
+
+async function fetchMetaplexMetadataBatch(
+  connection: Connection,
+  mints: PublicKey[]
+): Promise<Array<{ uri: string; name: string; symbol: string } | null>> {
+  if (mints.length === 0) return []
+  const pdas = mints.map(
+    (mint) =>
+      PublicKey.findProgramAddressSync(
+        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        METADATA_PROGRAM_ID
+      )[0]
+  )
+  const out: Array<{ uri: string; name: string; symbol: string } | null> = []
+  for (let i = 0; i < pdas.length; i += METADATA_ACCOUNT_FETCH_CHUNK) {
+    const slice = pdas.slice(i, i + METADATA_ACCOUNT_FETCH_CHUNK)
+    let infos: (AccountInfo<Buffer> | null)[]
+    try {
+      // Same default commitment as `getAccountInfo(pubkey)` (single-arg) on this Connection.
+      infos = await connection.getMultipleAccountsInfo(slice)
+    } catch {
+      infos = slice.map(() => null)
+    }
+    for (const info of infos) {
+      if (!info?.data) {
+        out.push(null)
+        continue
+      }
+      out.push(parseMetaplexMetadataAccountData(info.data))
+    }
+  }
+  return out
 }
 
 /** Fetch JSON from metadata URI and return name + image (with basic CORS-safe handling). */
@@ -282,6 +313,24 @@ async function fetchMetadataJson(uri: string): Promise<{ name?: string; image?: 
   }
 }
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results: R[] = new Array(items.length)
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const i = nextIndex++
+      results[i] = await mapper(items[i]!, i)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 
 /**
  * Fetch all NFTs (token accounts with decimals 0) in the wallet.
@@ -294,7 +343,12 @@ export async function getWalletNfts(
   options?: { fetchMetadata?: boolean }
 ): Promise<WalletNft[]> {
   const fetchMetadata = options?.fetchMetadata !== false
-  const nfts: WalletNft[] = []
+  const rows: Array<{
+    mint: string
+    tokenAccount: string
+    amount: string
+    decimals: number
+  }> = []
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     const response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, {
       programId,
@@ -316,36 +370,49 @@ export async function getWalletNfts(
       if (!isNft) continue
       const mint = info.mint as string
       const tokenAccount = pubkey.toBase58()
-      let metadataUri: string | null = null
-      let name: string | null = null
-      let image: string | null = null
-      let collectionName: string | null = null
-      if (fetchMetadata) {
-        const meta = await fetchMetaplexMetadata(connection, new PublicKey(mint))
-        if (meta) {
-          metadataUri = meta.uri || null
-          name = meta.name || null
-          const json = meta.uri ? await fetchMetadataJson(meta.uri) : null
-          if (json) {
-            if (json.name) name = json.name
-            if (json.image) image = json.image
-            if (json.collection?.name) collectionName = json.collection.name
-          }
-        }
-      }
-      nfts.push({
-        mint,
-        tokenAccount,
-        amount,
-        decimals,
-        metadataUri,
-        name,
-        image,
-        collectionName,
-      })
+      rows.push({ mint, tokenAccount, amount, decimals })
     }
   }
-  return nfts
+
+  if (!fetchMetadata || rows.length === 0) {
+    return rows.map((row) => ({
+      ...row,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+    }))
+  }
+
+  const mintKeys = rows.map((r) => new PublicKey(r.mint))
+  const onChainMeta = await fetchMetaplexMetadataBatch(connection, mintKeys)
+
+  const enriched = await mapWithConcurrency(rows, METADATA_JSON_FETCH_CONCURRENCY, async (row, i) => {
+    let metadataUri: string | null = null
+    let name: string | null = null
+    let image: string | null = null
+    let collectionName: string | null = null
+    const meta = onChainMeta[i] ?? null
+    if (meta) {
+      metadataUri = meta.uri || null
+      name = meta.name || null
+      const json = meta.uri ? await fetchMetadataJson(meta.uri) : null
+      if (json) {
+        if (json.name) name = json.name
+        if (json.image) image = json.image
+        if (json.collection?.name) collectionName = json.collection.name
+      }
+    }
+    return {
+      ...row,
+      metadataUri,
+      name,
+      image,
+      collectionName,
+    }
+  })
+
+  return enriched
 }
 
 /**

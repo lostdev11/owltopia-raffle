@@ -70,6 +70,19 @@ export function resolveWalletAdapterRpcUrl(): string {
 }
 
 /**
+ * Server JSON-RPC for **read-heavy** calls (`getAccount`, `getParsedTokenAccountsByOwner`, etc.).
+ * When unset, falls back to {@link resolveServerSolanaRpcUrl} (same as today).
+ *
+ * Do **not** rely on this for `getTransaction` / archival history, or for UMI + DAS / Bubblegum —
+ * keep using the primary URL so Helius (or your paid RPC) handles tx fetch and indexer APIs.
+ */
+export function resolveServerSolanaReadRpcUrl(): string {
+  const read = process.env.SOLANA_RPC_READ_URL?.trim()
+  if (read) return sanitizeRpcUrl(read)
+  return resolveServerSolanaRpcUrl()
+}
+
+/**
  * Server JSON-RPC (API routes, verification, escrow). Prefer SOLANA_RPC_DEV_URL in dev, else same dev public URL.
  */
 export function resolveServerSolanaRpcUrl(): string {

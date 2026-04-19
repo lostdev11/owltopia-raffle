@@ -13,7 +13,7 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import { PublicKey } from '@solana/web3.js'
-import { getSolanaConnection } from '@/lib/solana/connection'
+import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, ThemeAccent } from '@/lib/types'
@@ -433,7 +433,7 @@ export async function POST(request: NextRequest) {
         try {
           const mintPk = new PublicKey(nftMintAddress)
           const creatorPk = new PublicKey(walletAddress)
-          const holder = await getNftHolderInWallet(getSolanaConnection(), mintPk, creatorPk, 'confirmed')
+          const holder = await getNftHolderInWallet(getSolanaReadConnection(), mintPk, creatorPk, 'confirmed')
           if (holder && 'delegated' in holder && holder.delegated) {
             return NextResponse.json(
               {

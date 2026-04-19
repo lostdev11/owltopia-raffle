@@ -988,11 +988,15 @@ export async function DELETE(
       escrowCurrentlyHoldsPrize = escrowCheck.holds
     }
 
-    // Safety net: only require return when escrow wallet currently holds the NFT.
-    // DB flags can be stale; live escrow state is authoritative.
+    // Safety net: only auto-return when escrow holds the prize **and** this listing has a verified
+    // deposit. Otherwise duplicate listings (same mint as another row that actually deposited) look
+    // like escrow holds the NFT on-chain while `prize_deposited_at` is null — transfer would fail with
+    // "Prize deposit is not verified". Full admin can then delete the orphan DB row without return.
+    const depositVerifiedForThisListing = Boolean(existingRaffle.prize_deposited_at)
     const requiresPrizeReturnBeforeDelete =
       (existingRaffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(existingRaffle)) &&
       escrowCurrentlyHoldsPrize &&
+      depositVerifiedForThisListing &&
       !existingRaffle.prize_returned_at &&
       !existingRaffle.nft_transfer_transaction
     if (requiresPrizeReturnBeforeDelete) {
@@ -1021,17 +1025,31 @@ export async function DELETE(
     }
 
     // Full admin delete = hard delete (entries cascade delete).
-    await recordRaffleAdminDeletion({
-      raffle: existingRaffle,
-      adminWallet: session.wallet,
-      deleteReason: deleteReasonParsed!,
-    })
+    try {
+      await recordRaffleAdminDeletion({
+        raffle: existingRaffle,
+        adminWallet: session.wallet,
+        deleteReason: deleteReasonParsed!,
+      })
+    } catch (auditErr) {
+      const detail = auditErr instanceof Error ? auditErr.message : String(auditErr)
+      console.error('[DELETE raffle] audit insert failed:', auditErr)
+      return NextResponse.json(
+        {
+          error: `Could not save the deletion audit log (${detail}). Apply Supabase migration 071 (table raffle_admin_deletions), confirm RLS is enabled, then retry. The raffle was not deleted.`,
+        },
+        { status: 503 }
+      )
+    }
 
     const success = await deleteRaffle(raffleId)
 
     if (!success) {
       return NextResponse.json(
-        { error: 'Failed to delete raffle' },
+        {
+          error:
+            'Database could not delete this raffle (row missing or FK conflict). Check Supabase logs.',
+        },
         { status: 500 }
       )
     }

@@ -29,8 +29,8 @@ import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getSolanaConnection } from '@/lib/solana/connection'
-import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
+import { resolveServerSolanaRpcUrl, resolveServerSolanaReadRpcUrl } from '@/lib/solana-rpc-url'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
@@ -132,7 +132,7 @@ async function getEscrowTokenProgramForMint(
   mint: PublicKey,
   escrowOwner: PublicKey
 ): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -159,7 +159,7 @@ async function getEscrowTokenProgramForMint(
 export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<PublicKey | null> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return null
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -210,7 +210,7 @@ export async function assertEscrowSplPrizeNotFrozen(
   const tokenProgram = await getEscrowTokenProgramForMint(mint, keypair.publicKey)
   if (!tokenProgram) return { blocked: false }
 
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const ata = await getAssociatedTokenAddress(
     mint,
     keypair.publicKey,
@@ -253,7 +253,7 @@ export type EscrowHeldNft = { mint: string; tokenProgram: PublicKey }
 export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return []
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const results: EscrowHeldNft[] = []
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
@@ -282,7 +282,7 @@ export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
 export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return false
-  const endpoint = resolveServerSolanaRpcUrl()
+  const endpoint = resolveServerSolanaReadRpcUrl()
 
   // createUmi has multiple overloads; use any to avoid version-specific type issues.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -303,6 +303,7 @@ export async function payoutSplFromEscrowToRecipient(
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(mintAddress)
   const recipientPubkey = new PublicKey(recipientWallet)
@@ -328,7 +329,7 @@ export async function payoutSplFromEscrowToRecipient(
   )
 
   try {
-    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    const sourceAcc = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
     if (sourceAcc.amount < NFT_AMOUNT) {
       return {
         ok: false,
@@ -343,7 +344,7 @@ export async function payoutSplFromEscrowToRecipient(
   }
   let destAccountExists = false
   try {
-    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
+    const destAcc = await getAccount(readConn, destAta, 'confirmed', tokenProgram)
     destAccountExists = true
     if (destAcc.isFrozen) {
       return {
@@ -430,6 +431,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(mintAddress)
   const recipientPubkey = new PublicKey(recipientWallet)
@@ -455,7 +457,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
   )
 
   try {
-    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    const sourceAcc = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
     if (sourceAcc.amount < amount) {
       return {
         ok: false,
@@ -471,7 +473,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
 
   let destAccountExists = false
   try {
-    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
+    const destAcc = await getAccount(readConn, destAta, 'confirmed', tokenProgram)
     destAccountExists = true
     if (destAcc.isFrozen) {
       return {
@@ -973,7 +975,7 @@ async function detectPrizeReturnKind(
   }
 
   // Legacy / unknown: SPL Token or Token-2022 ATA first
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   if (preferredMint) {
     try {
       const mint = new PublicKey(preferredMint)
@@ -1076,6 +1078,7 @@ async function transferSplPrizeToCreatorFromEscrow(
     }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(chosen.mint)
   const creatorPubkey = new PublicKey(creatorWallet)
@@ -1099,7 +1102,7 @@ async function transferSplPrizeToCreatorFromEscrow(
   const CONFIRMED = 'confirmed' as const
   let sourceAccount
   try {
-    sourceAccount = await getAccount(connection, sourceAta, CONFIRMED, tokenProgram)
+    sourceAccount = await getAccount(readConn, sourceAta, CONFIRMED, tokenProgram)
     if (sourceAccount.amount < NFT_AMOUNT) {
       return {
         ok: false,
@@ -1124,7 +1127,7 @@ async function transferSplPrizeToCreatorFromEscrow(
 
   let destAccountExists = false
   try {
-    await getAccount(connection, destAta, CONFIRMED, tokenProgram)
+    await getAccount(readConn, destAta, CONFIRMED, tokenProgram)
     destAccountExists = true
   } catch {
     destAccountExists = false
@@ -1456,7 +1459,7 @@ export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{
   if (!keypair) {
     return { holds: false, error: 'Prize escrow not configured' }
   }
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const mint = new PublicKey(partner.mint)
   const tokenProgram =
     partner.tokenProgram === 'token2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
@@ -1484,7 +1487,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
   if (!keypair) {
     return { holds: false, error: 'Prize escrow not configured' }
   }
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const standard = raffle.prize_standard ?? null
   const escrowPk = keypair.publicKey
 

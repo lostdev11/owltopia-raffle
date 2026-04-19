@@ -19,7 +19,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getSolanaConnection } from '@/lib/solana/connection'
+import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
 import type { Entry, Raffle } from '@/lib/types'
 
@@ -61,7 +61,7 @@ async function getFundsEscrowTokenProgramForMint(
   mint: PublicKey,
   escrowOwner: PublicKey
 ): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -160,6 +160,7 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
       return { ok: true, signature: sig }
     }
 
+    const readConn = getSolanaReadConnection()
     const tokenInfo = getTokenInfo(currency)
     if (!tokenInfo.mintAddress) {
       return { ok: false, error: `${currency} mint not configured.` }
@@ -200,7 +201,7 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
         ASSOCIATED_TOKEN_PROGRAM_ID
       )
       try {
-        await getAccount(connection, toAta, 'confirmed', programId)
+        await getAccount(readConn, toAta, 'confirmed', programId)
       } catch {
         tx.add(
           createAssociatedTokenAccountInstruction(
@@ -279,6 +280,7 @@ export async function refundEntryFromFundsEscrow(
       return { ok: true, signature: sig }
     }
 
+    const readConn = getSolanaReadConnection()
     const tokenInfo = getTokenInfo(currency)
     if (!tokenInfo.mintAddress) {
       return { ok: false, error: `${currency} mint not configured.` }
@@ -313,7 +315,7 @@ export async function refundEntryFromFundsEscrow(
 
     const tx = new Transaction()
     try {
-      await getAccount(connection, toAta, 'confirmed', programId)
+      await getAccount(readConn, toAta, 'confirmed', programId)
     } catch {
       tx.add(
         createAssociatedTokenAccountInstruction(

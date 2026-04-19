@@ -14,8 +14,8 @@ export function warnIfWalletRpcIsHeliusDevOnce(): void {
   if (!url || !/helius-rpc\.com/i.test(url)) return
   warnedWalletRpcHelius = true
   console.info(
-    '[OwlRaffle] Wallet RPC points at Helius. Browser code calls getParsedTokenAccountsByOwner often; that uses RPC credits. ' +
-      'Set NEXT_PUBLIC_WALLET_READ_RPC_URL (prod) or NEXT_PUBLIC_DEV_SOLANA_RPC_URL (dev) to a free HTTP endpoint, or keep HELIUS_API_KEY for server DAS only. ' +
+    '[OwlRaffle] Wallet RPC points at Helius. Wallet reads (e.g. getParsedTokenAccountsByOwner) use RPC credits; NFT list fallback batches Metaplex metadata via getMultipleAccounts instead of many getAccountInfo calls. ' +
+      'Set NEXT_PUBLIC_WALLET_READ_RPC_URL (prod) or NEXT_PUBLIC_DEV_SOLANA_RPC_URL (dev) to a free HTTP endpoint; keep HELIUS_API_KEY for server DAS. ' +
       'See .env.example (Wallet read RPC / Helius).'
   )
 }
