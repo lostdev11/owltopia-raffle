@@ -446,7 +446,9 @@ export function CreateRaffleForm() {
     if (loading || createStep !== 'idle' || createSubmitInFlightRef.current) {
       return
     }
-    
+
+    createSubmitInFlightRef.current = true
+    try {
     if (!connected || !publicKey) {
       alert('Please connect your wallet to create a raffle')
       return
@@ -600,7 +602,6 @@ export function CreateRaffleForm() {
       return
     }
 
-    createSubmitInFlightRef.current = true
     setSubmissionError(null)
     setCreateStep('saving')
     setLoading(true)
@@ -1138,6 +1139,7 @@ export function CreateRaffleForm() {
           .getElementById('create-raffle-submit-error')
           ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
+    }
     } finally {
       createSubmitInFlightRef.current = false
       setLoading(false)

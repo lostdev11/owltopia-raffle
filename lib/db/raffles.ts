@@ -20,6 +20,7 @@ import {
 } from '@/lib/raffles/list-query-statuses'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -1143,16 +1144,58 @@ const NON_TERMINAL_DUPLICATE_STATUSES: RaffleStatus[] = [
   'successful_pending_claims',
 ]
 
+function normalizePrizeMintQueryValue(prizeMintOrAssetId: string): string {
+  const trimmed = prizeMintOrAssetId?.trim() ?? ''
+  return normalizePrizeAssetIdForRaffle(trimmed) ?? trimmed
+}
+
+export class DuplicateActiveNftPrizeError extends Error {
+  constructor() {
+    super('duplicate_active_nft_prize')
+    this.name = 'DuplicateActiveNftPrizeError'
+  }
+}
+
 /**
- * If the creator already has a non-terminal raffle listing this prize mint (or same id in nft_token_id), return it.
- * Prevents double-tap / spam POST from creating multiple live listings for the same NFT.
+ * Any non-terminal raffle anywhere listing this prize mint/token id (normalized).
+ * Prevents duplicate listings for the same on-chain NFT across creators.
+ */
+export async function findNonTerminalNftRaffleByPrizeAssetId(
+  prizeMintOrAssetId: string
+): Promise<{ id: string; slug: string; status: RaffleStatus } | null> {
+  const mint = normalizePrizeMintQueryValue(prizeMintOrAssetId)
+  if (!mint) return null
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select('id, slug, status')
+    .or(`nft_mint_address.eq.${mint},nft_token_id.eq.${mint}`)
+    .or(`status.in.(${NON_TERMINAL_DUPLICATE_STATUSES.join(',')}),status.is.null`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('findNonTerminalNftRaffleByPrizeAssetId error:', error)
+    throw new Error(error.message)
+  }
+  if (!data) return null
+  return {
+    id: String(data.id),
+    slug: String(data.slug),
+    status: (data.status as RaffleStatus) ?? null,
+  }
+}
+
+/**
+ * @deprecated Prefer {@link findNonTerminalNftRaffleByPrizeAssetId} — duplicate NFT prizes are blocked globally.
  */
 export async function findNonTerminalRaffleByCreatorAndPrizeMint(
   creatorWallet: string,
   prizeMintOrAssetId: string
 ): Promise<{ id: string; slug: string; status: RaffleStatus } | null> {
   const w = creatorWallet?.trim()
-  const mint = prizeMintOrAssetId?.trim()
+  const mint = normalizePrizeMintQueryValue(prizeMintOrAssetId)
   if (!w || !mint) return null
 
   const { data, error } = await getSupabaseAdmin()
@@ -1256,7 +1299,11 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   if (raffle.prize_type === 'nft' || raffle.nft_mint_address || raffle.nft_token_id || 
       raffle.nft_collection_name || raffle.nft_metadata_uri) {
     insertData.nft_mint_address = raffle.nft_mint_address
+      ? normalizePrizeAssetIdForRaffle(raffle.nft_mint_address) ?? raffle.nft_mint_address.trim()
+      : null
     insertData.nft_token_id = raffle.nft_token_id
+      ? normalizePrizeAssetIdForRaffle(raffle.nft_token_id) ?? raffle.nft_token_id.trim()
+      : null
     insertData.nft_collection_name = raffle.nft_collection_name
     insertData.nft_metadata_uri = raffle.nft_metadata_uri
   }
@@ -1298,6 +1345,15 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   if (error) {
     console.error('Error creating raffle:', error)
     console.error('Raffle data attempted:', JSON.stringify(insertData, null, 2))
+
+    const pgCode = (error as { code?: string }).code
+    const msg = String(error.message ?? '')
+    if (
+      pgCode === '23505' &&
+      msg.includes('idx_raffles_nft_non_terminal_prize_asset_unique')
+    ) {
+      throw new DuplicateActiveNftPrizeError()
+    }
     
     // Handle duplicate slug error
     if (error.message?.includes('raffles_slug_key') || 

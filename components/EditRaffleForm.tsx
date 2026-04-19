@@ -27,6 +27,10 @@ import {
   parseNftFloorPrice,
   parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
+import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+} from '@/lib/raffles/admin-hard-delete'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -69,6 +73,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   )
   const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [adminHardDeleteReason, setAdminHardDeleteReason] = useState('')
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
   const [selectingWinner, setSelectingWinner] = useState(false)
@@ -279,6 +284,24 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       alert('Only admins can delete raffles')
       return
     }
+    if (isAdmin && adminRole === null) {
+      alert('Loading your admin role. Please try again in a moment.')
+      return
+    }
+
+    const reasonTrimmed = adminHardDeleteReason.trim()
+    if (adminRole === 'full') {
+      if (reasonTrimmed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
+        alert(
+          `Enter a delete reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters). Required for permanent admin deletes.`
+        )
+        return
+      }
+      if (reasonTrimmed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
+        alert(`Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`)
+        return
+      }
+    }
 
     setDeleting(true)
 
@@ -289,10 +312,14 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           'Content-Type': 'application/json',
           'x-wallet-address': publicKey.toBase58()
         },
-        body: JSON.stringify({ wallet_address: publicKey.toBase58() }),
+        body: JSON.stringify({
+          wallet_address: publicKey.toBase58(),
+          ...(adminRole === 'full' ? { delete_reason: reasonTrimmed } : {}),
+        }),
       })
 
       if (response.ok) {
+        setAdminHardDeleteReason('')
         router.push('/admin')
       } else {
         const errorData = await response.json()
@@ -1393,7 +1420,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <Button
                         type="button"
                         variant="destructive"
-                        disabled={loading || deleting}
+                        disabled={
+                          loading || deleting || (Boolean(isAdmin) && adminRole === null)
+                        }
                         className="flex items-center gap-2"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -1405,8 +1434,30 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         <DialogTitle>Delete Raffle</DialogTitle>
                         <DialogDescription>
                           Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
+                          {adminRole === 'full' && (
+                            <span className="block mt-2 font-medium text-foreground">
+                              Full admin: you must enter a short reason (audit log). Creator-only deletes stay in your dashboard as cancelled drafts without this.
+                            </span>
+                          )}
                         </DialogDescription>
                       </DialogHeader>
+                      {adminRole === 'full' ? (
+                        <div className="space-y-2 py-2">
+                          <Label htmlFor="edit-raffle-delete-reason">Delete reason (required)</Label>
+                          <textarea
+                            id="edit-raffle-delete-reason"
+                            value={adminHardDeleteReason}
+                            onChange={(e) => setAdminHardDeleteReason(e.target.value)}
+                            placeholder="e.g. Duplicate NFT prize listing — removing extra draft."
+                            maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
+                            rows={4}
+                            className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.
+                          </p>
+                        </div>
+                      ) : null}
                       <DialogFooter>
                         <Button
                           type="button"
@@ -1420,7 +1471,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                           type="button"
                           variant="destructive"
                           onClick={handleDelete}
-                          disabled={deleting}
+                          disabled={
+                            deleting ||
+                            adminRole === null ||
+                            (adminRole === 'full' &&
+                              adminHardDeleteReason.trim().length <
+                                ADMIN_HARD_DELETE_REASON_MIN_CHARS)
+                          }
                         >
                           {deleting ? 'Deleting...' : 'Delete Raffle'}
                         </Button>

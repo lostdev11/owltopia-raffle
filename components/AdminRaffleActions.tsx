@@ -13,6 +13,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+} from '@/lib/raffles/admin-hard-delete'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide-react'
@@ -47,6 +51,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const { connected, publicKey } = useWallet()
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
   const [returning, setReturning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [returnReason, setReturnReason] = useState<string>('cancelled')
@@ -587,16 +592,34 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }
 
   const handleDelete = async () => {
+    const trimmedReason = deleteReason.trim()
+    if (trimmedReason.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
+      setMessage({
+        type: 'error',
+        text: `Enter a delete reason (at least ${ADMIN_HARD_DELETE_REASON_MIN_CHARS} characters), e.g. duplicate NFT listing cleanup.`,
+      })
+      return
+    }
+    if (trimmedReason.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
+      setMessage({
+        type: 'error',
+        text: `Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`,
+      })
+      return
+    }
     setDeleting(true)
     setMessage(null)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify({ delete_reason: trimmedReason }),
       })
       const data = await res.json()
       if (res.ok) {
         setDeleteDialogOpen(false)
+        setDeleteReason('')
         router.push('/admin/raffles')
         router.refresh()
       } else {
@@ -1339,6 +1362,21 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       )}
                     </DialogDescription>
                   </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="admin-delete-reason">Delete reason (required)</Label>
+                    <textarea
+                      id="admin-delete-reason"
+                      value={deleteReason}
+                      onChange={(e) => setDeleteReason(e.target.value)}
+                      placeholder="e.g. Duplicate listing for the same NFT — removing the extra draft after migration 070."
+                      maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
+                      rows={4}
+                      className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters. Logged for audit.
+                    </p>
+                  </div>
                   <DialogFooter className="gap-2">
                     <Button
                       variant="outline"
@@ -1348,7 +1386,15 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     >
                       Cancel
                     </Button>
-                    <Button variant="destructive" onClick={handleDelete} disabled={deleting} className="touch-manipulation min-h-[44px] w-full sm:w-auto">
+                    <Button
+                      variant="destructive"
+                      onClick={handleDelete}
+                      disabled={
+                        deleting ||
+                        deleteReason.trim().length < ADMIN_HARD_DELETE_REASON_MIN_CHARS
+                      }
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
                       {deleting ? 'Deleting...' : 'Delete raffle'}
                     </Button>
                   </DialogFooter>

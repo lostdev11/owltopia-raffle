@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createRaffle,
+  DuplicateActiveNftPrizeError,
+  findNonTerminalNftRaffleByPrizeAssetId,
   findNonTerminalPartnerCryptoRaffleByCreator,
-  findNonTerminalRaffleByCreatorAndPrizeMint,
   generateUniqueSlug,
   getRaffleCreationCountForCreatorToday,
   getRafflesViaRest,
@@ -39,6 +40,7 @@ import {
   listPartnerPrizeTokens,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -398,8 +400,16 @@ export async function POST(request: NextRequest) {
       const prizeAmount: number | null = null
       const prizeCurrency: string | null = null
 
-      const nftMintAddress = body.nft_mint_address || null
-      const nftTokenId = body.nft_token_id || null
+      let nftMintAddress =
+        typeof body.nft_mint_address === 'string' && body.nft_mint_address.trim()
+          ? body.nft_mint_address.trim()
+          : null
+      let nftTokenId =
+        typeof body.nft_token_id === 'string' && body.nft_token_id.trim()
+          ? body.nft_token_id.trim()
+          : null
+      if (nftMintAddress) nftMintAddress = normalizePrizeAssetIdForRaffle(nftMintAddress) ?? nftMintAddress
+      if (nftTokenId) nftTokenId = normalizePrizeAssetIdForRaffle(nftTokenId) ?? nftTokenId
 
       if (!nftMintAddress && !nftTokenId) {
         return NextResponse.json(
@@ -457,9 +467,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: maxCheck.error }, { status: 400 })
       }
 
-      if (adminRole === null && prizeAssetId) {
+      if (prizeAssetId) {
         const existingForPrize = await withTimeout(
-          findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetId),
+          findNonTerminalNftRaffleByPrizeAssetId(prizeAssetId),
           SUPABASE_TIMEOUT_MS,
           'supabase error'
         )
@@ -467,7 +477,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             {
               error:
-                'You already have a raffle using this NFT. Open that listing or wait until it is completed or cancelled before creating another with the same prize.',
+                'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
               existing_slug: existingForPrize.slug,
             },
             { status: 409 }
@@ -574,11 +584,39 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
+    try {
+      const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
-    await notifyRaffleCreated(raffle)
+      await notifyRaffleCreated(raffle)
 
-    return NextResponse.json(raffle, { status: 201 })
+      return NextResponse.json(raffle, { status: 201 })
+    } catch (createErr) {
+      if (createErr instanceof DuplicateActiveNftPrizeError) {
+        const mintRaw =
+          typeof body.nft_mint_address === 'string'
+            ? body.nft_mint_address.trim()
+            : typeof body.nft_token_id === 'string'
+              ? body.nft_token_id.trim()
+              : ''
+        const normalizedMint = mintRaw ? normalizePrizeAssetIdForRaffle(mintRaw) ?? mintRaw : ''
+        const existing = normalizedMint
+          ? await withTimeout(
+              findNonTerminalNftRaffleByPrizeAssetId(normalizedMint),
+              SUPABASE_TIMEOUT_MS,
+              'supabase error'
+            ).catch(() => null)
+          : null
+        return NextResponse.json(
+          {
+            error:
+              'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
+            existing_slug: existing?.slug,
+          },
+          { status: 409 }
+        )
+      }
+      throw createErr
+    }
   } catch (error) {
     console.error('Error creating raffle:', error)
     const err = error as Error & { step?: 'timeout' | 'supabase error' }

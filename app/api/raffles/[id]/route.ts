@@ -12,6 +12,11 @@ import {
 } from '@/lib/raffles/prize-escrow'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+  recordRaffleAdminDeletion,
+} from '@/lib/raffles/admin-hard-delete'
+import {
   parseNftFloorPrice,
   parseNftTicketPrice,
   computeNftMinTicketsFromFloorAndTicket,
@@ -892,6 +897,16 @@ export async function DELETE(
     const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
+    let deleteReasonParsed: string | undefined
+    try {
+      const raw = await request.json()
+      if (raw && typeof raw === 'object' && typeof (raw as Record<string, unknown>).delete_reason === 'string') {
+        deleteReasonParsed = String((raw as Record<string, unknown>).delete_reason).trim()
+      }
+    } catch {
+      // No JSON body (or empty) — ok for raffle_creator soft delete
+    }
+
     // Check if raffle exists
     const existingRaffle = await getRaffleById(raffleId)
     if (!existingRaffle) {
@@ -902,6 +917,21 @@ export async function DELETE(
     }
 
     const role = await getAdminRole(session.wallet)
+
+    if (role === 'full') {
+      if (
+        !deleteReasonParsed ||
+        deleteReasonParsed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS ||
+        deleteReasonParsed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS
+      ) {
+        return NextResponse.json(
+          {
+            error: `Full admin delete requires delete_reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters).`,
+          },
+          { status: 400 }
+        )
+      }
+    }
     if (role === 'raffle_creator') {
       const wallet = session.wallet.trim()
       const createdBy = (existingRaffle.created_by ?? '').trim()
@@ -991,6 +1021,12 @@ export async function DELETE(
     }
 
     // Full admin delete = hard delete (entries cascade delete).
+    await recordRaffleAdminDeletion({
+      raffle: existingRaffle,
+      adminWallet: session.wallet,
+      deleteReason: deleteReasonParsed!,
+    })
+
     const success = await deleteRaffle(raffleId)
 
     if (!success) {
