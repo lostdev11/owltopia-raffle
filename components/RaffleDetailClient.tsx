@@ -37,6 +37,7 @@ import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency }
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
+  raffleAllowsAdminFundsEscrowRefund,
 } from '@/lib/raffles/ticket-escrow-policy'
 import {
   getThemeAccentBorderStyle,
@@ -4042,7 +4043,7 @@ export function RaffleDetailClient({
                         void fetchEntries()
                         router.refresh()
                       }}
-                      adminFundsEscrowRefundEnabled={raffle.status === 'failed_refund_available'}
+                      adminFundsEscrowRefundEnabled={raffleAllowsAdminFundsEscrowRefund(raffle)}
                     />
                   )}
                 </div>

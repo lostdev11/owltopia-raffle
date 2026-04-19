@@ -69,13 +69,18 @@ export default async function AdminRafflesPage() {
     }
 
     const status = (raffle.status ?? '').toLowerCase()
-    const needsCancelledNftRecovery =
-      status === 'cancelled' &&
+    /** Prominent admin bucket: NFT prize verified in escrow, not sent to winner — cancelled or already ended (incl. legacy). */
+    const needsNftEscrowRecovery =
       raffle.prize_type === 'nft' &&
+      !!(raffle.nft_mint_address ?? '').trim() &&
       !!raffle.prize_deposited_at &&
       !raffle.prize_returned_at &&
-      !raffle.nft_transfer_transaction
-    if (needsCancelledNftRecovery) {
+      !raffle.nft_transfer_transaction &&
+      (status === 'cancelled' ||
+        endTimeMs <= nowTime ||
+        status === 'failed_refund_available' ||
+        status === 'pending_min_not_met')
+    if (needsNftEscrowRecovery) {
       cancelledRecoveryRaffles.push(raffle)
       continue
     }

@@ -23,6 +23,7 @@ import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
+import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 
 const FULL_REFUND_WINDOW_HOURS = 24
@@ -184,11 +185,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
+  /** Matches server rules: verified deposit timestamp is enough (legacy rows may omit prize_deposit_tx). */
   const canReturnNft =
     isNftRaffle &&
     !!creatorWallet &&
     !!raffle.prize_deposited_at &&
-    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
@@ -702,7 +703,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           raffleCurrency={raffle.currency || 'SOL'}
           entries={entries}
           onRecorded={() => router.refresh()}
-          adminFundsEscrowRefundEnabled={raffle.status === 'failed_refund_available'}
+          adminFundsEscrowRefundEnabled={raffleAllowsAdminFundsEscrowRefund(raffle)}
         />
 
         <Card>

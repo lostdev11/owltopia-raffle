@@ -22,7 +22,8 @@ export type AdminManualRefundRecorderProps = {
   onRecorded?: () => void
   /**
    * TEMPORARY — remove with /api/admin/legacy-escrow-refund after one-time payouts.
-   * When true (`failed_refund_available`), show full-admin button to send refunds from FUNDS_ESCROW.
+   * When true (raffle status allows admin escrow refunds, e.g. failed minimum or cancelled), show full-admin
+   * button to send refunds from FUNDS_ESCROW.
    */
   adminFundsEscrowRefundEnabled?: boolean
 }

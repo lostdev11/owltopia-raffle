@@ -471,7 +471,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     isNftRaffle &&
     !!creatorWalletRaffle &&
     !!raffle.prize_deposited_at &&
-    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 

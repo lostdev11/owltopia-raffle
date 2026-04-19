@@ -1,4 +1,20 @@
-import type { Raffle } from '@/lib/types'
+import type { Raffle, RaffleStatus } from '@/lib/types'
+
+/**
+ * Statuses where full admins may push ticket payouts from FUNDS_ESCROW via legacy-escrow-refund
+ * (same on-chain path as buyer "Claim refund"). Cancelled listings never reach `failed_refund_available`
+ * but often still need escrow-driven refunds when ticket revenue sat in funds escrow.
+ */
+const ADMIN_FUNDS_ESCROW_REFUND_STATUSES: ReadonlySet<string> = new Set([
+  'failed_refund_available',
+  'cancelled',
+])
+
+/** Whether the admin "send refunds from funds escrow" tool may run for this raffle (UI + API). */
+export function raffleAllowsAdminFundsEscrowRefund(raffle: { status: RaffleStatus }): boolean {
+  const s = (raffle.status ?? '').toLowerCase()
+  return ADMIN_FUNDS_ESCROW_REFUND_STATUSES.has(s)
+}
 
 /** Max automatic deadline extensions when min_tickets is not met at end; then refunds + NFT return. */
 export const MAX_MIN_THRESHOLD_TIME_EXTENSIONS = 1

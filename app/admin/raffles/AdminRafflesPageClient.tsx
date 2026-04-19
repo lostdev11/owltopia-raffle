@@ -103,9 +103,10 @@ export function AdminRafflesPageClient({
       </div>
 
       <div className="mb-8 sm:mb-12">
-        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Cancelled / Deleted NFT Recovery</h2>
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">NFT prize still in escrow (ended or cancelled)</h2>
         <p className="text-sm text-muted-foreground mb-3">
-          NFT raffles that were cancelled and still have the prize in escrow. Use this section to return NFTs to creators before any cleanup.
+          Ended or cancelled NFT raffles where the prize is still held in escrow (no on-chain transfer to a winner yet).
+          Use this to return NFTs to creators, including legacy raffles that only have a verified deposit timestamp.
         </p>
         {rafflesState.cancelledRecovery.length > 0 ? (
           <RafflesList

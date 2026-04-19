@@ -1,6 +1,7 @@
 /**
  * Public leaderboard: top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
  * Supports all-time, UTC calendar month, and UTC calendar year scopes.
+ * Raffles in `failed_refund_available` (e.g. min threshold not met after extension) do not contribute to any category.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -156,6 +157,11 @@ function statusCountsAsRaffleWon(status: string | null): boolean {
   return s === 'completed' || s === 'successful_pending_claims'
 }
 
+/** Terminal min-threshold failure: exclude from entered / purchased / created / tickets-sold aggregates. */
+function isFailedRefundLeaderboardExcluded(status: string | null): boolean {
+  return (status || '').toLowerCase() === 'failed_refund_available'
+}
+
 function parseTimeMs(iso: string | null | undefined): number | null {
   if (iso == null || iso === '') return null
   const t = new Date(iso).getTime()
@@ -251,9 +257,15 @@ async function fetchAllConfirmedEntriesForLeaderboard(db: SupabaseClient, window
 }
 
 function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: LeaderboardEntryRow[], window: TimeWindow | null): LeaderboardData {
+  const excludedRaffleIds = new Set<string>()
+  for (const r of raffles) {
+    if (isFailedRefundLeaderboardExcluded(r.status)) excludedRaffleIds.add(r.id)
+  }
+
   // Raffles entered: distinct raffle count per wallet (entries already scoped)
   const enteredByWallet = new Map<string, Set<string>>()
   for (const e of entries) {
+    if (excludedRaffleIds.has(e.raffle_id)) continue
     const w = normalizeWallet(e.wallet_address)
     if (!w) continue
     let set = enteredByWallet.get(w)
@@ -272,6 +284,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
 
   const purchasedByWallet = new Map<string, number>()
   for (const e of entries) {
+    if (excludedRaffleIds.has(e.raffle_id)) continue
     const w = normalizeWallet(e.wallet_address)
     if (!w) continue
     const qty = Number(e.ticket_quantity)
@@ -284,6 +297,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
 
   const createdByWallet = new Map<string, number>()
   for (const r of raffles) {
+    if (isFailedRefundLeaderboardExcluded(r.status)) continue
     if (window && !inUtcWindow(r.created_at, window)) continue
     const w = normalizeWallet(r.creator_wallet ?? r.created_by)
     if (!w) continue
@@ -300,6 +314,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
   }
   const ticketsByCreator = new Map<string, number>()
   for (const e of entries) {
+    if (excludedRaffleIds.has(e.raffle_id)) continue
     const creator = raffleToCreator.get(e.raffle_id)
     if (!creator) continue
     const qty = Number(e.ticket_quantity)
