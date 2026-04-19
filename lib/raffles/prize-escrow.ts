@@ -962,16 +962,20 @@ async function detectPrizeReturnKind(
   if (standard === 'mpl_core') return 'mpl_core'
   if (standard === 'compressed') return 'compressed'
 
+  // Declared SPL / Token-2022: confirm escrow holds that mint as a token account first.
+  // Legacy rows sometimes left `prize_standard` as spl while the prize is Core or compressed
+  // (same situation as winner claim-prize fallback). When no SPL token account exists, fall
+  // through to legacy probes below instead of returning null.
   if (standard === 'spl' || standard === 'token2022') {
-    if (!preferredMint) return null
-    try {
-      const mint = new PublicKey(preferredMint)
-      const tp = await getEscrowTokenProgramForMint(mint, escrowPk)
-      if (tp) return 'spl'
-    } catch {
-      return null
+    if (preferredMint) {
+      try {
+        const mint = new PublicKey(preferredMint)
+        const tp = await getEscrowTokenProgramForMint(mint, escrowPk)
+        if (tp) return 'spl'
+      } catch {
+        // invalid mint address — continue to legacy probes
+      }
     }
-    return null
   }
 
   // Legacy / unknown: SPL Token or Token-2022 ATA first
