@@ -1,11 +1,27 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
+import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 
 type Item = { raffle: Raffle; entries: Entry[] }
+
+/** Same idea as RafflesList: SSR sends entries: []; keep fetched rows across router.refresh. */
+function mergeCarouselProps(prev: Item[], next: Item[]): Item[] {
+  const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
+  return next.map((item) => {
+    const prevItem = prevById.get(item.raffle.id)
+    const nextEmpty = !item.entries?.length
+    const prevHas = !!(prevItem?.entries?.length)
+    if (nextEmpty && prevHas && prevItem) {
+      return { raffle: item.raffle, entries: prevItem.entries }
+    }
+    return item
+  })
+}
 
 /**
  * Horizontal snap carousel for featured active raffles from partner creators.
@@ -18,6 +34,79 @@ export function PartnerRafflesCarousel({
   items: Item[]
   serverNow?: Date
 }) {
+  const [displayItems, setDisplayItems] = useState<Item[]>(items)
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+
+  const itemsKey = useMemo(
+    () =>
+      items
+        .map(({ raffle }) => raffle.id)
+        .slice()
+        .sort()
+        .join(','),
+    [items]
+  )
+
+  // Refresh raffle snapshots from props; preserve fetched entries when props still carry entries: [] (matches RafflesList).
+  useEffect(() => {
+    setDisplayItems((prev) => mergeCarouselProps(prev, items))
+  }, [items])
+
+  useEffect(() => {
+    if (items.length === 0) return
+    let cancelled = false
+
+    const loadEntries = async () => {
+      const batch = itemsRef.current
+      if (batch.length === 0 || cancelled) return
+      const apiBase = typeof window !== 'undefined' ? window.location.origin : ''
+
+      type FetchOk = { id: string; entries: Entry[]; ok: true }
+      type FetchFail = { id: string; ok: false }
+      const results = await Promise.all(
+        batch.map(async ({ raffle }): Promise<FetchOk | FetchFail> => {
+          try {
+            const url = `${apiBase}/api/entries?raffleId=${encodeURIComponent(raffle.id)}&t=${Date.now()}`
+            const response = await fetch(url)
+            if (!response.ok) return { id: raffle.id, ok: false }
+            const data = await response.json()
+            const entries = Array.isArray(data) ? (data as Entry[]) : []
+            return { id: raffle.id, entries, ok: true }
+          } catch {
+            return { id: raffle.id, ok: false }
+          }
+        })
+      )
+
+      if (cancelled) return
+
+      setDisplayItems((prev) => {
+        const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
+        const mergedProps = mergeCarouselProps(prev, itemsRef.current)
+        const mergedById = new Map(mergedProps.map((x) => [x.raffle.id, x]))
+        for (const r of results) {
+          if (r.ok) {
+            const row = mergedById.get(r.id)
+            if (row) mergedById.set(r.id, { raffle: row.raffle, entries: r.entries })
+          }
+        }
+        return itemsRef.current.map(({ raffle }) => {
+          const updated = mergedById.get(raffle.id)
+          if (updated) return updated
+          return { raffle, entries: prevById.get(raffle.id)?.entries ?? [] }
+        })
+      })
+    }
+
+    void loadEntries()
+    const interval = setInterval(() => void loadEntries(), RAFFLES_LIST_ENTRIES_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [itemsKey, items.length])
+
   if (items.length === 0) return null
 
   return (
@@ -47,7 +136,7 @@ export function PartnerRafflesCarousel({
         style={{ touchAction: 'pan-x manipulation', WebkitOverflowScrolling: 'touch' as const }}
         aria-label="Featured partner raffles carousel"
       >
-        {items.map(({ raffle, entries }, i) => (
+        {displayItems.map(({ raffle, entries }, i) => (
           <div
             key={raffle.id}
             className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 snap-start self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
