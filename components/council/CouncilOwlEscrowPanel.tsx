@@ -51,36 +51,57 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   const [withdrawUi, setWithdrawUi] = useState('')
   const [busy, setBusy] = useState<'dep' | 'wd' | 'wdAll' | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [configFetchFailed, setConfigFetchFailed] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
+  const loadEscrowConfig = useCallback(async () => {
+    setConfigFetchFailed(false)
     setConfigLoading(true)
-    fetch('/api/council/escrow', { cache: 'no-store' })
-      .then((r) => r.json().catch(() => ({})))
-      .then((data: { enabled?: boolean; escrowAddress?: string; owlMint?: string; decimals?: number; minDepositUi?: number }) => {
-        if (cancelled) return
-        if (data.enabled === true && data.escrowAddress && data.owlMint && typeof data.decimals === 'number') {
-          setConfig({
-            enabled: true,
-            escrowAddress: data.escrowAddress,
-            owlMint: data.owlMint,
-            decimals: data.decimals,
-            minDepositUi: typeof data.minDepositUi === 'number' ? data.minDepositUi : 1,
-          })
-        } else {
-          setConfig(null)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setConfig(null)
-      })
-      .finally(() => {
-        if (!cancelled) setConfigLoading(false)
-      })
-    return () => {
-      cancelled = true
+    try {
+      const r = await fetch('/api/council/escrow', { cache: 'no-store' })
+      let data: {
+        enabled?: boolean
+        escrowAddress?: string
+        owlMint?: string
+        decimals?: number
+        minDepositUi?: number
+      } = {}
+      try {
+        data = await r.json()
+      } catch {
+        data = {}
+      }
+      if (!r.ok) {
+        setConfig(null)
+        setConfigFetchFailed(true)
+        return
+      }
+      if (
+        data.enabled === true &&
+        data.escrowAddress &&
+        data.owlMint &&
+        typeof data.decimals === 'number'
+      ) {
+        setConfig({
+          enabled: true,
+          escrowAddress: data.escrowAddress,
+          owlMint: data.owlMint,
+          decimals: data.decimals,
+          minDepositUi: typeof data.minDepositUi === 'number' ? data.minDepositUi : 1,
+        })
+      } else {
+        setConfig(null)
+      }
+    } catch {
+      setConfig(null)
+      setConfigFetchFailed(true)
+    } finally {
+      setConfigLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void loadEscrowConfig()
+  }, [loadEscrowConfig])
 
   const sessionMatches = Boolean(sessionWallet && wallet && sessionWallet === wallet)
 
@@ -245,13 +266,31 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
     )
   }
 
+  if (!configLoading && !config && configFetchFailed) {
+    return (
+      <section
+        id="council-owl-escrow"
+        className="mb-8 scroll-mt-24 rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-4 sm:px-5"
+      >
+        <h2 className="text-sm font-semibold text-destructive">Council escrow could not load</h2>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Check your connection and try again. If this keeps happening on mobile, try disabling VPN or switching network.
+        </p>
+        <Button type="button" variant="secondary" className="mt-3 min-h-[44px]" onClick={() => void loadEscrowConfig()}>
+          Retry
+        </Button>
+      </section>
+    )
+  }
+
   if (!config) {
     return null
   }
 
   return (
     <section
-      className="mb-8 sm:mb-10 rounded-xl border border-emerald-500/30 bg-emerald-950/15 px-4 py-4 sm:px-5 sm:py-5"
+      id="council-owl-escrow"
+      className="mb-8 sm:mb-10 min-w-0 max-w-full scroll-mt-24 sm:scroll-mt-28 rounded-xl border border-emerald-500/30 bg-emerald-950/15 px-4 py-4 sm:px-5 sm:py-5"
       aria-labelledby="council-escrow-heading"
     >
       <h2 id="council-escrow-heading" className="text-sm font-semibold uppercase tracking-wider text-emerald-200/90">
@@ -262,8 +301,10 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         here for the next proposal unless you withdraw it to your wallet.
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-mono break-all">Escrow: {config.escrowAddress}</span>
+      <div className="mt-3 overflow-x-auto rounded-md border border-border/30 bg-background/30 px-2 py-1.5 text-xs text-muted-foreground [-webkit-overflow-scrolling:touch]">
+        <span className="font-mono whitespace-nowrap sm:whitespace-normal sm:break-all">
+          Escrow: {config.escrowAddress}
+        </span>
       </div>
 
       <div className="mt-4 flex flex-wrap items-baseline gap-2">
@@ -313,8 +354,12 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         </div>
       ) : null}
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2 rounded-lg border border-border/50 bg-background/40 p-3">
+      <p className="mt-4 text-[11px] text-muted-foreground sm:hidden">
+        On phones, deposit and withdraw stack — scroll to see both sections.
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-6 sm:mt-6 sm:grid-cols-2 sm:gap-4">
+        <div className="min-w-0 space-y-2 rounded-lg border border-border/50 bg-background/40 p-3">
           <Label htmlFor="council-dep">Deposit OWL</Label>
           <Input
             id="council-dep"
@@ -333,7 +378,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
             {busy === 'dep' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : 'Send OWL to escrow'}
           </Button>
         </div>
-        <div className="space-y-2 rounded-lg border border-border/50 bg-background/40 p-3">
+        <div className="min-w-0 space-y-2 rounded-lg border border-border/50 bg-background/40 p-3">
           <Label htmlFor="council-wd">Withdraw OWL</Label>
           <Input
             id="council-wd"
