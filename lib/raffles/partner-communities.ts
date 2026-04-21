@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
+import { getSupabasePublishableKey } from '@/lib/supabase-env'
+
 const CACHE_TTL_MS = 45_000
 
 export type ActivePartnerCommunityRow = {
@@ -16,7 +18,7 @@ async function getSupabaseForPartnerRead(): Promise<SupabaseClient | null> {
     const { getSupabaseAdmin } = await import('@/lib/supabase-admin')
     return getSupabaseAdmin()
   } catch {
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+    const anon = getSupabasePublishableKey()
     if (!anon) return null
     return createClient(url, anon)
   }

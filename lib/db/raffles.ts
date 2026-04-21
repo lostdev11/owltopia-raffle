@@ -21,6 +21,7 @@ import {
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
+import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -377,8 +378,7 @@ export async function getRafflesViaRest(
   options: GetRafflesViaRestOptions = {}
 ): Promise<GetRafflesResult> {
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const apiKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const apiKey = getSupabaseSecretKey() || getSupabasePublishableKey()
   if (!baseUrl || !apiKey) {
     return {
       data: [],

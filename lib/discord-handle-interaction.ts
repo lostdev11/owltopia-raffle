@@ -132,7 +132,7 @@ export async function handleDiscordApplicationCommand(
     } catch (e) {
       console.error('subscribe intent:', e)
       return ephemeral(
-        'Could not create a payment session (database error). On the host, set SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
+        'Could not create a payment session (database error). On the host, set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
       )
     }
 
@@ -260,7 +260,7 @@ export async function handleDiscordApplicationCommand(
     } catch (e) {
       console.error('status partner query:', e)
       return ephemeral(
-        'Could not load status (database error). Set SUPABASE_SERVICE_ROLE_KEY on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
+        'Could not load status (database error). Set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
       )
     }
     if (!partner && !pending) {

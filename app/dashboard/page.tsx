@@ -26,6 +26,7 @@ import {
   Share2,
   Wallet,
   Award,
+  Landmark,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
@@ -1310,6 +1311,23 @@ export default function DashboardPage() {
             </Button>
           </div>
         </header>
+
+      <Card className="mb-8 border-green-500/25 bg-green-500/[0.05] rounded-xl shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Landmark className="h-5 w-5 shrink-0 text-theme-prime" aria-hidden />
+            Owl Council
+          </CardTitle>
+          <CardDescription>
+            OWL-holder governance — browse proposals, vote (weight = OWL balance), or create if you hold 10+ OWL.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Button asChild variant="outline" size="sm" className="touch-manipulation min-h-[44px]">
+            <Link href="/council">Open Owl Council</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {showTicketRefundHub && (
         <Card className="mb-8 border-amber-500/50 bg-amber-500/[0.07]" role="region" aria-label="Ticket refunds and draw status">

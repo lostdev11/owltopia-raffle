@@ -2,11 +2,11 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { COMMUNITY_DISCORD_INVITE_URL, PLATFORM_NAME } from '@/lib/site-config'
 
 const externalLinks = [
   { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
@@ -14,7 +14,7 @@ const externalLinks = [
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
+  { name: 'Discord', url: COMMUNITY_DISCORD_INVITE_URL },
 ]
 
 const iconByLink: Record<string, React.ReactNode> = {
@@ -41,6 +41,11 @@ const glassCardItems = [
     label: 'Partner program',
     href: '/partner-program',
     icon: <HeartHandshake className="h-6 w-6" />,
+  },
+  {
+    label: 'Owl Council',
+    href: '/council',
+    icon: <Landmark className="h-6 w-6" />,
   },
   ...externalLinks.map((link) => ({
     label: link.name,

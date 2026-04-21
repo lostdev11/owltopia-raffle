@@ -72,7 +72,9 @@ export default async function RafflesPage() {
               <p className="text-destructive mb-4">{configError}</p>
               <p className="text-sm text-muted-foreground mb-4">
                 Set <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
-                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment.
+                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> in your
+                environment (legacy{' '}
+                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> is still read if unset).
               </p>
               <p className="text-sm text-muted-foreground mt-4">See README.md for setup.</p>
             </div>

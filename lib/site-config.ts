@@ -5,6 +5,9 @@
 const raw = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_PLATFORM_NAME?.trim()
 export const PLATFORM_NAME = raw || 'Owl Raffle'
 
+/** Owltopia Discord invite (same link as Footer). */
+export const COMMUNITY_DISCORD_INVITE_URL = 'https://discord.gg/nRD2wyg2vq'
+
 /** Default OG/twitter alt and tagline suffix. */
 export const OG_TAGLINE = 'Trusted raffles with full transparency. Every entry verified on-chain.'
 export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`

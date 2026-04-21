@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
+import { getSupabasePublishableKey } from '@/lib/supabase-env'
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabaseAnonKey = getSupabasePublishableKey()
 
 // Create a client with fallback values to prevent crashes during development
 // In production, these should be set via environment variables
@@ -51,7 +53,7 @@ export function getSupabaseConfigError(): string | null {
     return 'NEXT_PUBLIC_SUPABASE_URL is missing. Please set it in your .env.local file.'
   }
   if (!supabaseAnonKey || supabaseAnonKey === 'placeholder-key') {
-    return 'NEXT_PUBLIC_SUPABASE_ANON_KEY is missing. Please set it in your .env.local file.'
+    return 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is missing. Legacy NEXT_PUBLIC_SUPABASE_ANON_KEY is still supported — set either in .env.local.'
   }
   return null
 }

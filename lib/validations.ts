@@ -71,6 +71,53 @@ export const profileUpdateBody = z.object({
   displayName: z.string().min(1).max(32).trim(),
 })
 
+const councilSlug = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug: lowercase letters, numbers, hyphens only')
+
+export const councilVoteBody = z.object({
+  vote_choice: z.enum(['yes', 'no', 'abstain']),
+})
+
+/** Status is always `draft` at create — only admins may publish (set active). `slug` optional (server derives from title). */
+export const councilProposalCreateBody = z.object({
+  title: z.string().min(1).max(300),
+  slug: z.preprocess((val) => {
+    if (val === undefined || val === null) return undefined
+    if (typeof val !== 'string') return undefined
+    const t = val.trim()
+    return t === '' ? undefined : t
+  }, councilSlug.optional()),
+  summary: z.string().min(1).max(2000),
+  description: z.string().min(1).max(50_000),
+  start_time: z.string().min(1),
+  end_time: z.string().min(1),
+})
+
+export const councilEscrowDepositConfirmBody = z.object({
+  signature: z.string().min(80).max(120),
+})
+
+export const councilEscrowWithdrawBody = z
+  .object({
+    amountUi: z.number().positive().optional(),
+    withdrawAll: z.boolean().optional(),
+  })
+  .refine((b) => b.withdrawAll === true || (b.amountUi !== undefined && b.amountUi > 0), {
+    message: 'Provide amountUi or set withdrawAll to true.',
+  })
+
+export const councilProposalPatchBody = z.object({
+  title: z.string().min(1).max(300).optional(),
+  summary: z.string().min(1).max(2000).optional(),
+  description: z.string().min(1).max(50_000).optional(),
+  status: z.enum(['draft', 'active', 'ended', 'archived']).optional(),
+  start_time: z.string().min(1).optional(),
+  end_time: z.string().min(1).optional(),
+})
+
 export function parseOr400<T>(schema: z.ZodSchema<T>, data: unknown): { ok: true; data: T } | { ok: false; status: 400; error: string } {
   const result = schema.safeParse(data)
   if (result.success) return { ok: true, data: result.data }

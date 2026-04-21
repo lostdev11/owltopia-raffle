@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Coins } from 'lucide-react'
+import { Coins, Landmark } from 'lucide-react'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 import { Logo } from '@/components/Logo'
 import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
@@ -176,12 +176,21 @@ export function EnterOwlTopia() {
         >
           Trusted raffles with full transparency
         </p>
-        <Link
-          href="/raffles"
-          className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-lg px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation opacity-100"
-        >
-          Enter Raffles
-        </Link>
+        <div className="w-full max-w-sm flex flex-col sm:flex-row gap-3 items-stretch justify-center animate-enter-fade-in" style={fadeIn('0.55s')}>
+          <Link
+            href="/raffles"
+            className="flex-1 min-h-[44px] inline-flex items-center justify-center rounded-lg px-6 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+          >
+            Enter Raffles
+          </Link>
+          <Link
+            href="/council"
+            className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg px-6 py-4 text-base font-semibold border border-green-500/40 bg-background/80 text-theme-prime hover:bg-white/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+          >
+            <Landmark className="h-5 w-5 shrink-0" aria-hidden />
+            Owl Council
+          </Link>
+        </div>
         </div>
       </div>
       {/* Spacer so page can scroll and trigger scroll-based animation */}

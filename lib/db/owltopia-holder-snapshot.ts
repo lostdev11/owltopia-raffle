@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseSecretKey } from '@/lib/supabase-env'
 
 /** How long a stored snapshot is trusted before live DAS runs again (when skipCache is false). */
 export const OWLTOPIA_HOLDER_SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -11,7 +12,7 @@ export const OWLTOPIA_HOLDER_SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export async function getOwltopiaSnapshotIfFresh(walletAddress: string): Promise<boolean | null> {
   const w = walletAddress.trim()
   if (!w) return null
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
+  if (!getSupabaseSecretKey()) return null
 
   try {
     const admin = getSupabaseAdmin()
@@ -36,7 +37,7 @@ export async function getOwltopiaSnapshotIfFresh(walletAddress: string): Promise
 export async function upsertOwltopiaHolderSnapshot(walletAddress: string, isHolder: boolean): Promise<void> {
   const w = walletAddress.trim()
   if (!w) return
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return
+  if (!getSupabaseSecretKey()) return
 
   try {
     const admin = getSupabaseAdmin()

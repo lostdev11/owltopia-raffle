@@ -1,14 +1,16 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
+import { getSupabaseSecretKey } from '@/lib/supabase-env'
+
 let adminClient: SupabaseClient | null = null
 
 /**
- * Use service role for server-side reads when SUPABASE_SERVICE_ROLE_KEY is set (bypasses RLS).
+ * Use secret / service role for server-side reads when SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is set (bypasses RLS).
  * Pass the anon client as fallback when the key is missing or getSupabaseAdmin() throws.
  * Use in getRaffles, getEntriesByRaffleId, isAdmin, etc. so server-rendered pages load data reliably.
  */
 export function getSupabaseForServerRead(fallback: SupabaseClient): SupabaseClient {
-  if (typeof process !== 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (typeof process !== 'undefined' && getSupabaseSecretKey()) {
     try {
       return getSupabaseAdmin()
     } catch {
@@ -25,19 +27,19 @@ const HEALTH_CHECK_INTERVAL = 60000 // Check health every 60 seconds
  * Use this for all write operations (insert/update/delete) so they bypass RLS.
  * Required after migration 020 (permissive RLS policies removed).
  *
- * Set SUPABASE_SERVICE_ROLE_KEY in your server environment (e.g. .env.local).
+ * Set SUPABASE_SECRET_KEY (preferred) or SUPABASE_SERVICE_ROLE_KEY in your server environment (e.g. .env.local).
  * Never expose this key to the client.
  * 
  * Includes automatic reconnection handling for brief database restarts.
  */
 export function getSupabaseAdmin(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = getSupabaseSecretKey()
 
   if (!url || !key) {
     throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_SUPABASE_URL) must be set for server-side writes. ' +
-      'Add them to .env.local. Get the service role key from Supabase Dashboard → Settings → API.'
+      'SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_SUPABASE_URL) must be set for server-side writes. ' +
+      'Add them to .env.local. Get the secret key from Supabase Dashboard → Settings → API keys.'
     )
   }
 
