@@ -51,6 +51,12 @@ export function ProposalDetailClient({
         Back to Owl Council
       </Link>
 
+      {councilEscrowVotingEnabled ? (
+        <div className="mt-4">
+          <CouncilOwlEscrowPanel sessionWallet={sessionWallet} />
+        </div>
+      ) : null}
+
       <header className="mt-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge proposal={proposal} />
@@ -98,7 +104,6 @@ export function ProposalDetailClient({
           initialMyVote={initialMyVote}
           escrowVotingEnabled={councilEscrowVotingEnabled}
         />
-        {councilEscrowVotingEnabled ? <CouncilOwlEscrowPanel sessionWallet={sessionWallet} /> : null}
       </section>
     </div>
   )

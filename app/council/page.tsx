@@ -62,9 +62,9 @@ export default async function CouncilPage({ searchParams }: CouncilPageProps) {
 
   return (
     <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-6xl">
-      <CouncilHero showEscrowStakeLink={councilEscrowVotingEnabled} />
-
       {councilEscrowVotingEnabled ? <CouncilOwlEscrowPanel sessionWallet={sessionWallet} /> : null}
+
+      <CouncilHero showEscrowStakeLink={councilEscrowVotingEnabled} />
 
       <CouncilVotingExplainer escrowVotingEnabled={councilEscrowVotingEnabled} />
 

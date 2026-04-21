@@ -20,6 +20,13 @@ import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 
 const HEADER = 'X-Connected-Wallet'
 
+/** GET /api/council/escrow returns `reason` when enabled is false */
+const ESCROW_DISABLED_COPY: Record<string, string> = {
+  owl_not_configured: 'OWL is not enabled for this deployment (mint address missing).',
+  escrow_not_configured: 'Council escrow wallet is not configured on the server.',
+  owl_mint_missing: 'OWL mint metadata is missing on the server.',
+}
+
 type EscrowConfig = {
   enabled: true
   escrowAddress: string
@@ -52,9 +59,12 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   const [busy, setBusy] = useState<'dep' | 'wd' | 'wdAll' | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [configFetchFailed, setConfigFetchFailed] = useState(false)
+  /** Set when HTTP 200 but `enabled: false` — avoids silent empty panel when API disagrees with RSC shell */
+  const [escrowUnavailableReason, setEscrowUnavailableReason] = useState<string | null>(null)
 
   const loadEscrowConfig = useCallback(async () => {
     setConfigFetchFailed(false)
+    setEscrowUnavailableReason(null)
     setConfigLoading(true)
     try {
       const r = await fetch('/api/council/escrow', { cache: 'no-store' })
@@ -81,6 +91,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         data.owlMint &&
         typeof data.decimals === 'number'
       ) {
+        setEscrowUnavailableReason(null)
         setConfig({
           enabled: true,
           escrowAddress: data.escrowAddress,
@@ -90,6 +101,8 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         })
       } else {
         setConfig(null)
+        const reason = typeof (data as { reason?: string }).reason === 'string' ? (data as { reason: string }).reason : ''
+        setEscrowUnavailableReason(reason || 'disabled')
       }
     } catch {
       setConfig(null)
@@ -260,8 +273,9 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
 
   if (configLoading) {
     return (
-      <div className="mb-8 flex justify-center py-4">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
+      <div className="mb-8 flex flex-col items-center justify-center gap-3 py-6" role="status" aria-live="polite">
+        <Loader2 className="h-7 w-7 animate-spin text-emerald-400/90" aria-hidden />
+        <p className="text-center text-xs text-muted-foreground px-4 max-w-sm">Loading council escrow…</p>
       </div>
     )
   }
@@ -276,6 +290,26 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         <p className="mt-2 text-xs text-muted-foreground">
           Check your connection and try again. If this keeps happening on mobile, try disabling VPN or switching network.
         </p>
+        <Button type="button" variant="secondary" className="mt-3 min-h-[44px]" onClick={() => void loadEscrowConfig()}>
+          Retry
+        </Button>
+      </section>
+    )
+  }
+
+  if (!config && escrowUnavailableReason) {
+    const human =
+      ESCROW_DISABLED_COPY[escrowUnavailableReason] ??
+      (escrowUnavailableReason === 'disabled'
+        ? 'Council escrow is not available from the API.'
+        : `Council escrow unavailable (${escrowUnavailableReason}).`)
+    return (
+      <section
+        id="council-owl-escrow"
+        className="mb-8 scroll-mt-24 rounded-xl border border-amber-500/35 bg-amber-950/15 px-4 py-4 sm:px-5"
+      >
+        <h2 className="text-sm font-semibold text-amber-100">Council OWL escrow</h2>
+        <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{human}</p>
         <Button type="button" variant="secondary" className="mt-3 min-h-[44px]" onClick={() => void loadEscrowConfig()}>
           Retry
         </Button>
