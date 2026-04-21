@@ -273,10 +273,15 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
 
   if (configLoading) {
     return (
-      <div className="mb-8 flex flex-col items-center justify-center gap-3 py-6" role="status" aria-live="polite">
+      <section
+        id="council-owl-escrow"
+        className="mb-8 scroll-mt-24 sm:scroll-mt-28 flex min-h-[140px] flex-col items-center justify-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-950/10 px-4 py-8"
+        role="status"
+        aria-live="polite"
+      >
         <Loader2 className="h-7 w-7 animate-spin text-emerald-400/90" aria-hidden />
         <p className="text-center text-xs text-muted-foreground px-4 max-w-sm">Loading council escrow…</p>
-      </div>
+      </section>
     )
   }
 
@@ -318,7 +323,20 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   }
 
   if (!config) {
-    return null
+    return (
+      <section
+        id="council-owl-escrow"
+        className="mb-8 scroll-mt-24 rounded-xl border border-border/60 bg-muted/20 px-4 py-4 sm:px-5"
+      >
+        <h2 className="text-sm font-semibold text-foreground">Council OWL escrow</h2>
+        <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+          Escrow settings could not be loaded. Try refreshing the page.
+        </p>
+        <Button type="button" variant="secondary" className="mt-3 min-h-[44px]" onClick={() => void loadEscrowConfig()}>
+          Retry
+        </Button>
+      </section>
+    )
   }
 
   return (
