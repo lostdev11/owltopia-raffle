@@ -51,11 +51,9 @@ export function ProposalDetailClient({
         Back to Owl Council
       </Link>
 
-      {councilEscrowVotingEnabled ? (
-        <div className="mt-4">
-          <CouncilOwlEscrowPanel sessionWallet={sessionWallet} />
-        </div>
-      ) : null}
+      <div className="mt-4">
+        <CouncilOwlEscrowPanel sessionWallet={sessionWallet} />
+      </div>
 
       <header className="mt-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
