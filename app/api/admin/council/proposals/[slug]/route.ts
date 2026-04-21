@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/auth-server'
 import { councilProposalPatchBody, parseOr400 } from '@/lib/validations'
 import { getCouncilProposalWindowError } from '@/lib/council/owl-proposal-rules'
+import { notifyOwlCouncilProposalLive } from '@/lib/discord-owl-council-webhooks'
 import { getOwlProposalBySlugAny, updateOwlProposalBySlugAdmin } from '@/lib/db/owl-council'
 
 export const dynamic = 'force-dynamic'
@@ -47,9 +48,20 @@ export async function PATCH(
       }
     }
 
+    const becameActive = patch.status === 'active' && existing.status !== 'active'
+
     const result = await updateOwlProposalBySlugAdmin(slug, patch)
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 })
+    }
+
+    if (becameActive) {
+      const published = await getOwlProposalBySlugAny(slug)
+      if (published) {
+        void notifyOwlCouncilProposalLive(published).catch((e) =>
+          console.error('[api/admin/council/proposals/[slug]] Discord notify:', e)
+        )
+      }
     }
 
     return NextResponse.json({ ok: true })
