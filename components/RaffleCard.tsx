@@ -24,7 +24,6 @@ import {
   getThemeAccentClasses,
   getThemeAccentColor,
   getThemeAccentRgbChannels,
-  partnerStripOuterGlowFromChannels,
   softOuterGlowFromChannels,
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
@@ -286,7 +285,7 @@ export function RaffleCard({
       ? {
           ...borderStyleBase,
           borderColor: `rgb(${getThemeAccentRgbChannels(raffle.theme_accent)} / 0.82)`,
-          boxShadow: partnerStripOuterGlowFromChannels(getThemeAccentRgbChannels(raffle.theme_accent)),
+          boxShadow: 'none',
         }
       : borderStyleBase
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
