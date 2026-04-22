@@ -14,6 +14,7 @@ type RafflePromoPngButtonProps = {
   className?: string
   buttonLabel?: string
   fullWidth?: boolean
+  /** Unused on the canvas (image posts use short domain only); kept for call-site clarity. */
   sharePathPrefix?: string
   metaLine?: string
 }
@@ -84,6 +85,27 @@ function roundRectPath(
   ctx.closePath()
 }
 
+/** Short public hostname for PNG branding (easy to type / search — not a full raffle URL). */
+function siteHostnameForPromo(): string {
+  const raw =
+    typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SITE_URL
+      ? process.env.NEXT_PUBLIC_SITE_URL.trim()
+      : ''
+  if (raw) {
+    try {
+      const url = raw.startsWith('http') ? raw : `https://${raw}`
+      return new URL(url).hostname.replace(/^www\./i, '')
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof window !== 'undefined') {
+    const h = window.location.hostname.replace(/^www\./i, '')
+    if (h && !/^localhost$/i.test(h)) return h
+  }
+  return 'owltopia.xyz'
+}
+
 export function RafflePromoPngButton({
   title,
   slug,
@@ -94,7 +116,7 @@ export function RafflePromoPngButton({
   className,
   buttonLabel = 'Download PNG for X',
   fullWidth = true,
-  sharePathPrefix = '/raffles/',
+  sharePathPrefix: _sharePathPrefix = '/raffles/',
   metaLine,
 }: RafflePromoPngButtonProps) {
   const [busy, setBusy] = useState(false)
@@ -119,9 +141,7 @@ export function RafflePromoPngButton({
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Canvas unavailable')
 
-      const safePrefix = sharePathPrefix.startsWith('/') ? sharePathPrefix : `/${sharePathPrefix}`
-      const raffleUrl = `${window.location.origin}${safePrefix}${slug}`
-      const compactUrl = raffleUrl.replace(/^https?:\/\//i, '')
+      const promoHost = siteHostnameForPromo()
       const safeTitle = clampText(title || 'Owltopia Raffle', 120)
       const safeCurrency = (currency || 'SOL').trim().toUpperCase()
       const safeEndDate = endTime ? new Date(endTime) : null
@@ -206,21 +226,15 @@ export function RafflePromoPngButton({
       ctx.fillText(infoLine, contentX, infoY)
       ctx.fillText(endsLabel, contentX, infoY + 46)
 
-      const footerY = panelY + panelH - 54
-      ctx.fillStyle = 'rgba(148, 163, 184, 0.2)'
-      ctx.fillRect(panelX + 52, footerY - 36, panelW - 104, 1)
-      ctx.fillStyle = '#94a3b8'
-      ctx.font = '500 22px Inter, system-ui, sans-serif'
-      ctx.fillText(compactUrl, contentX, footerY)
-
-      // Professional brand lockup badge (bottom-left)
-      const badgeText = 'LIVE ON OWLTOPIA'
+      // Bottom-left: memorable domain only (full raffle URLs are not tappable in image posts on X).
+      const badgeText = `LIVE ON ${promoHost}`
       ctx.font = '700 16px Inter, system-ui, sans-serif'
       const badgePaddingX = 16
       const badgeH = 34
       const badgeW = Math.ceil(ctx.measureText(badgeText).width + badgePaddingX * 2)
       const badgeX = contentX
-      const badgeY = footerY - 89
+      const badgeBottomGap = 44
+      const badgeY = panelY + panelH - badgeBottomGap - badgeH
       ctx.save()
       roundRectPath(ctx, badgeX, badgeY, badgeW, badgeH, 999)
       const badgeFill = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY)
