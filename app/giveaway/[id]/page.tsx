@@ -88,7 +88,7 @@ export default function PublicGiveawayPage() {
             </ul>
           )}
           <div className="flex flex-col gap-3 pt-2">
-            <GiveawayShareButton title={title} />
+            <GiveawayShareButton title={title} giveawayId={id} />
             <div className="touch-manipulation min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full">
               <WalletConnectButton />
             </div>

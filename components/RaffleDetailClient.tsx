@@ -119,6 +119,7 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -2628,6 +2629,16 @@ export function RaffleDetailClient({
             <Share2 className="mr-2 h-4 w-4" />
             {shareCopied ? 'Copied!' : 'Share'}
           </Button>
+          <RafflePromoPngButton
+            title={raffle.title}
+            slug={raffle.slug}
+            ticketPrice={raffle.ticket_price}
+            currency={raffle.currency}
+            endTime={raffle.end_time}
+            imageUrl={heroImageDead ? null : heroImageSrc}
+            buttonLabel="PNG for X"
+            fullWidth={false}
+          />
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
               variant="outline"

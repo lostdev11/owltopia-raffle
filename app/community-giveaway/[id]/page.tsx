@@ -449,7 +449,19 @@ export default function CommunityGiveawayPage() {
               {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
               <div className="flex flex-col gap-3 pt-2 touch-manipulation">
-                <GiveawayShareButton title={title} />
+                <GiveawayShareButton
+                  title={title}
+                  giveawayId={id}
+                  imageUrl={
+                    !nftImageLoading &&
+                    nftImageAttemptChain.length > 0 &&
+                    nftImageAttemptIdx < nftImageAttemptChain.length
+                      ? nftImageAttemptChain[nftImageAttemptIdx]
+                      : null
+                  }
+                  endTime={info.ends_at}
+                  isCommunityGiveaway
+                />
                 <div className="min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full">
                   <WalletConnectButton />
                 </div>

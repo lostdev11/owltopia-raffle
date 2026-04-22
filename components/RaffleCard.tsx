@@ -36,6 +36,7 @@ import {
   clearReferralComplimentarySessionCache,
 } from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
+import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { Trophy, Share2, BadgeCheck, Loader2, Users } from 'lucide-react'
@@ -1606,6 +1607,15 @@ export function RaffleCard({
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
                     </Button>
+                    <RafflePromoPngButton
+                      title={raffle.title}
+                      slug={raffle.slug}
+                      ticketPrice={raffle.ticket_price}
+                      currency={raffle.currency}
+                      endTime={raffle.end_time}
+                      imageUrl={listThumbDead ? null : listThumbSrc}
+                      buttonLabel="Download PNG for X"
+                    />
                     <ReferralComplimentaryHint
                       variant="compact"
                       className="mt-2"

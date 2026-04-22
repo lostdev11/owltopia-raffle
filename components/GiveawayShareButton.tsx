@@ -3,13 +3,25 @@
 import { useState } from 'react'
 import { Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 
 type GiveawayShareButtonProps = {
   title: string
+  giveawayId?: string
+  imageUrl?: string | null
+  endTime?: string | null
+  isCommunityGiveaway?: boolean
   className?: string
 }
 
-export function GiveawayShareButton({ title, className }: GiveawayShareButtonProps) {
+export function GiveawayShareButton({
+  title,
+  giveawayId,
+  imageUrl,
+  endTime,
+  isCommunityGiveaway = false,
+  className,
+}: GiveawayShareButtonProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -61,6 +73,18 @@ export function GiveawayShareButton({ title, className }: GiveawayShareButtonPro
         <Share2 className="mr-2 h-4 w-4" />
         {busy ? 'Sharing…' : 'Share giveaway'}
       </Button>
+      {giveawayId ? (
+        <RafflePromoPngButton
+          title={title}
+          slug={giveawayId}
+          imageUrl={imageUrl}
+          endTime={endTime}
+          buttonLabel="Download PNG for X"
+          sharePathPrefix={isCommunityGiveaway ? '/community-giveaway/' : '/giveaway/'}
+          metaLine={isCommunityGiveaway ? 'Community giveaway on Owltopia' : 'NFT giveaway on Owltopia'}
+          className="mt-2"
+        />
+      ) : null}
       {message ? <p className="mt-1 text-xs text-muted-foreground">{message}</p> : null}
     </div>
   )
