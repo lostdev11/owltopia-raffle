@@ -15,6 +15,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { GiveawayShareButton } from '@/components/GiveawayShareButton'
 import { Gift, Loader2, Users } from 'lucide-react'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 
@@ -448,6 +449,7 @@ export default function CommunityGiveawayPage() {
               {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
               <div className="flex flex-col gap-3 pt-2 touch-manipulation">
+                <GiveawayShareButton title={title} />
                 <div className="min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full">
                   <WalletConnectButton />
                 </div>

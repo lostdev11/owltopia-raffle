@@ -7,6 +7,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { GiveawayShareButton } from '@/components/GiveawayShareButton'
 import { Gift, Loader2, LayoutDashboard } from 'lucide-react'
 
 type PublicGiveaway = {
@@ -87,6 +88,7 @@ export default function PublicGiveawayPage() {
             </ul>
           )}
           <div className="flex flex-col gap-3 pt-2">
+            <GiveawayShareButton title={title} />
             <div className="touch-manipulation min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full">
               <WalletConnectButton />
             </div>
