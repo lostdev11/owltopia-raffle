@@ -96,6 +96,9 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
   const { audioRef, isPlaying, loadError, play, pause } = usePlatformMusic()
   const registerRaffleListOwlUi = useRegisterRaffleListOwlMusicUi()
 
+  const [mounted, setMounted] = useState(false)
+  const [pos, setPos] = useState<Pos | null>(null)
+
   /** Hide the global corner music button while this listing-page control is visible. */
   useEffect(() => {
     const showOwlChrome = Boolean(enabled && mounted && pos && onRafflesListPage)
@@ -113,8 +116,6 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
   const freqDataRef = useRef<Uint8Array | null>(null)
 
   const safeRef = useRef<SafeInsets>({ top: 0, right: 0, bottom: 0, left: 0 })
-  const [mounted, setMounted] = useState(false)
-  const [pos, setPos] = useState<Pos | null>(null)
   const dragRef = useRef<DragSession | null>(null)
 
   const [playPending, setPlayPending] = useState(false)
