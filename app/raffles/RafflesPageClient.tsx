@@ -110,6 +110,17 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
   return { active, pausedPending, future, past }
 }
 
+/** Scheduled / opening soon: open, no winner yet, prize not in escrow, entry deadline not passed (if set). */
+function isPendingFutureCommunityGiveaway(g: CommunityGiveawayBrowseItem, now: Date): boolean {
+  if (g.status !== 'open' || g.winnerDrawn || g.prizeDeposited) return false
+  const nowMs = now.getTime()
+  if (g.ends_at) {
+    const endMs = new Date(g.ends_at).getTime()
+    if (!Number.isNaN(endMs) && endMs <= nowMs) return false
+  }
+  return true
+}
+
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
 
@@ -734,6 +745,30 @@ export function RafflesPageClient({
     }
   }, [tab])
 
+  const giveawaysBuckets = useMemo(() => {
+    if (!giveawaysList || giveawaysList.length === 0) {
+      return {
+        pending: [] as CommunityGiveawayBrowseItem[],
+        main: [] as CommunityGiveawayBrowseItem[],
+      }
+    }
+    const pending: CommunityGiveawayBrowseItem[] = []
+    const main: CommunityGiveawayBrowseItem[] = []
+    for (const g of giveawaysList) {
+      if (isPendingFutureCommunityGiveaway(g, serverTime)) pending.push(g)
+      else main.push(g)
+    }
+    pending.sort((a, b) => {
+      const aEnd = a.ends_at ? new Date(a.ends_at).getTime() : Number.POSITIVE_INFINITY
+      const bEnd = b.ends_at ? new Date(b.ends_at).getTime() : Number.POSITIVE_INFINITY
+      const safe = (t: number) => (Number.isNaN(t) ? Number.POSITIVE_INFINITY : t)
+      const dr = safe(aEnd) - safe(bEnd)
+      if (dr !== 0) return dr
+      return new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    })
+    return { pending, main }
+  }, [giveawaysList, serverTime])
+
   const isEmpty = active.length === 0 && pausedPending.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
   const recoveredFromError =
@@ -992,17 +1027,59 @@ export function RafflesPageClient({
               {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length === 0 && (
                 <p className="text-muted-foreground py-8">No public giveaways right now. Check back soon.</p>
               )}
-              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
-                <ul
-                  className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
-                  role="list"
-                >
-                  {giveawaysList.map((g, i) => (
-                    <li key={g.id} className="min-w-0">
-                      <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
-                    </li>
-                  ))}
-                </ul>
+              {!giveawaysLoading && !giveawaysError &&
+                giveawaysList &&
+                giveawaysList.length > 0 &&
+                giveawaysBuckets.pending.length > 0 && (
+                  <section className="space-y-4" aria-labelledby="giveaways-pending-heading">
+                    <div className="max-w-3xl space-y-1">
+                      <h3 id="giveaways-pending-heading" className="text-lg font-semibold tracking-tight">
+                        Pending giveaways
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        Scheduled or opening soon — the prize NFT is not verified in escrow yet. Entries open once the
+                        deposit confirms; dates below show boost and entry deadlines when set.
+                      </p>
+                    </div>
+                    <ul
+                      className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                      role="list"
+                    >
+                      {giveawaysBuckets.pending.map((g, i) => (
+                        <li key={g.id} className="min-w-0">
+                          <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && giveawaysBuckets.main.length > 0 && (
+                <section className="space-y-4" aria-labelledby="giveaways-live-heading">
+                  {giveawaysBuckets.pending.length > 0 ? (
+                    <div className="max-w-3xl">
+                      <h3 id="giveaways-live-heading" className="text-lg font-semibold tracking-tight">
+                        Open giveaways
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Join now (sign in on the giveaway page), apply OWL boosts before the boost deadline, and watch for
+                        the draw after entries close.
+                      </p>
+                    </div>
+                  ) : null}
+                  <ul
+                    className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                    role="list"
+                  >
+                    {giveawaysBuckets.main.map((g, i) => (
+                      <li key={g.id} className="min-w-0">
+                        <CommunityGiveawayBrowseCard
+                          g={g}
+                          priorityImage={giveawaysBuckets.pending.length === 0 && i === 0}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               )}
             </div>
           ) : tab === 'owl-vision' ? (

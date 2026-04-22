@@ -2,6 +2,8 @@ import { ImageResponse } from 'next/og'
 import { getNftGiveawayById } from '@/lib/db/nft-giveaways'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
+/** Node matches `app/opengraph-image.tsx` so `getNftGiveawayById` (Supabase) and @vercel/og run consistently for X/Discord crawlers. */
+export const runtime = 'nodejs'
 export const alt = PLATFORM_NAME
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'

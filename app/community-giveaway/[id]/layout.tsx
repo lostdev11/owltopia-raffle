@@ -5,6 +5,7 @@ import {
   OG_ALT,
   DEFAULT_OG_IMAGE_DIMS,
   DEFAULT_OG_IMAGE_TYPE,
+  OG_IMAGE_CACHE_VERSION,
   getSiteBaseUrl,
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
@@ -34,7 +35,7 @@ export async function generateMetadata({
   }
 
   const canonicalUrl = `${site}/community-giveaway/${trimmed}`
-  const ogImageUrl = `${canonicalUrl}/opengraph-image`
+  const ogImageUrl = `${canonicalUrl}/opengraph-image?v=${OG_IMAGE_CACHE_VERSION}`
   let title = `Community giveaway | ${PLATFORM_NAME}`
   let description = `Join a community giveaway on ${PLATFORM_NAME}. Connect your wallet on the giveaway page.`
 
@@ -69,6 +70,7 @@ export async function generateMetadata({
       description,
       images: [{ url: ogImageUrl, width: 1200, height: 630, alt: title }],
     },
+    other: { 'twitter:url': canonicalUrl },
   }
 }
 
