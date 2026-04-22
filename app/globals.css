@@ -381,6 +381,35 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   z-index: 10001 !important;
 }
 
+/* Partner raffles: seamless horizontal loop without scrollLeft (mobile-friendly). */
+@keyframes partner-raffles-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.partner-raffles-marquee-track {
+  --partner-marquee-duration: 40s;
+  display: flex;
+  width: max-content;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  animation: partner-raffles-marquee var(--partner-marquee-duration) linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .partner-raffles-marquee-outer {
+    overflow-x: auto;
+  }
+  .partner-raffles-marquee-track {
+    animation: none !important;
+  }
+}
+
 /* Winner golden tint animation */
 @keyframes golden-pulse {
   0%, 100% {

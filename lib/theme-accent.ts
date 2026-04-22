@@ -57,6 +57,20 @@ export function softOuterGlowFromChannels(channels: string): string {
 }
 
 /**
+ * Even softer ambient halo for the partner featured marquee: lower peak alpha and
+ * wider falloff so saturated accents (e.g. prime green) read as light in the scene,
+ * not a thick outer stroke against the page background.
+ */
+export function partnerStripOuterGlowFromChannels(channels: string): string {
+  return [
+    `0 0 16px rgb(${channels} / 0.09)`,
+    `0 0 36px rgb(${channels} / 0.055)`,
+    `0 0 64px rgb(${channels} / 0.032)`,
+    `0 0 100px rgb(${channels} / 0.018)`,
+  ].join(', ')
+}
+
+/**
  * Get theme accent border style object
  */
 export function getThemeAccentBorderStyle(theme: ThemeAccent): { borderColor: string; boxShadow: string } {

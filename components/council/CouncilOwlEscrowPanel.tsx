@@ -82,6 +82,8 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   const [voteLockedDecimal, setVoteLockedDecimal] = useState<string | null>(null)
   /** From API — use for strict >0 check (avoids parsing decimal strings). */
   const [voteLockedRaw, setVoteLockedRaw] = useState<string | null>(null)
+  /** From API — when 0n, nothing may be withdrawn (all stake may be vote-locked or empty). */
+  const [withdrawableRaw, setWithdrawableRaw] = useState<string | null>(null)
   const [voteLockBreakdown, setVoteLockBreakdown] = useState<VoteLockBreakdownRow[]>([])
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [depositUi, setDepositUi] = useState('')
@@ -154,6 +156,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
       setWithdrawableDecimal(null)
       setVoteLockedDecimal(null)
       setVoteLockedRaw(null)
+      setWithdrawableRaw(null)
       setVoteLockBreakdown([])
       return
     }
@@ -169,18 +172,21 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         const d = data as {
           balanceDecimal: string
           withdrawableDecimal?: string
+          withdrawableRaw?: string
           voteLockedDecimal?: string
           voteLockedRaw?: string
           voteLockBreakdown?: unknown
         }
         setBalanceDecimal(d.balanceDecimal)
         setWithdrawableDecimal(typeof d.withdrawableDecimal === 'string' ? d.withdrawableDecimal : null)
+        setWithdrawableRaw(typeof d.withdrawableRaw === 'string' ? d.withdrawableRaw : null)
         setVoteLockedDecimal(typeof d.voteLockedDecimal === 'string' ? d.voteLockedDecimal : null)
         setVoteLockedRaw(typeof d.voteLockedRaw === 'string' ? d.voteLockedRaw : null)
         setVoteLockBreakdown(parseVoteLockBreakdown(d.voteLockBreakdown))
       } else {
         setBalanceDecimal(null)
         setWithdrawableDecimal(null)
+        setWithdrawableRaw(null)
         setVoteLockedDecimal(null)
         setVoteLockedRaw(null)
         setVoteLockBreakdown([])
@@ -335,17 +341,6 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         return
       }
 
-      try {
-        if (voteLockedRaw !== null && voteLockedRaw !== '' && BigInt(voteLockedRaw) > 0n) {
-          setMsg(
-            `Your ${OWL_TICKER} is locked in an active proposal vote. Withdraw is disabled until that voting ends.`
-          )
-          return
-        }
-      } catch {
-        /* ignore malformed raw */
-      }
-
       setBusy(all ? 'wdAll' : 'wd')
       try {
         let jsonBody: Record<string, unknown>
@@ -381,17 +376,20 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         setBusy(null)
       }
     },
-    [config, wallet, sessionMatches, withdrawUi, refreshBalance, voteLockedRaw]
+    [config, wallet, sessionMatches, withdrawUi, refreshBalance]
   )
 
-  let hasActiveVoteLock = false
   let voteLockedAmountIsZero = true
+  let noWithdrawable = false
   try {
-    hasActiveVoteLock = Boolean(voteLockedRaw && BigInt(voteLockedRaw) > 0n)
     voteLockedAmountIsZero = !voteLockedRaw || voteLockedRaw.trim() === '' || BigInt(voteLockedRaw) === 0n
+    noWithdrawable =
+      withdrawableRaw !== null &&
+      withdrawableRaw !== '' &&
+      BigInt(withdrawableRaw) === 0n
   } catch {
-    hasActiveVoteLock = false
     voteLockedAmountIsZero = true
+    noWithdrawable = false
   }
 
   if (configLoading) {
@@ -632,8 +630,8 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
                 <span className="tabular-nums font-medium text-emerald-200/95">
                   {withdrawableDecimal} {OWL_TICKER}
                 </span>{' '}
-                is stake not backing open votes — that is what you may return to your wallet below when withdrawal is
-                enabled (withdraw is paused while any amount stays locked above).
+                is stake not backing open votes — you can withdraw up to this amount below. The locked portion above
+                stays in voting stake until those proposals finish.
               </p>
             </div>
           ) : null}
@@ -669,10 +667,10 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
             <Label htmlFor="council-wd" className="text-xs text-muted-foreground">
               Withdraw to wallet
             </Label>
-            {sessionMatches && hasActiveVoteLock ? (
-              <p className="rounded-lg border border-amber-500/30 bg-amber-950/25 px-3 py-2 text-xs text-amber-100/95 leading-relaxed">
-                Your {OWL_TICKER} is locked because you have an active vote on an open proposal. Withdraw is unavailable
-                until that voting ends.
+            {sessionMatches && noWithdrawable && withdrawableDecimal !== null ? (
+              <p className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+                Nothing is available to withdraw right now (your full stake is committed to active votes, or your
+                balance is zero).
               </p>
             ) : null}
             <Input
@@ -682,14 +680,14 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
               placeholder="Amount"
               value={withdrawUi}
               onChange={(e) => setWithdrawUi(e.target.value)}
-              disabled={busy !== null || !sessionMatches || hasActiveVoteLock}
+              disabled={busy !== null || !sessionMatches || noWithdrawable}
             />
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 type="button"
                 variant="secondary"
                 className="min-h-[44px] flex-1 touch-manipulation"
-                disabled={busy !== null || !sessionMatches || hasActiveVoteLock}
+                disabled={busy !== null || !sessionMatches || noWithdrawable}
                 onClick={() => void withdraw(false)}
               >
                 {busy === 'wd' ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden /> : null}
@@ -699,7 +697,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
                 type="button"
                 variant="outline"
                 className="min-h-[44px] flex-1 touch-manipulation border-emerald-500/35"
-                disabled={busy !== null || !sessionMatches || hasActiveVoteLock}
+                disabled={busy !== null || !sessionMatches || noWithdrawable}
                 onClick={() => void withdraw(true)}
               >
                 {busy === 'wdAll' ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden /> : null}

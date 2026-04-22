@@ -1,30 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
-
-/** Pixels advanced per animation frame (~0.55 → ~33px/s at 60fps). */
-const PARTNER_CAROUSEL_AUTO_SCROLL_PX_PER_FRAME = 0.55
-
-function subscribeReducedMotion(onStoreChange: () => void) {
-  if (typeof window === 'undefined') return () => {}
-  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-  mq.addEventListener('change', onStoreChange)
-  return () => mq.removeEventListener('change', onStoreChange)
-}
-
-function getReducedMotionSnapshot() {
-  if (typeof window === 'undefined') return false
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
-function getReducedMotionServerSnapshot() {
-  return false
-}
 
 type Item = { raffle: Raffle; entries: Entry[] }
 
@@ -43,8 +24,9 @@ function mergeCarouselProps(prev: Item[], next: Item[]): Item[] {
 }
 
 /**
- * Featured partner raffles strip on /raffles (All tab): horizontal scroll with seamless
- * auto-advance loop. Respects prefers-reduced-motion; pauses on hover (mouse) or touch.
+ * Partner featured strip: CSS transform marquee (duplicated row + translate -50%),
+ * not scrollLeft — works consistently on mobile and desktop.
+ * Pause: `animation-play-state: paused` while user interacts.
  */
 export function PartnerRafflesCarousel({
   items,
@@ -56,14 +38,8 @@ export function PartnerRafflesCarousel({
   const [displayItems, setDisplayItems] = useState<Item[]>(items)
   const itemsRef = useRef(items)
   itemsRef.current = items
-  const stripRef = useRef<HTMLDivElement>(null)
-  const pauseAutoRef = useRef(false)
-  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const prefersReducedMotion = useSyncExternalStore(
-    subscribeReducedMotion,
-    getReducedMotionSnapshot,
-    getReducedMotionServerSnapshot
-  )
+  const [marqueePaused, setMarqueePaused] = useState(false)
+  const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const itemsKey = useMemo(
     () =>
@@ -136,55 +112,42 @@ export function PartnerRafflesCarousel({
 
   useEffect(() => {
     return () => {
-      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+      if (resumeAfterPointerRef.current) clearTimeout(resumeAfterPointerRef.current)
     }
   }, [])
 
-  /** Duplicate slides so we can reset scroll in the middle for a seamless loop. */
+  // New partner list / refresh: do not leave the strip stuck paused from a prior interaction.
+  useEffect(() => {
+    setMarqueePaused(false)
+    if (resumeAfterPointerRef.current) {
+      clearTimeout(resumeAfterPointerRef.current)
+      resumeAfterPointerRef.current = null
+    }
+  }, [itemsKey])
+
   const loopItems = useMemo(() => {
     if (displayItems.length === 0) return []
     return [...displayItems, ...displayItems]
   }, [displayItems])
 
-  useLayoutEffect(() => {
-    if (prefersReducedMotion || displayItems.length === 0) return
-
-    let raf = 0
-    let cancelled = false
-
-    const tick = () => {
-      if (cancelled) return
-      const strip = stripRef.current
-      if (!strip || pauseAutoRef.current) {
-        raf = requestAnimationFrame(tick)
-        return
-      }
-
-      strip.scrollLeft += PARTNER_CAROUSEL_AUTO_SCROLL_PX_PER_FRAME
-
-      const half = strip.scrollWidth / 2
-      if (half > 0 && strip.scrollLeft >= half - 0.5) {
-        strip.scrollLeft -= half
-      }
-
-      raf = requestAnimationFrame(tick)
+  const pauseMarquee = () => {
+    setMarqueePaused(true)
+    if (resumeAfterPointerRef.current) {
+      clearTimeout(resumeAfterPointerRef.current)
+      resumeAfterPointerRef.current = null
     }
-
-    raf = requestAnimationFrame(tick)
-
-    return () => {
-      cancelled = true
-      cancelAnimationFrame(raf)
-    }
-  }, [prefersReducedMotion, displayItems.length, itemsKey])
-
-  const scheduleResumeAfterInteraction = () => {
-    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-    resumeTimerRef.current = setTimeout(() => {
-      resumeTimerRef.current = null
-      pauseAutoRef.current = false
-    }, 3500)
   }
+
+  const scheduleResume = () => {
+    if (resumeAfterPointerRef.current) clearTimeout(resumeAfterPointerRef.current)
+    resumeAfterPointerRef.current = setTimeout(() => {
+      resumeAfterPointerRef.current = null
+      setMarqueePaused(false)
+    }, 3000)
+  }
+
+  const n = displayItems.length
+  const durationSec = Math.max(20, n * 8)
 
   if (items.length === 0) return null
 
@@ -201,7 +164,7 @@ export function PartnerRafflesCarousel({
           </h2>
         </div>
         <p className="text-sm text-muted-foreground sm:text-base">
-          Featured partner raffles (2% platform fee on tickets) · auto-scrolls · tap or drag to pause ·{' '}
+          Featured partner raffles (2% platform fee on tickets) · auto-scrolls · tap to pause ·{' '}
           <Link
             href="/partner-program"
             className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
@@ -210,50 +173,44 @@ export function PartnerRafflesCarousel({
           </Link>
         </p>
       </div>
-      {/* Scroll viewport must not be the flex row: inner `w-max` flex track forces scrollWidth > clientWidth so scrollLeft works reliably. */}
-      <div className="w-full min-w-0 max-w-full">
+      <div
+        className="partner-raffles-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden overflow-y-visible pt-4 pb-8 -mx-1 px-3 sm:pt-6 sm:pb-10 sm:px-5"
+        style={{ touchAction: 'manipulation' as const }}
+        onPointerDown={pauseMarquee}
+        onPointerUp={scheduleResume}
+        onPointerCancel={scheduleResume}
+        role="region"
+        aria-label="Featured partner raffles, auto-scrolling. Tap to pause."
+      >
         <div
-          ref={stripRef}
+          className="partner-raffles-marquee-track gap-4 sm:gap-5"
           dir="ltr"
-          className="w-full min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain pt-4 pb-8 scroll-pl-3 scroll-pr-3 -mx-1 px-3 sm:pt-6 sm:pb-10 sm:scroll-pl-5 sm:scroll-pr-5 sm:px-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{
-            touchAction: 'pan-x manipulation',
-            WebkitOverflowScrolling: 'touch',
-            scrollBehavior: 'auto',
-          }}
-          aria-label="Featured partner raffles carousel"
-          onPointerDown={() => {
-            pauseAutoRef.current = true
-            if (resumeTimerRef.current) {
-              clearTimeout(resumeTimerRef.current)
-              resumeTimerRef.current = null
-            }
-          }}
-          onPointerUp={() => {
-            scheduleResumeAfterInteraction()
-          }}
+          style={
+            {
+              animationPlayState: marqueePaused ? 'paused' : 'running',
+              '--partner-marquee-duration': `${durationSec}s`,
+            } as CSSProperties
+          }
         >
-          <div className="flex w-max min-w-0 flex-nowrap items-stretch gap-4 sm:gap-5">
-            {loopItems.map(({ raffle, entries }, i) => (
-              <div
-                key={`${raffle.id}-${i}`}
-                className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
-              >
-                {/* self-stretch + h-full chain: all slides match tallest row (avoid h-full on slide — breaks with auto-height scroller) */}
-                <div className="flex h-full min-h-0 w-full flex-1 flex-col">
-                  <RaffleCard
-                    raffle={raffle}
-                    entries={entries}
-                    size="small"
-                    section="active"
-                    serverNow={serverNow}
-                    priority={i === 0}
-                    isPartnerCommunity
-                  />
-                </div>
+          {loopItems.map(({ raffle, entries }, i) => (
+            <div
+              key={`${raffle.id}-${i}`}
+              className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
+            >
+              <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+                <RaffleCard
+                  raffle={raffle}
+                  entries={entries}
+                  size="small"
+                  section="active"
+                  serverNow={serverNow}
+                  priority={i === 0}
+                  isPartnerCommunity
+                  partnerFeaturedStrip
+                />
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>

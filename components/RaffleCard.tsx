@@ -24,6 +24,7 @@ import {
   getThemeAccentClasses,
   getThemeAccentColor,
   getThemeAccentRgbChannels,
+  partnerStripOuterGlowFromChannels,
   softOuterGlowFromChannels,
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
@@ -90,6 +91,8 @@ interface RaffleCardProps {
   serverNow?: Date
   /** Partner community creator (2% platform fee); show badge on card */
   isPartnerCommunity?: boolean
+  /** Featured partner marquee: softer rim + ambient glow so halos blend on dark backgrounds */
+  partnerFeaturedStrip?: boolean
 }
 
 export function RaffleCard({
@@ -102,6 +105,7 @@ export function RaffleCard({
   priority = false,
   serverNow,
   isPartnerCommunity = false,
+  partnerFeaturedStrip = false,
 }: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -270,13 +274,21 @@ export function RaffleCard({
   
   // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const borderStyle = isPendingDraft
+  const borderStyleBase = isPendingDraft
     ? { borderColor: '#f59e0b', boxShadow: softOuterGlowFromChannels('245 158 11') }
     : isFuture
-    ? { borderColor: '#ef4444', boxShadow: softOuterGlowFromChannels('239 68 68') }
-    : !isActive
-      ? { borderColor: '#3b82f6', boxShadow: softOuterGlowFromChannels('59 130 246') }
-      : baseBorderStyle
+      ? { borderColor: '#ef4444', boxShadow: softOuterGlowFromChannels('239 68 68') }
+      : !isActive
+        ? { borderColor: '#3b82f6', boxShadow: softOuterGlowFromChannels('59 130 246') }
+        : baseBorderStyle
+  const borderStyle =
+    partnerFeaturedStrip && isActive && !isPendingDraft && !isFuture
+      ? {
+          ...borderStyleBase,
+          borderColor: `rgb(${getThemeAccentRgbChannels(raffle.theme_accent)} / 0.82)`,
+          boxShadow: partnerStripOuterGlowFromChannels(getThemeAccentRgbChannels(raffle.theme_accent)),
+        }
+      : borderStyleBase
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const cardSurfaceStyle: CSSProperties =
     isWinner
