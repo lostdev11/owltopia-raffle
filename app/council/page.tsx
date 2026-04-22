@@ -16,11 +16,11 @@ import { getProposalTimeline } from '@/lib/council/proposal-status'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { isCouncilOwlEscrowVotingEnabled } from '@/lib/council/council-owl-escrow-keypair'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 export const metadata: Metadata = {
   title: `Owl Council | ${PLATFORM_NAME}`,
-  description:
-    'Proposals and votes for Owltopia — OWL-weighted voting; new ideas go live after team review.',
+  description: `Proposals and votes for Owltopia — ${OWL_TICKER}-weighted voting; new ideas go live after team review.`,
 }
 
 export const dynamic = 'force-dynamic'
@@ -62,7 +62,7 @@ export default async function CouncilPage({ searchParams }: CouncilPageProps) {
 
   return (
     <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-6xl">
-      <CouncilHero showEscrowStakeLink />
+      <CouncilHero />
 
       <div className="relative z-10 min-w-0">
         <CouncilOwlEscrowPanel sessionWallet={sessionWallet} />

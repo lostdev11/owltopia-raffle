@@ -1,13 +1,9 @@
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Coins, Vote } from 'lucide-react'
+import { Vote } from 'lucide-react'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
-type CouncilHeroProps = {
-  /** When council escrow voting is enabled in env, show a jump link so mobile users don’t skip the stake panel. */
-  showEscrowStakeLink?: boolean
-}
-
-export function CouncilHero({ showEscrowStakeLink = false }: CouncilHeroProps) {
+export function CouncilHero() {
   return (
     <section className="relative overflow-hidden rounded-2xl border border-green-500/25 bg-gradient-to-br from-emerald-950/40 via-background to-background px-4 py-10 sm:px-8 sm:py-14 mb-10 sm:mb-12">
       <div
@@ -25,7 +21,7 @@ export function CouncilHero({ showEscrowStakeLink = false }: CouncilHeroProps) {
         </h1>
         <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
           Propose and discuss what comes next for Owltopia. Eligible holders can submit ideas; the team reviews and
-          publishes them here. When a vote is open, your choice is counted in proportion to the OWL in your wallet.
+          publishes them here. When a vote is open, your choice is counted in proportion to the {OWL_TICKER} in your wallet.
         </p>
         <div className="pt-2 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-center items-stretch sm:items-center">
           <Button
@@ -38,19 +34,6 @@ export function CouncilHero({ showEscrowStakeLink = false }: CouncilHeroProps) {
               View active proposals
             </Link>
           </Button>
-          {showEscrowStakeLink ? (
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="min-h-[48px] touch-manipulation border-emerald-500/35 bg-emerald-950/20 hover:bg-emerald-950/35"
-            >
-              <Link href="#council-owl-escrow" className="inline-flex items-center justify-center gap-2">
-                <Coins className="h-4 w-4 shrink-0" aria-hidden />
-                OWL voting stake (escrow)
-              </Link>
-            </Button>
-          ) : null}
         </div>
       </div>
     </section>

@@ -178,24 +178,58 @@ export async function sumVoteTotalsForManyProposals(ids: string[]): Promise<Map<
   return map
 }
 
-export async function getOwlVoteForWallet(
+/** Single ballot row for a wallet on a proposal (for “My vote” UI). */
+export type OwlMyVoteRecord = {
+  voteChoice: OwlVoteChoice
+  /** Display string from DB voting_power (OWL-weighted). */
+  votingPowerDecimal: string
+  councilVoteUsedEscrow: boolean
+}
+
+export async function getOwlVoteRecordForWallet(
   proposalId: string,
   wallet: string
-): Promise<OwlVoteChoice | null> {
+): Promise<OwlMyVoteRecord | null> {
   const w = wallet.trim()
   if (!proposalId || !w) return null
 
   const { data, error } = await db()
     .from('owl_votes')
-    .select('vote_choice')
+    .select('vote_choice, voting_power, council_vote_used_escrow')
     .eq('proposal_id', proposalId)
     .eq('wallet_address', w)
     .maybeSingle()
 
   if (error || !data) return null
-  const c = (data as { vote_choice?: string }).vote_choice
-  if (c === 'yes' || c === 'no' || c === 'abstain') return c
-  return null
+  const row = data as {
+    vote_choice?: string
+    voting_power?: string | number | null
+    council_vote_used_escrow?: boolean | null
+  }
+  const c = row.vote_choice
+  if (c !== 'yes' && c !== 'no' && c !== 'abstain') return null
+
+  let votingPowerDecimal = '1'
+  if (row.voting_power !== undefined && row.voting_power !== null) {
+    votingPowerDecimal =
+      typeof row.voting_power === 'number'
+        ? String(row.voting_power)
+        : String(row.voting_power).trim() || '1'
+  }
+
+  return {
+    voteChoice: c,
+    votingPowerDecimal,
+    councilVoteUsedEscrow: row.council_vote_used_escrow === true,
+  }
+}
+
+export async function getOwlVoteForWallet(
+  proposalId: string,
+  wallet: string
+): Promise<OwlVoteChoice | null> {
+  const r = await getOwlVoteRecordForWallet(proposalId, wallet)
+  return r?.voteChoice ?? null
 }
 
 export async function insertOwlVote(params: {
@@ -204,6 +238,8 @@ export async function insertOwlVote(params: {
   voteChoice: OwlVoteChoice
   /** OWL-weighted amount (decimal string recommended for NUMERIC precision). */
   votingPower: number | string
+  /** When true, voting weight came from OWL in council escrow; locks that weight against withdrawal until voting ends. */
+  councilVoteUsedEscrow?: boolean
 }): Promise<{ ok: true } | { ok: false; code: 'duplicate' | 'error'; message: string }> {
   try {
     const admin = getSupabaseAdmin()
@@ -212,6 +248,7 @@ export async function insertOwlVote(params: {
       wallet_address: params.wallet.trim(),
       vote_choice: params.voteChoice,
       voting_power: params.votingPower,
+      council_vote_used_escrow: params.councilVoteUsedEscrow === true,
     })
     if (!error) return { ok: true }
 

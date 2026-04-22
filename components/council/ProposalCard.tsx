@@ -3,6 +3,7 @@ import type { OwlProposalRow } from '@/lib/db/owl-council'
 import { StatusBadge } from '@/components/council/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { ArrowRight } from 'lucide-react'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 function formatWhen(iso: string): string {
   try {
@@ -44,7 +45,7 @@ export function ProposalCard({ proposal, voteTotal }: ProposalCardProps) {
       </dl>
       {voteTotal !== undefined && voteTotal > 0 ? (
         <p className="text-xs text-muted-foreground">
-          OWL-weight total:{' '}
+          {OWL_TICKER}-weight total:{' '}
           <span className="text-foreground font-medium tabular-nums">
             {voteTotal.toLocaleString(undefined, { maximumFractionDigits: 4 })}
           </span>

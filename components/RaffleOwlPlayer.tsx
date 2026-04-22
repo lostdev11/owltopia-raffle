@@ -2,14 +2,12 @@
 
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSelectedLayoutSegments } from 'next/navigation'
 import { Loader2, Pause, Play } from 'lucide-react'
-import {
-  RAFFLE_AMBIENT_AUDIO_PATH,
-  RAFFLE_AMBIENT_TRACK_TITLE,
-} from '@/lib/raffle-ambient-audio'
+import { RAFFLE_AMBIENT_TRACK_TITLE } from '@/lib/raffle-ambient-audio'
+import { usePlatformMusic, useRegisterRaffleListOwlMusicUi } from '@/components/PlatformMusic'
+import { isPublicRafflesListRoute } from '@/lib/navigation/raffles-list-route'
 
-const DEFAULT_VOLUME = 0.32
 /** Fixed size for clamping and default placement (icon-only glass button). */
 const PLAYER_W = 56
 const PLAYER_H = 56
@@ -24,13 +22,6 @@ const EDGE = 12
 type Pos = { x: number; y: number }
 
 type SafeInsets = { bottom: number; right: number; left: number; top: number }
-
-/** Only the listings page `/raffles` (ignores trailing slash; query strings are not in pathname). */
-function isRafflesListPathname(pathname: string | null): boolean {
-  if (pathname == null) return false
-  const normalized = pathname.replace(/\/+$/, '') || '/'
-  return normalized === '/raffles'
-}
 
 function measureSafeInsets(): SafeInsets {
   if (typeof document === 'undefined' || typeof document.body === 'undefined') {
@@ -100,9 +91,18 @@ function getAudioContextCtor(): (typeof AudioContext) | null {
 
 export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
   const pathname = usePathname()
-  const onRafflesListPage = isRafflesListPathname(pathname)
+  const segments = useSelectedLayoutSegments()
+  const onRafflesListPage = isPublicRafflesListRoute(pathname, segments)
+  const { audioRef, isPlaying, loadError, play, pause } = usePlatformMusic()
+  const registerRaffleListOwlUi = useRegisterRaffleListOwlMusicUi()
 
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  /** Hide the global corner music button while this listing-page control is visible. */
+  useEffect(() => {
+    const showOwlChrome = Boolean(enabled && mounted && pos && onRafflesListPage)
+    registerRaffleListOwlUi(showOwlChrome)
+    return () => registerRaffleListOwlUi(false)
+  }, [enabled, mounted, pos, onRafflesListPage, registerRaffleListOwlUi])
+
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -117,12 +117,11 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
   const [pos, setPos] = useState<Pos | null>(null)
   const dragRef = useRef<DragSession | null>(null)
 
-  const [tabVisible, setTabVisible] = useState(
-    () => typeof document !== 'undefined' && document.visibilityState === 'visible'
-  )
-  const [loadError, setLoadError] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
   const [playPending, setPlayPending] = useState(false)
+
+  useEffect(() => {
+    if (isPlaying) setPlayPending(false)
+  }, [isPlaying])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document.body === 'undefined') return
@@ -142,74 +141,6 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
     setMounted(true)
     setPos(next)
   }, [])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const onVis = () => setTabVisible(document.visibilityState === 'visible')
-    document.addEventListener('visibilitychange', onVis)
-    return () => document.removeEventListener('visibilitychange', onVis)
-  }, [])
-
-  const syncPlaying = useCallback(() => {
-    const a = audioRef.current
-    setIsPlaying(!!a && !a.paused && !a.ended)
-  }, [])
-
-  useEffect(() => {
-    const a = audioRef.current
-    if (!a) return
-    if (!enabled || !tabVisible || !onRafflesListPage) {
-      a.pause()
-      syncPlaying()
-    }
-  }, [enabled, onRafflesListPage, tabVisible, syncPlaying])
-
-  /** Re-bind when `<audio>` exists (first paint had `return null` so `[]` never saw the element). */
-  useEffect(() => {
-    if (!mounted || !pos) return
-    const a = audioRef.current
-    if (!a) return
-    const onPlay = () => {
-      setIsPlaying(true)
-      setPlayPending(false)
-    }
-    const onPause = () => {
-      setIsPlaying(false)
-      setPlayPending(false)
-    }
-    const onPlaying = () => setPlayPending(false)
-    a.addEventListener('play', onPlay)
-    a.addEventListener('playing', onPlaying)
-    a.addEventListener('pause', onPause)
-    return () => {
-      a.removeEventListener('play', onPlay)
-      a.removeEventListener('playing', onPlaying)
-      a.removeEventListener('pause', onPause)
-    }
-  }, [mounted, pos])
-
-  /** Try to start on `/raffles` (often blocked on mobile until a gesture — then Play still works). */
-  useEffect(() => {
-    if (!mounted || !onRafflesListPage || !enabled || loadError || !tabVisible) return
-    const a = audioRef.current
-    if (!a) return
-    a.loop = true
-    a.volume = DEFAULT_VOLUME
-    let cancelled = false
-    const p = a.play()
-    if (p !== undefined) {
-      p
-        .then(() => {
-          if (!cancelled) syncPlaying()
-        })
-        .catch(() => {
-          /* autoplay blocked — ignore */
-        })
-    }
-    return () => {
-      cancelled = true
-    }
-  }, [mounted, onRafflesListPage, enabled, loadError, tabVisible, syncPlaying])
 
   const persistPos = useCallback((p: Pos) => {
     safeRef.current = measureSafeInsets()
@@ -352,32 +283,30 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
     }
   }, [stopBeatGlowLoop])
 
-  const togglePlayPause = useCallback(() => {
+  const togglePlayPause = useCallback(async () => {
+    if (loadError) return
     const a = audioRef.current
-    if (!a || loadError) return
-    a.loop = true
-    a.volume = DEFAULT_VOLUME
+    if (!a) return
     if (a.paused) {
       setPlayPending(true)
-      void a
-        .play()
-        .then(async () => {
-          setPlayPending(false)
-          syncPlaying()
-          if (ensureWebAudioGraph(a)) {
-            try {
-              await audioCtxRef.current?.resume()
-            } catch {
-              /* ignore */
-            }
-          }
-        })
-        .catch(() => setPlayPending(false))
+      await play()
+      const el = audioRef.current
+      if (!el || el.paused) {
+        setPlayPending(false)
+        return
+      }
+      if (ensureWebAudioGraph(el)) {
+        try {
+          await audioCtxRef.current?.resume()
+        } catch {
+          /* ignore */
+        }
+      }
     } else {
-      a.pause()
       setPlayPending(false)
+      pause()
     }
-  }, [ensureWebAudioGraph, loadError, syncPlaying])
+  }, [audioRef, ensureWebAudioGraph, loadError, pause, play])
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -456,21 +385,6 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
 
   const content = (
     <>
-      <audio
-        ref={audioRef}
-        src={RAFFLE_AMBIENT_AUDIO_PATH}
-        preload="metadata"
-        playsInline
-        className="hidden"
-        onError={() => {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(
-              '[RaffleOwlPlayer] Failed to load ambient track. Add your WAV at public/audio/owltopia-move-in-silence.wav (see lib/raffle-ambient-audio.ts).'
-            )
-          }
-          setLoadError(true)
-        }}
-      />
       <button
         ref={buttonRef}
         type="button"

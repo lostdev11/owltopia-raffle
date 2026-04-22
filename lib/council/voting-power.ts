@@ -13,7 +13,7 @@ export async function resolveVotingPowerForOwlVote(
   wallet: string,
   _proposal: OwlProposalRow
 ): Promise<
-  | { ok: true; weightDecimal: string; weightApprox: number }
+  | { ok: true; weightDecimal: string; weightApprox: number; usedCouncilEscrow: boolean }
   | { ok: false; code: 'no_owl' | 'owl_disabled' | 'invalid_wallet' | 'rpc_error'; message: string }
 > {
   const w = wallet.trim()
@@ -37,7 +37,7 @@ export async function resolveVotingPowerForOwlVote(
     if (!Number.isFinite(weightApprox)) {
       return { ok: false, code: 'rpc_error', message: 'Could not compute voting weight.' }
     }
-    return { ok: true, weightDecimal, weightApprox }
+    return { ok: true, weightDecimal, weightApprox, usedCouncilEscrow: true }
   }
 
   const measured = await getOwlRawBalanceCreditAware(w)
@@ -65,5 +65,5 @@ export async function resolveVotingPowerForOwlVote(
     return { ok: false, code: 'rpc_error', message: 'Could not compute voting weight.' }
   }
 
-  return { ok: true, weightDecimal, weightApprox }
+  return { ok: true, weightDecimal, weightApprox, usedCouncilEscrow: false }
 }

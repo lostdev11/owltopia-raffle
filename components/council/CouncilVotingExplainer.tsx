@@ -1,5 +1,7 @@
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
+
 /**
- * Short explainer for Owl Council voting (weights and escrow tip).
+ * Short explainer for Owl Council voting (weights and voting stake tip).
  */
 export function CouncilVotingExplainer({ escrowVotingEnabled = false }: { escrowVotingEnabled?: boolean }) {
   return (
@@ -12,18 +14,18 @@ export function CouncilVotingExplainer({ escrowVotingEnabled = false }: { escrow
         casts yes, no, or abstain, and totals weight your{' '}
         {escrowVotingEnabled ? (
           <>
-            <span className="text-foreground font-medium">OWL held in the Council escrow</span> (send OWL via the escrow
+            <span className="text-foreground font-medium">{OWL_TICKER} credited in voting stake</span> (add {OWL_TICKER} via the voting stake
             panel on this page).
           </>
         ) : (
           <>
-            <span className="text-foreground font-medium">OWL balance</span>.
+            <span className="text-foreground font-medium">{OWL_TICKER} balance</span>.
           </>
         )}
       </p>
       {escrowVotingEnabled ? (
         <p className="mt-3">
-          <span className="text-foreground font-medium">Escrow:</span> OWL stays in the Council pool until you
+          <span className="text-foreground font-medium">Voting stake:</span> {OWL_TICKER} stays in the Council pool until you
           withdraw it; you can leave it there to vote on later proposals without depositing again.
         </p>
       ) : null}

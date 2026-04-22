@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { isCouncilOwlEscrowVotingEnabled } from '@/lib/council/council-owl-escrow-keypair'
-import { getOwlCouncilEscrowBalanceRaw } from '@/lib/db/owl-council-escrow'
+import {
+  getOwlCouncilEscrowBalanceRaw,
+  getOwlCouncilEscrowVoteLockedRaw,
+  listOwlCouncilEscrowVoteLocksForWallet,
+} from '@/lib/db/owl-council-escrow'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { owlRawToDecimalString } from '@/lib/council/owl-amount-format'
 
@@ -36,12 +40,30 @@ export async function GET(request: NextRequest) {
     }
 
     const raw = await getOwlCouncilEscrowBalanceRaw(session.wallet)
+    const lockedRaw = await getOwlCouncilEscrowVoteLockedRaw(session.wallet, owl.decimals)
+    const withdrawableRaw = raw > lockedRaw ? raw - lockedRaw : 0n
     const balanceDecimal = owlRawToDecimalString(raw, owl.decimals)
+    const lockedDecimal = owlRawToDecimalString(lockedRaw, owl.decimals)
+    const withdrawableDecimal = owlRawToDecimalString(withdrawableRaw, owl.decimals)
+
+    const voteLockBreakdown = (await listOwlCouncilEscrowVoteLocksForWallet(session.wallet, owl.decimals)).map(
+      (r) => ({
+        proposalId: r.proposalId,
+        slug: r.slug,
+        title: r.title,
+        lockedDecimal: r.lockedDecimal,
+      })
+    )
 
     return NextResponse.json({
       enabled: true,
       balanceRaw: raw.toString(),
       balanceDecimal,
+      voteLockedRaw: lockedRaw.toString(),
+      voteLockedDecimal: lockedDecimal,
+      withdrawableRaw: withdrawableRaw.toString(),
+      withdrawableDecimal,
+      voteLockBreakdown,
     })
   } catch (error) {
     console.error('[api/council/escrow/balance] GET:', error)

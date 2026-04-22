@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { councilEscrowWithdrawBody, parseOr400 } from '@/lib/validations'
 import { isCouncilOwlEscrowVotingEnabled } from '@/lib/council/council-owl-escrow-keypair'
-import { getOwlCouncilEscrowBalanceRaw, rpcFinalizeCouncilEscrowWithdrawal } from '@/lib/db/owl-council-escrow'
+import {
+  getOwlCouncilEscrowBalanceRaw,
+  getOwlCouncilEscrowVoteLockedRaw,
+  rpcFinalizeCouncilEscrowWithdrawal,
+} from '@/lib/db/owl-council-escrow'
 import { transferCouncilOwlFromEscrowToWallet } from '@/lib/council/council-owl-escrow-withdraw'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { owlUiToRawBigint } from '@/lib/council/owl-amount-format'
@@ -59,18 +63,39 @@ export async function POST(request: NextRequest) {
     }
 
     const bal = await getOwlCouncilEscrowBalanceRaw(wallet)
+    const locked = await getOwlCouncilEscrowVoteLockedRaw(wallet, owl.decimals)
+    const withdrawable = bal > locked ? bal - locked : 0n
+
     let amountRaw = 0n
     if (parsed.data.withdrawAll) {
-      amountRaw = bal
+      amountRaw = withdrawable
     } else if (parsed.data.amountUi !== undefined) {
       amountRaw = owlUiToRawBigint(parsed.data.amountUi, owl.decimals)
     }
 
     if (amountRaw <= 0n) {
+      if (bal > 0n && withdrawable === 0n) {
+        return NextResponse.json(
+          {
+            error:
+              'Your escrow OWL is committed to active proposal votes. You can withdraw after those voting windows end, or any amount above the committed voting weight.',
+          },
+          { status: 403 }
+        )
+      }
       return NextResponse.json({ error: 'Withdraw amount must be positive.' }, { status: 400 })
     }
     if (amountRaw > bal) {
       return NextResponse.json({ error: 'Amount exceeds your credited council escrow balance.' }, { status: 400 })
+    }
+    if (amountRaw > withdrawable) {
+      return NextResponse.json(
+        {
+          error:
+            'That amount includes OWL committed to active proposal votes. Reduce the withdrawal or wait until voting ends.',
+        },
+        { status: 403 }
+      )
     }
 
     const out = await transferCouncilOwlFromEscrowToWallet({
@@ -81,11 +106,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: out.error }, { status: 502 })
     }
 
-    const fin = await rpcFinalizeCouncilEscrowWithdrawal(wallet, amountRaw, out.signature)
+    const fin = await rpcFinalizeCouncilEscrowWithdrawal(wallet, amountRaw, out.signature, owl.decimals)
     if (!fin.ok) {
       console.error(
         '[api/council/escrow/withdraw] CRITICAL: on-chain withdraw succeeded but ledger finalize failed',
-        { wallet, amountRaw: amountRaw.toString(), signature: out.signature, error: fin.message }
+        {
+          wallet,
+          amountRaw: amountRaw.toString(),
+          signature: out.signature,
+          error: fin.message,
+          code: fin.code,
+        }
       )
       return NextResponse.json(
         {

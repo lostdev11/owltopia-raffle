@@ -2,15 +2,17 @@
 
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import type { OwlProposalRow, OwlVoteTotals } from '@/lib/db/owl-council'
+import type { OwlMyVoteRecord, OwlProposalRow, OwlVoteTotals } from '@/lib/db/owl-council'
 import type { OwlVoteChoice } from '@/lib/council/vote-types'
 import { MarkdownContent } from '@/components/MarkdownContent'
 import { StatusBadge } from '@/components/council/StatusBadge'
 import { CountdownBlock } from '@/components/council/CountdownBlock'
 import { ResultsBar } from '@/components/council/ResultsBar'
 import { CouncilOwlEscrowPanel } from '@/components/council/CouncilOwlEscrowPanel'
+import { ProposalMyVoteCard } from '@/components/council/ProposalMyVoteCard'
 import { VotePanel } from '@/components/council/VotePanel'
 import { isCouncilVotingOpen } from '@/lib/council/proposal-status'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 function formatWhen(iso: string): string {
   try {
@@ -28,6 +30,7 @@ type ProposalDetailClientProps = {
   voteTotals: OwlVoteTotals
   sessionWallet: string | null
   initialMyVote: OwlVoteChoice | null
+  initialMyVoteRecord: OwlMyVoteRecord | null
   councilEscrowVotingEnabled: boolean
 }
 
@@ -36,6 +39,7 @@ export function ProposalDetailClient({
   voteTotals,
   sessionWallet,
   initialMyVote,
+  initialMyVoteRecord,
   councilEscrowVotingEnabled,
 }: ProposalDetailClientProps) {
   const votingOpen = isCouncilVotingOpen(proposal)
@@ -69,6 +73,13 @@ export function ProposalDetailClient({
         </p>
       </header>
 
+      <ProposalMyVoteCard
+        proposal={proposal}
+        sessionWallet={sessionWallet}
+        initialRecord={initialMyVoteRecord}
+        councilEscrowVotingEnabled={councilEscrowVotingEnabled}
+      />
+
       {showCountdown ? <div className="mt-6">
         <CountdownBlock endTimeIso={proposal.end_time} />
       </div> : null}
@@ -84,7 +95,7 @@ export function ProposalDetailClient({
 
       <section className="mt-8 space-y-3" aria-labelledby="results-heading">
         <h2 id="results-heading" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          {votingOpen ? 'Tallies (OWL-weighted, live)' : 'Results (OWL-weighted)'}
+          {votingOpen ? `Tallies (${OWL_TICKER}-weighted, live)` : `Results (${OWL_TICKER}-weighted)`}
         </h2>
         <div className="rounded-xl border border-border/60 bg-card/30 p-4 sm:p-5">
           <ResultsBar totals={voteTotals} />

@@ -31,7 +31,6 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
-import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import {
   ReferralComplimentaryHint,
   clearReferralComplimentarySessionCache,
@@ -1138,15 +1137,6 @@ export function RaffleCard({
                 </span>
               )}
             </div>
-            {/* Raffle description — single secondary text below title */}
-            {raffle.description && (
-              <p
-                className="text-[11px] text-muted-foreground line-clamp-2 sm:line-clamp-3 mb-1 sm:mb-1 mt-0 break-words min-w-0 leading-snug"
-                title={raffle.description}
-              >
-                <RaffleDescriptionText raffle={raffle} />
-              </p>
-            )}
                 </LinkifiedTextInsideLinkProvider>
               </Link>
               <div className="relative z-10 mt-auto flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 px-1.5 pb-1.5 pt-0.5 sm:px-2 sm:pb-2 sm:pt-1 [&_a]:relative [&_a]:z-20">
@@ -1246,14 +1236,12 @@ export function RaffleCard({
   const sizeClasses = {
     medium: {
       title: 'text-lg',
-      description: 'text-sm line-clamp-2',
       content: 'text-sm',
       footer: 'text-xs',
       badge: 'text-xs',
     },
     large: {
       title: 'text-xl',
-      description: 'text-base line-clamp-2',
       content: 'text-base',
       footer: 'text-sm',
       badge: 'text-sm',
@@ -1349,7 +1337,7 @@ export function RaffleCard({
               )}
               {/* Metadata overlay on image */}
               <div 
-                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-100 transition-opacity z-10 cursor-pointer"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1357,14 +1345,7 @@ export function RaffleCard({
                 }}
               >
                 <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      {raffle.description && (
-                        <p className={`${classes.description} text-white/90 line-clamp-3`}>
-                          <RaffleDescriptionText raffle={raffle} />
-                        </p>
-                      )}
-                    </div>
+                  <div className="flex justify-end mb-2">
                     <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
                       {showHolderBadge && (
                         <span

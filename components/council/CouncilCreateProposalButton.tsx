@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Loader2, PlusCircle } from 'lucide-react'
 import { MIN_OWL_TO_CREATE_PROPOSAL } from '@/lib/council/owl-proposal-rules'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 /**
  * Uses 7-day cached OWL snapshot via GET /api/council/owl-eligibility (refreshes when stale).
@@ -62,14 +63,14 @@ export function CouncilCreateProposalButton() {
     !loading
 
   const hint = !connected
-    ? `Connect a wallet to check the ${MIN_OWL_TO_CREATE_PROPOSAL} OWL requirement (snapshot refreshes about every 7 days).`
+    ? `Connect a wallet to check the ${MIN_OWL_TO_CREATE_PROPOSAL} ${OWL_TICKER} requirement (snapshot refreshes about every 7 days).`
     : loading
-      ? 'Checking OWL balance snapshot…'
+      ? `Checking ${OWL_TICKER} balance snapshot…`
       : !owlConfigured
-        ? 'OWL token is not configured on this deployment.'
+        ? `${OWL_TICKER} is not configured on this deployment.`
         : eligible === false
-          ? `You need at least ${MIN_OWL_TO_CREATE_PROPOSAL} OWL to create a proposal (last snapshot may be up to 7 days old).`
-          : 'Create a proposal (10+ OWL and sign-in required on the next page).'
+          ? `You need at least ${MIN_OWL_TO_CREATE_PROPOSAL} ${OWL_TICKER} to create a proposal (last snapshot may be up to 7 days old).`
+          : `Create a proposal (10+ ${OWL_TICKER} and sign-in required on the next page).`
 
   return (
     <div className="flex flex-col items-center gap-3 mb-10 sm:mb-12 max-w-lg mx-auto text-center px-2">

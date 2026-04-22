@@ -75,6 +75,7 @@ export async function POST(
       wallet: session.wallet,
       voteChoice: parsed.data.vote_choice,
       votingPower: powerRes.weightDecimal,
+      councilVoteUsedEscrow: powerRes.usedCouncilEscrow,
     })
 
     if (!result.ok) {

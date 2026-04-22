@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import {
-  getOwlVoteForWallet,
+  getOwlVoteRecordForWallet,
   getPublishedOwlProposalBySlug,
   sumVoteTotalsForProposal,
 } from '@/lib/db/owl-council'
@@ -39,8 +39,10 @@ export default async function CouncilProposalPage({ params }: Props) {
   const session = parseSessionCookieValue(raw)
   const sessionWallet = session?.wallet ?? null
 
-  const initialMyVote =
-    sessionWallet ? await getOwlVoteForWallet(proposal.id, sessionWallet) : null
+  const initialMyVoteRecord =
+    sessionWallet ? await getOwlVoteRecordForWallet(proposal.id, sessionWallet) : null
+
+  const initialMyVote = initialMyVoteRecord?.voteChoice ?? null
 
   return (
     <ProposalDetailClient
@@ -48,6 +50,7 @@ export default async function CouncilProposalPage({ params }: Props) {
       voteTotals={voteTotals}
       sessionWallet={sessionWallet}
       initialMyVote={initialMyVote}
+      initialMyVoteRecord={initialMyVoteRecord}
       councilEscrowVotingEnabled={isCouncilOwlEscrowVotingEnabled()}
     />
   )

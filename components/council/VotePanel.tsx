@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { OwlProposalRow } from '@/lib/db/owl-council'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 import type { OwlVoteChoice } from '@/lib/council/vote-types'
 import { isCouncilVotingOpen } from '@/lib/council/proposal-status'
 
@@ -17,7 +18,7 @@ type VotePanelProps = {
   slug: string
   sessionWallet: string | null
   initialMyVote: OwlVoteChoice | null
-  /** When true, copy explains council OWL escrow voting (server env). */
+  /** When true, copy explains council OWL voting stake (server env). */
   escrowVotingEnabled?: boolean
 }
 
@@ -120,10 +121,17 @@ export function VotePanel({
 
   if (myVote) {
     return (
-      <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.06] p-4 sm:p-5">
-        <p className="text-sm font-medium text-emerald-100">Your vote</p>
-        <p className="mt-1 text-lg capitalize text-theme-prime">{myVote}</p>
-        <p className="mt-2 text-xs text-muted-foreground">Votes cannot be changed in MVP.</p>
+      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 sm:p-5">
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Your ballot is on file. See the{' '}
+          <a
+            href="#proposal-my-vote"
+            className="font-medium text-emerald-100 underline-offset-2 hover:underline touch-manipulation"
+          >
+            My vote
+          </a>{' '}
+          section for your choice and weight.
+        </p>
       </div>
     )
   }
@@ -146,14 +154,14 @@ export function VotePanel({
         {escrowVotingEnabled ? (
           <>
             {' '}
-            Vote weight equals the OWL you have credited in{' '}
-            <strong className="text-foreground font-medium">Council escrow</strong> (use the escrow panel on this
-            page). OWL stays there for future votes until you withdraw.
+            Vote weight equals the {OWL_TICKER} you have credited in{' '}
+            <strong className="text-foreground font-medium">voting stake</strong> (use the voting stake panel on this
+            page). {OWL_TICKER} stays there for future votes until you withdraw.
           </>
         ) : (
           <>
             {' '}
-            Vote weight equals your OWL balance (cached when possible). Tallies aggregate OWL-weight across Yes / No /
+            Vote weight equals your {OWL_TICKER} balance (cached when possible). Tallies aggregate {OWL_TICKER}-weight across Yes / No /
             Abstain.
           </>
         )}

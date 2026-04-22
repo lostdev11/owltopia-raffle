@@ -1,4 +1,5 @@
 import type { OwlVoteTotals } from '@/lib/db/owl-council'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 export function ResultsBar({ totals }: { totals: OwlVoteTotals }) {
   const y = totals.yes
@@ -13,7 +14,7 @@ export function ResultsBar({ totals }: { totals: OwlVoteTotals }) {
       <ResultRow label="No" value={n} pct={pct(n)} barClass="bg-rose-500/70" />
       <ResultRow label="Abstain" value={a} pct={pct(a)} barClass="bg-muted-foreground/50" />
       <p className="text-xs text-muted-foreground tabular-nums">
-        Total OWL-weight: {sum.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+        Total {OWL_TICKER}-weight: {sum.toLocaleString(undefined, { maximumFractionDigits: 4 })}
       </p>
     </div>
   )

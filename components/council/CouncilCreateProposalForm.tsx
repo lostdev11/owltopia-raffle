@@ -16,6 +16,7 @@ import {
   MAX_COUNCIL_PROPOSAL_DURATION_DAYS,
   MIN_OWL_TO_CREATE_PROPOSAL,
 } from '@/lib/council/owl-proposal-rules'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
 const HEADER = 'X-Connected-Wallet'
 
@@ -150,7 +151,7 @@ export function CouncilCreateProposalForm() {
         <CardHeader>
           <CardTitle className="text-lg">Create a proposal</CardTitle>
           <CardDescription>
-            For OWL holders with at least {MIN_OWL_TO_CREATE_PROPOSAL} OWL. The voting window (start → end) can be at
+            For {OWL_TICKER} holders with at least {MIN_OWL_TO_CREATE_PROPOSAL} {OWL_TICKER}. The voting window (start → end) can be at
             most {MAX_COUNCIL_PROPOSAL_DURATION_DAYS} days. Submissions stay private until moderators in Owl Vision
             review and activate them — then they appear on Owl Council for voting.
           </CardDescription>
