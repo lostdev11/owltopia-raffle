@@ -160,9 +160,9 @@ export function RafflePromoPngButton({
       ctx.stroke()
       ctx.restore()
 
-      const imageBox = { x: 744, y: 88, w: 328, h: 500 }
+      const imageBox = { x: 716, y: 160, w: 356, h: 356 }
       const contentX = 96
-      const contentMaxW = 590
+      const contentMaxW = 560
 
       ctx.save()
       roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, 20)
@@ -196,14 +196,10 @@ export function RafflePromoPngButton({
       ctx.fillRect(imageBox.x, imageBox.y, imageBox.w, imageBox.h)
       ctx.restore()
 
-      ctx.fillStyle = '#67e8f9'
-      ctx.font = '600 24px Inter, system-ui, sans-serif'
-      ctx.fillText('OWLTOPIA', contentX, 112)
-
       ctx.fillStyle = '#f8fafc'
       ctx.font = '700 56px Inter, system-ui, sans-serif'
-      const lineCount = drawWrappedText(ctx, safeTitle, contentX, 198, contentMaxW, 66, 3)
-      const infoY = 198 + lineCount * 66 + 36
+      const lineCount = drawWrappedText(ctx, safeTitle, contentX, 178, contentMaxW, 66, 3)
+      const infoY = 178 + lineCount * 66 + 36
 
       ctx.fillStyle = '#cbd5e1'
       ctx.font = '500 29px Inter, system-ui, sans-serif'
@@ -216,6 +212,30 @@ export function RafflePromoPngButton({
       ctx.fillStyle = '#94a3b8'
       ctx.font = '500 22px Inter, system-ui, sans-serif'
       ctx.fillText(compactUrl, contentX, footerY)
+
+      // Professional brand lockup badge (bottom-left)
+      const badgeText = 'LIVE ON OWLTOPIA'
+      ctx.font = '700 16px Inter, system-ui, sans-serif'
+      const badgePaddingX = 16
+      const badgeH = 34
+      const badgeW = Math.ceil(ctx.measureText(badgeText).width + badgePaddingX * 2)
+      const badgeX = contentX
+      const badgeY = footerY - 89
+      ctx.save()
+      roundRectPath(ctx, badgeX, badgeY, badgeW, badgeH, 999)
+      const badgeFill = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY)
+      badgeFill.addColorStop(0, 'rgba(34, 211, 238, 0.22)')
+      badgeFill.addColorStop(1, 'rgba(56, 189, 248, 0.16)')
+      ctx.fillStyle = badgeFill
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(103, 232, 249, 0.52)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.restore()
+      ctx.fillStyle = '#a5f3fc'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(badgeText, badgeX + badgePaddingX, badgeY + badgeH / 2 + 0.5)
+      ctx.textBaseline = 'alphabetic'
 
       const fileSlug = slug.trim() || 'raffle'
       const fileName = `${fileSlug}-x-card.png`
