@@ -104,6 +104,10 @@ export function RafflePromoPngButton({
     window.setTimeout(() => setMessage(null), 2200)
   }
 
+  const isLikelyMobile = () =>
+    (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
+    (typeof window.matchMedia === 'function' && window.matchMedia('(hover: none), (pointer: coarse)').matches)
+
   const onGenerate = async () => {
     if (typeof window === 'undefined') return
     setBusy(true)
@@ -213,15 +217,56 @@ export function RafflePromoPngButton({
       ctx.font = '500 22px Inter, system-ui, sans-serif'
       ctx.fillText(compactUrl, contentX, footerY)
 
-      const dataUrl = canvas.toDataURL('image/png')
-      const download = document.createElement('a')
       const fileSlug = slug.trim() || 'raffle'
-      download.href = dataUrl
-      download.download = `${fileSlug}-x-card.png`
-      document.body.appendChild(download)
-      download.click()
-      download.remove()
-      setMessage('PNG downloaded')
+      const fileName = `${fileSlug}-x-card.png`
+      const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('Could not create PNG blob'))
+        }, 'image/png')
+      })
+
+      const nav = typeof navigator !== 'undefined' ? navigator : null
+      const shareCapable = !!nav && typeof nav.share === 'function'
+      const canShareFile =
+        shareCapable &&
+        typeof nav.canShare === 'function' &&
+        nav.canShare({
+          files: [new File([pngBlob], fileName, { type: 'image/png' })],
+        })
+
+      if (canShareFile) {
+        try {
+          await nav.share({
+            title: safeTitle,
+            text: 'Save this PNG and post it on X',
+            files: [new File([pngBlob], fileName, { type: 'image/png' })],
+          })
+          setMessage('Use Save Image in the share sheet')
+          return
+        } catch (shareErr) {
+          if (shareErr instanceof DOMException && shareErr.name === 'AbortError') {
+            setMessage('Save cancelled')
+            return
+          }
+        }
+      }
+
+      const blobUrl = window.URL.createObjectURL(pngBlob)
+      if (isLikelyMobile()) {
+        window.open(blobUrl, '_blank', 'noopener,noreferrer')
+        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000)
+        setMessage('Image opened - long-press to save')
+      } else {
+        const download = document.createElement('a')
+        download.href = blobUrl
+        download.download = fileName
+        document.body.appendChild(download)
+        download.click()
+        download.remove()
+        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10_000)
+        setMessage('PNG downloaded')
+      }
     } catch {
       setMessage('Could not generate PNG')
     } finally {
