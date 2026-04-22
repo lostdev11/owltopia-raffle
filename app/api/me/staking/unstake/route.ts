@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { executeUnstake } from '@/lib/nesting/service'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -13,7 +13,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()

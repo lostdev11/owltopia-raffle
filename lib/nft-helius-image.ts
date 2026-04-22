@@ -9,12 +9,31 @@ export function pickImageFromHeliusAsset(result: unknown): string | null {
   const content = r.content as Record<string, unknown> | undefined
   if (!content) return null
 
+  const pickFromPropertiesFiles = (metadata: Record<string, unknown> | undefined): string | null => {
+    const props = metadata?.properties as Record<string, unknown> | undefined
+    const files = props?.files as Array<{ uri?: string; type?: string }> | undefined
+    if (!Array.isArray(files)) return null
+    // Prefer explicit image mime; else first usable uri (Metaplex metadata pattern).
+    for (const entry of files) {
+      const t = (entry?.type ?? '').toLowerCase()
+      const u = entry?.uri?.trim()
+      if (!u) continue
+      if (t.startsWith('image/')) return u
+    }
+    const firstUri = files.find((f) => typeof f?.uri === 'string' && f.uri.trim())?.uri?.trim()
+    return firstUri ?? null
+  }
+
   const files = content.files as Array<{ uri?: string; cdn_uri?: string }> | undefined
   const first = files?.[0]
   const fromFile = first?.uri ?? first?.cdn_uri
   if (typeof fromFile === 'string' && fromFile.trim()) return fromFile.trim()
 
   const metadata = content.metadata as Record<string, unknown> | undefined
+
+  const fromPropFiles = pickFromPropertiesFiles(metadata)
+  if (fromPropFiles) return fromPropFiles
+
   const metaImg = metadata?.image
   if (typeof metaImg === 'string' && metaImg.trim()) return metaImg.trim()
   if (metaImg && typeof metaImg === 'object' && metaImg !== null) {

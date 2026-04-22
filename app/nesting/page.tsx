@@ -1,5 +1,9 @@
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { listActiveStakingPools } from '@/lib/db/staking-pools'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { NestingLandingClient } from '@/components/nesting/NestingLandingClient'
 import {
   PLATFORM_NAME,
@@ -37,6 +41,12 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic'
 
 export default async function NestingPage() {
+  const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
+  const role = session ? await getAdminRole(session.wallet) : null
+  if (!role) {
+    redirect('/')
+  }
+
   const pools = await listActiveStakingPools()
   return <NestingLandingClient initialPools={pools} />
 }

@@ -16,10 +16,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Gift, Loader2, Users } from 'lucide-react'
+import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 
 type PublicInfo = {
   id: string
   title: string
+  nft_mint_address: string
   description: string | null
   access_gate: string
   status: string
@@ -67,6 +69,10 @@ export default function CommunityGiveawayPage() {
   const [needsSignIn, setNeedsSignIn] = useState(false)
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
+  const [nftImageAttemptChain, setNftImageAttemptChain] = useState<string[]>([])
+  const [nftImageAttemptIdx, setNftImageAttemptIdx] = useState(0)
+  /** Starts true so the first paint after load shows a spinner (not a placeholder) when resolving metadata. */
+  const [nftImageLoading, setNftImageLoading] = useState(true)
 
   const loadPublic = useCallback(async () => {
     if (!id) return
@@ -126,6 +132,38 @@ export default function CommunityGiveawayPage() {
   useEffect(() => {
     void loadStatus()
   }, [loadStatus])
+
+  useEffect(() => {
+    let cancelled = false
+    const mint = info?.nft_mint_address?.trim()
+    if (!mint) {
+      setNftImageAttemptChain([])
+      setNftImageAttemptIdx(0)
+      setNftImageLoading(false)
+      return
+    }
+    setNftImageLoading(true)
+    setNftImageAttemptIdx(0)
+    setNftImageAttemptChain([])
+    fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { image?: string | null } | null) => {
+        if (cancelled) return
+        const raw = json?.image?.trim()
+        if (!raw) {
+          setNftImageAttemptChain([])
+          return
+        }
+        setNftImageAttemptChain(buildRaffleImageAttemptChain(raw, null))
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setNftImageLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [info?.nft_mint_address])
 
   const handleSignIn = useCallback(async () => {
     if (!publicKey || !signMessage) {
@@ -279,7 +317,34 @@ export default function CommunityGiveawayPage() {
 
   return (
     <main className="container mx-auto px-4 py-8 max-w-lg">
-      <Card className="border-green-500/20">
+      <Card className="overflow-hidden border-green-500/20">
+        {info ? (
+          <div className="relative w-full aspect-square min-h-[200px] overflow-hidden bg-muted sm:min-h-0">
+            {!nftImageLoading &&
+            nftImageAttemptChain.length > 0 &&
+            nftImageAttemptIdx < nftImageAttemptChain.length ? (
+              // eslint-disable-next-line @next/next/no-img-element -- remote NFT URIs via proxy / fallback chain
+              <img
+                key={`nft-${nftImageAttemptIdx}-${nftImageAttemptChain[nftImageAttemptIdx]?.slice(0, 48)}`}
+                src={nftImageAttemptChain[nftImageAttemptIdx]}
+                alt={`${title} — prize NFT`}
+                className="h-full w-full object-cover"
+                loading="eager"
+                fetchPriority="high"
+                decoding="sync"
+                onError={() => setNftImageAttemptIdx((i) => i + 1)}
+              />
+            ) : nftImageLoading ? (
+              <div className="flex h-full min-h-[200px] w-full items-center justify-center text-muted-foreground sm:min-h-0">
+                <Loader2 className="h-10 w-10 animate-spin" aria-hidden />
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[200px] w-full items-center justify-center bg-green-500/10 sm:min-h-0">
+                <Gift className="h-16 w-16 text-green-500/70 sm:h-20 sm:w-20" aria-hidden />
+              </div>
+            )}
+          </div>
+        ) : null}
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <Gift className="h-6 w-6 shrink-0" />

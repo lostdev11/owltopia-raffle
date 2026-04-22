@@ -33,6 +33,19 @@ function mintsEqual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
+/** Mirrors server rules for PATCH status open from cancelled — used to enable the Restore button. */
+function canRestoreCancelledCommunityGiveaway(g: CommunityGiveaway): boolean {
+  if (g.status !== 'cancelled' || g.winner_wallet) return false
+  if (!g.prize_deposited_at) return false
+  const startMs = new Date(g.starts_at).getTime()
+  if (Number.isNaN(startMs) || Date.now() >= startMs) return false
+  if (g.ends_at) {
+    const endMs = new Date(g.ends_at).getTime()
+    if (!Number.isNaN(endMs) && Date.now() > endMs) return false
+  }
+  return true
+}
+
 /**
  * Prefer grid selection, then wallet inventory match, then mint-only (on-chain / Core / CNFT resolution).
  */
@@ -916,6 +929,38 @@ export default function AdminCommunityGiveawaysPage() {
                       >
                         Cancel
                       </Button>
+                    </div>
+                  )}
+                  {g.status === 'cancelled' && (
+                    <div className="space-y-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={
+                          actionId === g.id || !canRestoreCancelledCommunityGiveaway(g)
+                        }
+                        title={
+                          canRestoreCancelledCommunityGiveaway(g)
+                            ? 'Re-open this giveaway as live (same rules as before cancel)'
+                            : 'Restore requires escrow verified, no winner, scheduled start not reached, and entry period not ended'
+                        }
+                        onClick={() => void patchStatus(g.id, { status: 'open' })}
+                      >
+                        {actionId === g.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Restore giveaway'
+                        )}
+                      </Button>
+                      {!canRestoreCancelledCommunityGiveaway(g) && (
+                        <p className="text-xs text-muted-foreground max-w-md">
+                          Restore is only available while the scheduled start is still in the future, the
+                          prize is verified in escrow, no winner was drawn, and the entry deadline has not
+                          passed when an end time is set.
+                        </p>
+                      )}
                     </div>
                   )}
                 </li>

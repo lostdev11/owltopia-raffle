@@ -6,7 +6,7 @@
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
-import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
+import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
@@ -73,44 +73,6 @@ function rafflePageUrl(raffle: Raffle): string {
 function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {
   const base = getSiteBaseUrl()
   return `${base}/community-giveaway/${encodeURIComponent(g.id)}`
-}
-
-/** Normalize metadata image URIs so Discord embeds accept them (https, site-relative, common ipfs/ar schemes). */
-function discordEmbedImageFromNftUri(raw: string | null | undefined): string | undefined {
-  if (!raw?.trim()) return undefined
-  const t = raw.trim()
-  try {
-    const u = new URL(t)
-    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
-  } catch {
-    try {
-      const base = getSiteBaseUrl()
-      const u = new URL(t, `${base}/`)
-      if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
-    } catch {
-      /* fall through */
-    }
-  }
-  if (/^ipfs:\/\//i.test(t)) {
-    const path = t.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '')
-    return `https://ipfs.io/ipfs/${path}`
-  }
-  if (/^ar:\/\//i.test(t)) {
-    const path = t.replace(/^ar:\/\//i, '').replace(/^\/+/, '')
-    return `https://arweave.net/${path}`
-  }
-  return undefined
-}
-
-async function communityGiveawayPrizeImageForDiscord(
-  nftMint: string,
-  nftTokenId: string | null | undefined
-): Promise<string | undefined> {
-  const mint = nftMint.trim()
-  if (!mint) return undefined
-  const assetId = nftTokenId?.trim() || mint
-  const raw = await fetchNftImageUriFromHelius(assetId)
-  return discordEmbedImageFromNftUri(raw)
 }
 
 function discordTimestampUnix(iso: string): number | null {
@@ -407,7 +369,7 @@ export async function notifyCommunityGiveawayOpened(
   const url = webhookUrlCommunityGiveawayOpen()
   if (!url) return
 
-  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+  const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
     giveaway.nft_token_id
   )
@@ -470,7 +432,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
   const url = webhookUrlCommunityGiveawayWinner()
   if (!url) return
 
-  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+  const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
     giveaway.nft_token_id
   )

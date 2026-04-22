@@ -64,6 +64,8 @@ export function Header() {
 
   // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
   const showOwlVision = Boolean(isAdmin)
+  /** Nesting is admin-only in nav until the public flow is ready — avoids a dead link for visitors. */
+  const showNestingNav = Boolean(isAdmin)
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -71,7 +73,7 @@ export function Header() {
   const navLinks = [
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { href: '/council', label: 'Council', icon: Landmark },
-    { href: '/nesting', label: 'Nesting', icon: Bird },
+    ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -103,12 +105,14 @@ export function Header() {
                   <span className="hidden sm:inline">Council</span>
                 </Button>
               </Link>
-              <Link href="/nesting">
-                <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
-                  <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">Nesting</span>
-                </Button>
-              </Link>
+              {showNestingNav && (
+                <Link href="/nesting">
+                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Nesting</span>
+                  </Button>
+                </Link>
+              )}
               {connected && (
                 <Link href="/dashboard">
                   <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
