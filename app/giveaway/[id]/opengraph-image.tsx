@@ -4,8 +4,11 @@ import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
 import { absolutizeForOg } from '@/lib/og/server-og-asset-url'
 import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-preview'
+import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
+import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 
 export const runtime = 'nodejs'
+export const revalidate = 300
 export const alt = PLATFORM_NAME
 export const size = OWLTOPIA_OG_SIZE
 export const contentType = 'image/png'
@@ -32,20 +35,21 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const { id } = await params
   const trimmed = typeof id === 'string' ? id.trim() : ''
   const site = getSiteBaseUrl()
+  const ogOpts = await getOwltopiaOgResponseOptions()
 
   if (!trimmed) {
-    return new ImageResponse(generic, { ...OWLTOPIA_OG_SIZE })
+    return new ImageResponse(generic, { ...ogOpts })
   }
 
   let g: Awaited<ReturnType<typeof getNftGiveawayById>> = null
   try {
     g = await getNftGiveawayById(trimmed)
   } catch {
-    return new ImageResponse(generic, { ...OWLTOPIA_OG_SIZE })
+    return new ImageResponse(generic, { ...ogOpts })
   }
 
   if (!g) {
-    return new ImageResponse(generic, { ...OWLTOPIA_OG_SIZE })
+    return new ImageResponse(generic, { ...ogOpts })
   }
 
   const rawTitle = g.title?.trim() || 'NFT giveaway'
@@ -58,14 +62,29 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     if (raw) imageUrl = absolutizeForOg(raw, site)
   }
 
-  return new ImageResponse(
-    owltopiaLinkPreviewOg({
-      title,
-      kindLabel: 'NFT giveaway',
-      line1: `Status: ${stateLabel}`,
-      line2: 'Connect the eligible wallet on the giveaway page',
-      imageUrl,
-    }),
-    { ...OWLTOPIA_OG_SIZE }
-  )
+  const artData = imageUrl ? await fetchImageDataUrlForOg(imageUrl) : null
+
+  try {
+    return new ImageResponse(
+      owltopiaLinkPreviewOg({
+        title,
+        kindLabel: 'NFT giveaway',
+        line1: `Status: ${stateLabel}`,
+        line2: 'Connect the eligible wallet on the giveaway page',
+        imageUrl: artData,
+      }),
+      { ...ogOpts }
+    )
+  } catch {
+    return new ImageResponse(
+      owltopiaLinkPreviewOg({
+        title,
+        kindLabel: 'NFT giveaway',
+        line1: `Status: ${stateLabel}`,
+        line2: 'Connect the eligible wallet on the giveaway page',
+        imageUrl: null,
+      }),
+      { ...ogOpts }
+    )
+  }
 }

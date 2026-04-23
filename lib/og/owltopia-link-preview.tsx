@@ -1,20 +1,52 @@
 import type { ReactElement } from 'react'
 import { getSiteBaseUrl } from '@/lib/site-config'
+import { OG_FONT_SANS } from '@/lib/og/og-image-fonts'
+import { OWLTOPIA_OG_H, OWLTOPIA_OG_W, OWLTOPIA_OG_SIZE } from '@/lib/og/og-constants'
+
+/**
+ * 1200×630 — same *visual* structure as `RafflePromoPngButton` (1200×675 canvas) so
+ * a shared link “looks like” the downloadable X card, within platform size limits.
+ */
+const W = OWLTOPIA_OG_W
+const H = OWLTOPIA_OG_H
+
+const THEME = {
+  bg: '#0a0a0a',
+  foreground: '#fafafa',
+  muted: '#a3a3a3',
+  prime: '#00ff88',
+  midnight: '#00d4ff',
+  greenRgba: 'rgba(34, 197, 94, 0.45)',
+} as const
+
+/** Proportions from RafflePromoPng `PROMO` / panel, scaled for H=630. */
+const L = {
+  outer: 40,
+  panelR: 28,
+  art: 400,
+  textLeft: 48,
+  textArtGap: 32,
+  title: 50,
+  titleLine: 1.1,
+  meta: 25,
+  afterTitle: 22,
+  betweenMeta: 32,
+} as const
+
+const sans = `${OG_FONT_SANS}, ui-sans-serif, system-ui, -apple-system, sans-serif`
 
 export type OwltopiaLinkPreviewOgProps = {
   title: string
-  kindLabel: string
+  /** Optional. Raffle promo has none — keep null/empty to match the PNG. */
+  kindLabel?: string | null
   line1: string
   line2?: string
   imageUrl: string | null
 }
 
-const W = 1200
-const H = 630
-
 /**
- * Branded 1200×630 PNG for `next/og` — aligned with in-app promo cards (dark + neon green + art square).
- * Used for X/Twitter, Discord, Slack, iMessage link unfurls via og:image.
+ * Branded 1200×630 PNG for `next/og` — mirrors the client promo (`RafflePromoPngButton`):
+ * triple radial field, glass panel, gradient accent bar, title, ticket/ends, big art, LIVE ON pill.
  */
 export function owltopiaLinkPreviewOg({
   title,
@@ -30,30 +62,60 @@ export function owltopiaLinkPreviewOg({
   } catch {
     /* keep default */
   }
-  const safeTitle = title.length > 90 ? `${title.slice(0, 87).trimEnd()}...` : title
-  const art = 300
+  const safeTitle = title.length > 110 ? `${title.slice(0, 106).trimEnd()}...` : title
+  const showKind = kindLabel && kindLabel.trim().length > 0
+  const kl = (kindLabel ?? '').trim().toUpperCase()
 
   return (
     <div
       style={{
+        position: 'relative',
         width: W,
         height: H,
         display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#0a0a0a',
-        backgroundImage:
-          'radial-gradient(ellipse 70% 55% at 18% 50%, rgba(0, 255, 136, 0.14) 0%, transparent 55%),' +
-          'radial-gradient(ellipse 50% 45% at 82% 80%, rgba(0, 212, 255, 0.11) 0%, transparent 50%),' +
-          'radial-gradient(ellipse 40% 35% at 38% 18%, rgba(168, 255, 0, 0.08) 0%, transparent 45%)',
-        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+        backgroundColor: THEME.bg,
+        fontFamily: sans,
       }}
     >
       <div
         style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `radial-gradient(ellipse 60% 55% at 20% 50%, rgba(0, 255, 136, 0.11) 0%, rgba(0, 255, 136, 0) 60%)`,
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `radial-gradient(ellipse 50% 48% at 80% 82%, rgba(0, 212, 255, 0.1) 0%, rgba(0, 212, 255, 0) 55%)`,
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `radial-gradient(ellipse 42% 40% at 40% 18%, rgba(168, 255, 0, 0.08) 0%, rgba(168, 255, 0, 0) 50%)`,
+        }}
+      />
+
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 1,
           display: 'flex',
           width: '100%',
           height: '100%',
-          padding: 28,
+          padding: L.outer,
           boxSizing: 'border-box',
         }}
       >
@@ -64,14 +126,16 @@ export function owltopiaLinkPreviewOg({
             width: '100%',
             height: '100%',
             boxSizing: 'border-box',
-            borderRadius: 24,
-            border: '3px solid #00ff88',
-            background: 'linear-gradient(145deg, rgba(10, 28, 18, 0.97) 0%, rgba(6, 20, 12, 0.99) 50%, rgba(8, 22, 14, 0.98) 100%)',
-            boxShadow: '0 0 0 1px rgba(0, 255, 136, 0.15), 0 0 40px rgba(0, 255, 136, 0.18)',
-            padding: 28,
+            borderRadius: L.panelR,
+            border: '2.5px solid rgba(0, 255, 136, 0.95)',
+            background:
+              'linear-gradient(145deg, rgba(10, 28, 18, 0.97) 0%, rgba(6, 20, 12, 0.98) 50%, rgba(12, 26, 16, 0.97) 100%)',
+            boxShadow: '0 0 0 1px rgba(0, 255, 136, 0.15), 0 0 32px rgba(0, 255, 136, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.045)',
+            padding: L.textLeft,
+            paddingRight: L.textLeft,
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 32,
+            gap: L.textArtGap,
             overflow: 'hidden',
           }}
         >
@@ -81,72 +145,120 @@ export function owltopiaLinkPreviewOg({
               flexDirection: 'column',
               flex: 1,
               minWidth: 0,
+              minHeight: 0,
               height: '100%',
               justifyContent: 'space-between',
-              paddingLeft: 8,
-              paddingRight: 8,
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div
-                style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: 'rgba(0, 255, 136, 0.9)',
-                  letterSpacing: 5,
-                  textTransform: 'uppercase',
-                  marginBottom: 12,
-                }}
-              >
-                {kindLabel}
-              </div>
-              <div
-                style={{
-                  fontSize: 46,
-                  fontWeight: 800,
-                  color: '#fafafa',
-                  lineHeight: 1.1,
-                  letterSpacing: -1,
-                }}
-              >
-                {safeTitle}
-              </div>
-              <div
-                style={{
-                  fontSize: 23,
-                  fontWeight: 500,
-                  color: '#a3a3a3',
-                  marginTop: 20,
-                }}
-              >
-                {line1}
-              </div>
-              {line2 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                justifyContent: 'flex-start',
+                paddingTop: 4,
+              }}
+            >
+              {showKind ? (
                 <div
                   style={{
-                    fontSize: 23,
-                    fontWeight: 500,
-                    color: '#a3a3a3',
-                    marginTop: 8,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: 'rgba(0, 255, 136, 0.88)',
+                    letterSpacing: 4.5,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
                   }}
                 >
-                  {line2}
+                  {kl}
                 </div>
               ) : null}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'stretch',
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: 5,
+                    minHeight: 44,
+                    borderRadius: 2,
+                    background: `linear-gradient(180deg, ${THEME.prime} 0%, ${THEME.midnight} 100%)`,
+                    flexShrink: 0,
+                    alignSelf: 'stretch',
+                  }}
+                />
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: L.title,
+                      fontWeight: 700,
+                      color: THEME.foreground,
+                      lineHeight: L.titleLine,
+                      letterSpacing: -0.5,
+                      textShadow: '0 0 20px rgba(0, 255, 136, 0.18)',
+                    }}
+                  >
+                    {safeTitle}
+                  </div>
+                </div>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  marginTop: L.afterTitle,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: L.meta,
+                    fontWeight: 500,
+                    color: THEME.muted,
+                  }}
+                >
+                  {line1}
+                </div>
+                {line2 ? (
+                  <div
+                    style={{
+                      fontSize: L.meta,
+                      fontWeight: 500,
+                      color: THEME.muted,
+                      marginTop: L.betweenMeta - 2,
+                    }}
+                  >
+                    {line2}
+                  </div>
+                ) : null}
+              </div>
             </div>
+
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'row',
                 alignItems: 'center',
                 borderRadius: 999,
-                paddingLeft: 18,
-                paddingRight: 18,
-                paddingTop: 10,
-                paddingBottom: 10,
+                paddingLeft: 16,
+                paddingRight: 16,
+                paddingTop: 8,
+                paddingBottom: 8,
                 alignSelf: 'flex-start',
-                background: 'linear-gradient(90deg, rgba(0, 255, 136, 0.22) 0%, rgba(0, 212, 255, 0.14) 100%)',
-                border: '1px solid rgba(34, 197, 94, 0.45)',
+                background: 'linear-gradient(90deg, rgba(0, 255, 136, 0.2) 0%, rgba(0, 212, 255, 0.14) 100%)',
+                border: `1px solid ${THEME.greenRgba}`,
               }}
             >
               <span
@@ -162,24 +274,24 @@ export function owltopiaLinkPreviewOg({
           {imageUrl ? (
             <div
               style={{
-                width: art,
-                height: art,
-                borderRadius: 18,
+                width: L.art,
+                height: L.art,
+                borderRadius: 20,
                 overflow: 'hidden',
-                border: '2px solid rgba(0, 255, 136, 0.45)',
+                border: '2px solid rgba(0, 255, 136, 0.5)',
                 display: 'flex',
+                boxShadow: '0 0 10px rgba(0, 255, 136, 0.25), 0 0 1px rgba(0,0,0,0.2)',
                 flexShrink: 0,
-                boxShadow: '0 0 20px rgba(0, 255, 136, 0.15)',
               }}
             >
               <img
                 src={imageUrl}
-                width={art}
-                height={art}
+                width={L.art}
+                height={L.art}
                 style={{
                   objectFit: 'cover',
-                  width: art,
-                  height: art,
+                  width: L.art,
+                  height: L.art,
                 }}
                 alt=""
               />
@@ -187,10 +299,10 @@ export function owltopiaLinkPreviewOg({
           ) : (
             <div
               style={{
-                width: art,
-                height: art,
-                borderRadius: 18,
-                backgroundColor: 'rgba(6, 20, 12, 0.9)',
+                width: L.art,
+                height: L.art,
+                borderRadius: 20,
+                backgroundColor: 'rgba(6, 20, 12, 0.75)',
                 border: '2px solid rgba(0, 255, 136, 0.2)',
                 flexShrink: 0,
               }}
@@ -202,4 +314,4 @@ export function owltopiaLinkPreviewOg({
   )
 }
 
-export const OWLTOPIA_OG_SIZE = { width: W, height: H } as const
+export { OWLTOPIA_OG_SIZE } from '@/lib/og/og-constants'

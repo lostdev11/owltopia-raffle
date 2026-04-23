@@ -8,29 +8,18 @@ import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 import { absolutizeForOg } from '@/lib/og/server-og-asset-url'
 import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-preview'
+import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
+import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 import { getPartnerPrizeListingImageUrl, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const runtime = 'nodejs'
+/** Edge cache: faster repeat crawls (X may retry); generation still uses quick art pre-fetch. */
+export const revalidate = 300
 export const alt = PLATFORM_NAME
 export const size = OWLTOPIA_OG_SIZE
 export const contentType = 'image/png'
 
-function formatPrize(raffle: {
-  prize_type: string
-  prize_amount: number | null
-  prize_currency: string | null
-  nft_collection_name: string | null
-}): string {
-  if (raffle.prize_type === 'nft') {
-    return raffle.nft_collection_name || 'NFT'
-  }
-  if (raffle.prize_amount != null && raffle.prize_currency) {
-    return `${raffle.prize_amount} ${raffle.prize_currency}`
-  }
-  return 'Raffle'
-}
-
-function genericNotFound() {
+async function genericNotFound() {
   return new ImageResponse(
     (
       <div
@@ -47,7 +36,7 @@ function genericNotFound() {
         <div style={{ fontSize: 40, color: 'rgba(255,255,255,0.85)' }}>Raffle not found</div>
       </div>
     ),
-    { ...OWLTOPIA_OG_SIZE }
+    { ...(await getOwltopiaOgResponseOptions()) }
   )
 }
 
@@ -57,7 +46,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const site = getSiteBaseUrl()
 
   if (!raffle) {
-    return genericNotFound()
+    return await genericNotFound()
   }
 
   const sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
@@ -85,7 +74,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
           </div>
         </div>
       ),
-      { ...OWLTOPIA_OG_SIZE }
+      { ...(await getOwltopiaOgResponseOptions()) }
     )
   }
 
@@ -111,13 +100,32 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   }
 
   const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
-  const line2 = `Prize: ${formatPrize(raffle)} · Ends ${endStr}`
+  const line2 = `Ends ${endStr}`
 
-  return new ImageResponse(owltopiaLinkPreviewOg({
-    title: rawTitle,
-    kindLabel: 'Owltopia raffle',
-    line1,
-    line2,
-    imageUrl,
-  }), { ...OWLTOPIA_OG_SIZE })
+  const artData = imageUrl ? await fetchImageDataUrlForOg(imageUrl) : null
+  const ogOpts = await getOwltopiaOgResponseOptions()
+
+  try {
+    return new ImageResponse(
+      owltopiaLinkPreviewOg({
+        title: rawTitle,
+        kindLabel: null,
+        line1,
+        line2,
+        imageUrl: artData,
+      }),
+      { ...ogOpts }
+    )
+  } catch {
+    return new ImageResponse(
+      owltopiaLinkPreviewOg({
+        title: rawTitle,
+        kindLabel: null,
+        line1,
+        line2,
+        imageUrl: null,
+      }),
+      { ...ogOpts }
+    )
+  }
 }
