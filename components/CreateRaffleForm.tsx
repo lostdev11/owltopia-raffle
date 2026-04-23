@@ -137,11 +137,10 @@ export function CreateRaffleForm() {
   /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
-  const [floorPriceLoading, setFloorPriceLoading] = useState(false)
-  const [floorPriceCurrency, setFloorPriceCurrency] = useState<string | null>(null)
-  const [floorPriceAutoNote, setFloorPriceAutoNote] = useState<string | null>(null)
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
   const [ticketPrice, setTicketPrice] = useState('')
+  /** When non-null, ticket was last set by floor autofill; floor edits re-suggest only if ticket still matches. */
+  const lastAutofillTicketRef = useRef<string | null>(null)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -149,10 +148,13 @@ export function CreateRaffleForm() {
       setSelectedNft(null)
       setImageUrl(getPartnerPrizeListingImageUrl(tokenPrizeCurrency))
       setFloorPrice('')
-      setFloorPriceCurrency(null)
-      setFloorPriceAutoNote(null)
+      lastAutofillTicketRef.current = null
     }
   }, [prizeMode, tokenPrizeCurrency])
+
+  useEffect(() => {
+    lastAutofillTicketRef.current = null
+  }, [prizeMode])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -183,182 +185,48 @@ export function CreateRaffleForm() {
     }
   }, [connected, publicKey])
 
-  /** Suggest ticket = floor ÷ default ticket count (editable after). */
-  const suggestTicketFromFloor = useCallback((floorValue: string) => {
+  /**
+   * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
+   * still exactly the last value we autofill (so a manual price is not cleared when the user fixes floor).
+   */
+  const applyFloorToTicketAutofill = useCallback((floorValue: string) => {
     const trimmed = floorValue.trim()
     if (!trimmed) {
-      setTicketPrice('')
+      if (ticketPrice === '' || (lastAutofillTicketRef.current !== null && ticketPrice === lastAutofillTicketRef.current)) {
+        setTicketPrice('')
+      }
+      lastAutofillTicketRef.current = null
       return
     }
     const floor = parseFloat(trimmed)
-    if (Number.isFinite(floor) && floor > 0) {
-      const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
-      if (!Number.isFinite(calculated)) {
-        setTicketPrice('')
-        return
-      }
-      const formatted =
-        calculated >= 1
-          ? calculated.toFixed(2)
-          : calculated >= 0.01
-            ? calculated.toFixed(4)
-            : calculated.toFixed(6)
+    if (!Number.isFinite(floor) || floor <= 0) {
+      return
+    }
+    const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
+    if (!Number.isFinite(calculated)) {
+      return
+    }
+    const formatted =
+      calculated >= 1
+        ? calculated.toFixed(2)
+        : calculated >= 0.01
+          ? calculated.toFixed(4)
+          : calculated.toFixed(6)
+    const shouldAutofill =
+      ticketPrice === '' || (lastAutofillTicketRef.current !== null && ticketPrice === lastAutofillTicketRef.current)
+    if (shouldAutofill) {
       setTicketPrice(formatted)
+      lastAutofillTicketRef.current = formatted
     }
-  }, [])
+  }, [ticketPrice])
 
+  /** When the prize NFT (or mode) changes, reset floor and ticket so values are not carried over. */
   useEffect(() => {
-    if (prizeMode !== 'nft') {
-      setFloorPriceLoading(false)
-      return
-    }
-    if (!selectedNft) {
-      setFloorPrice('')
-      setFloorPriceLoading(false)
-      setFloorPriceCurrency(null)
-      setFloorPriceAutoNote(null)
-      setTicketPrice('')
-      return
-    }
-    let cancelled = false
-    setFloorPriceLoading(true)
-    setFloorPriceCurrency(null)
-    setFloorPriceAutoNote(null)
-    fetch(`/api/nft/floor-price?mint=${encodeURIComponent(selectedNft.mint)}`, { credentials: 'include' })
-      .then((r) => {
-        if (cancelled) return undefined
-        return r.json().then((data) => ({ ok: r.ok, data }))
-      })
-      .then(
-        (
-          wrapped:
-            | { ok: boolean; data: { floorPrice?: string | null; currency?: string | null; message?: string | null } }
-            | undefined
-        ) => {
-          if (cancelled) return
-          if (!wrapped) {
-            setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
-            return
-          }
-          const { ok, data } = wrapped
-          if (!ok) {
-            setFloorPriceAutoNote(
-              typeof data?.message === 'string' && data.message
-                ? data.message
-                : 'Could not check floor price. Enter the prize value manually in your raffle currency.'
-            )
-            return
-          }
-          if (data?.floorPrice != null && data.floorPrice !== '') {
-            const fp = String(data.floorPrice)
-            setFloorPrice(fp)
-            setFloorPriceCurrency(data.currency ?? null)
-            suggestTicketFromFloor(fp)
-            setFloorPriceAutoNote(typeof data.message === 'string' && data.message ? data.message : null)
-          } else if (typeof data?.message === 'string' && data.message) {
-            setFloorPriceAutoNote(data.message)
-          } else {
-            setFloorPriceAutoNote('No automatic price for this NFT. Enter a fair floor price in your raffle currency.')
-          }
-        }
-      )
-      .catch(() => {
-        if (!cancelled) {
-          setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFloorPriceLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [selectedNft?.mint, prizeMode, suggestTicketFromFloor])
-
-  useEffect(() => {
-    if (prizeMode !== 'token') return
-    const amt = partnerPrizeAmount.trim()
-    if (!amt || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
-      setFloorPriceLoading(false)
-      setFloorPriceAutoNote(null)
-      return
-    }
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      setFloorPriceLoading(true)
-      setFloorPriceAutoNote(null)
-      const q = new URLSearchParams({
-        prizeCurrency: tokenPrizeCurrency,
-        prizeAmount: amt,
-        listingCurrency: raffleCurrency,
-      })
-      fetch(`/api/partner-token/suggested-floor?${q.toString()}`, { credentials: 'include' })
-        .then((r) => {
-          if (cancelled) return undefined
-          return r.json().then((data) => ({ ok: r.ok, data }))
-        })
-        .then(
-          (
-            wrapped:
-              | {
-                  ok: boolean
-                  data: {
-                    floorPrice?: string | null
-                    listingCurrency?: string | null
-                    message?: string | null
-                    hint?: string | null
-                  }
-                }
-              | undefined
-          ) => {
-            if (cancelled) return
-            if (!wrapped) {
-              setFloorPriceAutoNote(
-                'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-              )
-              return
-            }
-            const { ok, data } = wrapped
-            if (!ok) {
-              setFloorPriceAutoNote(
-                typeof data?.message === 'string' && data.message
-                  ? data.message
-                  : 'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-              )
-              return
-            }
-            if (data?.floorPrice != null && data.floorPrice !== '') {
-              const fp = String(data.floorPrice)
-              setFloorPrice(fp)
-              setFloorPriceCurrency(data.listingCurrency ?? raffleCurrency)
-              suggestTicketFromFloor(fp)
-              const hint = typeof data?.hint === 'string' && data.hint.trim() ? data.hint.trim() : null
-              const msg = typeof data?.message === 'string' && data.message ? data.message : null
-              setFloorPriceAutoNote(hint ?? msg)
-            } else if (typeof data?.message === 'string' && data.message) {
-              setFloorPriceAutoNote(data.message)
-            } else {
-              setFloorPriceAutoNote(
-                'No automatic price for this token pair. Enter a fair floor price in your ticket currency.'
-              )
-            }
-          }
-        )
-        .catch(() => {
-          if (!cancelled) {
-            setFloorPriceAutoNote(
-              'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-            )
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setFloorPriceLoading(false)
-        })
-    }, 450)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-      setFloorPriceLoading(false)
-    }
-  }, [prizeMode, tokenPrizeCurrency, partnerPrizeAmount, raffleCurrency, suggestTicketFromFloor])
+    if (prizeMode !== 'nft') return
+    setFloorPrice('')
+    setTicketPrice('')
+    lastAutofillTicketRef.current = null
+  }, [prizeMode, selectedNft?.mint])
 
   const derivedDrawGoal = useMemo(() => {
     const fp = parseNftFloorPrice(floorPrice)
@@ -1485,11 +1353,19 @@ export function CreateRaffleForm() {
                 required
                 className="text-base sm:text-sm touch-manipulation min-h-[44px]"
                 value={ticketPrice ?? ''}
-                onChange={(e) => setTicketPrice(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setTicketPrice(v)
+                  if (lastAutofillTicketRef.current !== null && v !== lastAutofillTicketRef.current) {
+                    lastAutofillTicketRef.current = null
+                  }
+                }}
                 aria-describedby="ticket_price_help"
               />
               <p id="ticket_price_help" className="text-xs text-muted-foreground">
-                Pre-filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when you enter floor; adjust as needed.
+                Filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when ticket is empty; changing floor
+                re-fills only while the ticket still matches the last auto-filled value (manual prices are
+                not overwritten).
               </p>
             </div>
           </div>
@@ -1542,14 +1418,7 @@ export function CreateRaffleForm() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="floor_price">
-                Floor price (prize value) *
-                {floorPriceLoading && (
-                  <span className="ml-2 text-muted-foreground font-normal">
-                    {prizeMode === 'token' ? 'Fetching spot price…' : 'Checking marketplace…'}
-                  </span>
-                )}
-              </Label>
+              <Label htmlFor="floor_price">Floor price (prize value) *</Label>
               <Input
                 id="floor_price"
                 name="floor_price"
@@ -1560,7 +1429,7 @@ export function CreateRaffleForm() {
                 onChange={(e) => {
                   const v = e.target.value
                   setFloorPrice(v)
-                  suggestTicketFromFloor(v)
+                  applyFloorToTicketAutofill(v)
                 }}
                 placeholder="e.g., 0.25 or 5.5 (same as currency above)"
                 required
@@ -1568,30 +1437,18 @@ export function CreateRaffleForm() {
               <p className="text-xs text-muted-foreground">
                 {prizeMode === 'token' ? (
                   <>
-                    When the prize is a token, we estimate advertised value from a <strong>spot price</strong> (Jupiter,
-                    with Helius as backup) using your <strong>prize amount</strong> and <strong>ticket currency</strong>{' '}
-                    below. Estimates can be wrong on thin markets — always verify before publishing.
+                    Enter the <strong>advertised prize value</strong> in your ticket currency (same as the currency
+                    you chose above) — e.g. from a price chart or the amount you are committing. This sets the revenue
+                    threshold for rev share.
                   </>
                 ) : (
                   <>
-                    We try to load a suggested price from the marketplace when you pick an NFT; if none appears, enter a
-                    fair value in <strong className="font-medium text-foreground">{raffleCurrency}</strong>.
+                    Enter a <strong>fair value</strong> in <strong className="font-medium text-foreground">{raffleCurrency}</strong>{' '}
+                    (check Magic Eden or Tensor for collection floor, then type it here). This sets the revenue threshold
+                    for rev share.
                   </>
-                )}{' '}
-                This sets the revenue threshold for rev share.
-              </p>
-              {floorPriceCurrency &&
-                floorPrice &&
-                raffleCurrency &&
-                floorPriceCurrency.toUpperCase() !== raffleCurrency.toUpperCase() && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Suggested price is in {floorPriceCurrency}; your raffle currency is {raffleCurrency}. Adjust the number
-                    if needed so it matches {raffleCurrency}.
-                  </p>
                 )}
-              {floorPriceAutoNote && (
-                <p className="text-xs text-muted-foreground">{floorPriceAutoNote}</p>
-              )}
+              </p>
             </div>
           </div>
 
