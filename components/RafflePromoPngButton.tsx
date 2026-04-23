@@ -22,6 +22,37 @@ type RafflePromoPngButtonProps = {
 const WIDTH = 1200
 const HEIGHT = 675
 
+/** Matches `app/layout.tsx` + `tailwind.config` — canvas will use it when the font is loaded. */
+const FONT_SANS = '"Plus Jakarta Sans", system-ui, sans-serif'
+
+/**
+ * Owltopia brand (aligned with `app/globals.css` body + `rev-share-pool-card` + tailwind `theme-prime` / `theme-midnight` / `theme-dawn`).
+ */
+const THEME = {
+  background: '#0a0a0a', // --background 0 0% 3.9%
+  foreground: '#fafafa', // --foreground
+  muted: '#a3a3a3', // ~ --muted-foreground
+  prime: '#00ff88', // theme-prime
+  midnight: '#00d4ff', // theme-midnight
+  dawn: '#a8ff00', // theme-dawn
+  greenRgb: '34, 197, 94', // .owltopia-neon / rev-share borders
+} as const
+
+/** Partner layout: big square art, balanced copy, room for neon frame + optional watermark. */
+const PROMO = {
+  /** NFT / prize square (larger = more "poster" presence). */
+  imageSize: 420,
+  contentX: 72,
+  /** Space between text column and art. */
+  textImageGap: 40,
+  artRightPad: 36,
+  titleLineH: 58,
+  afterTitleGap: 28,
+  betweenMetaLines: 38,
+  cornerR: 28,
+  imageCornerR: 20,
+} as const
+
 function clampText(input: string, max: number): string {
   const normalized = input.trim().replace(/\s+/g, ' ')
   if (normalized.length <= max) return normalized
@@ -38,15 +69,12 @@ async function tryLoadImage(src: string): Promise<HTMLImageElement | null> {
   })
 }
 
-function drawWrappedText(
+function wrapTextToLines(
   ctx: CanvasRenderingContext2D,
   text: string,
-  x: number,
-  y: number,
   maxWidth: number,
-  lineHeight: number,
   maxLines: number
-) {
+): string[] {
   const words = text.split(' ')
   const lines: string[] = []
   let current = ''
@@ -61,6 +89,19 @@ function drawWrappedText(
     if (lines.length >= maxLines - 1) break
   }
   if (current && lines.length < maxLines) lines.push(current)
+  return lines
+}
+
+function drawWrappedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number
+) {
+  const lines = wrapTextToLines(ctx, text, maxWidth, maxLines)
   return lines.map((line, index) => {
     ctx.fillText(line, x, y + lineHeight * index)
     return line
@@ -106,6 +147,35 @@ function siteHostnameForPromo(): string {
   return 'owltopia.xyz'
 }
 
+function watermarkIconUrl(): string {
+  if (typeof window === 'undefined') return '/icon.png'
+  return new URL('/icon.png', window.location.origin).href
+}
+
+/**
+ * Raffle / promo cards: prominent neon border + slight top/left read (partner reference).
+ * Drawn after all panel content.
+ */
+/** Raffle-style neon frame (stroke + glow; does not cover the interior). */
+function drawPanelNeonFrame(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.save()
+  roundRectPath(ctx, x, y, w, h, r)
+  ctx.lineJoin = 'round'
+  ctx.shadowColor = 'rgba(0, 255, 136, 0.5)'
+  ctx.shadowBlur = 22
+  ctx.strokeStyle = 'rgba(0, 255, 136, 0.95)'
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+  ctx.restore()
+}
+
 export function RafflePromoPngButton({
   title,
   slug,
@@ -135,6 +205,13 @@ export function RafflePromoPngButton({
     setBusy(true)
     setMessage(null)
     try {
+      if (typeof document !== 'undefined' && document.fonts?.ready) {
+        try {
+          await document.fonts.ready
+        } catch {
+          /* continue with fallbacks */
+        }
+      }
       const canvas = document.createElement('canvas')
       canvas.width = WIDTH
       canvas.height = HEIGHT
@@ -154,17 +231,28 @@ export function RafflePromoPngButton({
           ? `Ticket: ${ticketPrice} ${safeCurrency}`
           : clampText(metaLine?.trim() || 'Join the Owltopia giveaway', 56)
 
-      const bg = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT)
-      bg.addColorStop(0, '#060b16')
-      bg.addColorStop(0.52, '#0a1222')
-      bg.addColorStop(1, '#111827')
-      ctx.fillStyle = bg
+      // Base: same family as `body` — near-black, then soft theme radials (stronger than CSS 0.05 for export).
+      ctx.fillStyle = THEME.background
       ctx.fillRect(0, 0, WIDTH, HEIGHT)
 
-      const accent = ctx.createRadialGradient(WIDTH - 64, 18, 10, WIDTH - 64, 18, 400)
-      accent.addColorStop(0, 'rgba(34, 211, 238, 0.2)')
-      accent.addColorStop(1, 'rgba(34, 211, 238, 0)')
-      ctx.fillStyle = accent
+      const r1 = ctx.createRadialGradient(WIDTH * 0.2, HEIGHT * 0.5, 0, WIDTH * 0.2, HEIGHT * 0.5, WIDTH * 0.55)
+      r1.addColorStop(0, 'rgba(0, 255, 136, 0.11)')
+      r1.addColorStop(0.55, 'rgba(0, 255, 136, 0.02)')
+      r1.addColorStop(1, 'rgba(0, 255, 136, 0)')
+      ctx.fillStyle = r1
+      ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+      const r2 = ctx.createRadialGradient(WIDTH * 0.8, HEIGHT * 0.82, 0, WIDTH * 0.8, HEIGHT * 0.82, WIDTH * 0.5)
+      r2.addColorStop(0, 'rgba(0, 212, 255, 0.1)')
+      r2.addColorStop(0.5, 'rgba(0, 212, 255, 0.02)')
+      r2.addColorStop(1, 'rgba(0, 212, 255, 0)')
+      ctx.fillStyle = r2
+      ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+      const r3 = ctx.createRadialGradient(WIDTH * 0.4, HEIGHT * 0.18, 0, WIDTH * 0.4, HEIGHT * 0.18, WIDTH * 0.42)
+      r3.addColorStop(0, 'rgba(168, 255, 0, 0.08)')
+      r3.addColorStop(1, 'rgba(168, 255, 0, 0)')
+      ctx.fillStyle = r3
       ctx.fillRect(0, 0, WIDTH, HEIGHT)
 
       const panelX = 44
@@ -172,20 +260,52 @@ export function RafflePromoPngButton({
       const panelW = WIDTH - 88
       const panelH = HEIGHT - 88
       ctx.save()
-      roundRectPath(ctx, panelX, panelY, panelW, panelH, 28)
-      ctx.fillStyle = 'rgba(12, 18, 33, 0.9)'
+      roundRectPath(ctx, panelX, panelY, panelW, panelH, PROMO.cornerR)
+      const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY + panelH)
+      panelGrad.addColorStop(0, 'rgba(10, 28, 18, 0.97)')
+      panelGrad.addColorStop(0.5, 'rgba(6, 20, 12, 0.98)')
+      panelGrad.addColorStop(1, 'rgba(12, 26, 16, 0.97)')
+      ctx.fillStyle = panelGrad
       ctx.fill()
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)'
-      ctx.lineWidth = 1
-      ctx.stroke()
       ctx.restore()
 
-      const imageBox = { x: 716, y: 160, w: 356, h: 356 }
-      const contentX = 96
-      const contentMaxW = 560
+      // Subtle site icon watermark (partner: more interest on the field — same as favicon)
+      {
+        const wm = await tryLoadImage(watermarkIconUrl())
+        if (wm) {
+          ctx.save()
+          roundRectPath(ctx, panelX, panelY, panelW, panelH, PROMO.cornerR)
+          ctx.clip()
+          const s = Math.min(panelW, panelH) * 0.88
+          const wx = panelX + (panelW - s) / 2
+          const wy = panelY + (panelH - s) / 2
+          ctx.globalAlpha = 0.055
+          ctx.drawImage(wm, wx, wy, s, s)
+          ctx.globalAlpha = 1
+          ctx.restore()
+        }
+      }
+
+      // Inset top highlight (rev-share style)
+      ctx.save()
+      const hi = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY)
+      hi.addColorStop(0, 'rgba(255, 255, 255, 0)')
+      hi.addColorStop(0.5, 'rgba(255, 255, 255, 0.045)')
+      hi.addColorStop(1, 'rgba(255, 255, 255, 0)')
+      ctx.fillStyle = hi
+      roundRectPath(ctx, panelX + 40, panelY + 1, panelW - 80, 1, 0.5)
+      ctx.fill()
+      ctx.restore()
+
+      const iz = PROMO.imageSize
+      const imageX = Math.round(panelX + panelW - PROMO.artRightPad - iz)
+      const imageY = Math.round(panelY + (panelH - iz) / 2)
+      const contentX = PROMO.contentX
+      const contentMaxW = imageX - contentX - PROMO.textImageGap
+      const imageBox = { x: imageX, y: imageY, w: iz, h: iz }
 
       ctx.save()
-      roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, 20)
+      roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, PROMO.imageCornerR)
       ctx.clip()
       if (imageUrl?.trim()) {
         const loaded = await tryLoadImage(imageUrl)
@@ -197,38 +317,79 @@ export function RafflePromoPngButton({
           const drawY = imageBox.y - (drawH - imageBox.h) / 2
           ctx.drawImage(loaded, drawX, drawY, drawW, drawH)
         } else {
-          ctx.fillStyle = 'rgba(71, 85, 105, 0.3)'
+          ctx.fillStyle = 'rgba(6, 20, 12, 0.75)'
           ctx.fillRect(imageBox.x, imageBox.y, imageBox.w, imageBox.h)
         }
       } else {
-        ctx.fillStyle = 'rgba(71, 85, 105, 0.3)'
+        ctx.fillStyle = 'rgba(6, 20, 12, 0.75)'
         ctx.fillRect(imageBox.x, imageBox.y, imageBox.w, imageBox.h)
       }
       ctx.restore()
 
       const imageShade = ctx.createLinearGradient(0, imageBox.y, 0, imageBox.y + imageBox.h)
-      imageShade.addColorStop(0, 'rgba(2, 6, 23, 0)')
-      imageShade.addColorStop(1, 'rgba(2, 6, 23, 0.35)')
+      imageShade.addColorStop(0, 'rgba(0, 0, 0, 0)')
+      imageShade.addColorStop(1, 'rgba(4, 24, 12, 0.42)')
       ctx.save()
-      roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, 20)
+      roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, PROMO.imageCornerR)
       ctx.clip()
       ctx.fillStyle = imageShade
       ctx.fillRect(imageBox.x, imageBox.y, imageBox.w, imageBox.h)
       ctx.restore()
 
-      ctx.fillStyle = '#f8fafc'
-      ctx.font = '700 56px Inter, system-ui, sans-serif'
-      const lineCount = drawWrappedText(ctx, safeTitle, contentX, 178, contentMaxW, 66, 3)
-      const infoY = 178 + lineCount * 66 + 36
+      // Neon frame on the art square (partner: on-brand with raffle site)
+      ctx.save()
+      roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, PROMO.imageCornerR)
+      ctx.strokeStyle = 'rgba(0, 255, 136, 0.5)'
+      ctx.lineWidth = 2
+      ctx.shadowColor = 'rgba(0, 255, 136, 0.25)'
+      ctx.shadowBlur = 10
+      ctx.stroke()
+      ctx.restore()
 
-      ctx.fillStyle = '#cbd5e1'
-      ctx.font = '500 29px Inter, system-ui, sans-serif'
+      const titleLineH = PROMO.titleLineH
+      const titleTop = imageY + 2
+      ctx.save()
+      ctx.font = `700 54px ${FONT_SANS}`
+      const titleLines = wrapTextToLines(ctx, safeTitle, contentMaxW, 3)
+      const lineCount = titleLines.length
+
+      const barGrad = ctx.createLinearGradient(
+        contentX - 16,
+        titleTop,
+        contentX - 8,
+        titleTop + lineCount * titleLineH
+      )
+      barGrad.addColorStop(0, THEME.prime)
+      barGrad.addColorStop(1, THEME.midnight)
+      ctx.fillStyle = barGrad
+      roundRectPath(
+        ctx,
+        contentX - 20,
+        titleTop - 3,
+        5,
+        Math.max(40, lineCount * titleLineH + 2),
+        2
+      )
+      ctx.fill()
+
+      ctx.fillStyle = THEME.foreground
+      ctx.shadowColor = 'rgba(0, 255, 136, 0.22)'
+      ctx.shadowBlur = 18
+      titleLines.forEach((line, i) => {
+        ctx.fillText(line, contentX, titleTop + i * titleLineH)
+      })
+      ctx.shadowBlur = 0
+      const infoY = titleTop + lineCount * titleLineH + PROMO.afterTitleGap
+
+      ctx.fillStyle = THEME.muted
+      ctx.font = `500 28px ${FONT_SANS}`
       ctx.fillText(infoLine, contentX, infoY)
-      ctx.fillText(endsLabel, contentX, infoY + 46)
+      ctx.fillText(endsLabel, contentX, infoY + PROMO.betweenMetaLines)
+      ctx.restore()
 
       // Bottom-left: memorable domain only (full raffle URLs are not tappable in image posts on X).
       const badgeText = `LIVE ON ${promoHost}`
-      ctx.font = '700 16px Inter, system-ui, sans-serif'
+      ctx.font = `700 16px ${FONT_SANS}`
       const badgePaddingX = 16
       const badgeH = 34
       const badgeW = Math.ceil(ctx.measureText(badgeText).width + badgePaddingX * 2)
@@ -238,18 +399,21 @@ export function RafflePromoPngButton({
       ctx.save()
       roundRectPath(ctx, badgeX, badgeY, badgeW, badgeH, 999)
       const badgeFill = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY)
-      badgeFill.addColorStop(0, 'rgba(34, 211, 238, 0.22)')
-      badgeFill.addColorStop(1, 'rgba(56, 189, 248, 0.16)')
+      badgeFill.addColorStop(0, 'rgba(0, 255, 136, 0.2)')
+      badgeFill.addColorStop(1, 'rgba(0, 212, 255, 0.14)')
       ctx.fillStyle = badgeFill
       ctx.fill()
-      ctx.strokeStyle = 'rgba(103, 232, 249, 0.52)'
+      ctx.strokeStyle = `rgba(${THEME.greenRgb}, 0.45)`
       ctx.lineWidth = 1
       ctx.stroke()
       ctx.restore()
-      ctx.fillStyle = '#a5f3fc'
+      ctx.fillStyle = '#d1fae5'
       ctx.textBaseline = 'middle'
       ctx.fillText(badgeText, badgeX + badgePaddingX, badgeY + badgeH / 2 + 0.5)
       ctx.textBaseline = 'alphabetic'
+
+      // Outer shell after all content so the neon reads like the site raffle frame
+      drawPanelNeonFrame(ctx, panelX, panelY, panelW, panelH, PROMO.cornerR)
 
       const fileSlug = slug.trim() || 'raffle'
       const fileName = `${fileSlug}-x-card.png`
