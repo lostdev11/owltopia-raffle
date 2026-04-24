@@ -10,15 +10,18 @@ export type OgFont = {
   weight: 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
 }
 
-/** Pinned jsdelivr; matches `next/font` Plus Jakarta Sans. */
+/**
+ * Pinned jsdelivr; matches `next/font` Plus Jakarta Sans.
+ * Satori (next/og) does not support WOFF2 — only ttf/otf/woff.
+ */
 const PLUS_JAKARTA_500 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.2.5/files/plus-jakarta-sans-latin-500-normal.woff2'
+  'https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.2.5/files/plus-jakarta-sans-latin-500-normal.woff'
 const PLUS_JAKARTA_700 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.2.5/files/plus-jakarta-sans-latin-700-normal.woff2'
+  'https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.2.5/files/plus-jakarta-sans-latin-700-normal.woff'
 
 /** Shipped in `public/og-assets/` so OG routes never need outbound fetches in production. */
-const LOCAL_WOFF2_500 = 'plus-jakarta-sans-latin-500-normal.woff2'
-const LOCAL_WOFF2_700 = 'plus-jakarta-sans-latin-700-normal.woff2'
+const LOCAL_WOFF_500 = 'plus-jakarta-sans-latin-500-normal.woff'
+const LOCAL_WOFF_700 = 'plus-jakarta-sans-latin-700-normal.woff'
 
 export const OG_FONT_SANS = 'Plus Jakarta Sans' as const
 
@@ -30,7 +33,7 @@ function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
 const load = cache(async function loadPlusJakartaBuffers() {
   const dir = join(process.cwd(), 'public', 'og-assets')
   try {
-    const [b500, b700] = await Promise.all([readFile(join(dir, LOCAL_WOFF2_500)), readFile(join(dir, LOCAL_WOFF2_700))])
+    const [b500, b700] = await Promise.all([readFile(join(dir, LOCAL_WOFF_500)), readFile(join(dir, LOCAL_WOFF_700))])
     if (b500.byteLength >= 24 && b700.byteLength >= 24) {
       return { a: bufferToArrayBuffer(b500), b: bufferToArrayBuffer(b700) } as const
     }
