@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { cache } from 'react'
 import { OWLTOPIA_OG_SIZE } from '@/lib/og/og-constants'
 
@@ -14,15 +16,33 @@ const PLUS_JAKARTA_500 =
 const PLUS_JAKARTA_700 =
   'https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.2.5/files/plus-jakarta-sans-latin-700-normal.woff2'
 
+/** Shipped in `public/og-assets/` so OG routes never need outbound fetches in production. */
+const LOCAL_WOFF2_500 = 'plus-jakarta-sans-latin-500-normal.woff2'
+const LOCAL_WOFF2_700 = 'plus-jakarta-sans-latin-700-normal.woff2'
+
 export const OG_FONT_SANS = 'Plus Jakarta Sans' as const
 
+function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
+  // Copy so we return a true ArrayBuffer (not SharedArrayBuffer) for Satori.
+  return new Uint8Array(buf).buffer
+}
+
 const load = cache(async function loadPlusJakartaBuffers() {
+  const dir = join(process.cwd(), 'public', 'og-assets')
+  try {
+    const [b500, b700] = await Promise.all([readFile(join(dir, LOCAL_WOFF2_500)), readFile(join(dir, LOCAL_WOFF2_700))])
+    if (b500.byteLength >= 24 && b700.byteLength >= 24) {
+      return { a: bufferToArrayBuffer(b500), b: bufferToArrayBuffer(b700) } as const
+    }
+  } catch {
+    /* fall through to CDN */
+  }
   const [a, b] = await Promise.all([
-    fetch(PLUS_JAKARTA_500, { next: { revalidate: 86400 } }).then((r) => {
+    fetch(PLUS_JAKARTA_500).then((r) => {
       if (!r.ok) throw new Error('Plus Jakarta 500')
       return r.arrayBuffer()
     }),
-    fetch(PLUS_JAKARTA_700, { next: { revalidate: 86400 } }).then((r) => {
+    fetch(PLUS_JAKARTA_700).then((r) => {
       if (!r.ok) throw new Error('Plus Jakarta 700')
       return r.arrayBuffer()
     }),
@@ -46,9 +66,13 @@ export type OwltopiaOgResponseInit = { width: number; height: number; fonts?: Og
 
 /** For `new ImageResponse(…, options)` to match the promo PNG typography. */
 export const getOwltopiaOgResponseOptions = cache(async function getOwltopiaOgResponseOptions(): Promise<OwltopiaOgResponseInit> {
-  const fonts = await loadPlusJakartaForOg()
-  if (!fonts) {
+  try {
+    const fonts = await loadPlusJakartaForOg()
+    if (!fonts) {
+      return { ...OWLTOPIA_OG_SIZE }
+    }
+    return { ...OWLTOPIA_OG_SIZE, fonts }
+  } catch {
     return { ...OWLTOPIA_OG_SIZE }
   }
-  return { ...OWLTOPIA_OG_SIZE, fonts }
 })

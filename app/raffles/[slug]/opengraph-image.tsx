@@ -20,6 +20,12 @@ export const size = OWLTOPIA_OG_SIZE
 export const contentType = 'image/png'
 
 async function genericNotFound() {
+  let init: Awaited<ReturnType<typeof getOwltopiaOgResponseOptions>> = { ...OWLTOPIA_OG_SIZE }
+  try {
+    init = await getOwltopiaOgResponseOptions()
+  } catch {
+    // Size-only (system fonts) if options fail
+  }
   return new ImageResponse(
     (
       <div
@@ -36,96 +42,128 @@ async function genericNotFound() {
         <div style={{ fontSize: 40, color: 'rgba(255,255,255,0.85)' }}>Raffle not found</div>
       </div>
     ),
-    { ...(await getOwltopiaOgResponseOptions()) }
+    { ...init }
   )
 }
 
 export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params
-  const raffle = await getRaffleBySlug(slug)
+  let slug: string
+  try {
+    ;({ slug } = await params)
+  } catch {
+    return await genericNotFound()
+  }
+
+  let raffle: Awaited<ReturnType<typeof getRaffleBySlug>>
+  try {
+    raffle = await getRaffleBySlug(slug)
+  } catch {
+    return await genericNotFound()
+  }
+
   const site = getSiteBaseUrl()
 
   if (!raffle) {
     return await genericNotFound()
   }
 
-  const sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
+  let sessionValue: string | undefined
+  try {
+    sessionValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value
+  } catch {
+    sessionValue = undefined
+  }
   const session = parseSessionCookieValue(sessionValue)
   const viewerWallet = session?.wallet ?? null
-  const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
-  if (!canViewerSeeRafflePending(raffle, viewerWallet, viewerIsAdmin)) {
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: '#0a0a0a',
-            fontFamily: 'system-ui, sans-serif',
-          }}
-        >
-          <div style={{ fontSize: 40, fontWeight: 800, color: 'white' }}>{PLATFORM_NAME}</div>
-          <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.7)', marginTop: 12 }}>
-            Raffle preview unavailable
-          </div>
-        </div>
-      ),
-      { ...(await getOwltopiaOgResponseOptions()) }
-    )
-  }
-
-  const rawTitle = raffle.title.length > 80 ? `${raffle.title.slice(0, 77)}...` : raffle.title
-  const endStr = new Date(raffle.end_time).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-
-  const chain = buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)
-  let imageUrl: string | null = null
-  for (const u of chain) {
-    const abs = absolutizeForOg(u, site)
-    if (abs) {
-      imageUrl = abs
-      break
+  let viewerIsAdmin = false
+  if (viewerWallet) {
+    try {
+      viewerIsAdmin = (await getAdminRole(viewerWallet)) !== null
+    } catch {
+      viewerIsAdmin = false
     }
   }
-  if (!imageUrl && isPartnerSplPrizeRaffle(raffle)) {
-    const rel = getPartnerPrizeListingImageUrl(raffle.prize_currency)
-    imageUrl = absolutizeForOg(rel, site)
+  if (!canViewerSeeRafflePending(raffle, viewerWallet, viewerIsAdmin)) {
+    try {
+      return new ImageResponse(
+        (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#0a0a0a',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            <div style={{ fontSize: 40, fontWeight: 800, color: 'white' }}>{PLATFORM_NAME}</div>
+            <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.7)', marginTop: 12 }}>
+              Raffle preview unavailable
+            </div>
+          </div>
+        ),
+        { ...(await getOwltopiaOgResponseOptions()) }
+      )
+    } catch {
+      return await genericNotFound()
+    }
   }
 
-  const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
-  const line2 = `Ends ${endStr}`
-
-  const artData = imageUrl ? await fetchImageDataUrlForOg(imageUrl) : null
-  const ogOpts = await getOwltopiaOgResponseOptions()
-
   try {
-    return new ImageResponse(
-      owltopiaLinkPreviewOg({
-        title: rawTitle,
-        kindLabel: null,
-        line1,
-        line2,
-        imageUrl: artData,
-      }),
-      { ...ogOpts }
-    )
+    const rawTitle = raffle.title.length > 80 ? `${raffle.title.slice(0, 77)}...` : raffle.title
+    const endStr = new Date(raffle.end_time).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+
+    const chain = buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)
+    let imageUrl: string | null = null
+    for (const u of chain) {
+      const abs = absolutizeForOg(u, site)
+      if (abs) {
+        imageUrl = abs
+        break
+      }
+    }
+    if (!imageUrl && isPartnerSplPrizeRaffle(raffle)) {
+      const rel = getPartnerPrizeListingImageUrl(raffle.prize_currency)
+      imageUrl = absolutizeForOg(rel, site)
+    }
+
+    const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
+    const line2 = `Ends ${endStr}`
+
+    const artData = imageUrl ? await fetchImageDataUrlForOg(imageUrl) : null
+    const ogOpts = await getOwltopiaOgResponseOptions()
+
+    try {
+      return new ImageResponse(
+        owltopiaLinkPreviewOg({
+          title: rawTitle,
+          kindLabel: null,
+          line1,
+          line2,
+          imageUrl: artData,
+        }),
+        { ...ogOpts }
+      )
+    } catch {
+      return new ImageResponse(
+        owltopiaLinkPreviewOg({
+          title: rawTitle,
+          kindLabel: null,
+          line1,
+          line2,
+          imageUrl: null,
+        }),
+        { ...ogOpts }
+      )
+    }
   } catch {
-    return new ImageResponse(
-      owltopiaLinkPreviewOg({
-        title: rawTitle,
-        kindLabel: null,
-        line1,
-        line2,
-        imageUrl: null,
-      }),
-      { ...ogOpts }
-    )
+    return await genericNotFound()
   }
 }
