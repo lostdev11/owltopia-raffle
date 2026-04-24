@@ -65,11 +65,10 @@ import {
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
+  listPartnerPrizeTokens,
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
-
-type TokenPrizeCurrency = 'SOL' | 'USDC' | 'TRQ'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -126,7 +125,7 @@ export function CreateRaffleForm() {
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [prizeMode, setPrizeMode] = useState<'nft' | 'token'>('nft')
-  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<TokenPrizeCurrency>('TRQ')
+  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('TRQ')
   const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
@@ -240,6 +239,13 @@ export function CreateRaffleForm() {
     if (!Number.isFinite(n) || n < 1) return null
     return n
   }, [partnerMinTickets])
+
+  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
+
+  const partnerPrizeAmountPlaceholder = useMemo(() => {
+    const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
+    return dec <= 6 ? 'e.g. 100 or 50.25' : 'e.g. 1000 or 250.5'
+  }, [tokenPrizeCurrency])
 
   const loadWalletAssets = async () => {
     if (!publicKey) return
@@ -1021,7 +1027,8 @@ export function CreateRaffleForm() {
         <CardHeader>
           <CardTitle>Create a raffle</CardTitle>
           <CardDescription>
-            Connect your wallet to create a raffle (NFT or token prize: SOL, USDC, TRQ). Sign in from your dashboard first so we can save your listing.
+            Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your
+            dashboard first so we can save your listing.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -1080,51 +1087,71 @@ export function CreateRaffleForm() {
           </div>
 
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-            <Label className="text-base">Prize type</Label>
-            <p className="text-xs text-muted-foreground">
-              Tickets are always paid in SOL or USDC. Choose whether the <strong>prize</strong> is an NFT
-              or a token (SOL, USDC, or TRQ — same prize escrow as NFTs). <strong>OWL</strong> as a prize token is off for now.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="space-y-1.5">
+              <Label className="text-base">Prize type</Label>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Ticket sales use SOL or USDC. What you give away is separate: an <strong>NFT</strong> from
+                your wallet, or an <strong>allowlisted partner</strong> token (escrowed the same way as
+                NFTs). <strong>OWL</strong> as a partner prize token is off for now.
+              </p>
+            </div>
+            <div
+              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              role="group"
+              aria-label="Prize type"
+            >
               <Button
                 type="button"
                 variant={prizeMode === 'nft' ? 'default' : 'outline'}
-                className="min-h-[44px] touch-manipulation justify-start"
+                className="min-h-[44px] w-full touch-manipulation"
                 onClick={() => setPrizeMode('nft')}
+                aria-pressed={prizeMode === 'nft'}
               >
-                NFT prize
+                NFT from wallet
               </Button>
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-[240px]">
-                <Label htmlFor="token_prize_select" className="text-sm font-medium">
-                  tokens
+              <Button
+                type="button"
+                variant={prizeMode === 'token' ? 'default' : 'outline'}
+                className="min-h-[44px] w-full touch-manipulation"
+                onClick={() => setPrizeMode('token')}
+                aria-pressed={prizeMode === 'token'}
+              >
+                Partner token
+              </Button>
+            </div>
+            {prizeMode === 'token' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="token_prize_select" className="text-sm">
+                  Prize token
                 </Label>
                 <select
                   id="token_prize_select"
-                  value={prizeMode === 'nft' ? '' : tokenPrizeCurrency}
+                  value={tokenPrizeCurrency}
                   onChange={(e) => {
                     const v = e.target.value
                     if (v === 'OWL') return
-                    if (v === 'SOL' || v === 'USDC' || v === 'TRQ') {
+                    if (v && isPartnerPrizeCurrency(v)) {
                       setPrizeMode('token')
                       setTokenPrizeCurrency(v)
                     }
                   }}
                   className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  aria-label="Token prize type"
+                  aria-label="Prize token"
                 >
-                  {/* Placeholder when NFT prize is selected — hidden so it never appears in the open list */}
-                  <option value="" disabled hidden>
-                    &nbsp;
-                  </option>
-                  <option value="SOL">SOL</option>
-                  <option value="USDC">USDC</option>
-                  <option value="TRQ">TRQ</option>
+                  {allowedPartnerPrizeList.map((t) => {
+                    const label = t.displayLabel ? `${t.displayLabel} (${t.currencyCode})` : t.currencyCode
+                    return (
+                      <option key={t.currencyCode} value={t.currencyCode}>
+                        {label}
+                      </option>
+                    )
+                  })}
                   <option value="OWL" disabled={!PARTNER_OWL_PRIZE_UI_ENABLED}>
                     OWL
                   </option>
                 </select>
               </div>
-            </div>
+            )}
           </div>
 
           {prizeMode === 'token' && (
@@ -1141,7 +1168,9 @@ export function CreateRaffleForm() {
                   ? 'Mainnet wrapped SOL (wSOL) in your wallet — you sign one SPL transfer of this amount to the platform escrow after the raffle is saved.'
                   : tokenPrizeCurrency === 'USDC'
                     ? 'Mainnet USDC only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
-                    : 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'}
+                    : tokenPrizeCurrency === 'TRQ'
+                      ? 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
+                      : `Mainnet ${tokenPrizeCurrency} (SPL, allowlisted mint). You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.`}
               </p>
               <Input
                 id="partner_prize_amount"
@@ -1149,11 +1178,7 @@ export function CreateRaffleForm() {
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                placeholder={
-                  tokenPrizeCurrency === 'USDC'
-                    ? 'e.g. 100 or 50.25'
-                    : 'e.g. 1000 or 250.5'
-                }
+                placeholder={partnerPrizeAmountPlaceholder}
                 className="min-h-[44px] touch-manipulation text-base sm:text-sm"
                 value={partnerPrizeAmount}
                 onChange={(e) => setPartnerPrizeAmount(e.target.value)}

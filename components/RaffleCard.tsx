@@ -15,6 +15,7 @@ import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
+import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -1121,12 +1122,12 @@ export function RaffleCard({
                   <span className="font-semibold inline-flex items-center gap-1">
                     {raffle.prize_amount} {raffle.prize_currency}
                     {(() => {
-                      const u = raffle.prize_currency.trim().toUpperCase()
-                      const cur =
-                        u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
-                          ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
-                          : null
-                      return cur ? <CurrencyIcon currency={cur} size={12} className="inline-block" /> : null
+                      const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
+                      const showPrizeIcon =
+                        u === 'OWL' || (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                      return showPrizeIcon ? (
+                        <CurrencyIcon currency={u || 'OWL'} size={12} className="inline-block" />
+                      ) : null
                     })()}
                   </span>
                 </span>
@@ -1488,12 +1489,12 @@ export function RaffleCard({
                       <span className="font-semibold inline-flex items-center gap-1.5">
                         {raffle.prize_amount} {raffle.prize_currency}
                         {(() => {
-                          const u = raffle.prize_currency.trim().toUpperCase()
-                          const cur =
-                            u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
-                              ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
-                              : null
-                          return cur ? <CurrencyIcon currency={cur} size={16} className="inline-block" /> : null
+                          const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
+                          const showPrizeIcon =
+                            u === 'OWL' || (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                          return showPrizeIcon ? (
+                            <CurrencyIcon currency={u || 'OWL'} size={16} className="inline-block" />
+                          ) : null
                         })()}
                       </span>
                     </div>
