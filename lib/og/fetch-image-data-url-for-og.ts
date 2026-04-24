@@ -1,16 +1,41 @@
 /**
  * Pre-fetches a remote art URL so `next/og` / Satori does not block on a slow
- * `<img src={https...} />` when Twitter/X crawls (tight timeout → gray card otherwise).
+ * `<img src={https...} />` when social crawlers hit the route.
+ *
+ * `/api/proxy-image` can take many seconds (IPFS gateway races use ~14s per attempt), so the
+ * default timeout must exceed the old 2.5s cap or raffle OG art is often empty.
  */
 const DEFAULT_UA = 'OwltopiaImageBot/1.0 (+https://owltopia.xyz)'
 
-const DEFAULT_TIMEOUT_MS = 2_500
+const DEFAULT_TIMEOUT_MS = 18_000
 const DEFAULT_MAX_BYTES = 1_500_000
 
 function isSvg(mime: string, url: string) {
   if (mime === 'image/svg+xml') return true
   if (/\.svg([?#]|$)/i.test(url)) return true
   return false
+}
+
+/** When gateways omit Content-Type or send application/octet-stream (common on IPFS). */
+function sniffImageMimeFromBuffer(buf: ArrayBuffer): string | null {
+  const u8 = new Uint8Array(buf)
+  if (u8.length < 12) return null
+  if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'image/jpeg'
+  if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'image/png'
+  if (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38) return 'image/gif'
+  if (
+    u8[0] === 0x52 &&
+    u8[1] === 0x49 &&
+    u8[2] === 0x46 &&
+    u8[3] === 0x46 &&
+    u8[8] === 0x57 &&
+    u8[9] === 0x45 &&
+    u8[10] === 0x42 &&
+    u8[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return null
 }
 
 /**
@@ -41,15 +66,20 @@ export async function fetchImageDataUrlForOg(
       const n = parseInt(cl, 10)
       if (Number.isFinite(n) && n > maxBytes) return null
     }
-    const mime = res.headers.get('content-type')?.split(';')[0].trim() ?? ''
-    if (mime && !mime.startsWith('image/')) return null
-    if (mime && isSvg(mime, s)) return null
 
     const buf = await res.arrayBuffer()
     if (buf.byteLength < 24 || buf.byteLength > maxBytes) return null
+
+    let mime = (res.headers.get('content-type')?.split(';')[0].trim() ?? '').toLowerCase()
+    if (!mime || mime === 'application/octet-stream' || !mime.startsWith('image/')) {
+      const sniffed = sniffImageMimeFromBuffer(buf)
+      if (sniffed) mime = sniffed
+    }
+    if (!mime.startsWith('image/')) return null
+    if (isSvg(mime, s)) return null
+
     const b64 = Buffer.from(buf).toString('base64')
-    const contentType = mime && mime.startsWith('image/') ? mime : 'image/png'
-    return `data:${contentType};base64,${b64}`
+    return `data:${mime};base64,${b64}`
   } catch {
     return null
   } finally {

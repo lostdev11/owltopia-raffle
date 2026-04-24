@@ -13,6 +13,8 @@ import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 import { getPartnerPrizeListingImageUrl, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const runtime = 'nodejs'
+/** Allow slow `/api/proxy-image` IPFS gateway races while prefetching art for Satori. */
+export const maxDuration = 60
 /** Edge cache: faster repeat crawls (X may retry); generation still uses quick art pre-fetch. */
 export const revalidate = 300
 export const alt = PLATFORM_NAME
@@ -120,24 +122,27 @@ export default async function Image({ params }: { params: Promise<{ slug: string
       year: 'numeric',
     })
 
-    const chain = buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)
-    let imageUrl: string | null = null
-    for (const u of chain) {
+    const absolutized: string[] = []
+    for (const u of buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)) {
       const abs = absolutizeForOg(u, site)
-      if (abs) {
-        imageUrl = abs
-        break
+      if (abs && (absolutized.length === 0 || absolutized[absolutized.length - 1] !== abs)) {
+        absolutized.push(abs)
       }
     }
-    if (!imageUrl && isPartnerSplPrizeRaffle(raffle)) {
+    if (absolutized.length === 0 && isPartnerSplPrizeRaffle(raffle)) {
       const rel = getPartnerPrizeListingImageUrl(raffle.prize_currency)
-      imageUrl = absolutizeForOg(rel, site)
+      const abs = absolutizeForOg(rel, site)
+      if (abs) absolutized.push(abs)
     }
 
     const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
     const line2 = `Ends ${endStr}`
 
-    const artData = imageUrl ? await fetchImageDataUrlForOg(imageUrl) : null
+    let artData: string | null = null
+    for (const abs of absolutized) {
+      artData = await fetchImageDataUrlForOg(abs)
+      if (artData) break
+    }
     const ogOpts = await getOwltopiaOgResponseOptions()
 
     try {
