@@ -62,6 +62,10 @@ export async function generateMetadata({
       // Explicit image object so X shows the raffle image in the share card
       images: [{ url: ogImage.url, width: 1200, height: 630, alt: ogImage.alt }],
     },
+    // Root layout sets twitter:url to the homepage. Match og:url (giveaway pages already do
+    // this) so X’s crawler doesn’t see a home URL on a per-raffle card. Preserve layout `other` keys
+    // in case the child’s `other` object replaces the parent’s at build time.
+    other: { 'twitter:url': canonicalUrl, 'mobile-web-app-capable': 'yes' },
   }
 }
 
