@@ -1,14 +1,6 @@
 'use client'
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import {
   RAFFLE_AMBIENT_AUDIO_PATH,
@@ -29,19 +21,6 @@ type PlatformMusicContextValue = {
 
 const PlatformMusicContext = createContext<PlatformMusicContextValue | null>(null)
 
-/** When `RaffleOwlPlayer` shows its draggable control on `/raffles`, hide the global corner button. */
-const RegisterRaffleListOwlUiContext = createContext<((visible: boolean) => void) | null>(
-  null
-)
-
-export function useRegisterRaffleListOwlMusicUi(): (visible: boolean) => void {
-  const fn = useContext(RegisterRaffleListOwlUiContext)
-  if (!fn) {
-    throw new Error('useRegisterRaffleListOwlMusicUi must be used within PlatformMusicProvider')
-  }
-  return fn
-}
-
 export function usePlatformMusic(): PlatformMusicContextValue {
   const ctx = useContext(PlatformMusicContext)
   if (!ctx) {
@@ -59,14 +38,10 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
   const [audioMounted, setAudioMounted] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const [raffleListOwlUiVisible, setRaffleListOwlUiVisible] = useState(false)
   const gestureCleanupRef = useRef<(() => void) | null>(null)
 
-  const registerRaffleListOwlUi = useCallback((visible: boolean) => {
-    setRaffleListOwlUiVisible(visible)
-  }, [])
-
-  const showFloatingControl = !loadError && !raffleListOwlUiVisible
+  /** RaffleOwlPlayer hides this via `body[data-owl-raffle-list-owl="1"]` in globals.css — not React state, so we don't re-render the app (Radix/Dialog ref issues). */
+  const showFloatingControl = !loadError
 
   const syncPlaying = useCallback(() => {
     const a = audioRef.current
@@ -190,6 +165,14 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
     }
   }, [audioMounted, loadError, syncPlaying])
 
+  // Never call setState from a ref callback — it can re-enter commit and, with Radix ref composition
+  // down the tree, trigger "Maximum update depth exceeded" in dev.
+  useLayoutEffect(() => {
+    if (audioRef.current) {
+      setAudioMounted(true)
+    }
+  }, [])
+
   const value = useMemo<PlatformMusicContextValue>(
     () => ({
       audioRef,
@@ -203,13 +186,9 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
   )
 
   return (
-    <RegisterRaffleListOwlUiContext.Provider value={registerRaffleListOwlUi}>
-      <PlatformMusicContext.Provider value={value}>
+    <PlatformMusicContext.Provider value={value}>
       <audio
-        ref={(el) => {
-          audioRef.current = el
-          setAudioMounted(!!el)
-        }}
+        ref={audioRef}
         src={RAFFLE_AMBIENT_AUDIO_PATH}
         preload="auto"
         playsInline
@@ -228,7 +207,7 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
         <button
           type="button"
           onClick={toggle}
-          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[150] flex h-11 w-11 touch-manipulation items-center justify-center rounded-full border border-emerald-400/35 bg-black/55 text-emerald-100 shadow-lg backdrop-blur-md transition-[transform,background-color] hover:bg-black/70 active:scale-[0.96] motion-reduce:transition-none md:h-12 md:w-12"
+          className="platform-music-floating-ctl fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[150] flex h-11 w-11 touch-manipulation items-center justify-center rounded-full border border-emerald-400/35 bg-black/55 text-emerald-100 shadow-lg backdrop-blur-md transition-[transform,background-color] hover:bg-black/70 active:scale-[0.96] motion-reduce:transition-none md:h-12 md:w-12"
           style={{ touchAction: 'manipulation' }}
           aria-label={
             isPlaying
@@ -246,7 +225,6 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
         </button>
       )}
       {children}
-      </PlatformMusicContext.Provider>
-    </RegisterRaffleListOwlUiContext.Provider>
+    </PlatformMusicContext.Provider>
   )
 }

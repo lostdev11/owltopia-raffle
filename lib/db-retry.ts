@@ -79,10 +79,30 @@ export async function withRetry<T>(
 }
 
 /**
+ * Schema/client errors: wrong columns, 4xx from PostgREST/REST, invalid query — not fixed by retrying.
+ * (Do not treat "rest error" alone as signal: our REST helper prefixes every non-2xx, including 400/42703.)
+ */
+export function isNonRetryableDbErrorMessage(message: string): boolean {
+  const m = (message || '').toLowerCase()
+  if (m.includes('42703') || m.includes('42p01') || m.includes('42p02') || m.includes('undefined_column')) {
+    return true
+  }
+  if (m.includes('column') && m.includes('does not exist')) return true
+  if (m.includes('could not find') && m.includes('column')) return true
+  if (/rest error:\s*supabase\s+4\d{2}/i.test(message)) return true
+  return false
+}
+
+/**
  * Determines if an error is worth retrying.
  * Returns true for connection/timeout errors, false for validation/logic errors.
  */
 export function isRetryableError(error: Error): boolean {
+  if (isNonRetryableDbErrorMessage(error.message)) return false
+
+  // Our `fetchRafflesViaRestRaw` throws `rest error: Supabase 5xx ...` for upstream failures
+  if (/rest error:\s*supabase\s+5\d{2}/i.test(error.message)) return true
+
   const message = error.message.toLowerCase()
   const retryablePatterns = [
     'connection',
@@ -95,12 +115,16 @@ export function isRetryableError(error: Error): boolean {
     'socket',
     'fetch failed',
     'failed to fetch',
-    'rest error',
     'upstream',
     'disconnect',
     'reset',
+    '500',
+    '502',
     '503',
+    '504',
     'service unavailable',
+    '522',
+    '524',
     // Supabase-specific patterns
     'postgrest',
     'pgrst',
@@ -109,7 +133,7 @@ export function isRetryableError(error: Error): boolean {
     'connection reset',
   ]
 
-  return retryablePatterns.some(pattern => message.includes(pattern))
+  return retryablePatterns.some((pattern) => message.includes(pattern))
 }
 
 /**

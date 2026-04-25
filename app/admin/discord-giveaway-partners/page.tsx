@@ -213,9 +213,12 @@ export default function AdminDiscordGiveawayPartnersPage() {
       <p className="text-muted-foreground text-sm mb-8">
         After a community pays (off-platform for now), create a tenant here: they add a channel **incoming webhook**,
         you set status and optional <span className="font-mono text-xs">active_until</span>. They receive automatic
-        Discord posts when an NFT giveaway is linked to their tenant and deposit is verified / prize claimed. They can
-        also call <span className="font-mono text-xs">{notifyPath}</span> with their API secret to push custom embeds
-        (e.g. from their own bot).
+        Discord posts when an NFT giveaway is linked to their tenant and deposit is verified / prize claimed.
+        In Discord they can set <span className="font-mono text-xs">/owltopia-partner webhook-raffle-*</span> to mirror
+        the main site’s created/winner feed for ticket raffles (after you link a partner-creator wallet to this tenant
+        in <Link href="/admin/partner-creators" className="text-primary underline">Partner program creators</Link>).
+        They can also call <span className="font-mono text-xs">{notifyPath}</span> with their API secret to push custom
+        embeds (e.g. from their own bot).
       </p>
 
       {newSecret && (
@@ -370,6 +373,13 @@ export default function AdminDiscordGiveawayPartnersPage() {
                       {rotatingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Rotate API secret'}
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Ticket raffle created webhook: {p.raffle_webhook_url_created ? 'set' : 'not set'}
+                    {` · `}Winner channel webhook: {p.raffle_webhook_url_winner ? 'set' : 'not set'}
+                    <span className="block sm:inline sm:before:content-['\a0·\a0']">
+                      (per-server: <code className="text-[11px]">/owltopia-partner webhook-raffle-*</code>)
+                    </span>
+                  </p>
                   <Button
                     type="button"
                     variant="ghost"
@@ -378,7 +388,7 @@ export default function AdminDiscordGiveawayPartnersPage() {
                     onClick={() => copyText(`id-${p.id}`, p.id)}
                   >
                     <Copy className="h-3 w-3 mr-1" />
-                    Copy tenant id (for giveaway link)
+                    Copy tenant id (for giveaway + partner creator link)
                   </Button>
                 </li>
               ))}

@@ -79,11 +79,27 @@ export async function POST(request: NextRequest) {
 
     const is_active = typeof body.is_active === 'boolean' ? body.is_active : true
 
+    let discord_partner_tenant_id: string | null | undefined
+    if (body.discord_partner_tenant_id === null) {
+      discord_partner_tenant_id = null
+    } else if (body.discord_partner_tenant_id === undefined) {
+      discord_partner_tenant_id = undefined
+    } else if (typeof body.discord_partner_tenant_id === 'string') {
+      const t = body.discord_partner_tenant_id.trim()
+      discord_partner_tenant_id = t || null
+    } else {
+      return NextResponse.json(
+        { error: 'discord_partner_tenant_id must be a string, null, or omitted' },
+        { status: 400 }
+      )
+    }
+
     const row = await insertPartnerCommunityCreator({
       creator_wallet,
       display_label: display_label === undefined ? null : display_label,
       sort_order,
       is_active,
+      discord_partner_tenant_id,
     })
     clearPartnerCommunityWalletCache()
     return NextResponse.json({ creator: row })

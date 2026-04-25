@@ -57,6 +57,11 @@
   }
   /* M3: use outline variant for subtle dividers where appropriate */
   /* Safe area: respect notch/home indicator on mobile (most users are on mobile wallets) */
+  /* /raffles list owl: RaffleOwlPlayer sets body[data-owl-raffle-list-owl="1"]; hide duplicate corner control with CSS, not setState in PlatformMusic (avoids Radix "Maximum update depth"). */
+  body[data-owl-raffle-list-owl='1'] .platform-music-floating-ctl {
+    display: none;
+  }
+
   body {
     @apply bg-background text-foreground;
     background-image: 

@@ -2715,6 +2715,15 @@ export function RaffleDetailClient({
     <>
       <div className={`container mx-auto ${imageSize === 'small' ? 'py-4 px-3' : imageSize === 'medium' ? 'py-6 px-3 sm:px-4' : 'py-8 px-3 sm:px-4'}`}>
       <div className={`mx-auto ${imageSize === 'small' ? 'space-y-3 max-w-xl' : imageSize === 'medium' ? 'space-y-4 max-w-3xl' : 'space-y-6 max-w-5xl'}`}>
+        {raffle.list_on_platform === false && (
+          <p
+            className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-3 text-sm leading-relaxed text-foreground/95 sm:text-base"
+            role="status"
+          >
+            This raffle is not shown on the public raffles list. It was shared as a direct link (for
+            example from a partner Discord). You can still enter tickets here like any other raffle.
+          </p>
+        )}
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <Button
             variant="outline"

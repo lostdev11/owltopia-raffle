@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import type { Raffle, Entry, RaffleStatus } from '@/lib/types'
-import { withRetry, withQueryRetry } from '@/lib/db-retry'
+import { isRetryableError, withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
 import { getRaffleRevenue, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
@@ -66,24 +66,11 @@ async function checkNftMigrationApplied(): Promise<boolean> {
       .from('raffles')
       .select('id, prize_type')
       .limit(1)
-    
-    // If error mentions missing column or schema, migration not applied
-    let isApplied = true
-    if (error) {
-      const errorMsg = error.message?.toLowerCase() || ''
-      const errorCode = error.code?.toLowerCase() || ''
-      
-      // Check for column-related errors
-      if (errorMsg.includes('column') || 
-          errorMsg.includes('does not exist') ||
-          errorMsg.includes('prize_type') ||
-          errorCode === '42703' || // PostgreSQL undefined_column error code
-          errorCode === '42p01') { // PostgreSQL undefined_table error code
-        isApplied = false
-      }
-      // Other errors (like no rows, connection issues) are unrelated - assume migration is applied
-    }
-    
+
+    // Only true when the probe query succeeds. Unknown/parse-mismatch errors are not treated as
+    // "column exists" — that mis-cached a wide column list and hit 42703 after new migrations.
+    const isApplied = !error
+
     // Cache the result
     nftMigrationCache = {
       applied: isApplied,
@@ -112,9 +99,10 @@ const RAFFLE_TAIL_FUNDS_ESCROW =
 
 const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 
+/** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at,list_on_platform'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -150,6 +138,11 @@ let imageFallbackColumnCache: { applied: boolean; checked: boolean } = {
   checked: false,
 }
 
+let discordPartnerTenantColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
 /**
  * Whether migration 044 (`image_fallback_url`) exists — avoids 42703 when the column was never applied.
  */
@@ -162,23 +155,34 @@ async function checkImageFallbackColumnApplied(): Promise<boolean> {
       .from('raffles')
       .select('id,image_fallback_url')
       .limit(1)
-    let applied = true
-    if (error) {
-      const msg = (error.message ?? '').toLowerCase()
-      const code = String(error.code ?? '').toLowerCase()
-      if (
-        code === '42703' ||
-        msg.includes('does not exist') ||
-        msg.includes('image_fallback_url')
-      ) {
-        applied = false
-      }
-    }
+    const applied = !error
     imageFallbackColumnCache = { applied, checked: true }
     return applied
   } catch (err) {
     console.warn('Could not check image_fallback_url column:', err)
     imageFallbackColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
+/**
+ * Whether migration 084 `raffles.discord_partner_tenant_id` exists — avoids 42703 on REST/Supabase.
+ */
+async function checkDiscordPartnerTenantColumnApplied(): Promise<boolean> {
+  if (discordPartnerTenantColumnCache.checked) {
+    return discordPartnerTenantColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,discord_partner_tenant_id')
+      .limit(1)
+    const applied = !error
+    discordPartnerTenantColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check discord_partner_tenant_id column:', err)
+    discordPartnerTenantColumnCache = { applied: false, checked: true }
     return false
   }
 }
@@ -195,7 +199,10 @@ async function getRaffleColumns(): Promise<string> {
   }
   const hasNftSupport = await checkNftMigrationApplied()
   const hasImageFallback = await checkImageFallbackColumnApplied()
-  const base = getBaseRaffleColumnsCore(hasImageFallback)
+  const hasDiscordTenant = await checkDiscordPartnerTenantColumnApplied()
+  const base =
+    getBaseRaffleColumnsCore(hasImageFallback) +
+    (hasDiscordTenant ? ',discord_partner_tenant_id' : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -248,16 +255,9 @@ function toUserFriendlyMessage(rawMessage: string): string {
   return rawMessage
 }
 
-/** Same patterns as isRetryableError; check raw string so we always throw for connection/timeout. */
+/** Same as `isRetryableError` from db-retry (4xx/42703 are not retried with exponential backoff). */
 function isRetryableMessage(rawMessage: string): boolean {
-  const lower = (rawMessage ?? '').toLowerCase()
-  const patterns = [
-    'connection', 'timeout', 'network', 'upstream', 'disconnect', 'reset',
-    'econnrefused', 'enotfound', 'etimedout', 'socket', 'fetch failed', 'failed to fetch',
-    'rest error', 'postgrest', 'pgrst', 'connection terminated',
-    'server closed the connection', 'connection reset',
-  ]
-  return patterns.some((p) => lower.includes(p))
+  return isRetryableError(new Error(rawMessage || ''))
 }
 
 /** Status values for public raffle listing (excludes draft and cancelled) */
@@ -297,6 +297,8 @@ function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
     nft_collection_name: null,
     nft_token_id: null,
     nft_metadata_uri: null,
+    list_on_platform: true,
+    discord_partner_tenant_id: null,
   } as Raffle
 }
 
@@ -317,6 +319,26 @@ function isColumnOrSchemaError(message: string): boolean {
  * Use for server render and API route to avoid connection timeouts on cold start / paused project.
  * When includeDraft is true, draft raffles are included so "Future Raffles" can show scheduled drafts to everyone.
  */
+function buildRafflesListRestUrl(
+  baseUrl: string,
+  activeOnly: boolean,
+  select: string,
+  includeDraft: boolean,
+  listOnPlatformFilter: 'eq.true' | 'off'
+): string {
+  const url = new URL(`${baseUrl}/rest/v1/raffles`)
+  url.searchParams.set('status', rafflesRestStatusInClause(includeDraft, activeOnly))
+  if (activeOnly) url.searchParams.set('is_active', 'is.true')
+  if (listOnPlatformFilter === 'eq.true') {
+    // Hide partner "Discord / link only" raffles from public list (see migration 085).
+    url.searchParams.set('list_on_platform', 'eq.true')
+  }
+  url.searchParams.set('order', 'created_at.desc,id.desc')
+  url.searchParams.set('limit', String(getRafflesRestListLimit()))
+  url.searchParams.set('select', select)
+  return url.toString()
+}
+
 async function fetchRafflesViaRestRaw(
   baseUrl: string,
   apiKey: string,
@@ -325,39 +347,60 @@ async function fetchRafflesViaRestRaw(
   perAttemptMs: number,
   includeDraft: boolean = false
 ): Promise<Raffle[]> {
-  const url = new URL(`${baseUrl}/rest/v1/raffles`)
-  url.searchParams.set('status', rafflesRestStatusInClause(includeDraft, activeOnly))
-  if (activeOnly) url.searchParams.set('is_active', 'is.true')
-  url.searchParams.set('order', 'created_at.desc,id.desc')
-  url.searchParams.set('limit', String(getRafflesRestListLimit()))
-  url.searchParams.set('select', select)
-
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), perAttemptMs)
-  try {
-    const res = await fetch(url.toString(), {
-      headers: {
-        apikey: apiKey,
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-        Connection: 'keep-alive',
-      },
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-    if (!res.ok) {
+  const fetchOnce = async (listOnPlatformFilter: 'eq.true' | 'off') => {
+    const url = buildRafflesListRestUrl(baseUrl, activeOnly, select, includeDraft, listOnPlatformFilter)
+    const controller = new AbortController()
+    const id = setTimeout(() => controller.abort(), perAttemptMs)
+    try {
+      const res = await fetch(url, {
+        headers: {
+          apikey: apiKey,
+          Authorization: `Bearer ${apiKey}`,
+          Accept: 'application/json',
+          Connection: 'keep-alive',
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      })
       const text = await res.text().catch(() => '')
-      throw new Error(`rest error: Supabase ${res.status} ${text.slice(0, 200)}`)
+      if (!res.ok) {
+        throw new Error(`rest error: Supabase ${res.status} ${text.slice(0, 200)}`)
+      }
+      if (!text) return [] as unknown[]
+      try {
+        return JSON.parse(text) as unknown
+      } catch {
+        return []
+      }
+    } finally {
+      clearTimeout(id)
     }
-    const data = await res.json()
-    const rows = Array.isArray(data) ? data : []
-    if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
-      return rows.map((row: Record<string, unknown>) => normalizeBaseRowToRaffle(row))
-    }
-    return rows.map((row: Record<string, unknown>) => normalizeRaffleRow(row))
-  } finally {
-    clearTimeout(id)
   }
+
+  let data: unknown
+  let inMemoryListFilter: boolean
+  try {
+    data = await fetchOnce('eq.true')
+    inMemoryListFilter = false
+  } catch (e) {
+    const msg = (e as Error)?.message ?? ''
+    if (msg.toLowerCase().includes('list_on_platform')) {
+      data = await fetchOnce('off')
+      inMemoryListFilter = true
+    } else {
+      throw e
+    }
+  }
+
+  const rows: Record<string, unknown>[] = Array.isArray(data) ? (data as Record<string, unknown>[]) : []
+  const publicRows = inMemoryListFilter
+    ? rows.filter((row) => (row as { list_on_platform?: boolean }).list_on_platform !== false)
+    : rows
+
+  if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
+    return publicRows.map((row) => normalizeBaseRowToRaffle(row))
+  }
+  return publicRows.map((row) => normalizeRaffleRow(row))
 }
 
 export interface GetRafflesViaRestOptions {
@@ -483,6 +526,7 @@ export async function getRaffles(
       if (error) {
         if (isColumnError(error.message, error.code)) {
           imageFallbackColumnCache = { applied: false, checked: true }
+          discordPartnerTenantColumnCache = { applied: false, checked: false }
           nftMigrationCache = { applied: false, checked: true }
           raffleColumnsCache = getBaseRaffleColumnsCore(false)
           const retryStatuses = options?.includeDraft ? ALL_STATUSES : activeOnly ? ['live', 'ready_to_draw'] : PUBLIC_STATUSES
@@ -527,6 +571,10 @@ export async function getRaffles(
         applied: columns.includes('image_fallback_url'),
         checked: true,
       }
+      discordPartnerTenantColumnCache = {
+        applied: columns.includes('discord_partner_tenant_id'),
+        checked: true,
+      }
       const hasNftSupport = columns.includes('prize_type')
       let raffles = (data || []) as unknown as Raffle[]
       if (!hasNftSupport && data?.length) {
@@ -565,6 +613,7 @@ export async function getRaffleBySlug(slug: string) {
     if (error) {
       if (isColumnError(error.message, error.code)) {
         imageFallbackColumnCache = { applied: false, checked: true }
+        discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
@@ -616,6 +665,7 @@ export async function getRaffleById(id: string) {
     if (error) {
       if (isColumnError(error.message, error.code)) {
         imageFallbackColumnCache = { applied: false, checked: true }
+        discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
@@ -721,6 +771,8 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
+    list_on_platform: (row as { list_on_platform?: unknown }).list_on_platform === false ? false : true,
+    discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
     time_extension_count,
   } as Raffle
 }
@@ -741,6 +793,7 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
     if (error) {
       if (isColumnError(error.message, error.code)) {
         imageFallbackColumnCache = { applied: false, checked: true }
+        discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
@@ -1335,6 +1388,12 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   if (raffle.prize_standard != null && raffle.prize_standard !== undefined) {
     insertData.prize_standard = raffle.prize_standard
   }
+  if (raffle.discord_partner_tenant_id != null && String(raffle.discord_partner_tenant_id).trim()) {
+    insertData.discord_partner_tenant_id = String(raffle.discord_partner_tenant_id).trim()
+  } else {
+    insertData.discord_partner_tenant_id = null
+  }
+  insertData.list_on_platform = raffle.list_on_platform === false ? false : true
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')

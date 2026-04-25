@@ -17,6 +17,7 @@ import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, ThemeAccent } from '@/lib/types'
+import { isNonRetryableDbErrorMessage } from '@/lib/db-retry'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getAdminRole } from '@/lib/db/admins'
@@ -41,6 +42,7 @@ import {
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
+import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,8 +101,12 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       const isConfig = error.code === 'CONFIG'
+      const isSchemaOrPostgrestBad =
+        isNonRetryableDbErrorMessage(error.message) || /\bpgrst\d{3}\b|postgrest/i.test(error.message)
       const isUpstreamUnavailable =
-        isConfig || /503|service unavailable|connection|timeout|missing/i.test(error.message)
+        isConfig ||
+        isSchemaOrPostgrestBad ||
+        /503|service unavailable|connection|timeout|missing/i.test(error.message)
       const status = isUpstreamUnavailable ? 503 : 502
       const bodyMessage =
         status === 503
@@ -266,6 +272,31 @@ export async function POST(request: NextRequest) {
 
     const adminRole = await getAdminRole(walletAddress)
 
+    let discordPartnerTenantId: string | null = null
+    try {
+      discordPartnerTenantId = await withTimeout(
+        getDiscordPartnerTenantIdForCreatorWallet(walletAddress),
+        SUPABASE_TIMEOUT_MS,
+        'supabase error'
+      )
+    } catch {
+      discordPartnerTenantId = null
+    }
+
+    const requestUnlisted = body.list_on_platform === false || body.listOnPlatform === false
+    if (requestUnlisted) {
+      if (adminRole === null && (discordPartnerTenantId == null || !String(discordPartnerTenantId).trim())) {
+        return NextResponse.json(
+          {
+            error:
+              'Hiding a raffle from public browse is only available for partners with a linked Discord (partner program) or for admins. Leave list_on_platform unset to list the raffle for everyone.',
+          },
+          { status: 400 }
+        )
+      }
+    }
+    const list_on_platform = !requestUnlisted
+
     let raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>
 
     if (isPartnerCryptoCreate) {
@@ -394,6 +425,8 @@ export async function POST(request: NextRequest) {
         creator_funds_claim_locked_at: null,
         prize_standard:
           getPartnerPrizeTokenByCurrency(prizeCurrency)?.tokenProgram === 'token2022' ? 'token2022' : 'spl',
+        discord_partner_tenant_id: discordPartnerTenantId,
+        list_on_platform,
       }
     } else {
       const prizeType: 'nft' = 'nft'
@@ -547,6 +580,8 @@ export async function POST(request: NextRequest) {
         creator_claimed_at: null,
         creator_claim_tx: null,
         creator_funds_claim_locked_at: null,
+        discord_partner_tenant_id: discordPartnerTenantId,
+        list_on_platform,
       }
     }
 

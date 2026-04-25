@@ -35,6 +35,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
       display_label?: string | null
       sort_order?: number
       is_active?: boolean
+      discord_partner_tenant_id?: string | null
     } = {}
 
     if ('display_label' in body) {
@@ -58,6 +59,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
         return NextResponse.json({ error: 'is_active must be a boolean' }, { status: 400 })
       }
       patch.is_active = body.is_active
+    }
+    if ('discord_partner_tenant_id' in body) {
+      if (body.discord_partner_tenant_id === null) {
+        patch.discord_partner_tenant_id = null
+      } else if (typeof body.discord_partner_tenant_id === 'string') {
+        const t = body.discord_partner_tenant_id.trim()
+        patch.discord_partner_tenant_id = t || null
+      } else {
+        return NextResponse.json(
+          { error: 'discord_partner_tenant_id must be a string or null' },
+          { status: 400 }
+        )
+      }
     }
 
     if (Object.keys(patch).length === 0) {

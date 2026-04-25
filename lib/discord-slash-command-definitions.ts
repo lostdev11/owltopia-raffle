@@ -40,6 +40,32 @@ export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
       ],
     },
     {
+      name: 'webhook-raffle-created',
+      description: 'Set incoming webhook for new ticket raffles (partner creator announcements)',
+      type: 1,
+      options: [
+        {
+          name: 'url',
+          description: 'https://discord.com/api/webhooks/…',
+          type: 3,
+          required: true,
+        },
+      ],
+    },
+    {
+      name: 'webhook-raffle-winner',
+      description: 'Set incoming webhook for ticket raffle winner draws (claim on owltopia dashboard)',
+      type: 1,
+      options: [
+        {
+          name: 'url',
+          description: 'https://discord.com/api/webhooks/…',
+          type: 3,
+          required: true,
+        },
+      ],
+    },
+    {
       name: 'status',
       description: 'Show subscription, webhook, and API status for this server',
       type: 1,

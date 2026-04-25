@@ -78,6 +78,13 @@ export interface DiscordGiveawayPartnerTenant {
   discord_guild_id: string | null
   /** Null until the server owner runs /owltopia-partner webhook (slash). */
   webhook_url: string | null
+  /**
+   * Optional. Same idea as `DISCORD_WEBHOOK_RAFFLE_*` for Owltopia: announce new ticket raffles
+   * hosted by a partner-linked creator, in this Discord.
+   */
+  raffle_webhook_url_created: string | null
+  /** Optional. Winner-draw pings (claims happen on the Owltopia user dashboard). */
+  raffle_webhook_url_winner: string | null
   api_secret_hash: string
   status: DiscordGiveawayPartnerStatus
   active_until: string | null
@@ -174,6 +181,16 @@ export interface Raffle {
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */
   description_urls_clickable?: boolean
+  /**
+   * When the creator wallet is allowlisted in `partner_community_creators` with a linked
+   * `discord_partner_tenant_id`, the raffle is stamped for partner Discord webhooks.
+   */
+  discord_partner_tenant_id: string | null
+  /**
+   * When true (default), the raffle is included in the public /raffles list and list APIs.
+   * When false, it is for partner Discord / direct link only: still at `/raffles/{slug}` for entry.
+   */
+  list_on_platform: boolean
   /** When creator requested cancellation (pending admin approval). */
   cancellation_requested_at: string | null
   /** When admin accepted cancellation. */

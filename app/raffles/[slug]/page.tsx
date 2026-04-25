@@ -43,10 +43,14 @@ export async function generateMetadata({
   const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
   const ogImage = resolveRaffleShareOgImage(raffle)
 
+  const linkOnly = raffle.list_on_platform === false
   return {
     title,
     description,
     alternates: { canonical: canonicalUrl },
+    ...(linkOnly
+      ? { robots: { index: false, follow: true } as const }
+      : {}),
     openGraph: {
       type: 'website',
       url: canonicalUrl,

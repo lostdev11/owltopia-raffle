@@ -21,6 +21,7 @@ import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
+import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,6 +87,7 @@ export async function GET(request: NextRequest) {
       communityGiveaways,
       referralSummary,
       offerRefundCandidates,
+      partnerDiscordTenantId,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -109,6 +111,10 @@ export async function GET(request: NextRequest) {
       listOfferRefundCandidatesByWallet(wallet).catch((err) => {
         console.error('listOfferRefundCandidatesByWallet:', err)
         return []
+      }),
+      getDiscordPartnerTenantIdForCreatorWallet(wallet).catch((err) => {
+        console.error('getDiscordPartnerTenantIdForCreatorWallet:', err)
+        return null as string | null
       }),
     ])
 
@@ -199,6 +205,8 @@ export async function GET(request: NextRequest) {
       creatorRefundRaffles,
       offerRefundCandidates,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
+      /** Linked Discord partner tenant (Owl Vision); used for partner raffle webhooks. */
+      partnerDiscordTenantId,
       nftGiveaways,
       communityGiveaways,
       referral:

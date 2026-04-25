@@ -124,6 +124,9 @@ function isPendingFutureCommunityGiveaway(g: CommunityGiveawayBrowseItem, now: D
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
 
+/** Stable empty ref so `?? []` does not create a new array every render (prevents RafflesList sync effect / max update depth). */
+const EMPTY_RAFFLE_BUCKET: RaffleWithEntries[] = []
+
 function PastRafflesCarousel({
   items,
   partnerWalletSet,
@@ -350,11 +353,18 @@ export function RafflesPageClient({
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error } = await supabase
+        // Public list excludes link-only (Discord) raffles; same wallet may still see their unlisted raffles.
+        const listQ = supabase
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-          .order('created_at', { ascending: false })
+        const listWithVisibility =
+          wallet
+            ? listQ.or(
+                `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
+              )
+            : listQ.eq('list_on_platform', true)
+        const { data, error } = await listWithVisibility.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
         const list = (data || []) as Partial<Raffle>[]
@@ -527,11 +537,16 @@ export function RafflesPageClient({
       if (!isSupabaseConfigured() || cancelled) return
       try {
         // Direct browser→Supabase fetch; often works when server→Supabase times out
-        const { data, error } = await supabase
+        const listQ = supabase
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-          .order('created_at', { ascending: false })
+        const q = wallet
+          ? listQ.or(
+              `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
+            )
+          : listQ.eq('list_on_platform', true)
+        const { data, error } = await q.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
         const list = (data || []) as Partial<Raffle>[]
@@ -612,22 +627,22 @@ export function RafflesPageClient({
     ? (clientBuckets!.active)
     : serverActive.length > 0
       ? serverActive
-      : (clientBuckets?.active ?? [])
+      : (clientBuckets?.active ?? EMPTY_RAFFLE_BUCKET)
   const pausedPending = useWalletVisibilityBuckets
     ? clientBuckets!.pausedPending
     : serverPausedPending.length > 0
       ? serverPausedPending
-      : (clientBuckets?.pausedPending ?? [])
+      : (clientBuckets?.pausedPending ?? EMPTY_RAFFLE_BUCKET)
   const future = useWalletVisibilityBuckets
     ? clientBuckets!.future
     : serverFuture.length > 0
       ? serverFuture
-      : (clientBuckets?.future ?? [])
+      : (clientBuckets?.future ?? EMPTY_RAFFLE_BUCKET)
   const past = useWalletVisibilityBuckets
     ? clientBuckets!.past
     : serverPast.length > 0
       ? serverPast
-      : (clientBuckets?.past ?? [])
+      : (clientBuckets?.past ?? EMPTY_RAFFLE_BUCKET)
   const allRafflesFlat: Raffle[] = [
     ...active.map((item) => item.raffle),
     ...pausedPending.map((item) => item.raffle),
@@ -641,23 +656,33 @@ export function RafflesPageClient({
   )
 
   const partnerOnly = tab === 'partner-raffles'
-  const creatorWalletKey = (r: Raffle) => (r.creator_wallet || r.created_by || '').trim()
   /** Match RafflesList / RaffleCard: DB flag or allowlisted partner wallet. */
-  const isPartnerCommunityRaffle = (raffle: Raffle) => {
-    const w = creatorWalletKey(raffle)
-    return raffle.creator_is_partner === true || (w ? partnerWalletSet.has(w) : false)
-  }
-  const filterPartnerBucket = (items: RaffleWithEntries[]) =>
-    partnerOnly ? items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)) : items
+  const isPartnerCommunityRaffle = useCallback(
+    (raffle: Raffle) => {
+      const w = (raffle.creator_wallet || raffle.created_by || '').trim()
+      return raffle.creator_is_partner === true || (w ? partnerWalletSet.has(w) : false)
+    },
+    [partnerWalletSet]
+  )
+  /** Partner tab: only community partner raffles. Main tab: exclude them so browse is separate. */
+  const filterPartnerBucket = useCallback(
+    (items: RaffleWithEntries[]) => {
+      if (partnerOnly) {
+        return items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle))
+      }
+      return items.filter(({ raffle }) => !isPartnerCommunityRaffle(raffle))
+    },
+    [partnerOnly, isPartnerCommunityRaffle]
+  )
 
-  const activeView = filterPartnerBucket(active)
-  const pausedPendingView = filterPartnerBucket(pausedPending)
-  const futureView = filterPartnerBucket(future)
-  const pastView = filterPartnerBucket(past)
+  const activeView = useMemo(() => filterPartnerBucket(active), [active, filterPartnerBucket])
+  const pausedPendingView = useMemo(() => filterPartnerBucket(pausedPending), [pausedPending, filterPartnerBucket])
+  const futureView = useMemo(() => filterPartnerBucket(future), [future, filterPartnerBucket])
+  const pastView = useMemo(() => filterPartnerBucket(past), [past, filterPartnerBucket])
 
   const partnerFeaturedActive = useMemo(
     () => active.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)),
-    [active, partnerWalletSet]
+    [active, isPartnerCommunityRaffle]
   )
 
   const isEmptyPartnerView =
@@ -876,7 +901,7 @@ export function RafflesPageClient({
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            All raffles
+            Main
           </button>
           <button
             type="button"
@@ -1344,9 +1369,17 @@ export function RafflesPageClient({
                         onClick={() => setTab('all')}
                         className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
                       >
-                        All raffles
+                        Main
                       </button>{' '}
-                      to see the full list.
+                      to see non-partner listings, or the{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('partner-raffles')}
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                      >
+                        Partner raffles
+                      </button>{' '}
+                      tab.
                     </p>
                     <button
                       type="button"
@@ -1363,13 +1396,33 @@ export function RafflesPageClient({
               {tab === 'all' && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
               )}
+              {tab === 'all' && !partnerOnly && (
+                <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+                  This view lists host raffles outside the partner program. Verified partner community listings live under{' '}
+                  <button
+                    type="button"
+                    onClick={() => setTab('partner-raffles')}
+                    className="text-foreground/90 font-medium underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
+                  >
+                    Partner raffles
+                  </button>
+                  ; highlights may still appear in the strip above when you are on Main.
+                </p>
+              )}
               {partnerOnly && (
                 <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
-                  Raffles from verified partner communities (2% platform fee on tickets).{' '}
+                  Only raffles from verified partner community hosts (2% platform fee on tickets).{' '}
                   <Link href="/partner-program" className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
-                    Owltopia Partner Program
+                    Partner program
                   </Link>
-                  . <span className="text-foreground/90">All raffles</span> shows the full list.
+                  . Use the Main tab for the rest of the site&apos;s raffles, or the{' '}
+                  <Link
+                    href="/partners/dashboard"
+                    className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
+                  >
+                    partner hub
+                  </Link>
+                  {` `}if you host for a community.
                 </p>
               )}
           <div className="mb-8 sm:mb-12 w-full min-w-0">

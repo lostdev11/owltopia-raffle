@@ -32,6 +32,7 @@ export default function AdminPartnerCreatorsPage() {
     display_label: '',
     sort_order: '0',
     is_active: true,
+    discord_partner_tenant_id: '',
   })
 
   useEffect(() => {
@@ -104,6 +105,8 @@ export default function AdminPartnerCreatorsPage() {
           display_label: form.display_label.trim() || null,
           sort_order: Number.isFinite(sortParsed) ? sortParsed : 0,
           is_active: form.is_active,
+          discord_partner_tenant_id:
+            form.discord_partner_tenant_id.trim() || undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -111,7 +114,13 @@ export default function AdminPartnerCreatorsPage() {
         setCreateError(typeof data.error === 'string' ? data.error : 'Could not add partner wallet')
         return
       }
-      setForm({ creator_wallet: '', display_label: '', sort_order: '0', is_active: true })
+      setForm({
+        creator_wallet: '',
+        display_label: '',
+        sort_order: '0',
+        is_active: true,
+        discord_partner_tenant_id: '',
+      })
       await fetchList()
     } finally {
       setCreating(false)
@@ -193,10 +202,16 @@ export default function AdminPartnerCreatorsPage() {
       <p className="text-muted-foreground text-sm mb-8">
         Wallets here get the <strong className="text-foreground">2%</strong> partner fee tier and appear in the partner
         spotlight on <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
-        On raffle cards we show the creator&apos;s <strong className="text-foreground">dashboard display name</strong>{' '}
-        from <Link href="/dashboard" className="text-primary underline-offset-4 hover:underline">wallet profile</Link> when
-        set; otherwise the optional allowlist label below. Public site reads active rows only; you can deactivate without
-        deleting. Changes apply within about a minute of cache expiry, or immediately after each save from this page.
+        If you set a <strong className="text-foreground">Discord partner tenant id</strong> (from{' '}
+        <Link href="/admin/discord-giveaway-partners" className="text-primary underline-offset-4 hover:underline">
+          Discord partners
+        </Link>
+        ), new ticket raffles from that wallet can mirror Owltopia-style announcements in their server (created + winner
+        webhooks they configure; claims stay on the user dashboard). On raffle cards we show the creator&apos;s{' '}
+        <strong className="text-foreground">dashboard display name</strong> from{' '}
+        <Link href="/dashboard" className="text-primary underline-offset-4 hover:underline">wallet profile</Link> when set;
+        otherwise the optional allowlist label below. Public site reads active rows only; you can deactivate without
+        deleting. Cache refreshes on save.
       </p>
 
       <Card className="mb-8">
@@ -232,6 +247,17 @@ export default function AdminPartnerCreatorsPage() {
                 placeholder="Only if they have no dashboard display name"
                 value={form.display_label}
                 onChange={(e) => setForm((f) => ({ ...f, display_label: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="discord_partner_tenant_id">Discord partner tenant id (optional)</Label>
+              <Input
+                id="discord_partner_tenant_id"
+                className="font-mono text-xs touch-manipulation min-h-[44px]"
+                placeholder="UUID from Discord giveaway partners — links raffle webhooks to this host wallet"
+                value={form.discord_partner_tenant_id}
+                onChange={(e) => setForm((f) => ({ ...f, discord_partner_tenant_id: e.target.value }))}
+                autoComplete="off"
               />
             </div>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
@@ -293,6 +319,12 @@ export default function AdminPartnerCreatorsPage() {
                       Allowlist fallback label: <span className="text-foreground">{r.display_label}</span>
                     </p>
                   )}
+                  <p className="text-sm text-muted-foreground">
+                    Discord partner tenant:{' '}
+                    <span className="font-mono text-xs text-foreground break-all">
+                      {r.discord_partner_tenant_id ?? '— (not linked)'}
+                    </span>
+                  </p>
                   <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                     <label className="flex items-center gap-2 min-h-[44px] touch-manipulation cursor-pointer">
                       <input
@@ -336,6 +368,26 @@ export default function AdminPartnerCreatorsPage() {
                         }}
                       >
                         Set label
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-[44px] touch-manipulation"
+                        disabled={savingWallet === r.creator_wallet}
+                        onClick={() => {
+                          const raw = window.prompt(
+                            'Discord partner tenant UUID (empty to clear) — from Owl Vision → Discord partners',
+                            r.discord_partner_tenant_id ?? ''
+                          )
+                          if (raw === null) return
+                          const t = raw.trim()
+                          void patchRow(r.creator_wallet, {
+                            discord_partner_tenant_id: t === '' ? null : t,
+                          })
+                        }}
+                      >
+                        Set tenant
                       </Button>
                       <Button
                         type="button"

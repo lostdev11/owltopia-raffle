@@ -140,7 +140,11 @@ export default function PartnerProgramPage() {
         <section className="mb-10">
           <h2 className="text-2xl font-semibold">See partner raffles live</h2>
           <p className="text-muted-foreground">
-            Browse the dedicated tab for listings from verified partner wallets (same fee tier and badges as on cards).
+            The Main raffles view lists other hosts; partner program listings are only under Partner raffles (or{' '}
+            <Link href="/partner-raffles" className="text-foreground underline-offset-2 hover:underline">
+              this shortcut
+            </Link>
+            ) so your community is easy to find.
           </p>
           <div className="not-prose mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Button asChild className="min-h-[44px] touch-manipulation w-full sm:w-auto">
@@ -148,6 +152,9 @@ export default function PartnerProgramPage() {
             </Button>
             <Button asChild variant="outline" className="min-h-[44px] touch-manipulation w-full sm:w-auto">
               <Link href="/dashboard">Creator dashboard</Link>
+            </Button>
+            <Button asChild variant="outline" className="min-h-[44px] touch-manipulation w-full sm:w-auto">
+              <Link href="/partners/dashboard">Partner host hub</Link>
             </Button>
           </div>
         </section>

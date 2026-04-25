@@ -1,12 +1,15 @@
 'use client'
 
 import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePathname, useSelectedLayoutSegments } from 'next/navigation'
 import { Loader2, Pause, Play } from 'lucide-react'
 import { RAFFLE_AMBIENT_TRACK_TITLE } from '@/lib/raffle-ambient-audio'
-import { usePlatformMusic, useRegisterRaffleListOwlMusicUi } from '@/components/PlatformMusic'
+import { usePlatformMusic } from '@/components/PlatformMusic'
 import { isPublicRafflesListRoute } from '@/lib/navigation/raffles-list-route'
+
+/** Matches globals.css — toggled when list owl is visible so the corner music control hides without setState in PlatformMusic. */
+const BODY_OWL_RAFFLE_LIST_ATTR = 'data-owl-raffle-list-owl'
 
 /** Fixed size for clamping and default placement (icon-only glass button). */
 const PLAYER_W = 56
@@ -94,17 +97,25 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
   const segments = useSelectedLayoutSegments()
   const onRafflesListPage = isPublicRafflesListRoute(pathname, segments)
   const { audioRef, isPlaying, loadError, play, pause } = usePlatformMusic()
-  const registerRaffleListOwlUi = useRegisterRaffleListOwlMusicUi()
 
   const [mounted, setMounted] = useState(false)
   const [pos, setPos] = useState<Pos | null>(null)
+  /** `pos` changes every drag; do not use `pos` in an effect that updates ancestors. */
+  const hasPlacedPos = pos != null
+  const showOwlListChrome = Boolean(enabled && mounted && hasPlacedPos && onRafflesListPage)
 
-  /** Hide the global corner music button while this listing-page control is visible. */
-  useEffect(() => {
-    const showOwlChrome = Boolean(enabled && mounted && pos && onRafflesListPage)
-    registerRaffleListOwlUi(showOwlChrome)
-    return () => registerRaffleListOwlUi(false)
-  }, [enabled, mounted, pos, onRafflesListPage, registerRaffleListOwlUi])
+  /** Non-React: hide the global music button via `body[${BODY_OWL_RAFFLE_LIST_ATTR}]` + CSS (avoids re-renders that trip Radix ref loops). */
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined' || !document.body) return
+    if (showOwlListChrome) {
+      document.body.setAttribute(BODY_OWL_RAFFLE_LIST_ATTR, '1')
+    } else {
+      document.body.removeAttribute(BODY_OWL_RAFFLE_LIST_ATTR)
+    }
+    return () => {
+      document.body.removeAttribute(BODY_OWL_RAFFLE_LIST_ATTR)
+    }
+  }, [showOwlListChrome])
 
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -154,15 +165,16 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
     setPos(c)
   }, [])
 
+  // Attach once we have a position; do not re-subscribe on every drag (unstable `pos` ref).
   useEffect(() => {
-    if (!pos || typeof window === 'undefined') return
+    if (!hasPlacedPos || typeof window === 'undefined') return
     const onResize = () => {
       safeRef.current = measureSafeInsets()
       setPos((p) => (p ? clampPosition(p, safeRef.current) : p))
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [pos])
+  }, [hasPlacedPos])
 
   const stopBeatGlowLoop = useCallback(() => {
     if (glowRafRef.current) {

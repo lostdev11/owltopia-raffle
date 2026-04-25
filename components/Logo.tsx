@@ -71,8 +71,10 @@ export function Logo({
         height={height || 150}
         priority={priority}
         sizes="(max-width: 640px) 85vw, 280px"
-        className="h-auto max-w-full w-auto"
-        style={{ width: 'auto', height: 'auto' }}
+        className="object-contain max-w-full"
+        // Next.js: when the parent constrains one dimension in CSS, set the other to `auto` in style
+        // (avoids "width or height modified" warning with responsive headers).
+        style={{ width: 'auto', height: 'auto', maxWidth: '100%' }}
         unoptimized={isGif} // GIFs may need unoptimized for animations
         onError={() => setHasError(true)}
       />

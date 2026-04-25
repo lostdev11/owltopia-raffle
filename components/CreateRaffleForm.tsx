@@ -141,6 +141,9 @@ export function CreateRaffleForm() {
   /** When non-null, ticket was last set by floor autofill; floor edits re-suggest only if ticket still matches. */
   const lastAutofillTicketRef = useRef<string | null>(null)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
+  /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
+  const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
+  const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
 
   useEffect(() => {
     if (prizeMode === 'token') {
@@ -178,6 +181,32 @@ export function CreateRaffleForm() {
       })
       .catch(() => {
         if (!cancelled) setViewerIsAdmin(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !connected) {
+      setCanSetLinkOnlyVisibility(false)
+      setHideFromPublicBrowse(false)
+      return
+    }
+    let cancelled = false
+    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+      .then((r) => (cancelled || !r.ok ? null : r.json()))
+      .then((d: { canSetLinkOnly?: boolean } | null) => {
+        if (cancelled || !d) return
+        const ok = d.canSetLinkOnly === true
+        setCanSetLinkOnlyVisibility(ok)
+        if (!ok) setHideFromPublicBrowse(false)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCanSetLinkOnlyVisibility(false)
+          setHideFromPublicBrowse(false)
+        }
       })
     return () => {
       cancelled = true
@@ -507,6 +536,9 @@ export function CreateRaffleForm() {
       data.nft_token_id = selectedNft!.mint
       data.nft_metadata_uri = selectedNft!.metadataUri ?? undefined
       data.nft_collection_name = selectedNft!.collectionName ?? undefined
+    }
+    if (hideFromPublicBrowse) {
+      data.list_on_platform = false
     }
     try {
       const response = await fetch('/api/raffles', {
@@ -1518,6 +1550,26 @@ export function CreateRaffleForm() {
               <option value="coral">Coral (Rose)</option>
             </select>
           </div>
+
+          {canSetLinkOnlyVisibility && (
+            <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5">
+              <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0"
+                  checked={hideFromPublicBrowse}
+                  onChange={(e) => setHideFromPublicBrowse(e.target.checked)}
+                  id="hide-from-public-browse"
+                />
+                <span className="min-w-0 text-sm sm:text-base leading-relaxed text-foreground/95">
+                  <span className="font-medium">Discord / direct link only</span>
+                  {': '}
+                  do not show this raffle on the public raffles list. People can still enter using the
+                  page link (e.g. from your partner Discord or a shared link).
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="space-y-4">
             <Label>Night Mode Presets (optional)</Label>
