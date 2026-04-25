@@ -20,6 +20,7 @@ import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,6 +85,7 @@ export async function GET(request: NextRequest) {
       nftGiveaways,
       communityGiveaways,
       referralSummary,
+      offerRefundCandidates,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -103,6 +105,10 @@ export async function GET(request: NextRequest) {
       getReferralSummaryForWallet(wallet).catch((err) => {
         console.error('getReferralSummaryForWallet:', err)
         return null
+      }),
+      listOfferRefundCandidatesByWallet(wallet).catch((err) => {
+        console.error('listOfferRefundCandidatesByWallet:', err)
+        return []
       }),
     ])
 
@@ -191,6 +197,7 @@ export async function GET(request: NextRequest) {
         trackedRaffleIds: liveFundsEscrowBreakdown.trackedRaffleIds,
       },
       creatorRefundRaffles,
+      offerRefundCandidates,
       feeTier: { feeBps: feeTier.feeBps, reason: feeTier.reason },
       nftGiveaways,
       communityGiveaways,

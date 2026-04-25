@@ -56,6 +56,7 @@ END;
 $$ language 'plpgsql';
 
 -- Create trigger for raffles
+DROP TRIGGER IF EXISTS update_raffles_updated_at ON raffles;
 CREATE TRIGGER update_raffles_updated_at BEFORE UPDATE ON raffles
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -64,15 +65,19 @@ ALTER TABLE raffles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entries ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for raffles (public read, admin write)
+DROP POLICY IF EXISTS "Anyone can view active raffles" ON raffles;
 CREATE POLICY "Anyone can view active raffles" ON raffles
   FOR SELECT USING (is_active = true);
 
+DROP POLICY IF EXISTS "Anyone can view all raffles" ON raffles;
 CREATE POLICY "Anyone can view all raffles" ON raffles
   FOR SELECT USING (true);
 
 -- RLS Policies for entries (users can view their own, admins can view all)
+DROP POLICY IF EXISTS "Users can view entries for raffles" ON entries;
 CREATE POLICY "Users can view entries for raffles" ON entries
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own entries" ON entries;
 CREATE POLICY "Users can insert their own entries" ON entries
   FOR INSERT WITH CHECK (true);

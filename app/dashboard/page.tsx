@@ -145,6 +145,13 @@ function solscanTokenUrl(mint: string): string {
   return `https://solscan.io/token/${encodeURIComponent(mint)}${dev ? '?cluster=devnet' : ''}`
 }
 
+function formatMintForDisplay(mint: string | null | undefined): string {
+  const m = typeof mint === 'string' ? mint.trim() : ''
+  if (!m) return '—'
+  if (m.length > 12) return `${m.slice(0, 6)}…${m.slice(-6)}`
+  return m
+}
+
 /** Readable status for creator list (DB uses snake_case; some states need clearer wording). */
 function myRaffleStatusLabel(status: string | null): string {
   const s = status ?? 'draft'
@@ -183,6 +190,18 @@ type DashboardData = {
       confirmedEntries: number
       refundedEntries: number
     }>
+  }>
+  offerRefundCandidates?: Array<{
+    offerId: string
+    raffleId: string
+    raffleSlug: string
+    raffleTitle: string
+    amount: number
+    currency: string
+    status: 'declined' | 'cancelled' | 'expired'
+    createdAt: string
+    expiresAt: string
+    fundedAt: string
   }>
   feeTier: FeeTier
   nftGiveaways?: NftGiveaway[]
@@ -299,6 +318,7 @@ export default function DashboardPage() {
     null
   )
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
+  const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
@@ -313,6 +333,7 @@ export default function DashboardPage() {
   const [referralVanityError, setReferralVanityError] = useState<string | null>(null)
   const [referralVanitySaved, setReferralVanitySaved] = useState(false)
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'hosting' | 'winnings' | 'account'>('overview')
+  const [liveActivityMuted, setLiveActivityMuted] = useState(false)
   const hasRetried401OnMobile = useRef(false)
   const dashboardHydratedRef = useRef(false)
   const hasDashboardDataRef = useRef(false)
@@ -469,6 +490,34 @@ export default function DashboardPage() {
       setDisplayNameInput(data.displayName ?? '')
     }
   }, [data?.displayName, data])
+
+  // Keep wallet settings in sync with global live activity popup preference.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      setLiveActivityMuted(window.localStorage.getItem('owl:live-activity-muted') === '1')
+    } catch {
+      setLiveActivityMuted(false)
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'owl:live-activity-muted') return
+      setLiveActivityMuted(event.newValue === '1')
+    }
+    const onLiveActivityChange = () => {
+      try {
+        setLiveActivityMuted(window.localStorage.getItem('owl:live-activity-muted') === '1')
+      } catch {
+        setLiveActivityMuted(false)
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('owl:live-activity-muted-change', onLiveActivityChange)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('owl:live-activity-muted-change', onLiveActivityChange)
+    }
+  }, [])
 
   useEffect(() => {
     const r = data?.referral
@@ -707,6 +756,32 @@ export default function DashboardPage() {
     [loadDashboard]
   )
 
+  const handleClaimOfferRefund = useCallback(
+    async (offerId: string) => {
+      setClaimActionError(null)
+      setClaimOfferRefundLoadingId(offerId)
+      try {
+        const res = await fetch(`/api/me/raffle-offers/${offerId}/claim-refund`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not claim offer refund'
+          )
+          return
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimOfferRefundLoadingId(null)
+      }
+    },
+    [loadDashboard]
+  )
+
   const handleRequestCancellation = useCallback(
     async (raffleId: string) => {
       setRequestCancelError(null)
@@ -728,6 +803,21 @@ export default function DashboardPage() {
     },
     [loadDashboard]
   )
+
+  const handleToggleLiveActivityMuted = useCallback(() => {
+    setLiveActivityMuted((prev) => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('owl:live-activity-muted', next ? '1' : '0')
+          window.dispatchEvent(new Event('owl:live-activity-muted-change'))
+        } catch {
+          /* private mode / storage disabled — in-memory toggle only */
+        }
+      }
+      return next
+    })
+  }, [])
 
   const myRafflesForMemo = Array.isArray(data?.myRaffles) ? data.myRaffles : []
   const myEntriesForMemo = Array.isArray(data?.myEntries) ? data.myEntries : []
@@ -1045,6 +1135,7 @@ export default function DashboardPage() {
       ? data.engagement
       : getEmptyEngagementPayload()
   const creatorRefundRaffles = Array.isArray(data.creatorRefundRaffles) ? data.creatorRefundRaffles : []
+  const offerRefundCandidates = Array.isArray(data.offerRefundCandidates) ? data.offerRefundCandidates : []
   const legacyCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow === false)
   const escrowCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow !== false)
 
@@ -1146,7 +1237,8 @@ export default function DashboardPage() {
     refundableEntries.length > 0 ||
     legacyRefundEligibleEntries.length > 0 ||
     refundWaitRaffles.length > 0 ||
-    cancelledUnrefundedEntries.length > 0
+    cancelledUnrefundedEntries.length > 0 ||
+    offerRefundCandidates.length > 0
 
   const entriesPageSafe = Math.min(entriesPage, entriesListMaxPage)
   const raffleSummariesPage = raffleSummaries.slice(
@@ -1402,6 +1494,49 @@ export default function DashboardPage() {
                           </>
                         ) : (
                           `Claim ${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+                        )}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {offerRefundCandidates.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Claim back unaccepted offer bids</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  If your raffle offer was not accepted, your bid stays in escrow until you claim it back here.
+                </p>
+                <ul className="space-y-2">
+                  {offerRefundCandidates.slice(0, 25).map((offer) => (
+                    <li
+                      key={offer.offerId}
+                      className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                    >
+                      <div className="min-w-0">
+                        <Link href={`/raffles/${offer.raffleSlug}`} className="font-medium hover:underline truncate block">
+                          {offer.raffleTitle}
+                        </Link>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                          offer {offer.status}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        disabled={claimOfferRefundLoadingId === offer.offerId}
+                        onClick={() => handleClaimOfferRefund(offer.offerId)}
+                      >
+                        {claimOfferRefundLoadingId === offer.offerId ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Refunding…
+                          </>
+                        ) : (
+                          `Claim ${Number(offer.amount).toFixed(offer.currency === 'USDC' ? 2 : 4)} ${offer.currency}`
                         )}
                       </Button>
                     </li>
@@ -1748,6 +1883,31 @@ export default function DashboardPage() {
               </div>
             </CardContent>
             {displayNameError && <p className="text-sm text-destructive px-6 pb-4">{displayNameError}</p>}
+          </Card>
+
+          <Card className="rounded-xl border-border/60 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Ticket className="h-4 w-4" />
+                Live activity popups
+              </CardTitle>
+              <CardDescription>
+                Show or hide real-time ticket purchase popups across the site on this device.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground min-h-[44px] flex items-center">
+                Status: <span className="ml-1 font-medium text-foreground">{liveActivityMuted ? 'Muted' : 'On'}</span>
+              </p>
+              <Button
+                type="button"
+                variant={liveActivityMuted ? 'default' : 'outline'}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                onClick={handleToggleLiveActivityMuted}
+              >
+                {liveActivityMuted ? 'Unmute popups' : 'Mute popups'}
+              </Button>
+            </CardContent>
           </Card>
 
           <Card className="rounded-xl border-border/60 shadow-sm">
@@ -2762,6 +2922,7 @@ export default function DashboardPage() {
                   const claimed = Boolean(g.claimed_at)
                   const ready = Boolean(g.prize_deposited_at) && !claimed
                   const label = g.title?.trim() || 'Giveaway NFT'
+                  const mint = typeof g.nft_mint_address === 'string' ? g.nft_mint_address.trim() : ''
                   return (
                     <li
                       key={g.id}
@@ -2771,16 +2932,18 @@ export default function DashboardPage() {
                         <p className="font-medium truncate">{label}</p>
                         <p className="text-xs text-muted-foreground break-all">
                           Asset:{' '}
-                          <a
-                            href={solscanTokenUrl(g.nft_mint_address)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            {g.nft_mint_address.length > 12
-                              ? `${g.nft_mint_address.slice(0, 6)}…${g.nft_mint_address.slice(-6)}`
-                              : g.nft_mint_address}
-                          </a>
+                          {mint ? (
+                            <a
+                              href={solscanTokenUrl(mint)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              {formatMintForDisplay(mint)}
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                           {g.prize_standard ? (
                             <span className="text-muted-foreground"> · {g.prize_standard}</span>
                           ) : null}
@@ -2857,6 +3020,7 @@ export default function DashboardPage() {
                   const ready =
                     g.status === 'drawn' && Boolean(g.prize_deposited_at) && Boolean(g.winner_wallet) && !claimed
                   const label = g.title?.trim() || 'Community giveaway'
+                  const mint = typeof g.nft_mint_address === 'string' ? g.nft_mint_address.trim() : ''
                   return (
                     <li
                       key={g.id}
@@ -2866,16 +3030,18 @@ export default function DashboardPage() {
                         <p className="font-medium truncate">{label}</p>
                         <p className="text-xs text-muted-foreground break-all">
                           Asset:{' '}
-                          <a
-                            href={solscanTokenUrl(g.nft_mint_address)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            {g.nft_mint_address.length > 12
-                              ? `${g.nft_mint_address.slice(0, 6)}…${g.nft_mint_address.slice(-6)}`
-                              : g.nft_mint_address}
-                          </a>
+                          {mint ? (
+                            <a
+                              href={solscanTokenUrl(mint)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              {formatMintForDisplay(mint)}
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                           {g.prize_standard ? (
                             <span className="text-muted-foreground"> · {g.prize_standard}</span>
                           ) : null}

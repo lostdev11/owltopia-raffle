@@ -101,6 +101,8 @@ export type RaffleStatus =
 /** Supported raffle ticket currencies */
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
 
+export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
+
 export interface Raffle {
   id: string
   slug: string
@@ -196,6 +198,26 @@ export interface Raffle {
   creator_claimed_at?: string | null
   creator_claim_tx?: string | null
   creator_funds_claim_locked_at?: string | null
+}
+
+export interface RaffleOffer {
+  id: string
+  raffle_id: string
+  buyer_wallet: string
+  amount: number
+  currency: RaffleCurrency
+  status: RaffleOfferStatus
+  created_at: string
+  updated_at: string
+  expires_at: string
+  accepted_at: string | null
+  accepted_by_wallet: string | null
+  treasury_fee_bps: number
+  treasury_fee_amount: number | null
+  winner_net_amount: number | null
+  funded_at: string
+  refunded_at: string | null
+  refund_tx_signature: string | null
 }
 
 export interface Entry {

@@ -15,6 +15,9 @@ export const OWLTOPIA_DAS_CACHE_TTL_MS = devSaveApiCredits() ? 600_000 : 45_000
 /** Global live activity: GET /api/raffles */
 export const LIVE_ACTIVITY_REFETCH_MS = devSaveApiCredits() ? 600_000 : 90_000
 
+/** When Supabase Realtime WebSocket is unavailable (desktop firewall/adblock), poll recent confirmed entries */
+export const LIVE_ACTIVITY_POLL_FALLBACK_MS = devSaveApiCredits() ? 60_000 : 8_000
+
 /** Raffles "All" tab: full server re-render (includes holder enrichment → Helius). */
 export const RAFFLES_PAGE_SERVER_REFRESH_MS = devSaveApiCredits() ? 600_000 : 60_000
 

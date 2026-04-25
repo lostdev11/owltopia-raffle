@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
@@ -141,6 +141,12 @@ function solscanTokenUrl(mint: string): string {
   return `https://solscan.io/token/${encodeURIComponent(mint.trim())}${solscanClusterQuery()}`
 }
 
+function formatOfferAmount(amount: number, currency: string): string {
+  if (!Number.isFinite(amount)) return `0 ${currency}`
+  if (currency === 'USDC') return `${amount.toFixed(2)} ${currency}`
+  return `${amount.toFixed(4)} ${currency}`
+}
+
 interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
@@ -213,6 +219,13 @@ export function RaffleDetailClient({
   const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
+  const [raffleOffers, setRaffleOffers] = useState<RaffleOffer[]>([])
+  const [offersLoading, setOffersLoading] = useState(false)
+  const [offersError, setOffersError] = useState<string | null>(null)
+  const [newOfferAmount, setNewOfferAmount] = useState('')
+  const [submitOfferLoading, setSubmitOfferLoading] = useState(false)
+  const [acceptOfferIdLoading, setAcceptOfferIdLoading] = useState<string | null>(null)
+  const [offerWindowEndsAt, setOfferWindowEndsAt] = useState<string | null>(null)
   const [refundTerminalLoading, setRefundTerminalLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2456,12 +2469,105 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const fetchOffers = useCallback(async () => {
+    setOffersLoading(true)
+    setOffersError(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/offers`, {
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to load offers')
+        return
+      }
+      setRaffleOffers(Array.isArray(data?.offers) ? data.offers : [])
+      setOfferWindowEndsAt(typeof data?.offerWindowEndsAt === 'string' ? data.offerWindowEndsAt : null)
+    } catch (e) {
+      setOffersError(e instanceof Error ? e.message : 'Failed to load offers')
+    } finally {
+      setOffersLoading(false)
+    }
+  }, [raffle.id])
+
+  const handleSubmitOffer = useCallback(async () => {
+    setOffersError(null)
+    const amount = Number(newOfferAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setOffersError('Enter a valid offer amount')
+      return
+    }
+    setSubmitOfferLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/offers`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to submit offer')
+        return
+      }
+      setNewOfferAmount('')
+      await fetchOffers()
+    } catch (e) {
+      setOffersError(e instanceof Error ? e.message : 'Failed to submit offer')
+    } finally {
+      setSubmitOfferLoading(false)
+    }
+  }, [fetchOffers, newOfferAmount, raffle.id])
+
+  const handleAcceptOffer = useCallback(
+    async (offerId: string) => {
+      setOffersError(null)
+      setAcceptOfferIdLoading(offerId)
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}/offers/${offerId}/accept`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to accept offer')
+          return
+        }
+        await fetchOffers()
+      } catch (e) {
+        setOffersError(e instanceof Error ? e.message : 'Failed to accept offer')
+      } finally {
+        setAcceptOfferIdLoading(null)
+      }
+    },
+    [fetchOffers, raffle.id]
+  )
+
+  useEffect(() => {
+    const winnerWallet = (raffle.winner_wallet ?? '').trim()
+    if (!winnerWallet) return
+    const raffleEndMs = new Date(raffle.end_time).getTime()
+    const ended = !Number.isNaN(raffleEndMs) && raffleEndMs <= Date.now()
+    if (!ended) return
+    void fetchOffers()
+  }, [fetchOffers, raffle.end_time, raffle.winner_wallet])
+
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
   const winnerWalletNorm = (raffle.winner_wallet ?? '').trim()
   const walletNorm = walletAddress.trim()
   const isWinnerDetail = hasEnded && !!winnerWalletNorm && walletNorm === winnerWalletNorm
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
+  const offerWindowEndsDate = offerWindowEndsAt ? new Date(offerWindowEndsAt) : null
+  const offerWindowOpen =
+    !!offerWindowEndsDate &&
+    !Number.isNaN(offerWindowEndsDate.getTime()) &&
+    offerWindowEndsDate.getTime() > Date.now()
+  const prizeStillInEscrowForOffers =
+    !(raffle.nft_transfer_transaction ?? '').trim() && !raffle.prize_returned_at
+  const canViewOfferPanel = hasEnded && !!winnerWalletNorm
+  const isOfferBuyer =
+    connected && !!walletNorm && walletNorm !== winnerWalletNorm && prizeStillInEscrowForOffers
 
   const detailHeroCardStyle: CSSProperties =
     showEnteredStyle && userHasEnteredDetail
@@ -2687,6 +2793,87 @@ export function RaffleDetailClient({
           <p className="text-sm text-destructive mb-2" role="alert">
             {claimProceedsError}
           </p>
+        )}
+        {canViewOfferPanel && (
+          <Card className="border-primary/25">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Post-win offers</CardTitle>
+              <CardDescription>
+                Offers are active for 24 hours after winner selection.
+                {offerWindowEndsDate && ` Window ends ${formatDateTimeWithTimezone(offerWindowEndsDate.toISOString())}.`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {offersError && <p className="text-sm text-destructive">{offersError}</p>}
+              {!offerWindowOpen && (
+                <p className="text-sm text-muted-foreground">
+                  Offer window has closed for this raffle.
+                </p>
+              )}
+              {!prizeStillInEscrowForOffers && (
+                <p className="text-sm text-muted-foreground">
+                  Offers are disabled because this raffle prize has already been claimed or returned.
+                </p>
+              )}
+              {isOfferBuyer && offerWindowOpen && prizeStillInEscrowForOffers && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={newOfferAmount}
+                    onChange={(e) => setNewOfferAmount(e.target.value)}
+                    placeholder={`Your offer in ${raffle.currency}`}
+                    className="touch-manipulation min-h-[44px]"
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleSubmitOffer}
+                    disabled={submitOfferLoading}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {submitOfferLoading ? 'Submitting…' : 'Submit offer'}
+                  </Button>
+                </div>
+              )}
+              {offersLoading ? (
+                <p className="text-sm text-muted-foreground">Loading offers…</p>
+              ) : raffleOffers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No offers yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {raffleOffers.map((offer) => (
+                    <div
+                      key={offer.id}
+                      className="rounded-md border border-border/60 bg-muted/25 p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {formatOfferAmount(Number(offer.amount), offer.currency)}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-mono break-all">
+                          {offer.buyer_wallet}
+                        </p>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                          {offer.status}
+                        </p>
+                      </div>
+                      {isWinnerDetail && offer.status === 'pending' && offerWindowOpen && prizeStillInEscrowForOffers && (
+                        <Button
+                          size="sm"
+                          onClick={() => void handleAcceptOffer(offer.id)}
+                          disabled={acceptOfferIdLoading === offer.id}
+                          className="touch-manipulation min-h-[44px] sm:min-h-9"
+                        >
+                          {acceptOfferIdLoading === offer.id ? 'Accepting…' : 'Accept'}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
         {showCreatorRefundCandidates && creatorRefundCandidates.length > 0 && (
           <Card className="border-amber-500/30 bg-amber-500/5">
