@@ -660,17 +660,21 @@ export function RafflesPageClient({
   const isPartnerCommunityRaffle = useCallback(
     (raffle: Raffle) => {
       const w = (raffle.creator_wallet || raffle.created_by || '').trim()
-      return raffle.creator_is_partner === true || (w ? partnerWalletSet.has(w) : false)
+      return (
+        raffle.creator_is_partner === true ||
+        Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+        (w ? partnerWalletSet.has(w) : false)
+      )
     },
     [partnerWalletSet]
   )
-  /** Partner tab: only community partner raffles. Main tab: exclude them so browse is separate. */
+  /** Partner tab: only community partner raffles. Main tab: show all raffles. */
   const filterPartnerBucket = useCallback(
     (items: RaffleWithEntries[]) => {
       if (partnerOnly) {
         return items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle))
       }
-      return items.filter(({ raffle }) => !isPartnerCommunityRaffle(raffle))
+      return items
     },
     [partnerOnly, isPartnerCommunityRaffle]
   )
@@ -1395,19 +1399,6 @@ export function RafflesPageClient({
             <>
               {tab === 'all' && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
-              )}
-              {tab === 'all' && !partnerOnly && (
-                <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
-                  This view lists host raffles outside the partner program. Verified partner community listings live under{' '}
-                  <button
-                    type="button"
-                    onClick={() => setTab('partner-raffles')}
-                    className="text-foreground/90 font-medium underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
-                  >
-                    Partner raffles
-                  </button>
-                  ; highlights may still appear in the strip above when you are on Main.
-                </p>
               )}
               {partnerOnly && (
                 <p className="text-sm text-muted-foreground mb-4 max-w-2xl">

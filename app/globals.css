@@ -406,11 +406,32 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   will-change: transform;
 }
 
+@keyframes partner-logos-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.partner-logos-marquee-track {
+  --partner-logos-marquee-duration: 30s;
+  animation: partner-logos-marquee var(--partner-logos-marquee-duration) linear infinite;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .partner-raffles-marquee-outer {
     overflow-x: auto;
   }
   .partner-raffles-marquee-track {
+    animation: none !important;
+  }
+  .partner-logos-marquee-outer {
+    overflow-x: auto;
+  }
+  .partner-logos-marquee-track {
     animation: none !important;
   }
 }

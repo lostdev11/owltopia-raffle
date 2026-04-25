@@ -42,7 +42,6 @@ export function PartnerRafflesCarousel({
   itemsRef.current = items
   const [marqueePaused, setMarqueePaused] = useState(false)
   const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const logosScrollRef = useRef<HTMLDivElement | null>(null)
 
   const itemsKey = useMemo(
     () =>
@@ -153,34 +152,6 @@ export function PartnerRafflesCarousel({
   const durationSec = Math.max(20, n * 8)
   const logoDurationSec = Math.max(20, PARTNER_LOGOS.length * 6)
 
-  useEffect(() => {
-    const el = logosScrollRef.current
-    if (!el || PARTNER_LOGOS.length <= 1) return
-
-    let rafId = 0
-    let lastTs = 0
-    const pxPerSec = el.scrollWidth / logoDurationSec
-
-    const tick = (ts: number) => {
-      if (!lastTs) lastTs = ts
-      const dt = (ts - lastTs) / 1000
-      lastTs = ts
-
-      if (!marqueePaused) {
-        el.scrollLeft += pxPerSec * dt
-        const max = Math.max(1, el.scrollWidth - el.clientWidth)
-        if (el.scrollLeft >= max) {
-          // Single-list loop: jump back to start (no duplicate logos rendered).
-          el.scrollLeft = 0
-        }
-      }
-      rafId = window.requestAnimationFrame(tick)
-    }
-
-    rafId = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(rafId)
-  }, [logoDurationSec, marqueePaused])
-
   if (items.length === 0) return null
 
   return (
@@ -196,8 +167,7 @@ export function PartnerRafflesCarousel({
           </h2>
         </div>
         <div
-          ref={logosScrollRef}
-          className="w-full min-w-0 max-w-full overflow-x-hidden pb-1"
+          className="partner-logos-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden pb-1"
           style={{ touchAction: 'manipulation' as const }}
           onPointerDown={pauseMarquee}
           onPointerUp={scheduleResume}
@@ -206,12 +176,18 @@ export function PartnerRafflesCarousel({
           aria-label="Partner logos, auto-scrolling. Tap to pause."
         >
           <div
-            className="flex w-max flex-nowrap items-center gap-2.5 sm:gap-3"
+            className="partner-logos-marquee-track flex w-max flex-nowrap items-center gap-2.5 sm:gap-3"
             dir="ltr"
+            style={
+              {
+                animationPlayState: marqueePaused ? 'paused' : 'running',
+                '--partner-logos-marquee-duration': `${logoDurationSec}s`,
+              } as CSSProperties
+            }
           >
-            {PARTNER_LOGOS.map((logo) => (
+            {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map((logo, idx) => (
               <div
-                key={logo.src}
+                key={`${logo.src}-${idx}`}
                 className="flex h-[78px] w-[126px] shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-[92px] sm:w-[152px]"
               >
                 <Image

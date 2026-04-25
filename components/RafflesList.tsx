@@ -429,7 +429,9 @@ export function RafflesList({
         {otherRaffles.map(({ raffle, entries, profitInfo }, index) => {
           const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
           const isPartnerCommunity =
-            raffle.creator_is_partner === true || (creator ? partnerWalletSet?.has(creator) ?? false : false)
+            raffle.creator_is_partner === true ||
+            Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+            (creator ? partnerWalletSet?.has(creator) ?? false : false)
           return (
           <RaffleScrollReveal key={raffle.id}>
             <RaffleCard
