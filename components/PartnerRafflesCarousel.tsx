@@ -1,11 +1,13 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
+import { PARTNER_LOGOS } from '@/lib/partner-logos'
 
 type Item = { raffle: Raffle; entries: Entry[] }
 
@@ -40,6 +42,7 @@ export function PartnerRafflesCarousel({
   itemsRef.current = items
   const [marqueePaused, setMarqueePaused] = useState(false)
   const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const logosScrollRef = useRef<HTMLDivElement | null>(null)
 
   const itemsKey = useMemo(
     () =>
@@ -148,6 +151,35 @@ export function PartnerRafflesCarousel({
 
   const n = displayItems.length
   const durationSec = Math.max(20, n * 8)
+  const logoDurationSec = Math.max(20, PARTNER_LOGOS.length * 6)
+
+  useEffect(() => {
+    const el = logosScrollRef.current
+    if (!el || PARTNER_LOGOS.length <= 1) return
+
+    let rafId = 0
+    let lastTs = 0
+    const pxPerSec = el.scrollWidth / logoDurationSec
+
+    const tick = (ts: number) => {
+      if (!lastTs) lastTs = ts
+      const dt = (ts - lastTs) / 1000
+      lastTs = ts
+
+      if (!marqueePaused) {
+        el.scrollLeft += pxPerSec * dt
+        const max = Math.max(1, el.scrollWidth - el.clientWidth)
+        if (el.scrollLeft >= max) {
+          // Single-list loop: jump back to start (no duplicate logos rendered).
+          el.scrollLeft = 0
+        }
+      }
+      rafId = window.requestAnimationFrame(tick)
+    }
+
+    rafId = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(rafId)
+  }, [logoDurationSec, marqueePaused])
 
   if (items.length === 0) return null
 
@@ -157,11 +189,41 @@ export function PartnerRafflesCarousel({
       aria-labelledby="partner-raffles-carousel-heading"
     >
       <div className="mb-3 min-w-0 sm:mb-4">
-        <div className="mb-1 flex min-w-0 items-center gap-2">
+        <div className="mb-2 flex min-w-0 items-center gap-2">
           <Users className="h-5 w-5 shrink-0 text-violet-400" aria-hidden />
-          <h2 id="partner-raffles-carousel-heading" className="truncate text-lg font-bold sm:text-xl">
-            -OFFICIAL OWLTOPIA PARTNERS
+          <h2 id="partner-raffles-carousel-heading" className="truncate text-base font-bold sm:text-lg">
+            Partner Spotlight
           </h2>
+        </div>
+        <div
+          ref={logosScrollRef}
+          className="w-full min-w-0 max-w-full overflow-x-hidden pb-1"
+          style={{ touchAction: 'manipulation' as const }}
+          onPointerDown={pauseMarquee}
+          onPointerUp={scheduleResume}
+          onPointerCancel={scheduleResume}
+          role="region"
+          aria-label="Partner logos, auto-scrolling. Tap to pause."
+        >
+          <div
+            className="flex w-max flex-nowrap items-center gap-2.5 sm:gap-3"
+            dir="ltr"
+          >
+            {PARTNER_LOGOS.map((logo) => (
+              <div
+                key={logo.src}
+                className="flex h-[78px] w-[126px] shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-[92px] sm:w-[152px]"
+              >
+                <Image
+                  src={logo.src}
+                  alt={logo.alt}
+                  width={140}
+                  height={84}
+                  className="h-full w-full rounded-xl object-contain"
+                />
+              </div>
+            ))}
+          </div>
         </div>
         <p className="text-sm text-muted-foreground sm:text-base">
           <Link
