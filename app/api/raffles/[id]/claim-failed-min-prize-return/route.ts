@@ -7,6 +7,7 @@ import {
   getRaffleById,
 } from '@/lib/db/raffles'
 import {
+  type PrizeReturnReason,
   transferNftPrizeToCreator,
   transferPartnerSplPrizeToCreator,
 } from '@/lib/raffles/prize-escrow'
@@ -17,8 +18,9 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/claim-failed-min-prize-return
- * Creator-only: after min tickets were not met past the allowed extension (`failed_refund_available`),
- * retry returning the verified escrow prize (NFT or partner SPL) to the creator wallet.
+ * Creator-only: return the verified escrow prize (NFT or partner SPL) when the raffle is terminal and the
+ * prize is not for a winner — either `failed_refund_available` (min not met after extension) or
+ * `cancelled` (admin-approved cancellation), matching the dashboard "claim prize back" action.
  */
 export async function POST(
   request: NextRequest,
@@ -56,11 +58,13 @@ export async function POST(
       return NextResponse.json({ error: 'Only the raffle creator can claim this return' }, { status: 403 })
     }
 
-    if (raffle.status !== 'failed_refund_available') {
+    const isFailedMin = raffle.status === 'failed_refund_available'
+    const isCancelled = raffle.status === 'cancelled'
+    if (!isFailedMin && !isCancelled) {
       return NextResponse.json(
         {
           error:
-            'This raffle is not in refund-available state (minimum threshold flow). Open the raffle page once if it just ended.',
+            'Prize can only be claimed back when the raffle is cancelled or failed the minimum-ticket rule with refunds open. If it just ended, open the listing once or wait for status to update.',
         },
         { status: 400 }
       )
@@ -105,10 +109,14 @@ export async function POST(
       )
     }
 
+    const prizeReturnReason: PrizeReturnReason = isCancelled
+      ? 'cancelled'
+      : 'min_threshold_not_met'
+
     try {
       const result = partnerSpl
-        ? await transferPartnerSplPrizeToCreator(raffleId, 'min_threshold_not_met')
-        : await transferNftPrizeToCreator(raffleId, 'min_threshold_not_met')
+        ? await transferPartnerSplPrizeToCreator(raffleId, prizeReturnReason)
+        : await transferNftPrizeToCreator(raffleId, prizeReturnReason)
 
       if (!result.ok || !result.signature) {
         await clearNftPrizeClaimLock(raffleId)

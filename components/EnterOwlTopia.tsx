@@ -118,11 +118,12 @@ export function EnterOwlTopia() {
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
         <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">
-        {/* In-flow brand above announcements (all breakpoints; matches landing layout). */}
+        {/* In-flow brand: logo.gif is authored for the dark header — on the light home background the wordmark
+            washes out, so we sit it on a dark panel (same read as the nav bar). */}
         <div className="w-full flex justify-center animate-enter-fade-in" style={fadeIn('0.05s')}>
           <Link
             href="/"
-            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center"
+            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center rounded-2xl border border-zinc-800/70 bg-zinc-950 px-3 py-2.5 sm:px-4 sm:py-3 shadow-lg shadow-black/25 ring-1 ring-white/10"
             aria-label="Owltopia home"
           >
             <Logo className="w-full max-w-full h-auto" width={600} height={150} />

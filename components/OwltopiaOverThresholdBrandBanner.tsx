@@ -23,8 +23,7 @@ export function OwltopiaOverThresholdBrandBanner({
 }: OwltopiaOverThresholdBrandBannerProps) {
   return (
     <div
-      className={`relative w-full max-h-[240px] min-h-[100px] select-none overflow-hidden ${className}`}
-      style={{ aspectRatio: '4 / 1' }}
+      className={`relative w-full aspect-[3/2] max-h-[min(18rem,80vw)] max-sm:min-h-[160px] select-none overflow-hidden sm:aspect-[4/1] sm:min-h-0 sm:max-h-[240px] ${className}`}
     >
       <div className="absolute inset-0" aria-hidden>
         <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/95 via-emerald-950/30 to-black" />
@@ -40,7 +39,7 @@ export function OwltopiaOverThresholdBrandBanner({
             background: `radial-gradient(ellipse 30% 70% at 50% 50%, rgba(0, 255, 150, 0.08) 0%, transparent 60%)`,
           }}
         />
-        <div className="absolute inset-0 z-[1] flex min-h-0 min-w-0 items-center justify-center px-2 sm:px-3">
+        <div className="absolute inset-0 z-[1] flex min-h-0 min-w-0 max-sm:pt-7 max-sm:pb-1 items-center justify-center px-2 sm:px-3 sm:pt-0 sm:pb-0">
           <div className="relative h-full w-full min-h-0 min-w-0 max-w-4xl py-0.5">
             <Image
               src={BANNER_LOGO_SRC}
@@ -59,7 +58,7 @@ export function OwltopiaOverThresholdBrandBanner({
       {topLeft && <div className="absolute left-2.5 top-2.5 z-20 sm:left-3.5 sm:top-3.5">{topLeft}</div>}
 
       {bottomContent && (
-        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/20 to-transparent pb-2.5 pl-2.5 pr-2.5 pt-6 sm:pb-3.5 sm:pl-4 sm:pr-4">
+        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/85 via-black/35 to-transparent pb-3 pl-2.5 pr-2.5 pt-7 sm:from-black/80 sm:via-black/20 sm:pb-3.5 sm:pl-4 sm:pr-4 sm:pt-6">
           {bottomContent}
         </div>
       )}

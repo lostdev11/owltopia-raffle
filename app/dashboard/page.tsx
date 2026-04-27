@@ -118,13 +118,13 @@ function canClaimNftPrize(raffle: EntryWithRaffle['raffle'], wallet: string): bo
   return true
 }
 
-/** Creator can pull prize back from escrow after terminal min-threshold failure (matches claim-failed-min-prize-return API). */
+/** Creator can pull prize back from escrow after min-threshold failure or cancellation (matches claim-failed-min-prize-return API). */
 function canCreatorClaimFailedMinThresholdPrize(raffle: Raffle, wallet: string): boolean {
   const w = wallet.trim()
   if (!w) return false
   const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
   if (!creator || creator !== w) return false
-  if (raffle.status !== 'failed_refund_available') return false
+  if (raffle.status !== 'failed_refund_available' && raffle.status !== 'cancelled') return false
   if (raffle.winner_wallet?.trim() || (raffle.winner_selected_at && String(raffle.winner_selected_at).trim())) {
     return false
   }
@@ -2331,12 +2331,12 @@ export default function DashboardPage() {
               role="status"
             >
               <p className="text-sm font-medium text-foreground">
-                Claim your prize back (minimum not met after extension)
+                Claim your prize back (cancelled or minimum not met after extension)
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                For these raffles, ticket buyers can request refunds and your escrowed prize should return to your
-                wallet. If the automatic return did not finish, use the button on each raffle (same wallet you used to
-                create the listing; sign-in required).
+                For these listings, your prize may still be in platform escrow. If the return did not finish
+                automatically, use the button for each raffle (same wallet you used to create the listing; sign-in
+                required). Buyers on cancelled raffles are refunded per platform policy, separately from this claim.
               </p>
               <ul className="space-y-2">
                 {creatorFailedMinPrizeReturnClaimable.map((r) => (
@@ -2645,15 +2645,19 @@ export default function DashboardPage() {
                             Cancellation requested. Waiting for admin approval in Owl Vision.
                           </p>
                         )}
-                        {r.status === 'failed_refund_available' && (
+                        {(r.status === 'failed_refund_available' || r.status === 'cancelled') && (
                           <div className="rounded-md border border-amber-500/35 bg-amber-500/[0.06] p-3 space-y-2 mt-2">
-                            <p className="text-xs font-medium text-foreground">Minimum tickets not met (after extension)</p>
+                            <p className="text-xs font-medium text-foreground">
+                              {r.status === 'cancelled'
+                                ? 'Raffle cancelled'
+                                : 'Minimum tickets not met (after extension)'}
+                            </p>
                             {canCreatorClaimFailedMinThresholdPrize(r, wallet) ? (
                               <>
                                 <p className="text-xs text-muted-foreground leading-relaxed">
-                                  Your prize is still in platform escrow. Claim it back to this wallet (no ticket
-                                  purchase needed; one on-chain transfer). If this fails on mobile data, try Wi‑Fi or
-                                  again in a few minutes.
+                                  {r.status === 'cancelled'
+                                    ? 'This listing was cancelled. If your prize is still in platform escrow, claim it back to this wallet (one on-chain transfer; sign-in required). If this fails on mobile data, try Wi‑Fi or again in a few minutes.'
+                                    : 'Your prize is still in platform escrow. Claim it back to this wallet (no ticket purchase needed; one on-chain transfer). If this fails on mobile data, try Wi‑Fi or again in a few minutes.'}
                                 </p>
                                 <Button
                                   type="button"
