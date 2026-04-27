@@ -91,6 +91,8 @@ type EntryWithRaffle = {
     winner_selected_at?: string | null
     ticket_payments_to_funds_escrow?: boolean | null
     prize_type?: string | null
+    prize_amount?: number | null
+    prize_currency?: string | null
     nft_mint_address?: string | null
     nft_transfer_transaction?: string | null
     prize_deposited_at?: string | null

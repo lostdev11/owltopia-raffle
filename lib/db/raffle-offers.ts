@@ -199,8 +199,11 @@ export async function claimOfferRefund(input: {
       amount: Number(data.amount ?? 0),
       currency: String(data.currency ?? 'SOL').toUpperCase() as Raffle['currency'],
     })
-    if (!payout.ok || !payout.signature) {
+    if (!payout.ok) {
       throw new Error(payout.error || 'Failed to refund offer bid from funds escrow')
+    }
+    if (!payout.signature) {
+      throw new Error('Failed to refund offer bid from funds escrow')
     }
     txSig = payout.signature
   }

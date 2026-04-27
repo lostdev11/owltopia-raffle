@@ -11,7 +11,7 @@
     "generate:funds-escrow-key": "node scripts/generate-funds-escrow-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
     "mint:devnet-nft": "node scripts/mint-devnet-nft.mjs",
-    "build": "next build --webpack",
+    "build": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
