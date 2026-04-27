@@ -2615,9 +2615,12 @@ export function RaffleDetailClient({
     isAdmin && 
     !raffle.nft_transfer_transaction
 
+  const claimableEscrowPrize =
+    (raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()) || isPartnerSplPrizeRaffle(raffle)
+
   const showClaimPrizeButton =
     hasEnded &&
-    raffle.prize_type === 'nft' &&
+    claimableEscrowPrize &&
     !!winnerWalletNorm &&
     walletNorm === winnerWalletNorm &&
     !!raffle.prize_deposited_at &&
@@ -3677,7 +3680,7 @@ export function RaffleDetailClient({
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-foreground">You won this raffle</p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      The prize NFT is in platform escrow (verified). Tap Claim prize and we&apos;ll send it to your connected wallet on Solana. If something fails, contact support — an admin can retry the escrow transfer.
+                      The prize is in platform escrow (verified). Tap Claim prize and we&apos;ll send it to your connected wallet on Solana. If something fails, contact support — an admin can retry the escrow transfer.
                     </p>
                   </div>
                 </div>

@@ -1359,7 +1359,7 @@ export function RafflesPageClient({
               </div>
             ) : (
             <>
-              {tab === 'all' && partnerFeaturedActive.length > 0 && (
+              {partnerOnly && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
               )}
               {partnerOnly && (

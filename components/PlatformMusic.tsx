@@ -7,7 +7,6 @@ import {
   RAFFLE_AMBIENT_TRACK_TITLE,
 } from '@/lib/raffle-ambient-audio'
 
-const USER_PAUSED_KEY = 'owl-platform-music-user-paused'
 const DEFAULT_VOLUME = 0.32
 
 type PlatformMusicContextValue = {
@@ -38,7 +37,6 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
   const [audioMounted, setAudioMounted] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const gestureCleanupRef = useRef<(() => void) | null>(null)
 
   /** RaffleOwlPlayer hides this via `body[data-owl-raffle-list-owl="1"]` in globals.css — not React state, so we don't re-render the app (Radix/Dialog ref issues). */
   const showFloatingControl = !loadError
@@ -51,11 +49,6 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
   const pause = useCallback(() => {
     const a = audioRef.current
     if (!a || loadError) return
-    try {
-      localStorage.setItem(USER_PAUSED_KEY, 'true')
-    } catch {
-      /* ignore */
-    }
     a.pause()
     syncPlaying()
   }, [loadError, syncPlaying])
@@ -63,11 +56,6 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
   const play = useCallback(async () => {
     const a = audioRef.current
     if (!a || loadError) return
-    try {
-      localStorage.setItem(USER_PAUSED_KEY, 'false')
-    } catch {
-      /* ignore */
-    }
     a.loop = true
     a.volume = DEFAULT_VOLUME
     try {
@@ -97,71 +85,6 @@ export function PlatformMusicProvider({ children }: { children: React.ReactNode 
     return () => {
       a.removeEventListener('play', onPlay)
       a.removeEventListener('pause', onPause)
-    }
-  }, [audioMounted, loadError, syncPlaying])
-
-  useEffect(() => {
-    if (!audioMounted || loadError) return
-    const a = audioRef.current
-    if (!a) return
-
-    let cancelled = false
-    a.loop = true
-    a.volume = DEFAULT_VOLUME
-
-    const detachGesture = () => {
-      gestureCleanupRef.current?.()
-      gestureCleanupRef.current = null
-    }
-
-    const tryStart = async () => {
-      let userPaused = false
-      try {
-        userPaused = localStorage.getItem(USER_PAUSED_KEY) === 'true'
-      } catch {
-        /* ignore */
-      }
-      if (cancelled || userPaused) {
-        syncPlaying()
-        return
-      }
-
-      try {
-        await a.play()
-        detachGesture()
-      } catch {
-        const onGesture = () => {
-          if (cancelled) return
-          let paused = false
-          try {
-            paused = localStorage.getItem(USER_PAUSED_KEY) === 'true'
-          } catch {
-            /* ignore */
-          }
-          if (paused) return
-          void a
-            .play()
-            .then(() => {
-              detachGesture()
-              syncPlaying()
-            })
-            .catch(() => {})
-        }
-        detachGesture()
-        window.addEventListener('pointerdown', onGesture, { passive: true })
-        window.addEventListener('keydown', onGesture)
-        gestureCleanupRef.current = () => {
-          window.removeEventListener('pointerdown', onGesture)
-          window.removeEventListener('keydown', onGesture)
-        }
-      }
-      if (!cancelled) syncPlaying()
-    }
-
-    void tryStart()
-    return () => {
-      cancelled = true
-      detachGesture()
     }
   }, [audioMounted, loadError, syncPlaying])
 
