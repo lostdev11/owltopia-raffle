@@ -107,10 +107,14 @@ function raffleEndedOrCompleted(raffle: { end_time: string; status: string | nul
 }
 
 /** Matches server rules in POST /api/raffles/[id]/claim-prize */
-function canClaimNftPrize(raffle: EntryWithRaffle['raffle'], wallet: string): boolean {
+function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string): boolean {
   const w = wallet.trim()
   if (!w || !raffle.winner_wallet?.trim() || raffle.winner_wallet.trim() !== w) return false
-  if (raffle.prize_type !== 'nft' || !raffle.nft_mint_address?.trim()) return false
+  const partnerSpl = isPartnerSplPrizeRaffle(
+    raffle as Pick<FullRaffle, 'prize_type' | 'prize_currency'>
+  )
+  const nftPrize = raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()
+  if (!partnerSpl && !nftPrize) return false
   if (!raffle.prize_deposited_at) return false
   if (raffle.prize_returned_at) return false
   if (raffle.nft_transfer_transaction?.trim()) return false
@@ -320,6 +324,7 @@ export default function DashboardPage() {
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
+  const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
   const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
   const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
@@ -338,6 +343,12 @@ export default function DashboardPage() {
   const dashboardHydratedRef = useRef(false)
   const hasDashboardDataRef = useRef(false)
   const visibilityTick = useVisibilityTick()
+
+  useEffect(() => {
+    if (!claimPrizeSuccessTx) return
+    const t = window.setTimeout(() => setClaimPrizeSuccessTx(null), 9000)
+    return () => window.clearTimeout(t)
+  }, [claimPrizeSuccessTx])
 
   // Use wallet address string in deps so callback identity is stable (publicKey object ref can change every render and cause infinite loop).
   const walletAddr = publicKey?.toBase58() ?? ''
@@ -622,6 +633,7 @@ export default function DashboardPage() {
   const handleClaimPrize = useCallback(
     async (raffleId: string) => {
       setClaimActionError(null)
+      setClaimPrizeSuccessTx(null)
       setClaimPrizeLoadingId(raffleId)
       try {
         const res = await fetch(`/api/raffles/${raffleId}/claim-prize`, {
@@ -636,6 +648,13 @@ export default function DashboardPage() {
               : 'Could not claim prize'
           )
           return
+        }
+        const txSig =
+          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
+            ? (json as { transactionSignature: string }).transactionSignature.trim()
+            : ''
+        if (txSig) {
+          setClaimPrizeSuccessTx(txSig)
         }
         await loadDashboard({ silent: true })
       } finally {
@@ -934,7 +953,7 @@ export default function DashboardPage() {
       let prizeState: NftWinnerDashboardRow['prizeState']
       if (raffle.prize_returned_at) prizeState = 'returned'
       else if (tx) prizeState = 'claimed'
-      else if (canClaimNftPrize(raffle, walletForMemo)) prizeState = 'claimable'
+      else if (canClaimEscrowPrize(raffle, walletForMemo)) prizeState = 'claimable'
       else prizeState = 'waiting'
       if (!byId.has(raffle.id)) {
         byId.set(raffle.id, { raffle, prizeState, claimedTx: tx })
@@ -3210,13 +3229,52 @@ export default function DashboardPage() {
           {cryptoPrizeWinRows.length > 0 && (
             <div>
               <p className="text-sm font-medium text-foreground mb-2">Raffle winners (crypto / SPL prizes)</p>
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {cryptoPrizeWinRows.map((raffle) => (
-                  <li key={raffle.id}>
-                    <Link href={`/raffles/${raffle.slug}`} className="text-sm hover:underline">
-                      {raffle.title}
-                    </Link>
-                    <span className="text-sm text-muted-foreground"> — you won; open the raffle for details.</span>
+                  <li key={raffle.id} className="rounded-lg border border-border/50 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <Link href={`/raffles/${raffle.slug}`} className="text-sm font-medium hover:underline truncate block">
+                          {raffle.title}
+                        </Link>
+                        <span className="text-sm text-muted-foreground">
+                          Prize: {Number(raffle.prize_amount ?? 0).toFixed(raffle.prize_currency === 'USDC' ? 2 : 4)}{' '}
+                          {raffle.prize_currency ?? 'token'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canClaimEscrowPrize(raffle as EntryWithRaffle['raffle'], wallet) && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="min-h-[44px] touch-manipulation"
+                            disabled={claimPrizeLoadingId === raffle.id}
+                            onClick={() => handleClaimPrize(raffle.id)}
+                          >
+                            {claimPrizeLoadingId === raffle.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Gift className="h-4 w-4 mr-1" />
+                                Claim prize
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        {raffle.nft_transfer_transaction?.trim() && (
+                          <Button type="button" variant="outline" size="sm" className="min-h-[44px]" asChild>
+                            <a href={solscanTxUrl(raffle.nft_transfer_transaction.trim())} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="h-4 w-4 mr-1" />
+                              Prize tx
+                            </a>
+                          </Button>
+                        )}
+                        <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" asChild>
+                          <Link href={`/raffles/${raffle.slug}`}>Open</Link>
+                        </Button>
+                      </div>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -3301,7 +3359,7 @@ export default function DashboardPage() {
                         <span className="flex flex-wrap items-center justify-end gap-2">
                           {raffle.winner_wallet === wallet &&
                             raffle.prize_type === 'nft' &&
-                            canClaimNftPrize(raffle as EntryWithRaffle['raffle'], wallet) && (
+                            canClaimEscrowPrize(raffle as EntryWithRaffle['raffle'], wallet) && (
                               <Button
                                 type="button"
                                 size="sm"
@@ -3397,6 +3455,38 @@ export default function DashboardPage() {
       </TabsContent>
       </Tabs>
       </div>
+      {claimPrizeSuccessTx && (
+        <div className="fixed inset-x-0 bottom-3 z-50 px-3 safe-area-bottom pointer-events-none">
+          <div className="mx-auto max-w-xl rounded-xl border border-emerald-500/50 bg-emerald-500/10 p-3 shadow-lg pointer-events-auto">
+            <div className="flex items-start gap-3">
+              <Check className="mt-0.5 h-5 w-5 text-emerald-500 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">Prize claimed successfully</p>
+                <p className="text-xs text-muted-foreground break-all">
+                  Tx: {claimPrizeSuccessTx}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button type="button" size="sm" variant="secondary" className="min-h-[44px]" asChild>
+                    <a href={solscanTxUrl(claimPrizeSuccessTx)} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-1" />
+                      View on Solscan
+                    </a>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="min-h-[44px]"
+                    onClick={() => setClaimPrizeSuccessTx(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

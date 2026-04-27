@@ -21,7 +21,7 @@ import {
 } from '@solana/spl-token'
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
-import type { Entry, Raffle } from '@/lib/types'
+import type { Entry, Raffle, RaffleOffer } from '@/lib/types'
 
 const TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
 
@@ -261,6 +261,108 @@ export async function refundEntryFromFundsEscrow(
   const connection = getSolanaConnection()
   const escrowPubkey = kp.publicKey
   const buyerPk = new PublicKey(entry.wallet_address.trim())
+
+  try {
+    if (currency === 'SOL') {
+      const lamports = Math.round(amount * LAMPORTS_PER_SOL)
+      if (lamports <= 0) return { ok: false, error: 'Nothing to refund.' }
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: escrowPubkey,
+          toPubkey: buyerPk,
+          lamports,
+        })
+      )
+      const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      })
+      return { ok: true, signature: sig }
+    }
+
+    const readConn = getSolanaReadConnection()
+    const tokenInfo = getTokenInfo(currency)
+    if (!tokenInfo.mintAddress) {
+      return { ok: false, error: `${currency} mint not configured.` }
+    }
+    const mint = new PublicKey(tokenInfo.mintAddress)
+    const decimals = tokenInfo.decimals
+    const programId = await getFundsEscrowTokenProgramForMint(mint, escrowPubkey)
+    if (!programId) {
+      return {
+        ok: false,
+        error: `Funds escrow has no ${currency} token account for this mint.`,
+      }
+    }
+
+    const raw = BigInt(Math.round(amount * Math.pow(10, decimals)))
+    if (raw <= 0n) return { ok: false, error: 'Nothing to refund.' }
+
+    const fromAta = await getAssociatedTokenAddress(
+      mint,
+      escrowPubkey,
+      false,
+      programId,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+    const toAta = await getAssociatedTokenAddress(
+      mint,
+      buyerPk,
+      false,
+      programId,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+
+    const tx = new Transaction()
+    try {
+      await getAccount(readConn, toAta, 'confirmed', programId)
+    } catch {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          escrowPubkey,
+          toAta,
+          buyerPk,
+          mint,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      )
+    }
+    tx.add(
+      createTransferInstruction(fromAta, toAta, escrowPubkey, raw, [], programId)
+    )
+
+    const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    })
+    return { ok: true, signature: sig }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Refund one unaccepted raffle offer amount from funds escrow back to the offer buyer.
+ */
+export async function refundOfferBidFromFundsEscrow(
+  offer: Pick<RaffleOffer, 'buyer_wallet' | 'amount' | 'currency'>
+): Promise<FundsEscrowPayoutResult> {
+  const kp = getFundsEscrowKeypair()
+  if (!kp) {
+    return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
+  }
+
+  const amount = Number(offer.amount ?? 0)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'Invalid offer refund amount.' }
+  }
+
+  const currency = (offer.currency || 'SOL').toUpperCase() as 'SOL' | 'USDC' | 'OWL'
+  const connection = getSolanaConnection()
+  const escrowPubkey = kp.publicKey
+  const buyerPk = new PublicKey(String(offer.buyer_wallet ?? '').trim())
 
   try {
     if (currency === 'SOL') {

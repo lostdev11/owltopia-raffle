@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Raffle, RaffleOffer, RaffleOfferStatus } from '@/lib/types'
+import { refundOfferBidFromFundsEscrow } from '@/lib/raffles/funds-escrow'
 
 export const RAFFLE_OFFER_WINDOW_HOURS = 24
 export const RAFFLE_OFFER_TREASURY_FEE_BPS = 50 // 0.5%
@@ -172,7 +173,7 @@ export async function claimOfferRefund(input: {
   const client = getSupabaseAdmin()
   const { data, error } = await client
     .from('raffle_offers')
-    .select('id,buyer_wallet,status,refunded_at')
+    .select('id,buyer_wallet,amount,currency,status,refunded_at')
     .eq('id', id)
     .single()
 
@@ -190,8 +191,21 @@ export async function claimOfferRefund(input: {
     throw new Error('Offer is not eligible for refund yet')
   }
 
+  const providedTxSig = (input.refundTxSignature ?? '').trim()
+  let txSig = providedTxSig || null
+  if (!txSig) {
+    const payout = await refundOfferBidFromFundsEscrow({
+      buyer_wallet: String(data.buyer_wallet ?? '').trim(),
+      amount: Number(data.amount ?? 0),
+      currency: String(data.currency ?? 'SOL').toUpperCase() as Raffle['currency'],
+    })
+    if (!payout.ok || !payout.signature) {
+      throw new Error(payout.error || 'Failed to refund offer bid from funds escrow')
+    }
+    txSig = payout.signature
+  }
+
   const nowIso = asIso(new Date())
-  const txSig = (input.refundTxSignature ?? '').trim() || null
   const update = await client
     .from('raffle_offers')
     .update({
