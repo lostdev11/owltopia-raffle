@@ -86,7 +86,9 @@ export async function POST(
     if (alreadyRequested && needsFee && !feePaid) {
       if (!treasury) {
         return NextResponse.json(
-          { error: 'Treasury wallet is not configured. Set RAFFLE_RECIPIENT_WALLET.' },
+          {
+            error: 'Treasury wallet is not configured. Set RAFFLE_RECIPIENT_WALLET.',
+          },
           { status: 500 }
         )
       }
@@ -141,7 +143,9 @@ export async function POST(
     if (needsFee) {
       if (!treasury) {
         return NextResponse.json(
-          { error: 'Treasury wallet is not configured. Set RAFFLE_RECIPIENT_WALLET.' },
+          {
+            error: 'Treasury wallet is not configured. Set RAFFLE_RECIPIENT_WALLET.',
+          },
           { status: 500 }
         )
       }

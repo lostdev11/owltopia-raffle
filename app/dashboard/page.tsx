@@ -729,7 +729,7 @@ export default function DashboardPage() {
       try {
         const treasury = getRaffleTreasuryWalletAddress()
         if (!treasury) {
-          setClaimActionError('Treasury wallet is not configured for this site.')
+          setClaimActionError('Treasury wallet is not configured (RAFFLE_RECIPIENT_WALLET).')
           return
         }
         const feeSol = getCancellationFeeSol()

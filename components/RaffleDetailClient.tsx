@@ -2489,7 +2489,7 @@ export function RaffleDetailClient({
     }
     const treasury = getRaffleTreasuryWalletAddress()
     if (!treasury) {
-      setError('Treasury is not configured (public recipient missing).')
+      setError('Treasury is not configured (NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET).')
       return null
     }
     const feeSol = getCancellationFeeSol()
