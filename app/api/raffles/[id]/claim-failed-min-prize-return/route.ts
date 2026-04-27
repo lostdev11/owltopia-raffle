@@ -13,6 +13,8 @@ import {
 } from '@/lib/raffles/prize-escrow'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { canCreatorClaimNftBackAfterCancel } from '@/lib/raffles/cancellation-fee-policy'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,6 +67,16 @@ export async function POST(
         {
           error:
             'Prize can only be claimed back when the raffle is cancelled or failed the minimum-ticket rule with refunds open. If it just ended, open the listing once or wait for status to update.',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (isCancelled && !canCreatorClaimNftBackAfterCancel(raffle)) {
+      const fee = getCancellationFeeSol()
+      return NextResponse.json(
+        {
+          error: `The raffle was cancelled after it started. Pay the ${fee} SOL cancellation fee to the platform treasury and wait for the payment to be recorded, then you can claim your prize NFT back. Use Request cancellation on the listing (or the pay-fee path) with your connected creator wallet.`,
         },
         { status: 400 }
       )

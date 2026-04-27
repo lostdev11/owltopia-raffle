@@ -199,8 +199,15 @@ export interface Raffle {
   cancellation_fee_amount: number | null
   /** Currency of cancellation fee (e.g. SOL, USDC). */
   cancellation_fee_currency: string | null
-  /** full_refund = within 24h; no_refund = after 24h. */
+  /**
+   * full_refund = no post-start cancellation fee paid by host; no_refund = host paid the post-start fee
+   * (recorded on admin accept). Ticket buyers can still get refunds in both cases when treasury processes them.
+   */
   cancellation_refund_policy: 'full_refund' | 'no_refund' | null
+  /** Set when the creator’s on-chain cancellation-fee transfer was verified (post-start raffles). */
+  cancellation_fee_paid_at: string | null
+  /** Solana signature of the cancellation-fee transfer. */
+  cancellation_fee_payment_tx: string | null
   /** On-chain standard for NFT prize (SPL / Token-2022 / Mpl Core). Defaults to 'spl' when null. */
   prize_standard?: PrizeStandard | null
   /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */

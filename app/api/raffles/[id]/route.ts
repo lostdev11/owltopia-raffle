@@ -363,6 +363,8 @@ export async function PATCH(
         patch.cancellation_fee_amount = null
         patch.cancellation_fee_currency = null
         patch.cancellation_refund_policy = null
+        patch.cancellation_fee_paid_at = null
+        patch.cancellation_fee_payment_tx = null
       }
 
       if (nextStatus === 'live') {

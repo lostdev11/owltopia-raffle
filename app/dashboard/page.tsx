@@ -32,6 +32,12 @@ import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { useConnection } from '@solana/wallet-adapter-react'
+import { Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle } from '@/lib/types'
@@ -46,6 +52,7 @@ type Raffle = {
   slug: string
   title: string
   status: string | null
+  start_time?: string
   created_by?: string | null
   creator_wallet?: string | null
   creator_payout_amount: number | null
@@ -63,6 +70,7 @@ type Raffle = {
   winner_wallet?: string | null
   winner_selected_at?: string | null
   cancellation_requested_at?: string | null
+  cancellation_fee_paid_at?: string | null
   ticket_payments_to_funds_escrow?: boolean | null
   creator_claimed_at?: string | null
   creator_claim_tx?: string | null
@@ -109,6 +117,23 @@ function raffleEndedOrCompleted(raffle: { end_time: string; status: string | nul
 }
 
 /** Matches server rules in POST /api/raffles/[id]/claim-prize */
+function needsPayCancellationBeforeClaim(raffle: Raffle): boolean {
+  if (raffle.status !== 'cancelled') return false
+  if (!raffle.start_time) return false
+  if (!raffleRequiresCancellationFee(raffle as unknown as FullRaffle, new Date())) return false
+  return !raffle.cancellation_fee_paid_at
+}
+
+/** Live / ready listing: cancellation was requested but post-start fee not recorded yet. */
+function needsPayCancellationStraggler(raffle: Raffle): boolean {
+  const s = (raffle.status ?? '').toLowerCase()
+  if (s !== 'live' && s !== 'ready_to_draw') return false
+  if (!raffle.cancellation_requested_at) return false
+  if (!raffle.start_time) return false
+  if (!raffleRequiresCancellationFee(raffle as unknown as FullRaffle, new Date())) return false
+  return !raffle.cancellation_fee_paid_at
+}
+
 function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string): boolean {
   const w = wallet.trim()
   if (!w || !raffle.winner_wallet?.trim() || raffle.winner_wallet.trim() !== w) return false
@@ -301,6 +326,8 @@ type RaffleEntrySummary = {
 
 export default function DashboardPage() {
   const { publicKey, connected, signMessage } = useWallet()
+  const { connection } = useConnection()
+  const sendTransaction = useSendTransactionForWallet()
   const { setVisible } = useWalletModal()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -319,6 +346,7 @@ export default function DashboardPage() {
   const [claimProceedsLoadingId, setClaimProceedsLoadingId] = useState<string | null>(null)
   const [claimPrizeLoadingId, setClaimPrizeLoadingId] = useState<string | null>(null)
   const [claimFailedMinPrizeReturnLoadingId, setClaimFailedMinPrizeReturnLoadingId] = useState<string | null>(null)
+  const [payCancelFeeLoadingId, setPayCancelFeeLoadingId] = useState<string | null>(null)
   const [claimGiveawayLoadingId, setClaimGiveawayLoadingId] = useState<string | null>(null)
   const [claimCommunityGiveawayLoadingId, setClaimCommunityGiveawayLoadingId] = useState<string | null>(
     null
@@ -327,8 +355,6 @@ export default function DashboardPage() {
   const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
-  const [requestCancelId, setRequestCancelId] = useState<string | null>(null)
-  const [requestCancelError, setRequestCancelError] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
   const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<number | null>(null)
@@ -692,6 +718,72 @@ export default function DashboardPage() {
     [loadDashboard]
   )
 
+  const handlePayCancellationFee = useCallback(
+    async (r: Raffle) => {
+      if (!publicKey) {
+        setClaimActionError('Connect your wallet to pay the cancellation fee.')
+        return
+      }
+      setClaimActionError(null)
+      setPayCancelFeeLoadingId(r.id)
+      try {
+        const treasury = getRaffleTreasuryWalletAddress()
+        if (!treasury) {
+          setClaimActionError('Treasury wallet is not configured for this site.')
+          return
+        }
+        const feeSol = getCancellationFeeSol()
+        const lamports = Math.round(feeSol * LAMPORTS_PER_SOL)
+        const latestBlockhash = await connection.getLatestBlockhash('confirmed')
+        const tx = new Transaction()
+        tx.recentBlockhash = latestBlockhash.blockhash
+        tx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight
+        tx.feePayer = publicKey
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: new PublicKey(treasury),
+            lamports,
+          })
+        )
+        const sig = await sendTransaction(tx, connection, { maxRetries: 3 })
+        await connection.confirmTransaction(
+          {
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+            signature: sig,
+          },
+          'confirmed'
+        )
+        const path =
+          r.status === 'cancelled'
+            ? `/api/raffles/${r.id}/pay-cancellation-fee`
+            : `/api/raffles/${r.id}/request-cancellation`
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ feeTransactionSignature: sig }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not record cancellation fee'
+          )
+          return
+        }
+        await loadDashboard({ silent: true })
+      } catch (e) {
+        setClaimActionError(e instanceof Error ? e.message : 'Payment failed')
+      } finally {
+        setPayCancelFeeLoadingId(null)
+      }
+    },
+    [connection, publicKey, sendTransaction, loadDashboard]
+  )
+
   const handleClaimGiveaway = useCallback(
     async (giveawayId: string) => {
       if (!publicKey) return
@@ -799,28 +891,6 @@ export default function DashboardPage() {
         await loadDashboard({ silent: true })
       } finally {
         setClaimOfferRefundLoadingId(null)
-      }
-    },
-    [loadDashboard]
-  )
-
-  const handleRequestCancellation = useCallback(
-    async (raffleId: string) => {
-      setRequestCancelError(null)
-      setRequestCancelId(raffleId)
-      try {
-        const res = await fetch(`/api/raffles/${raffleId}/request-cancellation`, {
-          method: 'POST',
-          credentials: 'include',
-        })
-        const json = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setRequestCancelError((json as { error?: string }).error ?? 'Failed to request cancellation')
-          return
-        }
-        void loadDashboard({ silent: true })
-      } finally {
-        setRequestCancelId(null)
       }
     },
     [loadDashboard]
@@ -1393,7 +1463,7 @@ export default function DashboardPage() {
       : claimCommunityGiveawayLoadingId ? 'Claiming community giveaway...'
       : claimRefundLoadingEntryId ? 'Processing your ticket refund...'
       : claimOfferRefundLoadingId ? 'Processing your offer refund...'
-      : requestCancelId ? 'Submitting cancellation request...'
+      : payCancelFeeLoadingId ? 'Paying cancellation fee...'
       : null
 
   return (
@@ -2368,26 +2438,45 @@ export default function DashboardPage() {
                     <Link href={`/raffles/${r.slug}`} className="text-sm font-medium text-primary hover:underline">
                       {r.title}
                     </Link>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="touch-manipulation min-h-[44px] w-full shrink-0 sm:w-auto"
-                      disabled={claimFailedMinPrizeReturnLoadingId === r.id}
-                      onClick={() => void handleClaimFailedMinPrizeReturn(r.id)}
-                    >
-                      {claimFailedMinPrizeReturnLoadingId === r.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <>
-                          <Wallet className="h-4 w-4 sm:mr-1" />
-                          <span className="sm:inline">
-                            {isPartnerSplPrizeRaffle(r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)
-                              ? 'Claim tokens from escrow'
-                              : 'Claim NFT from escrow'}
-                          </span>
-                        </>
-                      )}
-                    </Button>
+                    {needsPayCancellationBeforeClaim(r) ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] w-full shrink-0 sm:w-auto"
+                        disabled={payCancelFeeLoadingId === r.id}
+                        onClick={() => void handlePayCancellationFee(r)}
+                      >
+                        {payCancelFeeLoadingId === r.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Wallet className="h-4 w-4 sm:mr-1" />
+                            <span className="sm:inline">Pay {getCancellationFeeSol()} SOL fee</span>
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] w-full shrink-0 sm:w-auto"
+                        disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                        onClick={() => void handleClaimFailedMinPrizeReturn(r.id)}
+                      >
+                        {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Wallet className="h-4 w-4 sm:mr-1" />
+                            <span className="sm:inline">
+                              {isPartnerSplPrizeRaffle(r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)
+                                ? 'Claim tokens from escrow'
+                                : 'Claim NFT from escrow'}
+                            </span>
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -2456,7 +2545,7 @@ export default function DashboardPage() {
                               )}
                             </Button>
                           )}
-                        {canCreatorClaimFailedMinThresholdPrize(r, wallet) && (
+                        {needsPayCancellationStraggler(r) && (
                           <Button
                             type="button"
                             size="sm"
@@ -2464,24 +2553,50 @@ export default function DashboardPage() {
                             className="touch-manipulation min-h-[44px] h-9"
                             onClick={(e) => {
                               e.stopPropagation()
-                              void handleClaimFailedMinPrizeReturn(r.id)
+                              void handlePayCancellationFee(r)
                             }}
-                            disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                            disabled={payCancelFeeLoadingId === r.id}
                           >
-                            {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                            {payCancelFeeLoadingId === r.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <>
                                 <Wallet className="h-4 w-4 sm:mr-1" />
-                                <span className="hidden sm:inline">
-                                  {isPartnerSplPrizeRaffle(r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)
-                                    ? 'Claim prize'
-                                    : 'Claim NFT'}
-                                </span>
+                                <span className="hidden sm:inline">Pay cancel fee</span>
                               </>
                             )}
                           </Button>
                         )}
+                        {canCreatorClaimFailedMinThresholdPrize(r, wallet) &&
+                          !needsPayCancellationBeforeClaim(r) &&
+                          !needsPayCancellationStraggler(r) && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              className="touch-manipulation min-h-[44px] h-9"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void handleClaimFailedMinPrizeReturn(r.id)
+                              }}
+                              disabled={claimFailedMinPrizeReturnLoadingId === r.id}
+                            >
+                              {claimFailedMinPrizeReturnLoadingId === r.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Wallet className="h-4 w-4 sm:mr-1" />
+                                  <span className="hidden sm:inline">
+                                    {isPartnerSplPrizeRaffle(
+                                      r as Pick<FullRaffle, 'prize_type' | 'prize_currency'>
+                                    )
+                                      ? 'Claim prize'
+                                      : 'Claim NFT'}
+                                  </span>
+                                </>
+                              )}
+                            </Button>
+                          )}
                         {r.creator_payout_amount != null &&
                           (r.status === 'completed' ||
                             (r.status === 'successful_pending_claims' && r.creator_claimed_at)) && (
@@ -2524,9 +2639,6 @@ export default function DashboardPage() {
                       }`}
                     >
                       <div className="pb-3 pl-1 pr-1 text-sm text-muted-foreground space-y-1">
-                        {requestCancelError && (
-                          <p className="text-destructive text-xs">{requestCancelError}</p>
-                        )}
                         {r.status === 'successful_pending_claims' &&
                           raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
@@ -2634,30 +2746,24 @@ export default function DashboardPage() {
                         {(r.status === 'live' || r.status === 'ready_to_draw') && !r.cancellation_requested_at && (
                           <p>
                             <Button
+                              asChild
                               type="button"
                               variant="outline"
                               size="sm"
                               className="text-amber-600 border-amber-500/50 hover:bg-amber-500/10"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleRequestCancellation(r.id)
-                              }}
-                              disabled={requestCancelId === r.id}
                             >
-                              {requestCancelId === r.id ? (
-                                <>
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                                  Requesting…
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="h-3.5 w-3.5 mr-1" />
-                                  Request cancellation
-                                </>
-                              )}
+                              <Link
+                                href={`/raffles/${r.slug}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center"
+                              >
+                                <XCircle className="h-3.5 w-3.5 mr-1" />
+                                Open raffle to request cancellation
+                              </Link>
                             </Button>
                             <span className="block text-xs mt-1 text-muted-foreground">
-                              Admin will review in Owl Vision. Ticket buyers get refunds in all cases. Within 24h: no fee to you. After 24h: you (host) are charged a cancellation fee.
+                              After the listed start time, a SOL fee may apply. You will confirm the amount in your wallet. Admin
+                              will review in Owl Vision; buyers on funds-escrow raffles can claim refunds in their dashboard.
                             </span>
                           </p>
                         )}
@@ -2673,7 +2779,36 @@ export default function DashboardPage() {
                                 ? 'Raffle cancelled'
                                 : 'Minimum tickets not met (after extension)'}
                             </p>
-                            {canCreatorClaimFailedMinThresholdPrize(r, wallet) ? (
+                            {canCreatorClaimFailedMinThresholdPrize(r, wallet) && needsPayCancellationBeforeClaim(r) ? (
+                              <>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                  This listing was cancelled after it started. Pay the {getCancellationFeeSol()} SOL
+                                  cancellation fee from this wallet, then you can claim your prize from escrow.
+                                </p>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="touch-manipulation min-h-[44px]"
+                                  disabled={payCancelFeeLoadingId === r.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handlePayCancellationFee(r)
+                                  }}
+                                >
+                                  {payCancelFeeLoadingId === r.id ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                      Paying…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Wallet className="h-4 w-4 mr-2" />
+                                      Pay {getCancellationFeeSol()} SOL
+                                    </>
+                                  )}
+                                </Button>
+                              </>
+                            ) : canCreatorClaimFailedMinThresholdPrize(r, wallet) ? (
                               <>
                                 <p className="text-xs text-muted-foreground leading-relaxed">
                                   {r.status === 'cancelled'

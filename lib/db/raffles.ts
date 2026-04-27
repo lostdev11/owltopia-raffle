@@ -102,7 +102,7 @@ const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 /** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,purchases_blocked_at,list_on_platform'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -764,6 +764,8 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     cancellation_fee_amount: (row.cancellation_fee_amount as number | null) ?? null,
     cancellation_fee_currency: (row.cancellation_fee_currency as string | null) ?? null,
     cancellation_refund_policy: (row.cancellation_refund_policy as string | null) ?? null,
+    cancellation_fee_paid_at: (row.cancellation_fee_paid_at as string | null) ?? null,
+    cancellation_fee_payment_tx: (row.cancellation_fee_payment_tx as string | null) ?? null,
     prize_type: (row.prize_type as 'crypto' | 'nft') ?? 'crypto',
     prize_standard: (row.prize_standard as any) ?? null,
     nft_mint_address: (row.nft_mint_address as string | null) ?? null,
@@ -1375,6 +1377,8 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.cancellation_fee_amount = raffle.cancellation_fee_amount ?? null
   insertData.cancellation_fee_currency = raffle.cancellation_fee_currency ?? null
   insertData.cancellation_refund_policy = raffle.cancellation_refund_policy ?? null
+  insertData.cancellation_fee_paid_at = raffle.cancellation_fee_paid_at ?? null
+  insertData.cancellation_fee_payment_tx = raffle.cancellation_fee_payment_tx ?? null
   if (raffle.ticket_payments_to_funds_escrow != null) {
     insertData.ticket_payments_to_funds_escrow = raffle.ticket_payments_to_funds_escrow
   }

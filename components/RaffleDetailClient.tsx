@@ -128,6 +128,9 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -235,6 +238,7 @@ export function RaffleDetailClient({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
+  const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator = connected && walletAddress && creatorWallet === walletAddress
@@ -339,6 +343,11 @@ export function RaffleDetailClient({
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
   const nowMs = serverTime.getTime()
+  const cancellationFeeApplies = useMemo(
+    () => raffleRequiresCancellationFee(raffle, serverTime),
+    [raffle.start_time, raffle.cancellation_fee_paid_at, serverTime]
+  )
+  const needsPayCancellationFee = cancellationFeeApplies && !raffle.cancellation_fee_paid_at
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
@@ -2432,23 +2441,136 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, returnPrizeReason, router])
 
-  const handleRequestCancellation = useCallback(async () => {
-    setRequestCancelLoading(true)
-    try {
+  const postRequestCancellation = useCallback(
+    async (feeTransactionSignature: string | null) => {
       const res = await fetch(`/api/raffles/${raffle.id}/request-cancellation`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify(
+          feeTransactionSignature ? { feeTransactionSignature } : {}
+        ),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError((data as { error?: string }).error ?? 'Failed to request cancellation')
-        return
+        const err =
+          (data as { error?: string }).error ?? 'Failed to request cancellation'
+        setError(err)
+        return { ok: false as const, data }
       }
-      router.refresh()
+      return { ok: true as const, data }
+    },
+    [raffle.id]
+  )
+
+  const postPayCancellationFeeWhenCancelled = useCallback(
+    async (feeTransactionSignature: string) => {
+      const res = await fetch(`/api/raffles/${raffle.id}/pay-cancellation-fee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ feeTransactionSignature }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const err = (data as { error?: string }).error ?? 'Failed to record cancellation fee'
+        setError(err)
+        return { ok: false as const }
+      }
+      return { ok: true as const }
+    },
+    [raffle.id]
+  )
+
+  const sendCancellationFeeAndGetSignature = useCallback(async () => {
+    if (!publicKey) {
+      setError('Connect your wallet to pay the cancellation fee.')
+      return null
+    }
+    const treasury = getRaffleTreasuryWalletAddress()
+    if (!treasury) {
+      setError('Treasury is not configured (public recipient missing).')
+      return null
+    }
+    const feeSol = getCancellationFeeSol()
+    const lamports = Math.round(feeSol * LAMPORTS_PER_SOL)
+    const latestBlockhash = await connection.getLatestBlockhash('confirmed')
+    const tx = new Transaction()
+    tx.recentBlockhash = latestBlockhash.blockhash
+    tx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight
+    tx.feePayer = publicKey
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: publicKey,
+        toPubkey: new PublicKey(treasury),
+        lamports,
+      })
+    )
+    const signature = await sendTransaction(tx, connection, { maxRetries: 3 })
+    await connection.confirmTransaction(
+      {
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        signature,
+      },
+      'confirmed'
+    )
+    return signature
+  }, [connection, publicKey, sendTransaction])
+
+  const handleConfirmRequestCancellation = useCallback(async () => {
+    setRequestCancelLoading(true)
+    setError(null)
+    try {
+      let feeSig: string | null = null
+      if (cancellationFeeApplies) {
+        feeSig = await sendCancellationFeeAndGetSignature()
+        if (!feeSig) {
+          return
+        }
+      }
+      const out = await postRequestCancellation(feeSig)
+      if (out?.ok) {
+        setRequestCancelDialogOpen(false)
+        router.refresh()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to request cancellation')
     } finally {
       setRequestCancelLoading(false)
     }
-  }, [raffle.id, router])
+  }, [
+    cancellationFeeApplies,
+    postRequestCancellation,
+    router,
+    sendCancellationFeeAndGetSignature,
+  ])
+
+  const handleStragglerPayCancellationFee = useCallback(async () => {
+    setRequestCancelLoading(true)
+    setError(null)
+    try {
+      const feeSig = await sendCancellationFeeAndGetSignature()
+      if (!feeSig) return
+      if (raffle.status === 'cancelled') {
+        const out = await postPayCancellationFeeWhenCancelled(feeSig)
+        if (out?.ok) router.refresh()
+      } else {
+        const out = await postRequestCancellation(feeSig)
+        if (out?.ok) router.refresh()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Payment failed')
+    } finally {
+      setRequestCancelLoading(false)
+    }
+  }, [
+    postPayCancellationFeeWhenCancelled,
+    postRequestCancellation,
+    raffle.status,
+    router,
+    sendCancellationFeeAndGetSignature,
+  ])
 
   const handleClaimProceeds = useCallback(async () => {
     setClaimProceedsError(null)
@@ -2776,27 +2898,79 @@ export function RaffleDetailClient({
               fullWidth={false}
             />
           )}
-          {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
-            <Button
-              variant="outline"
-              size="default"
-              onClick={handleRequestCancellation}
-              disabled={requestCancelLoading}
-              className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
-              title="Request cancellation. Ticket buyers get refunds in all cases. Within 24h: no fee to host. After 24h: host is charged cancellation fee."
-            >
-              {requestCancelLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <XCircle className="mr-2 h-4 w-4" />
-              )}
-              Request cancellation
-            </Button>
-          )}
+          {isCreator &&
+            (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+            !raffle.cancellation_requested_at && (
+              <Button
+                variant="outline"
+                size="default"
+                onClick={() => {
+                  setError(null)
+                  setRequestCancelDialogOpen(true)
+                }}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                title="Request cancellation. If the raffle has already started, you must pay a SOL fee to the platform. Buyers on funds-escrow raffles can claim refunds in their dashboard."
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="mr-2 h-4 w-4" />
+                )}
+                Request cancellation
+              </Button>
+            )}
+          {isCreator &&
+            (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+            !!raffle.cancellation_requested_at &&
+            needsPayCancellationFee && (
+              <Button
+                variant="outline"
+                size="default"
+                onClick={() => void handleStragglerPayCancellationFee()}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                title="Pay the cancellation fee so an admin can accept the request"
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="mr-2 h-4 w-4" />
+                )}
+                Pay {getCancellationFeeSol()} SOL cancellation fee
+              </Button>
+            )}
           {isCreator && raffle.cancellation_requested_at && (raffle.status !== 'cancelled') && (
             <span className="text-sm text-amber-600 dark:text-amber-400 self-center">
-              Cancellation requested — waiting for admin
+              {needsPayCancellationFee
+                ? 'Cancellation requested — pay the fee above so an admin can finish'
+                : 'Cancellation requested — waiting for admin'}
             </span>
+          )}
+          {isCreator && raffle.status === 'cancelled' && needsPayCancellationFee && (
+            <div
+              className="w-full sm:w-auto rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+              role="status"
+            >
+              <p className="font-medium">Pay cancellation fee to claim your prize from escrow</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                This raffle was cancelled after it started. Pay {getCancellationFeeSol()} SOL to the platform
+                wallet, then you can use Claim prize on your dashboard.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 touch-manipulation min-h-[44px]"
+                disabled={requestCancelLoading}
+                onClick={() => void handleStragglerPayCancellationFee()}
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Pay {getCancellationFeeSol()} SOL
+              </Button>
+            </div>
           )}
           {isCreator &&
             raffle.status === 'successful_pending_claims' &&
@@ -2820,6 +2994,63 @@ export function RaffleDetailClient({
               </Button>
             )}
         </div>
+        <Dialog open={requestCancelDialogOpen} onOpenChange={setRequestCancelDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Request cancellation?</DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {cancellationFeeApplies ? (
+                    <>
+                      <p>
+                        This raffle has already started. You will be charged {getCancellationFeeSol()} SOL to the
+                        platform treasury (plus a small network fee). If your wallet does not have enough SOL, the
+                        request will not complete.
+                      </p>
+                      <p className="text-xs">
+                        Buyers on funds-escrow raffles can claim ticket refunds from their dashboard. An admin must
+                        still approve this cancellation in Owl Vision.
+                      </p>
+                    </>
+                  ) : (
+                    <p>
+                      No post-start cancellation fee applies (the public start time has not passed yet). An admin
+                      will review the request in Owl Vision.
+                    </p>
+                  )}
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRequestCancelDialogOpen(false)}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+              >
+                Not now
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleConfirmRequestCancellation()}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto bg-amber-600 hover:bg-amber-700"
+              >
+                {requestCancelLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin inline" />
+                    Working…
+                  </>
+                ) : cancellationFeeApplies ? (
+                  `Yes — pay ${getCancellationFeeSol()} SOL & request`
+                ) : (
+                  'Yes, request cancellation'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {claimProceedsError && (
           <p className="text-sm text-destructive mb-2" role="alert">
             {claimProceedsError}

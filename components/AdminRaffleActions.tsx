@@ -25,13 +25,11 @@ import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
-
-const FULL_REFUND_WINDOW_HOURS = 24
-function isWithinFullRefundWindow(createdAt: string): boolean {
-  const created = new Date(createdAt).getTime()
-  const hours = (Date.now() - created) / (60 * 60 * 1000)
-  return hours <= FULL_REFUND_WINDOW_HOURS
-}
+import {
+  canCompleteCancellationForAdmin,
+  raffleRequiresCancellationFee,
+} from '@/lib/raffles/cancellation-fee-policy'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
 
 const PRIZE_RETURN_REASONS = [
   { value: 'cancelled', label: 'Raffle cancelled' },
@@ -229,7 +227,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const cancellationRequested = !!raffle.cancellation_requested_at
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
-  const fullRefundEligible = raffle.created_at ? isWithinFullRefundWindow(raffle.created_at) : false
+  const feeApplies = raffleRequiresCancellationFee(raffle)
+  const canAcceptCancel = canCompleteCancellationForAdmin(raffle)
+  const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
     isNftRaffle &&
@@ -1018,10 +1018,15 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     )}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {fullRefundEligible
-                      ? 'Within 24h: ticket buyers get refunds (treasury sends). No fee to host.'
-                      : 'After 24h: ticket buyers get refunds (treasury sends). Host is charged a cancellation fee.'}
+                    {feeApplies
+                      ? `Raffle has started. The creator must pay ${feeSol} SOL to treasury before you can accept. Ticket buyers can claim refunds in-app (funds escrow).`
+                      : 'Raffle has not started yet (by start time). No post-start cancellation fee. Ticket buyers can still claim refunds if this raffle used funds escrow.'}
                   </p>
+                  {feeApplies && !raffle.cancellation_fee_paid_at && (
+                    <p className="mt-2 text-xs font-medium text-destructive">
+                      Waiting for creator to complete the on-chain cancellation fee payment.
+                    </p>
+                  )}
                 </div>
                 <Dialog open={acceptCancelDialogOpen} onOpenChange={setAcceptCancelDialogOpen}>
                   <Button
@@ -1029,7 +1034,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => setAcceptCancelDialogOpen(true)}
-                    disabled={acceptingCancel}
+                    disabled={acceptingCancel || !canAcceptCancel}
+                    title={!canAcceptCancel ? 'Creator must pay the cancellation fee on-chain first' : undefined}
                   >
                     <XCircle className="h-4 w-4 mr-2 shrink-0" />
                     Accept cancellation
@@ -1039,10 +1045,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       <DialogTitle>Accept cancellation</DialogTitle>
                       <DialogDescription>
                         This will mark the raffle as cancelled.
-                        {fullRefundEligible ? (
-                          <> Ticket buyers get refunds (treasury sends). Within 24h: no fee to host.</>
+                        {canAcceptCancel ? (
+                          feeApplies ? (
+                            <> The creator already paid the {feeSol} SOL post-start fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
+                          ) : (
+                            <> No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
+                          )
                         ) : (
-                          <> Ticket buyers get refunds (treasury sends). After 24h: host will be charged the cancellation fee.</>
+                          <> You cannot accept until the creator pays the {feeSol} SOL fee to the platform wallet (on-chain) from their creator wallet.</>
                         )}
                       </DialogDescription>
                     </DialogHeader>
@@ -1057,7 +1067,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       </Button>
                       <Button
                         onClick={handleAcceptCancellation}
-                        disabled={acceptingCancel}
+                        disabled={acceptingCancel || !canAcceptCancel}
                         className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}
