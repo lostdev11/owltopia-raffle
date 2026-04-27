@@ -295,7 +295,7 @@ export default function PartnerHostDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Your hosted raffles</CardTitle>
-          <CardDescription>Same data as "My raffles" on the dashboard; links go to the public listing.</CardDescription>
+          <CardDescription>Same data as &quot;My raffles&quot; on the dashboard; links go to the public listing.</CardDescription>
         </CardHeader>
         <CardContent>
           {raffles.length === 0 ? (

@@ -39,9 +39,12 @@ export function PartnerRafflesCarousel({
 }) {
   const [displayItems, setDisplayItems] = useState<Item[]>(items)
   const itemsRef = useRef(items)
-  itemsRef.current = items
   const [marqueePaused, setMarqueePaused] = useState(false)
   const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
 
   const itemsKey = useMemo(
     () =>

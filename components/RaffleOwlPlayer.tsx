@@ -215,7 +215,7 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
     }
   }, [])
 
-  const startBeatGlowLoop = useCallback(() => {
+  const startBeatGlowLoop = () => {
     stopBeatGlowLoop()
     if (typeof window === 'undefined') return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -255,7 +255,7 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
       glowRafRef.current = requestAnimationFrame(tick)
     }
     glowRafRef.current = requestAnimationFrame(tick)
-  }, [stopBeatGlowLoop])
+  }
 
   useEffect(() => {
     if (!isPlaying || loadError) {

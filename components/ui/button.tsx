@@ -77,7 +77,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     }
 
     if (asChild && React.isValidElement(children)) {
-      return React.cloneElement(children, { ...baseProps, ref } as Record<string, unknown>)
+      // eslint-disable-next-line react-hooks/refs -- `asChild` composes props onto child elements.
+      return React.cloneElement(children, { ...baseProps } as Record<string, unknown>)
     }
 
     return (

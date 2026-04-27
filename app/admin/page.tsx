@@ -1868,7 +1868,7 @@ export default function AdminDashboardPage() {
                     liveDiscordMessage.xTemplates.length > 0 && (
                       <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
                         <p className="text-xs text-muted-foreground">
-                          One-click X templates for "{liveDiscordMessage.raffleTitle ?? 'this raffle'}":
+                          One-click X templates for &quot;{liveDiscordMessage.raffleTitle ?? 'this raffle'}&quot;:
                         </p>
                         <div className="flex flex-wrap gap-2">
                           {liveDiscordMessage.xTemplates.map((template) => (

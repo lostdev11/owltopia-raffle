@@ -13,24 +13,24 @@ export function devSaveApiCredits(): boolean {
 export const OWLTOPIA_DAS_CACHE_TTL_MS = devSaveApiCredits() ? 600_000 : 45_000
 
 /** Global live activity: GET /api/raffles */
-export const LIVE_ACTIVITY_REFETCH_MS = devSaveApiCredits() ? 600_000 : 90_000
+export const LIVE_ACTIVITY_REFETCH_MS = devSaveApiCredits() ? 600_000 : 180_000
 
 /** When Supabase Realtime WebSocket is unavailable (desktop firewall/adblock), poll recent confirmed entries */
 export const LIVE_ACTIVITY_POLL_FALLBACK_MS = devSaveApiCredits() ? 60_000 : 8_000
 
 /** Raffles "All" tab: full server re-render (includes holder enrichment → Helius). */
-export const RAFFLES_PAGE_SERVER_REFRESH_MS = devSaveApiCredits() ? 600_000 : 60_000
+export const RAFFLES_PAGE_SERVER_REFRESH_MS = devSaveApiCredits() ? 600_000 : 120_000
 
 /** Raffles list: entry totals for active raffles */
-export const RAFFLES_LIST_ENTRIES_POLL_MS = devSaveApiCredits() ? 30_000 : 3_000
+export const RAFFLES_LIST_ENTRIES_POLL_MS = devSaveApiCredits() ? 30_000 : 10_000
 
 /** Raffle detail: entries when Realtime is off */
-export const RAFFLE_DETAIL_ENTRIES_POLL_MS = devSaveApiCredits() ? 20_000 : 3_000
+export const RAFFLE_DETAIL_ENTRIES_POLL_MS = devSaveApiCredits() ? 20_000 : 8_000
 
 /** While Realtime is connected, still refetch occasionally (missed postgres_changes, sleeping tab, flaky network). */
 export const RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS = devSaveApiCredits()
   ? 120_000
-  : 20_000
+  : 45_000
 
 /** Enter Owltopia page: poll interval for GET /api/rev-share-schedule (not /api/rev-share). */
 export const ENTER_OWLTOPIA_REVSHARE_POLL_MS = devSaveApiCredits() ? 180_000 : 30_000

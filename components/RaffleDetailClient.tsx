@@ -120,6 +120,10 @@ import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
+import {
+  RaffleOverThresholdPngButton,
+  buildOverThresholdFlexMetaLines,
+} from '@/components/RaffleOverThresholdPngButton'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -417,6 +421,8 @@ export function RaffleDetailClient({
     pollingInterval: RAFFLE_DETAIL_ENTRIES_POLL_MS,
     initialEntries, // Initialize with server-side entries
   })
+
+  const profitInfoForSocialFlex = useMemo(() => getRaffleProfitInfo(raffle, entries), [raffle, entries])
 
   // Refresh entries when wallet connection status changes
   // This ensures user tickets are recalculated when user connects/disconnects
@@ -2754,6 +2760,19 @@ export function RaffleDetailClient({
             buttonLabel="PNG for X"
             fullWidth={false}
           />
+          {isActive && profitInfoForSocialFlex.isProfitable && (
+            <RaffleOverThresholdPngButton
+              title={raffle.title}
+              slug={raffle.slug}
+              ticketPrice={raffle.ticket_price}
+              currency={raffle.currency}
+              endTime={raffle.end_time}
+              imageUrl={heroImageDead ? null : heroImageSrc}
+              metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfoForSocialFlex)}
+              buttonLabel="Flex PNG (social)"
+              fullWidth={false}
+            />
+          )}
           {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
             <Button
               variant="outline"
@@ -3889,7 +3908,7 @@ export function RaffleDetailClient({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <p className="text-xs text-muted-foreground">💡 Don't see your entry?</p>
+                  <p className="text-xs text-muted-foreground">💡 Don&apos;t see your entry?</p>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -4368,7 +4387,7 @@ export function RaffleDetailClient({
                 className="text-base sm:text-sm h-11 sm:h-10 font-mono"
               />
               <p className="text-xs text-muted-foreground">
-                The Solana transaction signature that transferred the NFT to the winner's wallet.
+                The Solana transaction signature that transferred the NFT to the winner&apos;s wallet.
               </p>
             </div>
             
@@ -4510,7 +4529,7 @@ export function RaffleDetailClient({
               <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
                 <p>Tickets purchased successfully! Transaction confirmed.</p>
                 <p className="text-xs opacity-90">
-                  Your entry should appear shortly. If you don't see it, please refresh the page.
+                  Your entry should appear shortly. If you don&apos;t see it, please refresh the page.
                 </p>
               </div>
             )}

@@ -132,7 +132,10 @@ export async function GET(request: NextRequest) {
     const creatorRevenueTotal = Object.values(creatorRevenueByCurrency).reduce((a, b) => a + b, 0)
 
     const refundEligibleRaffles = raffles.filter(
-      (r) => r.status === 'failed_refund_available' || r.status === 'pending_min_not_met'
+      (r) =>
+        r.status === 'failed_refund_available' ||
+        r.status === 'pending_min_not_met' ||
+        r.status === 'cancelled'
     )
     const refundCandidatesByRaffle = await getRefundCandidatesByRaffleIds(
       refundEligibleRaffles.map((r) => r.id)

@@ -158,7 +158,7 @@ export default function TermsPage() {
             <li>Use the Platform for any illegal purposes</li>
             <li>Attempt to manipulate or exploit the raffle system</li>
             <li>Use automated tools or bots to purchase entries</li>
-            <li>Interfere with or disrupt the Platform's operation</li>
+            <li>Interfere with or disrupt the Platform&apos;s operation</li>
             <li>Impersonate any person or entity</li>
             <li>Attempt to gain unauthorized access to the Platform</li>
             <li>Violate any applicable laws or regulations</li>
@@ -183,8 +183,8 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">10. No Warranties</h2>
           <p className="mb-4">
-            THE PLATFORM IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, 
-            EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, 
+            THE PLATFORM IS PROVIDED &quot;AS IS&quot; AND &quot;AS AVAILABLE&quot; WITHOUT WARRANTIES OF ANY KIND,
+            EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY,
             FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
           </p>
         </section>
@@ -192,8 +192,8 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">11. Platform Modifications</h2>
           <p className="mb-4">
-            We reserve the right to modify, suspend, or discontinue any aspect of the Platform at any time, 
-            with or without notice. We are not liable to you or any third party for any such modifications, 
+            We reserve the right to modify, suspend, or discontinue any aspect of the Platform at any time,
+            with or without notice. We are not liable to you or any third party for any such modifications,
             suspensions, or discontinuations.
           </p>
         </section>
@@ -204,7 +204,7 @@ export default function TermsPage() {
             Raffle creators may cancel raffles in certain circumstances. If a raffle is cancelled:
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>Refunds, if applicable, will be processed according to the raffle creator's policies</li>
+            <li>Refunds, if applicable, will be processed according to the raffle creator&apos;s policies</li>
             <li>The Platform is not responsible for refund processing</li>
             <li>Participants are advised to review individual raffle terms</li>
           </ul>

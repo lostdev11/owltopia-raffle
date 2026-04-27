@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getActiveAnnouncements, hasNewAnnouncements } from '@/lib/db/announcements'
 
 export const dynamic = 'force-dynamic'
+const PUBLIC_CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
 
 /**
  * GET /api/announcements?placement=hero|raffles
@@ -15,9 +16,12 @@ export async function GET(request: NextRequest) {
     const list = await getActiveAnnouncements(validPlacement)
     const hasNew = validPlacement === 'raffles' ? await hasNewAnnouncements('raffles') : false
     if (validPlacement === 'raffles') {
-      return NextResponse.json({ announcements: list, hasNew })
+      return NextResponse.json(
+        { announcements: list, hasNew },
+        { headers: PUBLIC_CACHE_HEADERS }
+      )
     }
-    return NextResponse.json(list)
+    return NextResponse.json(list, { headers: PUBLIC_CACHE_HEADERS })
   } catch (error) {
     console.error('Error fetching announcements:', error)
     return NextResponse.json(

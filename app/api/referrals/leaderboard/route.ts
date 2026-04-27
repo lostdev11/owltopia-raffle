@@ -5,6 +5,7 @@ import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { isReferralAttributionEnabled } from '@/lib/referrals/config'
 
 export const dynamic = 'force-dynamic'
+const PUBLIC_CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' }
 
 const IP_LIMIT = 40
 const WINDOW_MS = 60_000
@@ -22,7 +23,10 @@ export async function GET(request: Request) {
     }
 
     if (!isReferralAttributionEnabled()) {
-      return NextResponse.json({ entries: [], displayNames: {} })
+      return NextResponse.json(
+        { entries: [], displayNames: {} },
+        { headers: PUBLIC_CACHE_HEADERS }
+      )
     }
 
     const rows = await getReferralLeaderboard(10)
@@ -37,7 +41,7 @@ export async function GET(request: Request) {
         referredTickets: Number(r.referred_entries),
       })),
       displayNames,
-    })
+    }, { headers: PUBLIC_CACHE_HEADERS })
   } catch (e) {
     console.error('[referrals/leaderboard]', e instanceof Error ? e.message : e)
     return NextResponse.json({ error: 'Failed to load referral leaderboard' }, { status: 500 })

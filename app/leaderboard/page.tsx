@@ -236,7 +236,7 @@ export default function LeaderboardPage() {
     setError(null)
     const url = buildLeaderboardApiUrl(periodKind, monthScope.year, monthScope.month, calendarYear)
     try {
-      const res = await fetch(url, { cache: 'no-store' })
+      const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to load leaderboard')
       const json = await res.json()
       const { period, ...rest } = json as LeaderboardData & { period: LeaderboardPeriodMeta }
@@ -258,7 +258,7 @@ export default function LeaderboardPage() {
   useEffect(() => {
     let cancelled = false
     setReferralLbLoading(true)
-    fetch('/api/referrals/leaderboard', { cache: 'no-store' })
+    fetch('/api/referrals/leaderboard')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('referral lb'))))
       .then((json: ReferralLeaderboardApiResponse) => {
         if (!cancelled) setReferralLb(json)

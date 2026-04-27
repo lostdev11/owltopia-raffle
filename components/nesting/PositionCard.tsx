@@ -31,6 +31,7 @@ export function PositionCard({
   unstakePhase = 'idle',
   actionsEnabled = true,
 }: Props) {
+  const nowMs = new Date().getTime()
   const claimable = useMemo(
     () =>
       estimateClaimableRewards({
@@ -39,14 +40,14 @@ export function PositionCard({
         rewardRateUnitSnapshot: position.reward_rate_unit_snapshot as RewardRateUnit,
         claimedRewards: Number(position.claimed_rewards),
         stakedAtMs: new Date(position.staked_at).getTime(),
-        asOfMs: Date.now(),
+        asOfMs: nowMs,
       }),
-    [position]
+    [position, nowMs]
   )
 
   const canUnstake =
     position.status === 'active' &&
-    (!position.unlock_at || new Date(position.unlock_at).getTime() <= Date.now())
+    (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs)
 
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
 

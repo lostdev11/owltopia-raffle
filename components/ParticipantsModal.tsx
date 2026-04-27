@@ -128,7 +128,7 @@ export function ParticipantsModal({
         </div>
         <div className="pt-4 border-t">
           <p className="text-xs text-muted-foreground text-center break-words px-2">
-            💡 Don't see your entry? Try refreshing the page to see the latest updates.
+            💡 Don&apos;t see your entry? Try refreshing the page to see the latest updates.
           </p>
         </div>
       </DialogContent>

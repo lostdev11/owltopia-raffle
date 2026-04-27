@@ -70,14 +70,17 @@ export function Footer() {
           </div>
           
           {/* Copyright and Terms Section */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/40 pt-3 sm:pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm border-t border-green-500/40 pt-3 sm:pt-4 text-zinc-300">
             <div className="flex items-center gap-3 sm:gap-4">
-              <span>© {new Date().getFullYear()} {PLATFORM_NAME}</span>
+              <span>
+                © {new Date().getFullYear()}{' '}
+                <span className="font-semibold text-white">{PLATFORM_NAME}</span>
+              </span>
             </div>
             <div className="flex items-center gap-4 sm:gap-6">
-              <Link 
-                href="/terms" 
-                className="hover:text-foreground transition-colors underline-offset-4 hover:underline touch-manipulation min-h-[44px] flex items-center"
+              <Link
+                href="/terms"
+                className="text-zinc-300 hover:text-white transition-colors underline-offset-4 hover:underline touch-manipulation min-h-[44px] flex items-center"
               >
                 Terms of Service
               </Link>

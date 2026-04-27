@@ -1589,7 +1589,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <DialogHeader>
                         <DialogTitle>Delete Raffle</DialogTitle>
                         <DialogDescription>
-                          Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
+                          Are you sure you want to delete &quot;{raffle.title}&quot;? This action cannot be undone and will also delete all associated entries.
                           <span className="block mt-2 font-medium text-foreground">
                             Enter a short reason for the audit log (required).
                           </span>

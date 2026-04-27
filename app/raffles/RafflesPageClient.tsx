@@ -18,7 +18,7 @@ import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import { normalizeRaffleTicketCurrency, revenueInCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
+import { normalizeRaffleTicketCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
 import {
   Eye,
   Shield,
@@ -50,6 +50,7 @@ import {
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
 import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
+import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -461,7 +462,7 @@ export function RafflesPageClient({
   useEffect(() => {
     if (tab !== 'leaderboard') return
     setLeaderboardLoading(true)
-    fetch('/api/leaderboard', { cache: 'no-store' })
+    fetch('/api/leaderboard')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
       .then((json: Record<string, unknown>) => {
         const { period, ...rest } = json
@@ -715,6 +716,8 @@ export function RafflesPageClient({
   useEffect(() => {
     if (tab !== 'all' && tab !== 'partner-raffles') return
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
       router.refresh()
     }, RAFFLES_PAGE_SERVER_REFRESH_MS)
     return () => clearInterval(interval)
@@ -747,7 +750,7 @@ export function RafflesPageClient({
     let cancelled = false
     setGiveawaysLoading(true)
     setGiveawaysError(null)
-    fetch('/api/public/community-giveaways', { cache: 'no-store' })
+    fetch('/api/public/community-giveaways')
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
         if (cancelled) return
@@ -839,60 +842,19 @@ export function RafflesPageClient({
       )}
 
       <div className="mb-6 sm:mb-8">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 tracking-tight text-emerald-950 drop-shadow-sm dark:bg-gradient-to-r dark:from-white dark:via-green-400 dark:to-green-300 dark:bg-clip-text dark:text-transparent dark:drop-shadow-lg">
           {PLATFORM_NAME}
         </h1>
-        <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
+        <p className="text-base sm:text-lg font-medium tracking-wide text-foreground/90 dark:bg-gradient-to-r dark:from-gray-300 dark:via-green-400 dark:to-gray-300 dark:bg-clip-text dark:text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
         {tab === 'all' && topProfitableActive.length > 0 && (
-          <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
-              const threshold = profitInfo?.threshold ?? null
-              const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
-              const thresholdCur = profitInfo?.thresholdCurrency
-                ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
-                : ticketCur
-              const revenueValue =
-                profitInfo != null ? revenueInCurrency(profitInfo.revenue, ticketCur) : null
-              return (
-                <Link
-                  key={raffle.id}
-                  href={`/raffles/${raffle.slug}`}
-                  className="relative overflow-hidden rounded-xl border border-emerald-400/70 bg-gradient-to-br from-emerald-500/15 via-emerald-400/5 to-transparent shadow-[0_0_25px_rgba(16,185,129,0.7)] px-3 py-3 sm:px-4 sm:py-4 hover:border-emerald-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.85)] transition-all cursor-pointer"
-                  onTouchStart={handleFeaturedCardTouchStart}
-                  onTouchMove={handleFeaturedCardTouchMove}
-                  onTouchEnd={handleFeaturedCardTouchEnd}
-                >
-                  <div className="pointer-events-none absolute -inset-px bg-[radial-gradient(circle_at_0_0,rgba(74,222,128,0.35),transparent_55%),radial-gradient(circle_at_100%_0,rgba(16,185,129,0.4),transparent_50%)] opacity-70" />
-                  <div className="relative flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm sm:text-base font-semibold text-emerald-50">
-                        {raffle.title}
-                      </p>
-                      <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-emerald-200">
-                        Over threshold
-                      </span>
-                    </div>
-                    {revenueValue != null && (
-                      <p className="text-[11px] sm:text-xs text-emerald-100/80">
-                        Revenue:{' '}
-                        <span className="font-semibold">
-                          {revenueValue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
-                        </span>{' '}
-                        · {raffle.prize_type === 'nft' ? 'Floor' : 'Threshold'}:{' '}
-                        <span className="font-semibold">
-                          {threshold != null
-                            ? `${threshold.toFixed(thresholdCur === 'USDC' ? 2 : 4)} ${thresholdCur}`
-                            : `0.0000 ${thresholdCur}`}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
+          <RaffleOverThresholdFlexShowcase
+            items={topProfitableActive}
+            onFeaturedTouchStart={handleFeaturedCardTouchStart}
+            onFeaturedTouchMove={handleFeaturedCardTouchMove}
+            onFeaturedTouchEnd={handleFeaturedCardTouchEnd}
+          />
         )}
         {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
         <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch]">

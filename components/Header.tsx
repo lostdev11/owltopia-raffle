@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
 import { Logo } from '@/components/Logo'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -69,6 +70,8 @@ export function Header() {
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const desktopNavButtonClass =
+    'text-white/90 hover:text-white hover:bg-white/10 active:bg-white/15 text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10'
 
   const navLinks = [
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
@@ -81,7 +84,7 @@ export function Header() {
   ]
 
   return (
-    <header className="w-full bg-black border-b border-green-500/20">
+    <header className="w-full bg-black border-b border-green-500/20 text-white">
       <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4 header-safe-area-inner">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           <Link
@@ -94,20 +97,20 @@ export function Header() {
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
             <div className="hidden md:flex items-center gap-2 lg:gap-4">
               <Link href="/leaderboard">
-                <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                   <Trophy className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Leaderboard</span>
                 </Button>
               </Link>
               <Link href="/council">
-                <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                   <Landmark className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Council</span>
                 </Button>
               </Link>
               {showNestingNav && (
                 <Link href="/nesting">
-                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                  <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                     <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">Nesting</span>
                   </Button>
@@ -115,7 +118,7 @@ export function Header() {
               )}
               {connected && (
                 <Link href="/dashboard">
-                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                  <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                     <LayoutDashboard className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">Dashboard</span>
                   </Button>
@@ -153,12 +156,15 @@ export function Header() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-10 w-10 p-0 min-h-[44px] min-w-[44px] touch-manipulation"
+                className="h-10 w-10 p-0 min-h-[44px] min-w-[44px] touch-manipulation text-white/90 hover:text-white hover:bg-white/10 active:bg-white/15"
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label="Open menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>
+            </div>
+            <div className="shrink-0">
+              <ThemeToggle />
             </div>
             <div className="shrink-0">
               <WalletConnectButton />

@@ -118,12 +118,18 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full dark" suppressHydrationWarning>
       <body className={`${plusJakartaSans.variable} ${bebasNeue.variable} font-sans min-h-full flex flex-col`}>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
+                try {
+                  const theme = localStorage.getItem('owl-theme');
+                  const root = document.documentElement;
+                  root.classList.toggle('dark', theme !== 'light');
+                } catch (_) {}
+
                 // Catch errors immediately, before React hydrates
                 const originalError = console.error;
                 

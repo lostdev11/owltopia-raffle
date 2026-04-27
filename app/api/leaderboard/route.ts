@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getLeaderboardWithMeta, parseLeaderboardPeriodFromSearchParams } from '@/lib/db/leaderboard'
 
 export const dynamic = 'force-dynamic'
+const PUBLIC_CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' }
 
 /**
  * GET /api/leaderboard
@@ -18,7 +19,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const period = parseLeaderboardPeriodFromSearchParams(searchParams)
     const { leaderboard, period: meta } = await getLeaderboardWithMeta(period)
-    return NextResponse.json({ ...leaderboard, period: meta })
+    return NextResponse.json(
+      { ...leaderboard, period: meta },
+      { headers: PUBLIC_CACHE_HEADERS }
+    )
   } catch (error) {
     console.error('Leaderboard API error:', error)
     return NextResponse.json(

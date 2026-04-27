@@ -228,7 +228,7 @@ const MOBILE_401_RETRY_DELAY_MS = 800
 
 const MY_ENTRIES_PAGE_SIZE = 20
 /** Background refresh for claim tracker + dashboard numbers while tab is open */
-const CLAIM_TRACKER_POLL_MS = 18_000
+const CLAIM_TRACKER_POLL_MS = 30_000
 
 function formatRelativeUpdated(updatedAt: number): string {
   const s = Math.floor((Date.now() - updatedAt) / 1000)
@@ -478,6 +478,7 @@ export default function DashboardPage() {
     if (!connected || !publicKey || needsSignIn) return
     const id = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
       if (!hasDashboardDataRef.current) return
       void loadDashboard({ silent: true })
     }, CLAIM_TRACKER_POLL_MS)
@@ -1141,7 +1142,7 @@ export default function DashboardPage() {
 
   const refundableEntries = myEntries.filter(
     (x) =>
-      x.raffle.status === 'failed_refund_available' &&
+      (x.raffle.status === 'failed_refund_available' || x.raffle.status === 'cancelled') &&
       x.entry.status === 'confirmed' &&
       !x.entry.refunded_at &&
       raffleUsesFundsEscrow(x.raffle)
@@ -1156,12 +1157,13 @@ export default function DashboardPage() {
       !raffleUsesFundsEscrow(x.raffle)
   )
 
-  /** Cancelled listings never reach `failed_refund_available`; treasury refunds are manual. */
+  /** Cancelled listings that did not route ticket revenue through funds escrow still need manual treasury refunds. */
   const cancelledUnrefundedEntries = myEntries.filter(
     (x) =>
       x.raffle.status === 'cancelled' &&
       x.entry.status === 'confirmed' &&
-      !x.entry.refunded_at
+      !x.entry.refunded_at &&
+      !raffleUsesFundsEscrow(x.raffle)
   )
 
   /** Ended, no winner, status not advanced yet — server should move to extension or refunds on refresh. */
@@ -1358,6 +1360,21 @@ export default function DashboardPage() {
   const shortWallet =
     wallet.length > 10 ? `${wallet.slice(0, 4)}…${wallet.slice(-4)}` : wallet
 
+  const activeProcessingMessage =
+    signingIn ? 'Signing in with wallet...'
+      : displayNameSaving ? 'Saving display name...'
+      : discordUnlinking ? 'Disconnecting Discord...'
+      : referralVanitySaving ? 'Saving referral code...'
+      : claimProceedsLoadingId ? 'Claiming creator proceeds...'
+      : claimPrizeLoadingId ? 'Claiming your prize...'
+      : claimFailedMinPrizeReturnLoadingId ? 'Returning prize from escrow...'
+      : claimGiveawayLoadingId ? 'Claiming NFT giveaway...'
+      : claimCommunityGiveawayLoadingId ? 'Claiming community giveaway...'
+      : claimRefundLoadingEntryId ? 'Processing your ticket refund...'
+      : claimOfferRefundLoadingId ? 'Processing your offer refund...'
+      : requestCancelId ? 'Submitting cancellation request...'
+      : null
+
   return (
     <main className="relative mx-auto max-w-4xl px-4 py-6 sm:py-10 safe-area-bottom">
       <div
@@ -1403,6 +1420,22 @@ export default function DashboardPage() {
             </Button>
           </div>
         </header>
+
+      {activeProcessingMessage && (
+        <div
+          className="sticky top-2 z-20 rounded-xl border border-primary/30 bg-background/95 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/75"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden />
+            <span>{activeProcessingMessage}</span>
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Your action is in progress. Keep this tab open until it completes.
+          </p>
+        </div>
+      )}
 
       <Card className="mb-8 border-green-500/25 bg-green-500/[0.05] rounded-xl shadow-sm">
         <CardHeader className="pb-2">
@@ -1467,8 +1500,8 @@ export default function DashboardPage() {
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
                 <p className="font-medium text-foreground mb-1">Claim refund from escrow</p>
                 <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                  This raffle did not reach its minimum after the extension. Claim your ticket payment back from funds
-                  escrow (mobile: use Wi‑Fi or solid data if the request fails).
+                  These raffles can be refunded on-chain from funds escrow. Claim your ticket payment back here
+                  (mobile: use Wi‑Fi or solid data if the request fails).
                 </p>
                 <ul className="space-y-2">
                   {refundableEntries.slice(0, 25).map(({ entry, raffle }) => (
@@ -1549,8 +1582,8 @@ export default function DashboardPage() {
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
                 <p className="font-medium text-foreground mb-1">Cancelled raffle — manual refund</p>
                 <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                  These listings were cancelled. Ticket refunds are issued manually by the platform (treasury), not through
-                  Claim refund. If you are still waiting, contact support with the raffle link.
+                  These listings were cancelled, but ticket revenue for them did not use funds escrow. Refunds are
+                  issued manually by the platform (treasury). If you are still waiting, contact support with the raffle link.
                 </p>
                 <ul className="space-y-3">
                   {cancelledRefundOwedByRaffle.map(({ raffle, parts }) => {

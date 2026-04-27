@@ -38,6 +38,10 @@ import {
 } from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
+import {
+  RaffleOverThresholdPngButton,
+  buildOverThresholdFlexMetaLines,
+} from '@/components/RaffleOverThresholdPngButton'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { Trophy, Share2, BadgeCheck, Loader2, Users } from 'lucide-react'
@@ -1113,6 +1117,15 @@ export function RaffleCard({
                     score={owlVisionScore}
                     className="!gap-1 !px-1.5 !py-0 !text-[10px] sm:!text-[11px] !leading-none [&_svg]:!h-2.5 [&_svg]:!w-2.5 sm:[&_svg]:!h-3 sm:[&_svg]:!w-3"
                   />
+                  {profitInfo?.isProfitable && section === 'active' && (
+                    <span
+                      className="inline-flex items-center justify-center gap-0.5 rounded-full border border-emerald-500/45 bg-emerald-500/15 px-1 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase leading-none tracking-wide text-emerald-200"
+                      title="Ticket revenue is past the platform revenue bar (e.g. floor or draw goal)."
+                    >
+                      <Trophy className="h-2.5 w-2.5 sm:h-2.5 sm:w-2.5" aria-hidden />
+                      Flex
+                    </span>
+                  )}
                 </div>
               </div>
             <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 text-[11px] leading-tight mb-0.5 sm:mb-1 mt-0">
@@ -1633,6 +1646,23 @@ export function RaffleCard({
                 )}
                 {showQuickBuy && isActive && !isFuture && !purchasesBlocked && (
             <div className="w-full space-y-3 pt-2">
+              {profitInfo?.isProfitable && profitInfo && (
+                <div
+                  className="relative z-20 w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <RaffleOverThresholdPngButton
+                    title={raffle.title}
+                    slug={raffle.slug}
+                    ticketPrice={raffle.ticket_price}
+                    currency={raffle.currency}
+                    endTime={raffle.end_time}
+                    imageUrl={listThumbDead ? null : listThumbSrc}
+                    metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfo)}
+                    buttonLabel="Download flex PNG (social)"
+                  />
+                </div>
+              )}
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <div className="p-2 rounded-lg bg-muted border">
                   <div className="flex items-center justify-between text-xs">

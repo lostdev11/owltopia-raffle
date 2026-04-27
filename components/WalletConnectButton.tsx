@@ -797,7 +797,7 @@ export function WalletConnectButton() {
 
             <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg">
               <p className="text-sm text-blue-600 dark:text-blue-400">
-                <strong>Don't have Phantom?</strong> Download it from the App Store or Google Play Store.
+                <strong>Don&apos;t have Phantom?</strong> Download it from the App Store or Google Play Store.
               </p>
             </div>
           </div>
