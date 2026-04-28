@@ -37,12 +37,37 @@ export async function GET(
     const eligible = isRaffleBuyoutWindowOpen(raffle)
     let reason: string | null = null
     if (!eligible) {
-      if (raffle.prize_type !== 'nft') reason = 'Buyouts apply to NFT prizes only.'
-      else if (!raffle.winner_wallet?.trim()) reason = 'Winner has not been selected yet.'
-      else if (raffle.nft_transfer_transaction?.trim()) reason = 'Prize already transferred — buyout closed.'
-      else if (raffle.buyout_closed_at) reason = 'A buyout offer was already accepted.'
-      else if (new Date(raffle.end_time).getTime() > Date.now()) reason = 'Raffle has not ended yet.'
-      else reason = 'Buyout is not available for this raffle.'
+      const endMs = new Date(raffle.end_time).getTime()
+      const ended = !Number.isNaN(endMs) && endMs <= Date.now()
+      if (raffle.prize_type !== 'nft') {
+        reason = 'Buyouts apply to NFT prizes only.'
+      } else if (!raffle.nft_mint_address?.trim()) {
+        reason = 'No NFT mint on this listing.'
+      } else if (!raffle.winner_wallet?.trim()) {
+        reason = 'Winner has not been selected yet — buyouts open after the draw.'
+      } else if (!raffle.prize_deposited_at) {
+        reason = 'Prize is not verified in escrow yet.'
+      } else if (raffle.prize_returned_at) {
+        reason = 'Prize was returned to the creator — buyout closed.'
+      } else if (raffle.buyout_closed_at) {
+        reason = 'A buyout offer was already accepted.'
+      } else if (raffle.nft_transfer_transaction?.trim()) {
+        reason = 'Winner already claimed the NFT — buyout closed.'
+      } else if (!ended) {
+        reason = 'Raffle has not ended yet — buyouts open after the end time once a winner is drawn.'
+      } else if (
+        raffle.status === 'cancelled' ||
+        raffle.status === 'draft' ||
+        raffle.status === 'failed_refund_available' ||
+        raffle.status === 'pending_min_not_met'
+      ) {
+        reason =
+          raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met'
+            ? 'This raffle did not complete successfully — buyouts are not available.'
+            : 'Buyout is not available for this raffle state.'
+      } else {
+        reason = 'Buyout is not available for this raffle.'
+      }
     }
 
     const rawOffers = await listBuyoutOffersForRaffle(raffle.id)

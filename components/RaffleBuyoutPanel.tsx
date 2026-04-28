@@ -264,7 +264,20 @@ export function RaffleBuyoutPanel({
   }
 
   if (!state.eligible) {
-    return null
+    return (
+      <Card className="mb-4 border-border/50 bg-muted/25">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Landmark className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            NFT buyout offers
+          </CardTitle>
+          <CardDescription className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
+            {state.reason ??
+              'Buyout bidding is not open yet. After the raffle ends and a winner is selected, anyone can deposit a SOL bid here; offers last 24 hours once confirmed.'}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
   }
 
   const feePct = (state.buyoutFeeBps / 100).toFixed(2)
