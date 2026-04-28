@@ -90,6 +90,10 @@ function isPendingNftRaffle(raffle: Raffle): boolean {
  * but are visible to admins and the raffle creator.
  */
 export function canViewerSeeRafflePending(raffle: Raffle, viewerWallet: string | null, viewerIsAdmin: boolean): boolean {
+  // Do not hide legacy/public non-escrow crypto raffles (e.g. SOL) behind pending visibility.
+  // Pending visibility gating is only for escrow-gated raffle types.
+  if (raffle.prize_type !== 'nft' && !isPartnerSplPrizeRaffle(raffle)) return true
+
   // Only restrict "pending NFT" raffles; everything else is public.
   if (!isPendingNftRaffle(raffle)) return true
 
