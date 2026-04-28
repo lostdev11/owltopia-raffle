@@ -19,7 +19,7 @@ import {
   rafflesRestStatusInClause,
 } from '@/lib/raffles/list-query-statuses'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
-import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { isPartnerPrizeCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
 
@@ -377,25 +377,24 @@ async function fetchRafflesViaRestRaw(
     }
   }
 
-  let data: unknown
-  let inMemoryListFilter: boolean
-  try {
-    data = await fetchOnce('eq.true')
-    inMemoryListFilter = false
-  } catch (e) {
-    const msg = (e as Error)?.message ?? ''
-    if (msg.toLowerCase().includes('list_on_platform')) {
-      data = await fetchOnce('off')
-      inMemoryListFilter = true
-    } else {
-      throw e
-    }
-  }
+  // Always fetch without server-side list_on_platform filter so we can apply nuanced
+  // in-memory visibility rules (e.g., keep legacy SOL crypto raffles visible publicly).
+  const data = await fetchOnce('off')
 
   const rows: Record<string, unknown>[] = Array.isArray(data) ? (data as Record<string, unknown>[]) : []
-  const publicRows = inMemoryListFilter
-    ? rows.filter((row) => (row as { list_on_platform?: boolean }).list_on_platform !== false)
-    : rows
+  const publicRows = rows.filter((row) => {
+    if ((row as { list_on_platform?: boolean }).list_on_platform !== false) return true
+
+    // Preserve legacy/public crypto behavior for non-partner token raffles (e.g. SOL):
+    // do not hide these from non-admin list even if list_on_platform is stale false.
+    const prizeType = typeof row.prize_type === 'string' ? row.prize_type.trim().toLowerCase() : 'crypto'
+    if (prizeType === 'nft') return false
+
+    const prizeCurrency = typeof row.prize_currency === 'string' ? row.prize_currency.trim().toUpperCase() : ''
+    if (isPartnerPrizeCurrency(prizeCurrency)) return false
+
+    return true
+  })
 
   if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
     return publicRows.map((row) => normalizeBaseRowToRaffle(row))
