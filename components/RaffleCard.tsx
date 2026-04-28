@@ -134,7 +134,22 @@ export function RaffleCard({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
-  const displayImageSrc = getRaffleDisplayImageUrl(raffle.image_url)
+  const displayImageSrc = useMemo(() => {
+    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
+    const isLegacyOwltopiaPlaceholder =
+      typeof raffle.image_url === 'string' &&
+      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const cryptoCurrencyArt =
+      (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
+      (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
+        ? prizeCurrency === 'SOL'
+          ? '/solana-mark.svg'
+          : '/usdc.png'
+        : null
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
+    return fromDb
+  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
   const displayAdminDisp = useMemo(
     () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
     [raffle.image_fallback_url]
@@ -198,7 +213,7 @@ export function RaffleCard({
 
   useEffect(() => {
     setListMintThumbSrc(null)
-    const hasPrimary = !!raffle.image_url?.trim()
+    const hasPrimary = !!displayImageSrc?.trim()
     if (hasPrimary) {
       setListThumbPhase('primary')
     } else if (displayAdminDisp) {
@@ -208,7 +223,7 @@ export function RaffleCard({
     } else {
       setListThumbPhase('dead')
     }
-  }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canListMintThumb])
+  }, [raffle.id, displayImageSrc, raffle.image_fallback_url, displayAdminDisp, canListMintThumb])
 
   useEffect(() => {
     if (imageModalOpen) setModalImgIdx(0)
@@ -253,6 +268,8 @@ export function RaffleCard({
           : listThumbPhase === 'admin'
             ? (displayAdminDisp ?? '')
             : displayImageSrc ?? ''
+  const listThumbUseContain =
+    listThumbSrc === '/solana-mark.svg' || listThumbSrc === '/usdc.png'
   const listThumbDead = listThumbPhase === 'dead'
   const listThumbMintLoading = listThumbPhase === 'mint_loading'
 
@@ -1042,7 +1059,7 @@ export function RaffleCard({
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center"
+                    className={`pointer-events-none absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-3' : 'object-cover object-center'}`}
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -1137,7 +1154,10 @@ export function RaffleCard({
                     {(() => {
                       const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
                       const showPrizeIcon =
-                        u === 'OWL' || (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                        u === 'SOL' ||
+                        u === 'USDC' ||
+                        u === 'OWL' ||
+                        (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
                       return showPrizeIcon ? (
                         <CurrencyIcon currency={u || 'OWL'} size={12} className="inline-block" />
                       ) : null
@@ -1331,7 +1351,7 @@ export function RaffleCard({
                   alt={raffle.title}
                   fill
                   sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-cover object-center"
+                  className={listThumbUseContain ? 'object-contain p-2' : 'object-cover object-center'}
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
@@ -1504,7 +1524,10 @@ export function RaffleCard({
                         {(() => {
                           const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
                           const showPrizeIcon =
-                            u === 'OWL' || (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                            u === 'SOL' ||
+                            u === 'USDC' ||
+                            u === 'OWL' ||
+                            (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
                           return showPrizeIcon ? (
                             <CurrencyIcon currency={u || 'OWL'} size={16} className="inline-block" />
                           ) : null

@@ -347,6 +347,12 @@ export function RafflesPageClient({
    */
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Admins already get the authoritative server-rendered list (includes pending moderation items).
+    // Avoid client-side wallet fallback overriding that list with narrower visibility.
+    if (viewerIsAdmin) {
+      setClientBuckets(null)
+      return
+    }
     if (!connected || !wallet || !isSupabaseConfigured()) {
       setClientBuckets(null)
       return
@@ -627,7 +633,7 @@ export function RafflesPageClient({
     }
   }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected, serverTime])
 
-  const useWalletVisibilityBuckets = Boolean(connected && wallet && clientBuckets)
+  const useWalletVisibilityBuckets = Boolean(!viewerIsAdmin && connected && wallet && clientBuckets)
   const active = useWalletVisibilityBuckets
     ? (clientBuckets!.active)
     : serverActive.length > 0

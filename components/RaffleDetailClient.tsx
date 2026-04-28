@@ -262,7 +262,22 @@ export function RaffleDetailClient({
   const [heroImgPhase, setHeroImgPhase] = useState<HeroImgPhase>('primary')
   const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const displayImageUrl = getRaffleDisplayImageUrl(raffle.image_url)
+  const displayImageUrl = useMemo(() => {
+    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
+    const isLegacyOwltopiaPlaceholder =
+      typeof raffle.image_url === 'string' &&
+      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const cryptoCurrencyArt =
+      (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
+      (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
+        ? prizeCurrency === 'SOL'
+          ? '/solana-mark.svg'
+          : '/usdc.png'
+        : null
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
+    return fromDb
+  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
   const displayAdminDisp = useMemo(
     () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
     [raffle.image_fallback_url]
@@ -282,7 +297,7 @@ export function RaffleDetailClient({
 
   useEffect(() => {
     setMintHeroSrc(null)
-    if (raffle.image_url?.trim()) {
+    if (displayImageUrl?.trim()) {
       setHeroImgPhase('primary')
     } else if (displayAdminDisp) {
       setHeroImgPhase('admin')
@@ -291,7 +306,7 @@ export function RaffleDetailClient({
     } else {
       setHeroImgPhase('dead')
     }
-  }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+  }, [raffle.id, displayImageUrl, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
 
   useEffect(() => {
     if (!depositEscrowError || !isEscrowSplPrizeFrozenVerifyError(depositEscrowError)) {
@@ -3939,9 +3954,14 @@ export function RaffleDetailClient({
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
                   <p className={classes.labelText + ' text-muted-foreground'}>Prize</p>
-                  <p className={classes.contentText + ' font-bold'}>
+                  <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
                     {raffle.prize_amount} {raffle.prize_currency}
-                  </p>
+                    <CurrencyIcon
+                      currency={raffle.prize_currency}
+                      size={imageSize === 'small' ? 16 : 20}
+                      className="inline-block"
+                    />
+                  </div>
                 </div>
               )}
               {raffle.ticket_price > 0 && (

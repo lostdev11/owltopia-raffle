@@ -147,25 +147,30 @@ export default async function RafflesPage() {
       )
     }
 
-    // Admins should also see pending raffles that may be unlisted (list_on_platform=false),
-    // so they can moderate/verify directly from /raffles.
+    // Admins should see the full raffle dataset (including unlisted), so moderation/verify
+    // actions are available directly from /raffles.
     if (viewerIsAdmin) {
       const adminAll = await getRaffles(false, { includeDraft: true })
-      const adminRows = adminAll.data ?? []
-      const pendingById = new Map<string, Raffle>()
-      const nowMs = Date.now()
-      for (const row of adminRows) {
-        if (isPendingNftRaffleAtTime(row, nowMs)) {
+      if (!adminAll.error && Array.isArray(adminAll.data) && adminAll.data.length > 0) {
+        allRaffles = adminAll.data
+      } else {
+        // Fallback: keep REST/public rows, but at least merge pending items from admin query.
+        const adminRows = adminAll.data ?? []
+        const pendingById = new Map<string, Raffle>()
+        const nowMs = Date.now()
+        for (const row of adminRows) {
+          if (isPendingNftRaffleAtTime(row, nowMs)) {
+            pendingById.set(row.id, row)
+          }
+        }
+        for (const row of allRaffles) {
           pendingById.set(row.id, row)
         }
-      }
-      for (const row of allRaffles) {
-        pendingById.set(row.id, row)
-      }
-      if (pendingById.size > 0) {
-        allRaffles = Array.from(pendingById.values()).sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )
+        if (pendingById.size > 0) {
+          allRaffles = Array.from(pendingById.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+        }
       }
     }
 
