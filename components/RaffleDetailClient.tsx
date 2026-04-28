@@ -17,6 +17,7 @@ import {
 } from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
+import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
 import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { Input } from '@/components/ui/input'
@@ -3930,6 +3931,9 @@ export function RaffleDetailClient({
                   <p className="text-sm text-destructive">{claimPrizeError}</p>
                 )}
               </div>
+            )}
+            {raffle.prize_type === 'nft' && (
+              <RaffleBuyoutPanel raffleId={raffle.id} winnerWallet={raffle.winner_wallet} />
             )}
             <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (

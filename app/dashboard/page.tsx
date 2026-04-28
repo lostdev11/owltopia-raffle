@@ -244,6 +244,18 @@ type DashboardData = {
     canSetVanity: boolean
   } | null
   engagement?: DashboardEngagementPayload
+  /** Buyout bids placed by this wallet (claim refunds here when expired/superseded). */
+  buyoutOffers?: Array<{
+    id: string
+    raffle_id: string
+    raffle_slug: string
+    raffle_title: string
+    currency: string
+    amount: number
+    status: string
+    deposit_tx_signature: string | null
+    refunded_at: string | null
+  }>
 }
 
 type NftWinnerDashboardRow = {
@@ -353,6 +365,7 @@ export default function DashboardPage() {
   )
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
+  const [buyoutRefundLoadingId, setBuyoutRefundLoadingId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
@@ -1230,6 +1243,14 @@ export default function DashboardPage() {
   const offerRefundCandidates = Array.isArray(data.offerRefundCandidates) ? data.offerRefundCandidates : []
   const legacyCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow === false)
   const escrowCreatorRefundRaffles = creatorRefundRaffles.filter((rr) => rr.ticketPaymentsToFundsEscrow !== false)
+
+  const buyoutOffersAll = Array.isArray(data.buyoutOffers) ? data.buyoutOffers : []
+  const buyoutRefundEligible = buyoutOffersAll.filter(
+    (o) =>
+      (o.status === 'expired' || o.status === 'superseded') &&
+      o.deposit_tx_signature &&
+      !o.refunded_at,
+  )
 
   const refundableEntries = myEntries.filter(
     (x) =>
@@ -2909,6 +2930,78 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {buyoutRefundEligible.length > 0 && (
+        <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Landmark className="h-5 w-5 shrink-0" aria-hidden />
+              NFT buyout — reclaim your bid
+            </CardTitle>
+            <CardDescription>
+              Your buyout deposit can be returned when the offer expired or the winner accepted someone else&apos;s bid.
+              Uses the platform treasury wallet — ensure{' '}
+              <span className="font-mono text-xs">RAFFLE_RECIPIENT_SECRET_KEY</span> is configured for automatic refunds.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {buyoutRefundEligible.map((o) => (
+              <div
+                key={o.id}
+                className="flex flex-col gap-2 rounded-lg border border-border/50 bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <Link href={`/raffles/${o.raffle_slug}`} className="block truncate font-medium hover:underline">
+                    {o.raffle_title}
+                  </Link>
+                  <p className="mt-1 text-sm tabular-nums text-muted-foreground">
+                    {o.amount} {o.currency} · {o.status}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="min-h-[44px] w-full shrink-0 touch-manipulation sm:w-auto"
+                  disabled={buyoutRefundLoadingId === o.id}
+                  onClick={async () => {
+                    setBuyoutRefundLoadingId(o.id)
+                    setClaimActionError(null)
+                    try {
+                      const res = await fetch(
+                        `/api/raffles/${encodeURIComponent(o.raffle_id)}/buyout/offers/${encodeURIComponent(o.id)}/refund`,
+                        {
+                          method: 'POST',
+                          credentials: 'include',
+                          headers: { 'X-Connected-Wallet': walletAddr },
+                        },
+                      )
+                      const json = await res.json().catch(() => ({}))
+                      if (!res.ok) {
+                        setClaimActionError(typeof json?.error === 'string' ? json.error : 'Refund failed')
+                        return
+                      }
+                      await loadDashboard({ silent: true })
+                    } catch (e) {
+                      setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
+                    } finally {
+                      setBuyoutRefundLoadingId(null)
+                    }
+                  }}
+                >
+                  {buyoutRefundLoadingId === o.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                      Sending…
+                    </>
+                  ) : (
+                    'Claim refund'
+                  )}
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {creatorRefundRaffles.length > 0 && (
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5 shadow-sm">

@@ -17,6 +17,10 @@ import {
 import { getReferralSummaryForWallet, syncReferralStateForWallet } from '@/lib/db/referrals'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
+import {
+  expireStaleBuyoutOffersForBidderWallet,
+  listBuyoutOffersForBidder,
+} from '@/lib/db/buyout-offers'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
@@ -46,6 +50,12 @@ export async function GET(request: NextRequest) {
     }
 
     const wallet = session.wallet
+
+    try {
+      await expireStaleBuyoutOffersForBidderWallet(wallet)
+    } catch (e) {
+      console.warn('[me/dashboard] buyout expire stale:', e instanceof Error ? e.message : e)
+    }
 
     try {
       await syncReferralStateForWallet(wallet)
@@ -88,6 +98,7 @@ export async function GET(request: NextRequest) {
       referralSummary,
       offerRefundCandidates,
       partnerDiscordTenantId,
+      buyoutOffers,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -115,6 +126,10 @@ export async function GET(request: NextRequest) {
       getDiscordPartnerTenantIdForCreatorWallet(wallet).catch((err) => {
         console.error('getDiscordPartnerTenantIdForCreatorWallet:', err)
         return null as string | null
+      }),
+      listBuyoutOffersForBidder(wallet).catch((err) => {
+        console.error('listBuyoutOffersForBidder:', err)
+        return []
       }),
     ])
 
@@ -216,6 +231,7 @@ export async function GET(request: NextRequest) {
         referralSummary != null
           ? { ...referralSummary, canSetVanity: canSetVanityReferral }
           : null,
+      buyoutOffers,
       engagement,
     })
   } catch (error) {

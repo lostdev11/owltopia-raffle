@@ -102,7 +102,7 @@ const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 /** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,buyout_closed_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -775,6 +775,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
     list_on_platform: (row as { list_on_platform?: unknown }).list_on_platform === false ? false : true,
     discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
+    buyout_closed_at: (row.buyout_closed_at as string | null) ?? null,
     time_extension_count,
   } as Raffle
 }

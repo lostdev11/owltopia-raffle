@@ -222,6 +222,38 @@ export interface Raffle {
   creator_claimed_at?: string | null
   creator_claim_tx?: string | null
   creator_funds_claim_locked_at?: string | null
+  /** Set when a buyout offer was accepted; no further bids allowed. */
+  buyout_closed_at?: string | null
+}
+
+/** Post-draw buyout bid on an NFT prize (v1: no pre-bids). */
+export type RaffleBuyoutOfferStatus =
+  | 'pending_deposit'
+  | 'active'
+  | 'accepted'
+  | 'expired'
+  | 'refunded'
+  | 'superseded'
+
+export interface RaffleBuyoutOffer {
+  id: string
+  raffle_id: string
+  bidder_wallet: string
+  currency: 'SOL' | 'USDC'
+  amount: number
+  status: RaffleBuyoutOfferStatus
+  deposit_tx_signature: string | null
+  created_at: string
+  activated_at: string | null
+  expires_at: string | null
+  accepted_at: string | null
+  accepted_by_wallet: string | null
+  treasury_fee_bps: number
+  treasury_fee_amount: number | null
+  winner_net_amount: number | null
+  payout_tx_signature: string | null
+  refund_tx_signature: string | null
+  refunded_at: string | null
 }
 
 export interface RaffleOffer {
