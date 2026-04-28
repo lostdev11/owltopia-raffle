@@ -75,6 +75,11 @@ export function isPendingNftRaffleAtTime(raffle: Raffle, nowMs: number): boolean
     return missingDeposit && (draftHasStarted || liveHasStarted)
   }
 
+  // Native SOL/USDC/crypto raffles (`prize_type: crypto`) do not gate tickets on NFT-style prize escrow
+  // (`entries/create` only blocks missing deposits for NFTs). Without this, unset `prize_deposited_at`
+  // would wrongly bucket them under "pending escrow" alongside NFT/partner flows (e.g. slug `…-sol` raffles).
+  if (raffle.prize_type === 'crypto') return false
+
   // Keep legacy NFT pre-escrow exemption behavior intact.
   if (raffle.prize_type === 'nft' && nftRaffleExemptFromEscrowRequirement(raffle)) return false
 
@@ -90,9 +95,9 @@ function isPendingNftRaffle(raffle: Raffle): boolean {
  * but are visible to admins and the raffle creator.
  */
 export function canViewerSeeRafflePending(raffle: Raffle, viewerWallet: string | null, viewerIsAdmin: boolean): boolean {
-  // Do not hide legacy/public non-escrow crypto raffles (e.g. SOL) behind pending visibility.
-  // Pending visibility gating is only for escrow-gated raffle types.
-  if (raffle.prize_type !== 'nft' && !isPartnerSplPrizeRaffle(raffle)) return true
+  // Pending deposit / moderation visibility applies to NFT prizes only.
+  // All crypto prizes (SOL, USDC, partner SPL) stay on the public browse list; ticket purchase still enforces escrow where required.
+  if (raffle.prize_type !== 'nft') return true
 
   // Only restrict "pending NFT" raffles; everything else is public.
   if (!isPendingNftRaffle(raffle)) return true

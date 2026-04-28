@@ -19,7 +19,7 @@ import {
   rafflesRestStatusInClause,
 } from '@/lib/raffles/list-query-statuses'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
-import { isPartnerPrizeCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
 
@@ -385,15 +385,10 @@ async function fetchRafflesViaRestRaw(
   const publicRows = rows.filter((row) => {
     if ((row as { list_on_platform?: boolean }).list_on_platform !== false) return true
 
-    // Preserve legacy/public crypto behavior for non-partner token raffles (e.g. SOL):
-    // do not hide these from non-admin list even if list_on_platform is stale false.
+    // When unlisted, hide only NFT (link-only NFT raffles); keep SOL, USDC, and partner SPL token
+    // prize raffles visible with the same parity as stale list_on_platform=false legacy rows.
     const prizeType = typeof row.prize_type === 'string' ? row.prize_type.trim().toLowerCase() : 'crypto'
-    if (prizeType === 'nft') return false
-
-    const prizeCurrency = typeof row.prize_currency === 'string' ? row.prize_currency.trim().toUpperCase() : ''
-    if (isPartnerPrizeCurrency(prizeCurrency)) return false
-
-    return true
+    return prizeType !== 'nft'
   })
 
   if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {

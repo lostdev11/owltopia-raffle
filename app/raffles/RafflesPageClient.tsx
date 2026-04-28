@@ -54,6 +54,20 @@ import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThreshol
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
+/**
+ * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: rows that are listed on-platform,
+ * owned by `wallet`, or unlisted crypto/SPL/USDC prizes (not unlisted NFT link-only rows).
+ */
+function supabaseBrowseListOr(wallet: string | null): string {
+  const w = wallet?.trim() || ''
+  const parts = ['list_on_platform.eq.true']
+  if (w) {
+    parts.push(`created_by.eq.${w}`, `creator_wallet.eq.${w}`)
+  }
+  parts.push('and(list_on_platform.eq.false,or(prize_type.is.null,prize_type.neq.nft))')
+  return parts.join(',')
+}
+
 interface RafflesPageClientProps {
   activeRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
   pausedPendingRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
@@ -360,19 +374,15 @@ export function RafflesPageClient({
     let cancelled = false
     ;(async () => {
       try {
-        // Public list excludes link-only (Discord) raffles; same wallet may still see their unlisted raffles.
         const listQ = supabase
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
+        // Parity with server REST browse rules (include unlisted partner SPL/crypto, not link-only NFT).
         const listWithVisibility =
           viewerIsAdmin
             ? listQ
-            : wallet
-            ? listQ.or(
-                `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
-              )
-            : listQ.eq('list_on_platform', true)
+            : listQ.or(supabaseBrowseListOr(wallet || null))
         const { data, error } = await listWithVisibility.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
@@ -550,13 +560,7 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        const q = viewerIsAdmin
-          ? listQ
-          : wallet
-          ? listQ.or(
-              `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
-            )
-          : listQ.eq('list_on_platform', true)
+        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr(wallet || null))
         const { data, error } = await q.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
