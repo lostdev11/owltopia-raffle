@@ -285,7 +285,7 @@ export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
   const endpoint = resolveServerSolanaReadRpcUrl()
 
   // createUmi has multiple overloads; use any to avoid version-specific type issues.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
   const asset: any = await fetchAssetV1(umi, umiPublicKey(mint))
   return asset.owner?.toString() === keypair.publicKey.toBase58()
@@ -543,7 +543,7 @@ export async function payoutMplCoreFromEscrowToRecipient(
 
   const endpoint = resolveServerSolanaRpcUrl()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
 
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
@@ -552,22 +552,22 @@ export async function payoutMplCoreFromEscrowToRecipient(
 
   const asset = umiPublicKey(assetMintAddress)
   const newOwner = umiPublicKey(recipientWallet)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const assetAccount: any = await fetchAsset(umi as any, asset)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'
       ? assetAccount.updateAuthority.address
       : undefined
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = transferV1(umi as any, {
       asset,
       newOwner,
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi as any)
     const sig = String(result.signature ?? result)
     return { ok: true, signature: sig }
@@ -597,7 +597,7 @@ export async function payoutCompressedFromEscrowToRecipient(
   const escrowBase58 = keypair.publicKey.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
@@ -605,7 +605,7 @@ export async function payoutCompressedFromEscrowToRecipient(
   umi.use(signerIdentity(signer))
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const asset: any = await getAssetWithProof(umi, umiPublicKey(trimmedAsset), { truncateCanopy: true })
     const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
     if (leafOwnerStr !== escrowBase58) {
@@ -616,7 +616,7 @@ export async function payoutCompressedFromEscrowToRecipient(
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = await buildBubblegumLeafTransferBuilder(
       umi,
       signer,
@@ -624,7 +624,7 @@ export async function payoutCompressedFromEscrowToRecipient(
       umiPublicKey(recipientWallet.trim()),
       asset
     )
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)
     return { ok: true, signature: sig }
@@ -1022,7 +1022,7 @@ async function detectPrizeReturnKind(
   const escrowBase58 = escrowPk.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
     const assetIdCandidates = Array.from(
       new Set(
@@ -1033,7 +1033,7 @@ async function detectPrizeReturnKind(
     )
     for (const assetId of assetIdCandidates) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
         const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
         if (leafOwnerStr === escrowBase58) return 'compressed'
@@ -1233,7 +1233,7 @@ async function transferMplCorePrizeToCreatorFromEscrow(
   }
 
   const endpoint = resolveServerSolanaRpcUrl()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
   const signer = createSignerFromKeypair(umi, umiKeypair)
@@ -1241,22 +1241,22 @@ async function transferMplCorePrizeToCreatorFromEscrow(
 
   const asset = umiPublicKey(mintStr)
   const newOwner = umiPublicKey(creatorWallet.trim())
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const assetAccount: any = await fetchAsset(umi as any, asset)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'
       ? assetAccount.updateAuthority.address
       : undefined
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = transferV1(umi as any, {
       asset,
       newOwner,
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi as any)
     const sig = String(result.signature ?? result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
@@ -1287,14 +1287,14 @@ async function transferCompressedPrizeToCreatorFromEscrow(
 
   const escrowBase58 = keypair.publicKey.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
   const signer = createSignerFromKeypair(umi, umiKeypair)
   umi.use(signerIdentity(signer))
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
     const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
     if (leafOwnerStr !== escrowBase58) {
@@ -1305,7 +1305,7 @@ async function transferCompressedPrizeToCreatorFromEscrow(
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = await buildBubblegumLeafTransferBuilder(
       umi,
       signer,
@@ -1313,7 +1313,7 @@ async function transferCompressedPrizeToCreatorFromEscrow(
       umiPublicKey(creatorWallet.trim()),
       asset
     )
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
@@ -1527,7 +1527,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
     const escrowBase58 = escrowPk.toBase58()
     const endpoint = resolveServerSolanaRpcUrl()
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
       const assetIdCandidates = Array.from(
         new Set(
@@ -1538,7 +1538,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
       )
       for (const assetId of assetIdCandidates) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
           const leafOwner = asset?.leafOwner
           if (leafOwner && String(leafOwner) === escrowBase58) return true

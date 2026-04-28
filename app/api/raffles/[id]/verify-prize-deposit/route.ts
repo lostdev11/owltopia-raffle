@@ -72,8 +72,8 @@ async function sumIncomingNativeSolToEscrowLamports(
     accountKeys?: unknown[]
   }
   const baseKeys = msg.staticAccountKeys ?? msg.accountKeys ?? []
-  const loadedWritable = (tx.meta.loadedAddresses?.writable ?? []) as string[]
-  const loadedReadonly = (tx.meta.loadedAddresses?.readonly ?? []) as string[]
+  const loadedWritable = (tx.meta.loadedAddresses?.writable ?? []) as unknown[]
+  const loadedReadonly = (tx.meta.loadedAddresses?.readonly ?? []) as unknown[]
   const accountKeys = [...baseKeys, ...loadedWritable, ...loadedReadonly]
     .map((k) => keyToBase58(k))
     .filter((k): k is string => !!k)
@@ -359,7 +359,7 @@ export async function POST(
           if (assetIdCandidates.length > 0) {
             const endpoint = resolveServerSolanaRpcUrl()
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
             for (const assetId of assetIdCandidates) {
@@ -490,7 +490,7 @@ export async function POST(
             )
             const endpoint = resolveServerSolanaRpcUrl()
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
             for (const assetId of assetIdCandidates) {

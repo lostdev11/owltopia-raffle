@@ -35,17 +35,17 @@ function shouldUseBubblegumTransferV2(
 }
 
 export async function buildBubblegumLeafTransferBuilder(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   umi: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   authoritySigner: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   leafOwner: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   newLeafOwner: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   asset: any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
 ): Promise<any> {
   const treeCfg = await fetchTreeConfigFromSeeds(umi, { merkleTree: asset.merkleTree })
 

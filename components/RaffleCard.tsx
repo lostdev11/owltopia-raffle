@@ -146,7 +146,7 @@ export function RaffleCard({
   const modalImageChain = useMemo(
     () =>
       buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean),
-    [raffle.id, raffle.image_url, raffle.image_fallback_url]
+    [raffle.image_url, raffle.image_fallback_url]
   )
   const [modalImgIdx, setModalImgIdx] = useState(0)
   const listThumbFallbackRaw = useMemo(

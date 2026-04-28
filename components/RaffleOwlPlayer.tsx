@@ -283,7 +283,7 @@ export function RaffleOwlPlayer({ enabled }: RaffleOwlPlayerProps) {
       cancelled = true
       stopBeatGlowLoop()
     }
-  }, [ensureWebAudioGraph, isPlaying, loadError, startBeatGlowLoop, stopBeatGlowLoop])
+  }, [ensureWebAudioGraph, isPlaying, loadError, startBeatGlowLoop, stopBeatGlowLoop, audioRef])
 
   useEffect(() => {
     return () => {

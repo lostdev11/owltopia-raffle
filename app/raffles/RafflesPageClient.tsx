@@ -141,12 +141,12 @@ function PastRafflesCarousel({
   const lastNavAtRef = useRef(0)
   const total = list.length
 
-  const clampIndex = (value: number) => {
+  const clampIndex = useCallback((value: number) => {
     if (total === 0) return 0
     if (value < 0) return total - 1
     if (value >= total) return 0
     return value
-  }
+  }, [total])
 
   // Auto-advance through past raffles when there is more than one. Must run unconditionally (Rules of Hooks).
   useEffect(() => {
@@ -155,7 +155,7 @@ function PastRafflesCarousel({
       setIndex((prev) => clampIndex(prev + 1))
     }, 6000)
     return () => clearInterval(id)
-  }, [total, rotationVersion])
+  }, [total, rotationVersion, clampIndex])
 
   if (total === 0) return null
 
@@ -415,7 +415,7 @@ export function RafflesPageClient({
   const tabQueryKey = searchParams.get('tab') ?? ''
   useLayoutEffect(() => {
     setTab(tabFromSearchParams(searchParams))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when `?tab=` changes; including
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keep this keyed to tabQueryKey only.
     // `searchParams` by identity would reset Owl Vision / Leaderboard after in-app tab clicks.
   }, [tabQueryKey])
 
@@ -625,7 +625,7 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected])
+  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected, serverTime])
 
   const useWalletVisibilityBuckets = Boolean(connected && wallet && clientBuckets)
   const active = useWalletVisibilityBuckets
