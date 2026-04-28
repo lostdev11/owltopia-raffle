@@ -8,6 +8,7 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { getAssociatedTokenAddress } from '@solana/spl-token'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
+import { normalizeDepositTxSignatureInput } from '@/lib/raffles/verify-prize-deposit-client'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -19,11 +20,13 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { transactionSignature } = body
+    const transactionSignature = normalizeDepositTxSignatureInput(
+      typeof body?.transactionSignature === 'string' ? body.transactionSignature : ''
+    )
 
     if (!transactionSignature) {
       return NextResponse.json(
-        { error: 'Missing required field: transactionSignature' },
+        { error: 'Missing required field: transactionSignature (raw signature or Solscan /tx/ link)' },
         { status: 400 }
       )
     }

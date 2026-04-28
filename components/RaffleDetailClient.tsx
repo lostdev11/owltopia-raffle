@@ -3707,8 +3707,8 @@ export function RaffleDetailClient({
                   <div className="flex flex-col gap-1">
                     {raffle.ticket_price > 0 && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-emerald-100/80">Price</span>
-                        <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-50`}>
+                        <span className="text-[11px] text-emerald-700 dark:text-emerald-100/80">Price</span>
+                        <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-900 dark:text-emerald-50`}>
                           {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
                           <CurrencyIcon
                             currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
@@ -3719,8 +3719,8 @@ export function RaffleDetailClient({
                       </div>
                     )}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-emerald-100/80">Tickets</span>
-                      <span className={`${classes.description} font-semibold text-emerald-50`}>{totalTicketsSold}</span>
+                      <span className="text-[11px] text-emerald-700 dark:text-emerald-100/80">Tickets</span>
+                      <span className={`${classes.description} font-semibold text-emerald-900 dark:text-emerald-50`}>{totalTicketsSold}</span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -3729,13 +3729,13 @@ export function RaffleDetailClient({
                         isFuture
                           ? 'border-amber-300/80 bg-amber-500/20 text-amber-100'
                           : isActive
-                            ? 'border-emerald-300/80 bg-emerald-500/25 text-emerald-50'
+                            ? 'border-emerald-600/40 bg-emerald-100 text-emerald-800 dark:border-emerald-300/80 dark:bg-emerald-500/25 dark:text-emerald-50'
                             : 'border-sky-300/80 bg-sky-500/20 text-sky-50'
                       }`}
                     >
                       {statusPillLabel}
                     </span>
-                    <span className="text-[11px] text-emerald-50/80">
+                    <span className="text-[11px] text-emerald-700 dark:text-emerald-50/80">
                       {timeToEndLabel}
                     </span>
                   </div>

@@ -360,7 +360,9 @@ export function RafflesPageClient({
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
         const listWithVisibility =
-          wallet
+          viewerIsAdmin
+            ? listQ
+            : wallet
             ? listQ.or(
                 `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
               )
@@ -542,7 +544,9 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        const q = wallet
+        const q = viewerIsAdmin
+          ? listQ
+          : wallet
           ? listQ.or(
               `list_on_platform.eq.true,created_by.eq.${wallet},creator_wallet.eq.${wallet}`
             )

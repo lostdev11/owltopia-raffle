@@ -1171,7 +1171,7 @@ export function RaffleCard({
                   className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1"
                   onClick={(e) => handleLinkClick(e)}
                 >
-                  <span className="text-[11px] text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
+                  <span className="text-[11px] text-foreground/75 dark:text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
                     {isFuture ? (
                       <span title={formatDateTimeWithTimezone(raffle.start_time)}>
                         {serverNow && new Date(raffle.start_time) <= serverNow
@@ -1532,7 +1532,7 @@ export function RaffleCard({
               </LinkifiedTextInsideLinkProvider>
               </Link>
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
-                <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
+                <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-foreground/75 dark:text-muted-foreground`}>
                   <Link
                     href={mediumRaffleHref}
                     className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5"

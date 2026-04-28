@@ -6,7 +6,7 @@
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { cookies } from 'next/headers'
-import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
+import { getRaffles, getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import {
@@ -147,7 +147,29 @@ export default async function RafflesPage() {
       )
     }
 
-    // Pending NFT raffles should only be visible to admins and the creator.
+    // Admins should also see pending raffles that may be unlisted (list_on_platform=false),
+    // so they can moderate/verify directly from /raffles.
+    if (viewerIsAdmin) {
+      const adminAll = await getRaffles(false, { includeDraft: true })
+      const adminRows = adminAll.data ?? []
+      const pendingById = new Map<string, Raffle>()
+      const nowMs = Date.now()
+      for (const row of adminRows) {
+        if (isPendingNftRaffleAtTime(row, nowMs)) {
+          pendingById.set(row.id, row)
+        }
+      }
+      for (const row of allRaffles) {
+        pendingById.set(row.id, row)
+      }
+      if (pendingById.size > 0) {
+        allRaffles = Array.from(pendingById.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+      }
+    }
+
+    // Pending raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
     // Enrich with creator Owl holder status — reserve wall clock under maxDuration.
