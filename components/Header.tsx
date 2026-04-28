@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird } from 'lucide-react'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -65,6 +65,8 @@ export function Header() {
 
   // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
   const showOwlVision = isAdmin && (adminRole === 'full' || adminRole === null)
+  /** Nesting nav is admin-only until the public launch path is ready (avoids a dead link for visitors). */
+  const showNestingNav = Boolean(isAdmin)
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -72,6 +74,7 @@ export function Header() {
   const navLinks = [
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     ...(isOwlEnabled() ? [{ href: '/owl-council', label: 'Owl Council', icon: Landmark }] : []),
+    ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -103,6 +106,14 @@ export function Header() {
                     <Landmark className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">Owl Council</span>
                     <span className="sm:hidden">Council</span>
+                  </Button>
+                </Link>
+              )}
+              {showNestingNav && (
+                <Link href="/nesting">
+                  <Button variant="ghost" size="sm" className="text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10">
+                    <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Nesting</span>
                   </Button>
                 </Link>
               )}
