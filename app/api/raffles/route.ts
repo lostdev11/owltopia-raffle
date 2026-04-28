@@ -41,13 +41,16 @@ import {
   listPartnerPrizeTokens,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
-import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
+import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 /** Vercel Pro serverless cap (seconds). Hobby is 10s; keep routes deployable on either tier by not relying on >10s in critical paths without testing. */
 export const maxDuration = 60
+
+/** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
+const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
@@ -160,8 +163,36 @@ export async function POST(request: NextRequest) {
         )
       }
     }
-    
-    const walletAddress = session.wallet
+
+    const rawWalletIntent =
+      (typeof body.wallet_address === 'string' ? body.wallet_address : '').trim() ||
+      request.headers.get(CONNECTED_WALLET_HEADER)?.trim() ||
+      ''
+    if (!rawWalletIntent) {
+      return NextResponse.json(
+        { error: 'Missing wallet_address. Refresh the page and try again.' },
+        { status: 400 }
+      )
+    }
+    const sessionNorm = normalizeSolanaWalletAddress(session.wallet)
+    const intentNorm = normalizeSolanaWalletAddress(rawWalletIntent)
+    if (!sessionNorm || !intentNorm) {
+      return NextResponse.json(
+        { error: 'Invalid wallet address. Refresh the page and try again.' },
+        { status: 400 }
+      )
+    }
+    if (sessionNorm !== intentNorm) {
+      return NextResponse.json(
+        {
+          error:
+            'Your signed-in wallet does not match the wallet connected in your browser. Open Dashboard, sign in again with the wallet you are using, then create the raffle.',
+        },
+        { status: 401 }
+      )
+    }
+
+    const walletAddress = sessionNorm
 
     const walletCreateRl = rateLimit(`raffles:create:${walletAddress}`, 6, 60_000)
     if (!walletCreateRl.allowed) {

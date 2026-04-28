@@ -543,7 +543,10 @@ export function CreateRaffleForm() {
     try {
       const response = await fetch('/api/raffles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-connected-wallet': publicKey.toBase58(),
+        },
         body: JSON.stringify(data),
         credentials: 'include',
       })
@@ -1017,7 +1020,11 @@ export function CreateRaffleForm() {
             ? errorData.existing_slug.trim()
             : ''
         if (response.status === 401) {
-          alert(`${msg} Sign in from your dashboard first, then try again.`)
+          alert(
+            typeof msg === 'string' && msg.trim()
+              ? msg.trim()
+              : 'Sign in required. Open your dashboard, sign in with your wallet, then try again.'
+          )
           router.push('/dashboard')
         } else if (response.status === 409 && existingSlug) {
           alert(`${msg}\n\nOpening your existing raffle…`)
