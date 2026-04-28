@@ -50,13 +50,24 @@ export default async function AdminRafflesPage() {
   const now = new Date()
   const nowTime = now.getTime()
 
+  const pendingCancellationRaffles: typeof allRaffles = []
+  const rafflesToBucket: typeof allRaffles = []
+  for (const raffle of allRaffles) {
+    const st = (raffle.status ?? '').toLowerCase()
+    if (raffle.cancellation_requested_at && st !== 'cancelled') {
+      pendingCancellationRaffles.push(raffle)
+    } else {
+      rafflesToBucket.push(raffle)
+    }
+  }
+
   const pastRaffles: typeof allRaffles = []
   const activeRaffles: typeof allRaffles = []
   const futureRaffles: typeof allRaffles = []
   const pausedPendingRaffles: typeof allRaffles = []
   const cancelledRecoveryRaffles: typeof allRaffles = []
 
-  for (const raffle of allRaffles) {
+  for (const raffle of rafflesToBucket) {
     const startTime = new Date(raffle.start_time)
     const endTime = new Date(raffle.end_time)
     const startTimeMs = startTime.getTime()
@@ -132,12 +143,14 @@ export default async function AdminRafflesPage() {
     futureRafflesWithEntries,
     pausedPendingRafflesWithEntries,
     cancelledRecoveryRafflesWithEntries,
+    pendingCancellationRafflesWithEntries,
   ] = await Promise.all([
     getRafflesWithEntries(pastRaffles),
     getRafflesWithEntries(activeRaffles),
     getRafflesWithEntries(futureRaffles),
     getRafflesWithEntries(pausedPendingRaffles),
     getRafflesWithEntries(cancelledRecoveryRaffles),
+    getRafflesWithEntries(pendingCancellationRaffles),
   ])
 
   return (
@@ -147,6 +160,7 @@ export default async function AdminRafflesPage() {
       pastRafflesWithEntries={pastRafflesWithEntries}
       pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
       cancelledRecoveryRafflesWithEntries={cancelledRecoveryRafflesWithEntries}
+      pendingCancellationRafflesWithEntries={pendingCancellationRafflesWithEntries}
     />
   )
 }

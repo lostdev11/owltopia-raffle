@@ -6,6 +6,11 @@ import {
   canCompleteCancellationForAdmin,
   raffleRequiresCancellationFee,
 } from '@/lib/raffles/cancellation-fee-policy'
+import {
+  transferNftPrizeToCreator,
+  transferPartnerSplPrizeToCreator,
+} from '@/lib/raffles/prize-escrow'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +18,8 @@ export const dynamic = 'force-dynamic'
  * POST /api/raffles/[id]/accept-cancellation
  * Full admin accepts a cancellation request. If the raffle had already started, the creator must have paid
  * the on-chain cancellation fee first. Ticket buyers with funds-escrow entries can claim refunds on the dashboard.
+ * After the raffle is marked cancelled, attempts the same automatic escrow → creator transfer as
+ * POST /return-prize-to-creator (NFT and partner SPL prizes). Non-escrow prize types are skipped.
  */
 export async function POST(
   request: NextRequest,
@@ -75,15 +82,56 @@ export async function POST(
       is_active: false,
     })
 
+    /** NFT or partner SPL prize in escrow — return to creator automatically (same as manual return-prize-to-creator). */
+    let prizeReturnAttempted = false
+    let prizeReturnOk: boolean | undefined
+    let prizeReturnSignature: string | undefined
+    let prizeReturnError: string | undefined
+
+    const escrowReturnEligible =
+      raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)
+
+    if (escrowReturnEligible) {
+      prizeReturnAttempted = true
+      const returnResult = isPartnerSplPrizeRaffle(raffle)
+        ? await transferPartnerSplPrizeToCreator(id, 'cancelled')
+        : await transferNftPrizeToCreator(id, 'cancelled')
+      prizeReturnOk = returnResult.ok
+      prizeReturnSignature = returnResult.signature
+      prizeReturnError = returnResult.error
+      if (!returnResult.ok && returnResult.error) {
+        console.warn(
+          `[accept-cancellation] Prize auto-return failed for raffle ${id}: ${returnResult.error}`
+        )
+      }
+    }
+
+    const baseMessage =
+      hostPaidFee && feeApplies
+        ? `Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). The creator paid the ${feeSol} SOL cancellation fee.`
+        : 'Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). No post-start cancellation fee applied.'
+
+    let message = baseMessage
+    if (prizeReturnAttempted && prizeReturnOk && prizeReturnSignature) {
+      message += ` Prize returned to creator from escrow (TX: ${prizeReturnSignature}).`
+    } else if (prizeReturnAttempted && prizeReturnError) {
+      message += ` Automatic prize return did not complete: ${prizeReturnError}. Use “Return prize to creator” in Owl Vision if the prize is still in escrow.`
+    }
+
     return NextResponse.json({
       success: true,
       refundPolicy,
       cancellationFeeAmount,
       cancellationFeeCurrency,
-      message:
-        hostPaidFee && feeApplies
-          ? `Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). The creator paid the ${feeSol} SOL cancellation fee.`
-          : 'Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). No post-start cancellation fee applied.',
+      message,
+      prizeReturnAttempted,
+      ...(prizeReturnAttempted
+        ? {
+            prizeReturnOk,
+            ...(prizeReturnSignature ? { prizeReturnSignature } : {}),
+            ...(prizeReturnError ? { prizeReturnError } : {}),
+          }
+        : {}),
     })
   } catch (err) {
     console.error('[POST /api/raffles/[id]/accept-cancellation]', err)

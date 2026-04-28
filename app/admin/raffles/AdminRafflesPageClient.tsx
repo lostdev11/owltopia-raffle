@@ -17,6 +17,7 @@ interface AdminRafflesPageClientProps {
   pastRafflesWithEntries: RaffleWithEntriesAndProfit[]
   pausedPendingRafflesWithEntries: RaffleWithEntriesAndProfit[]
   cancelledRecoveryRafflesWithEntries: RaffleWithEntriesAndProfit[]
+  pendingCancellationRafflesWithEntries: RaffleWithEntriesAndProfit[]
 }
 
 export function AdminRafflesPageClient({
@@ -25,6 +26,7 @@ export function AdminRafflesPageClient({
   pastRafflesWithEntries,
   pausedPendingRafflesWithEntries,
   cancelledRecoveryRafflesWithEntries,
+  pendingCancellationRafflesWithEntries,
 }: AdminRafflesPageClientProps) {
   const router = useRouter()
   const [rafflesState, setRafflesState] = useState({
@@ -33,6 +35,7 @@ export function AdminRafflesPageClient({
     past: pastRafflesWithEntries,
     pausedPending: pausedPendingRafflesWithEntries,
     cancelledRecovery: cancelledRecoveryRafflesWithEntries,
+    pendingCancellation: pendingCancellationRafflesWithEntries,
   })
 
   const handleRaffleDeleted = useCallback((raffleId: string) => {
@@ -43,6 +46,7 @@ export function AdminRafflesPageClient({
       past: prev.past.filter(({ raffle }) => raffle.id !== raffleId),
       pausedPending: prev.pausedPending.filter(({ raffle }) => raffle.id !== raffleId),
       cancelledRecovery: prev.cancelledRecovery.filter(({ raffle }) => raffle.id !== raffleId),
+      pendingCancellation: prev.pendingCancellation.filter(({ raffle }) => raffle.id !== raffleId),
     }))
     
     // Refresh the page after a short delay to ensure database is updated
@@ -68,6 +72,26 @@ export function AdminRafflesPageClient({
         <p className="text-base sm:text-lg text-muted-foreground">
           View and manage all raffles, including past raffles. You can delete any raffle from here.
         </p>
+      </div>
+
+      <div className="mb-8 sm:mb-12">
+        <h2 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Pending cancellation</h2>
+        <p className="text-sm text-muted-foreground mb-4 sm:mb-6">
+          Creators who requested cancellation — open each raffle in Owl Vision to accept or review. Post-start
+          raffles need the on-chain cancellation fee paid before you can complete cancellation.
+        </p>
+        {rafflesState.pendingCancellation.length > 0 ? (
+          <RafflesList
+            rafflesWithEntries={rafflesState.pendingCancellation}
+            title={undefined}
+            section="active"
+            onRaffleDeleted={handleRaffleDeleted}
+          />
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">No pending cancellation requests.</p>
+          </div>
+        )}
       </div>
 
       <div className="mb-8 sm:mb-12">
@@ -156,7 +180,8 @@ export function AdminRafflesPageClient({
         )}
       </div>
 
-      {rafflesState.active.length === 0 && 
+      {rafflesState.active.length === 0 &&
+       rafflesState.pendingCancellation.length === 0 &&
        rafflesState.cancelledRecovery.length === 0 &&
        rafflesState.pausedPending.length === 0 &&
        rafflesState.future.length === 0 && 
