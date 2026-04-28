@@ -36,18 +36,48 @@ async function sumIncomingNativeSolToEscrowLamports(
   } catch {
     return null
   }
+  const escrowBase58 = escrowPk.toBase58()
 
-  const tx = await connection
-    .getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
-    .catch(() => null)
+  const fetchOptions = [
+    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'confirmed' as const },
+    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'finalized' as const },
+  ]
+  let tx: Awaited<ReturnType<typeof connection.getTransaction>> | null = null
+  for (const opts of fetchOptions) {
+    tx = await connection.getTransaction(signature, opts as any).catch(() => null)
+    if (tx?.meta) break
+    await new Promise((r) => setTimeout(r, 250))
+  }
   if (!tx?.meta) return null
 
-  const msg = tx.transaction.message as {
-    staticAccountKeys?: PublicKey[]
-    accountKeys?: PublicKey[]
+  const keyToBase58 = (k: unknown): string | null => {
+    if (typeof k === 'string' && k.trim()) return k.trim()
+    if (k && typeof k === 'object' && 'pubkey' in k && typeof (k as { pubkey?: string }).pubkey === 'string') {
+      const p = (k as { pubkey: string }).pubkey.trim()
+      return p || null
+    }
+    try {
+      if (k instanceof PublicKey) return k.toBase58()
+      if (k != null) return new PublicKey(k as ConstructorParameters<typeof PublicKey>[0]).toBase58()
+    } catch {
+      return null
+    }
+    return null
   }
-  const accountKeys = (msg.staticAccountKeys ?? msg.accountKeys ?? []) as PublicKey[]
-  const recipientIndex = accountKeys.findIndex((k) => k.equals(escrowPk))
+
+  const msg = tx.transaction.message as {
+    staticAccountKeys?: unknown[]
+    accountKeys?: unknown[]
+  }
+  const baseKeys = msg.staticAccountKeys ?? msg.accountKeys ?? []
+  const loadedWritable = (tx.meta.loadedAddresses?.writable ?? []) as string[]
+  const loadedReadonly = (tx.meta.loadedAddresses?.readonly ?? []) as string[]
+  const accountKeys = [...baseKeys, ...loadedWritable, ...loadedReadonly]
+    .map((k) => keyToBase58(k))
+    .filter((k): k is string => !!k)
+  const recipientIndex = accountKeys.findIndex((k) => k === escrowBase58)
   if (recipientIndex < 0) return null
   const pre = tx.meta.preBalances?.[recipientIndex] ?? 0
   const post = tx.meta.postBalances?.[recipientIndex] ?? 0
