@@ -2,27 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Loader2, ArrowLeft, Copy, CheckCircle2, Radio } from 'lucide-react'
 import type { DiscordGiveawayPartnerTenant } from '@/lib/types'
 
 type PartnerRow = Omit<DiscordGiveawayPartnerTenant, 'api_secret_hash'>
 
 export default function AdminDiscordGiveawayPartnersPage() {
-  const router = useRouter()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [partners, setPartners] = useState<PartnerRow[]>([])
   const [loadingList, setLoadingList] = useState(true)
@@ -44,14 +40,12 @@ export default function AdminDiscordGiveawayPartnersPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -65,7 +59,6 @@ export default function AdminDiscordGiveawayPartnersPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -77,12 +70,6 @@ export default function AdminDiscordGiveawayPartnersPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
@@ -102,8 +89,8 @@ export default function AdminDiscordGiveawayPartnersPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin && adminRole !== 'raffle_creator') void fetchList()
-  }, [isAdmin, adminRole, fetchList])
+    if (isAdmin) void fetchList()
+  }, [isAdmin, fetchList])
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -196,7 +183,7 @@ export default function AdminDiscordGiveawayPartnersPage() {
     )
   }
 
-  if (!isAdmin || adminRole === 'raffle_creator') {
+  if (!isAdmin) {
     return (
       <div className="container mx-auto py-8 px-4">
         <p className="text-muted-foreground">Access denied.</p>
@@ -226,9 +213,12 @@ export default function AdminDiscordGiveawayPartnersPage() {
       <p className="text-muted-foreground text-sm mb-8">
         After a community pays (off-platform for now), create a tenant here: they add a channel **incoming webhook**,
         you set status and optional <span className="font-mono text-xs">active_until</span>. They receive automatic
-        Discord posts when an NFT giveaway is linked to their tenant and deposit is verified / prize claimed. They can
-        also call <span className="font-mono text-xs">{notifyPath}</span> with their API secret to push custom embeds
-        (e.g. from their own bot).
+        Discord posts when an NFT giveaway is linked to their tenant and deposit is verified / prize claimed.
+        In Discord they can set <span className="font-mono text-xs">/owltopia-partner webhook-raffle-*</span> to mirror
+        the main site’s created/winner feed for ticket raffles (after you link a partner-creator wallet to this tenant
+        in <Link href="/admin/partner-creators" className="text-primary underline">Partner program creators</Link>).
+        They can also call <span className="font-mono text-xs">{notifyPath}</span> with their API secret to push custom
+        embeds (e.g. from their own bot).
       </p>
 
       {newSecret && (
@@ -383,6 +373,13 @@ export default function AdminDiscordGiveawayPartnersPage() {
                       {rotatingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Rotate API secret'}
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Ticket raffle created webhook: {p.raffle_webhook_url_created ? 'set' : 'not set'}
+                    {` · `}Winner channel webhook: {p.raffle_webhook_url_winner ? 'set' : 'not set'}
+                    <span className="block sm:inline sm:before:content-['\a0·\a0']">
+                      (per-server: <code className="text-[11px]">/owltopia-partner webhook-raffle-*</code>)
+                    </span>
+                  </p>
                   <Button
                     type="button"
                     variant="ghost"
@@ -391,7 +388,7 @@ export default function AdminDiscordGiveawayPartnersPage() {
                     onClick={() => copyText(`id-${p.id}`, p.id)}
                   >
                     <Copy className="h-3 w-3 mr-1" />
-                    Copy tenant id (for giveaway link)
+                    Copy tenant id (for giveaway + partner creator link)
                   </Button>
                 </li>
               ))}

@@ -10,6 +10,7 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { adminLegacyEscrowRefundBody, parseOr400 } from '@/lib/validations'
 import { refundEntryFromFundsEscrow } from '@/lib/raffles/funds-escrow'
+import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,8 @@ type LegacyRefundRow =
  * TEMPORARY — delete this route after one-time admin-driven refunds are done.
  *
  * POST /api/admin/legacy-escrow-refund
- * Full admin only. For each entry in a `failed_refund_available` raffle: sends gross from FUNDS_ESCROW
+ * Full admin only. For each entry in a refund-eligible raffle (`failed_refund_available` or `cancelled`):
+ * sends gross from FUNDS_ESCROW
  * (same on-chain path as buyer self-claim). Works for both legacy raffles and standard funds-escrow raffles.
  */
 export async function POST(request: NextRequest) {
@@ -69,11 +71,11 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      if (raffle.status !== 'failed_refund_available') {
+      if (!raffleAllowsAdminFundsEscrowRefund(raffle)) {
         results.push({
           entryId,
           ok: false,
-          error: `Raffle status must be failed_refund_available (got ${raffle.status ?? 'unknown'})`,
+          error: `Raffle status must allow admin escrow refunds (e.g. failed_refund_available or cancelled; got ${raffle.status ?? 'unknown'})`,
         })
         continue
       }

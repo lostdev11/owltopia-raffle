@@ -1,7 +1,9 @@
 import type { Raffle } from '@/lib/types'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
+import { getActivePartnerCommunityCreatorRows } from '@/lib/raffles/partner-communities'
 import { devSaveApiCredits } from '@/lib/dev-budget'
 import { getWalletsWithAdminRole } from '@/lib/db/admins'
+import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
 
 /** Limit parallel Helius DAS calls so listing many unique creators does not trigger 429s. */
 const HOLDER_LOOKUP_CONCURRENCY = devSaveApiCredits() ? 2 : 3
@@ -48,7 +50,14 @@ async function forEachWithConcurrency<T>(
 export async function enrichRafflesWithCreatorHolder(
   raffles: Raffle[],
   options?: EnrichRafflesWithCreatorHolderOptions
-): Promise<(Raffle & { creator_is_holder: boolean; description_urls_clickable: boolean })[]> {
+): Promise<
+  (Raffle & {
+    creator_is_holder: boolean
+    creator_is_partner: boolean
+    creator_partner_display_name: string | null
+    description_urls_clickable: boolean
+  })[]
+> {
   if (!raffles.length) return []
 
   const wallets = new Set<string>()
@@ -57,6 +66,15 @@ export async function enrichRafflesWithCreatorHolder(
     if (w) wallets.add(w)
   }
 
+  const partnerRows = await getActivePartnerCommunityCreatorRows()
+  const partnerWallets = new Set(partnerRows.map((r) => r.creator_wallet))
+  const partnerTableLabelByWallet = new Map(
+    partnerRows.map((r) => [r.creator_wallet, r.display_label] as const)
+  )
+  const partnerProfileNames =
+    partnerRows.length > 0
+      ? await getDisplayNamesByWallets(partnerRows.map((r) => r.creator_wallet))
+      : {}
   const adminWallets = await getWalletsWithAdminRole(Array.from(wallets))
 
   const budgetMs = options?.budgetMs
@@ -74,7 +92,8 @@ export async function enrichRafflesWithCreatorHolder(
           wallet,
           listDisplayOnly ? { listDisplayOnly: true } : undefined
         )
-        holderByWallet.set(wallet, tier.reason === 'holder')
+        const isHolder = tier.reason === 'holder'
+        holderByWallet.set(wallet, isHolder)
       } catch {
         holderByWallet.set(wallet, false)
       }
@@ -84,9 +103,19 @@ export async function enrichRafflesWithCreatorHolder(
 
   return raffles.map((r) => {
     const w = (r.creator_wallet || r.created_by || '').trim()
+    const isPartner = w ? partnerWallets.has(w) : false
+    const profileName = w ? (partnerProfileNames[w]?.trim() ?? '') : ''
+    const tableLabel = w ? partnerTableLabelByWallet.get(w) : null
+    let creator_partner_display_name: string | null = null
+    if (isPartner) {
+      if (profileName) creator_partner_display_name = profileName
+      else if (tableLabel?.trim()) creator_partner_display_name = tableLabel.trim()
+    }
     return {
       ...r,
       creator_is_holder: holderByWallet.get(w) ?? false,
+      creator_is_partner: isPartner,
+      creator_partner_display_name,
       description_urls_clickable: w ? adminWallets.has(w) : false,
     }
   })

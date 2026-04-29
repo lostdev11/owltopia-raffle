@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js'
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
 import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
+import { getOwltopiaSnapshotIfFresh, upsertOwltopiaHolderSnapshot } from '@/lib/db/owltopia-holder-snapshot'
 
 const ownsOwltopiaCache = new Map<string, { value: boolean; expiresAt: number }>()
 
@@ -80,6 +81,7 @@ export type OwnsOwltopiaOptions = {
  * - Positive holder result requires Helius + OWLTOPIA_COLLECTION_ADDRESS; fungible OWL SPL balance is not used.
  * - Validates wallet address format; invalid addresses return false.
  * - Pass { skipCache: true } to force a fresh verification (e.g. dashboard load, creating a raffle).
+ * - When skipCache is false, a Supabase row from the last 7 days may short-circuit Helius (see owltopia_holder_snapshots).
  */
 export async function ownsOwltopia(
   walletAddress: string,
@@ -101,6 +103,17 @@ export async function ownsOwltopia(
     new PublicKey(normalized)
   } catch {
     return false
+  }
+
+  if (!options?.skipCache) {
+    const fromSnapshot = await getOwltopiaSnapshotIfFresh(normalized)
+    if (fromSnapshot !== null) {
+      ownsOwltopiaCache.set(normalized, {
+        value: fromSnapshot,
+        expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
+      })
+      return fromSnapshot
+    }
   }
 
   const collectionAddress = OWLTOPIA_COLLECTION_ADDRESS?.trim()
@@ -184,6 +197,7 @@ export async function ownsOwltopia(
             value: true,
             expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
+          await upsertOwltopiaHolderSnapshot(normalized, true)
           return true
         }
       }
@@ -251,6 +265,7 @@ export async function ownsOwltopia(
             value: false,
             expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
+          await upsertOwltopiaHolderSnapshot(normalized, false)
           return false
         }
 
@@ -260,6 +275,7 @@ export async function ownsOwltopia(
               value: true,
               expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
             })
+            await upsertOwltopiaHolderSnapshot(normalized, true)
             return true
           }
         }
@@ -269,6 +285,7 @@ export async function ownsOwltopia(
             value: false,
             expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
           })
+          await upsertOwltopiaHolderSnapshot(normalized, false)
           return false
         }
 
@@ -285,6 +302,7 @@ export async function ownsOwltopia(
           value: false,
           expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
         })
+        await upsertOwltopiaHolderSnapshot(normalized, false)
         return false
       }
     } catch (err) {

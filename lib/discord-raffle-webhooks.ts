@@ -4,12 +4,16 @@
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER (optional; falls back to raffle winner URL),
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN (optional; when a pool giveaway is opened for entries; falls back to LIVE_RAFFLES URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
+ * Partner communities: per-tenant `raffle_webhook_url_*` (see `discord_giveaway_partner_tenants`) when
+ * a raffle is stamped with `discord_partner_tenant_id` (partner program creator + linked tenant).
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
-import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
+import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
+import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
+import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -72,44 +76,6 @@ function rafflePageUrl(raffle: Raffle): string {
 function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {
   const base = getSiteBaseUrl()
   return `${base}/community-giveaway/${encodeURIComponent(g.id)}`
-}
-
-/** Normalize metadata image URIs so Discord embeds accept them (https, site-relative, common ipfs/ar schemes). */
-function discordEmbedImageFromNftUri(raw: string | null | undefined): string | undefined {
-  if (!raw?.trim()) return undefined
-  const t = raw.trim()
-  try {
-    const u = new URL(t)
-    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
-  } catch {
-    try {
-      const base = getSiteBaseUrl()
-      const u = new URL(t, `${base}/`)
-      if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
-    } catch {
-      /* fall through */
-    }
-  }
-  if (/^ipfs:\/\//i.test(t)) {
-    const path = t.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '')
-    return `https://ipfs.io/ipfs/${path}`
-  }
-  if (/^ar:\/\//i.test(t)) {
-    const path = t.replace(/^ar:\/\//i, '').replace(/^\/+/, '')
-    return `https://arweave.net/${path}`
-  }
-  return undefined
-}
-
-async function communityGiveawayPrizeImageForDiscord(
-  nftMint: string,
-  nftTokenId: string | null | undefined
-): Promise<string | undefined> {
-  const mint = nftMint.trim()
-  if (!mint) return undefined
-  const assetId = nftTokenId?.trim() || mint
-  const raw = await fetchNftImageUriFromHelius(assetId)
-  return discordEmbedImageFromNftUri(raw)
 }
 
 function discordTimestampUnix(iso: string): number | null {
@@ -263,14 +229,58 @@ async function postDiscordWebhook(
 
 /** Logs errors, never throws. Await when calling from API/cron so serverless does not exit before Discord receives the request. */
 export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
-  const url = webhookUrlCreated()
-  if (!url) return
+  const mainUrl = webhookUrlCreated()
+  const partnerTid =
+    typeof raffle.discord_partner_tenant_id === 'string' && raffle.discord_partner_tenant_id.trim()
+      ? raffle.discord_partner_tenant_id.trim()
+      : null
+  if (!mainUrl && !partnerTid) return
 
   const endTs = discordTimestampUnix(raffle.end_time)
   const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
   const image = resolveDiscordEmbedImageUrl(raffle)
 
-  await postDiscordWebhook(url, {
+  const creatorWallet = (
+    raffle.creator_wallet?.trim() ||
+    (typeof raffle.created_by === 'string' ? raffle.created_by.trim() : '')
+  ).trim()
+  let creatorDiscordId: string | undefined
+  if (creatorWallet) {
+    try {
+      const map = await getDiscordUserIdsByWallets([creatorWallet])
+      const id = map[creatorWallet]?.trim()
+      if (id) creatorDiscordId = id
+    } catch (e) {
+      console.error('[notifyRaffleCreated] creator Discord lookup:', e)
+    }
+  }
+  const creatorSnowflake = parseDiscordUserSnowflake(creatorDiscordId)
+
+  const creatorField =
+    creatorWallet && creatorSnowflake
+      ? {
+          name: 'Creator',
+          value: `<@${creatorSnowflake}> (\`${shortenWallet(creatorWallet)}\`)`,
+          inline: true,
+        }
+      : {
+          name: 'Creator',
+          value: creatorWallet
+            ? `\`${shortenWallet(creatorWallet)}\``
+            : raffle.created_by
+              ? `\`${shortenWallet(String(raffle.created_by))}\``
+              : '—',
+          inline: true,
+        }
+
+  const extras: WebhookExtras | undefined = creatorSnowflake
+    ? {
+        content: `Raffle creator: <@${creatorSnowflake}>`,
+        allowed_mentions: { parse: [], users: [creatorSnowflake] },
+      }
+    : undefined
+
+  const embed: DiscordEmbed = {
     title: 'New raffle created',
     description: raffle.title,
     url: rafflePageUrl(raffle),
@@ -283,20 +293,38 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
         inline: true,
       },
       { name: 'Ends', value: endLine, inline: false },
-      {
-        name: 'Creator',
-        value: raffle.creator_wallet
-          ? `\`${shortenWallet(raffle.creator_wallet)}\``
-          : raffle.created_by
-            ? `\`${shortenWallet(String(raffle.created_by))}\``
-            : '—',
-        inline: true,
-      },
+      creatorField,
       { name: 'Status', value: raffle.status ?? 'draft', inline: true },
+      ...(raffle.list_on_platform === false
+        ? [
+            {
+              name: 'Where to enter',
+              value:
+                'This raffle is not on the public raffles list — use the **Enter raffle** link in this post (e.g. share the button in your partner Discord).',
+              inline: false,
+            },
+          ]
+        : []),
     ],
     image: image ? { url: image } : undefined,
     timestamp: new Date().toISOString(),
-  })
+  }
+
+  if (mainUrl) {
+    await postDiscordWebhook(mainUrl, embed, extras)
+  }
+
+  if (!partnerTid) return
+  let tenant: Awaited<ReturnType<typeof getDiscordGiveawayPartnerById>> = null
+  try {
+    tenant = await getDiscordGiveawayPartnerById(partnerTid)
+  } catch (e) {
+    console.error('[notifyRaffleCreated] partner tenant load:', e)
+  }
+  if (!tenant || !isPartnerTenantEntitled(tenant)) return
+  const w = tenant.raffle_webhook_url_created?.trim()
+  if (!w) return
+  await postDiscordWebhook(w, embed, extras)
 }
 
 /** Logs errors, never throws. Await from selectWinner (or any serverless handler) so the outgoing webhook finishes before the invocation freezes. */
@@ -306,14 +334,20 @@ export async function notifyRaffleWinnerDrawn(
   statusAfterDraw: string,
   winnerDiscordUserId?: string | null
 ): Promise<void> {
-  const url = webhookUrlWinner()
-  if (!url) return
+  const mainUrl = webhookUrlWinner()
+  const partnerTid =
+    typeof raffle.discord_partner_tenant_id === 'string' && raffle.discord_partner_tenant_id.trim()
+      ? raffle.discord_partner_tenant_id.trim()
+      : null
+  if (!mainUrl && !partnerTid) return
 
   const statusNote =
     statusAfterDraw === 'successful_pending_claims'
       ? `${statusAfterDraw} (winner/creator claims may be pending)`
       : statusAfterDraw
   const image = resolveDiscordEmbedImageUrl(raffle)
+  const baseUrl = getSiteBaseUrl()
+  const dashboardLine = `${baseUrl.replace(/\/$/, '')}/dashboard`
 
   const discordSnowflake = parseDiscordUserSnowflake(winnerDiscordUserId ?? undefined)
 
@@ -332,27 +366,47 @@ export async function notifyRaffleWinnerDrawn(
       }
     : undefined
 
-  await postDiscordWebhook(
-    url,
-    {
-      title: 'Raffle ended — winner drawn',
-      description: raffle.title,
-      url: rafflePageUrl(raffle),
-      color: 0xfee75c,
-      fields: [
-        winnerField,
-        { name: 'Prize', value: prizeSummary(raffle), inline: true },
-        {
-          name: 'Raffle status',
-          value: statusNote,
-          inline: false,
-        },
-      ],
-      image: image ? { url: image } : undefined,
-      timestamp: new Date().toISOString(),
-    },
-    extras
-  )
+  const mainEmbed: DiscordEmbed = {
+    title: 'Raffle ended — winner drawn',
+    description: raffle.title,
+    url: rafflePageUrl(raffle),
+    color: 0xfee75c,
+    fields: [
+      winnerField,
+      { name: 'Prize', value: prizeSummary(raffle), inline: true },
+      {
+        name: 'Raffle status',
+        value: statusNote,
+        inline: false,
+      },
+    ],
+    image: image ? { url: image } : undefined,
+    timestamp: new Date().toISOString(),
+  }
+
+  if (mainUrl) {
+    await postDiscordWebhook(mainUrl, mainEmbed, extras)
+  }
+
+  if (!partnerTid) return
+  let tenant: Awaited<ReturnType<typeof getDiscordGiveawayPartnerById>> = null
+  try {
+    tenant = await getDiscordGiveawayPartnerById(partnerTid)
+  } catch (e) {
+    console.error('[notifyRaffleWinnerDrawn] partner tenant load:', e)
+  }
+  if (!tenant || !isPartnerTenantEntitled(tenant)) return
+  const w = tenant.raffle_webhook_url_winner?.trim()
+  if (!w) return
+
+  const partnerEmbed: DiscordEmbed = {
+    ...mainEmbed,
+    fields: [
+      ...(mainEmbed.fields ?? []),
+      { name: 'Claim on Owltopia', value: dashboardLine, inline: false },
+    ],
+  }
+  await postDiscordWebhook(w, partnerEmbed, extras)
 }
 
 /**
@@ -370,7 +424,7 @@ export async function notifyCommunityGiveawayOpened(
   const url = webhookUrlCommunityGiveawayOpen()
   if (!url) return
 
-  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+  const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
     giveaway.nft_token_id
   )
@@ -433,7 +487,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
   const url = webhookUrlCommunityGiveawayWinner()
   if (!url) return
 
-  const prizeImage = await communityGiveawayPrizeImageForDiscord(
+  const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
     giveaway.nft_token_id
   )

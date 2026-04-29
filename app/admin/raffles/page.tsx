@@ -15,7 +15,7 @@ export const revalidate = 0
 export default async function AdminRafflesPage() {
   const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
   const role = session ? await getAdminRole(session.wallet) : null
-  if (role !== 'full') {
+  if (!role) {
     redirect('/admin/raffles/new')
   }
 
@@ -50,13 +50,24 @@ export default async function AdminRafflesPage() {
   const now = new Date()
   const nowTime = now.getTime()
 
+  const pendingCancellationRaffles: typeof allRaffles = []
+  const rafflesToBucket: typeof allRaffles = []
+  for (const raffle of allRaffles) {
+    const st = (raffle.status ?? '').toLowerCase()
+    if (raffle.cancellation_requested_at && st !== 'cancelled') {
+      pendingCancellationRaffles.push(raffle)
+    } else {
+      rafflesToBucket.push(raffle)
+    }
+  }
+
   const pastRaffles: typeof allRaffles = []
   const activeRaffles: typeof allRaffles = []
   const futureRaffles: typeof allRaffles = []
   const pausedPendingRaffles: typeof allRaffles = []
   const cancelledRecoveryRaffles: typeof allRaffles = []
 
-  for (const raffle of allRaffles) {
+  for (const raffle of rafflesToBucket) {
     const startTime = new Date(raffle.start_time)
     const endTime = new Date(raffle.end_time)
     const startTimeMs = startTime.getTime()
@@ -69,13 +80,18 @@ export default async function AdminRafflesPage() {
     }
 
     const status = (raffle.status ?? '').toLowerCase()
-    const needsCancelledNftRecovery =
-      status === 'cancelled' &&
+    /** Prominent admin bucket: NFT prize verified in escrow, not sent to winner — cancelled or already ended (incl. legacy). */
+    const needsNftEscrowRecovery =
       raffle.prize_type === 'nft' &&
+      !!(raffle.nft_mint_address ?? '').trim() &&
       !!raffle.prize_deposited_at &&
       !raffle.prize_returned_at &&
-      !raffle.nft_transfer_transaction
-    if (needsCancelledNftRecovery) {
+      !raffle.nft_transfer_transaction &&
+      (status === 'cancelled' ||
+        endTimeMs <= nowTime ||
+        status === 'failed_refund_available' ||
+        status === 'pending_min_not_met')
+    if (needsNftEscrowRecovery) {
       cancelledRecoveryRaffles.push(raffle)
       continue
     }
@@ -127,12 +143,14 @@ export default async function AdminRafflesPage() {
     futureRafflesWithEntries,
     pausedPendingRafflesWithEntries,
     cancelledRecoveryRafflesWithEntries,
+    pendingCancellationRafflesWithEntries,
   ] = await Promise.all([
     getRafflesWithEntries(pastRaffles),
     getRafflesWithEntries(activeRaffles),
     getRafflesWithEntries(futureRaffles),
     getRafflesWithEntries(pausedPendingRaffles),
     getRafflesWithEntries(cancelledRecoveryRaffles),
+    getRafflesWithEntries(pendingCancellationRaffles),
   ])
 
   return (
@@ -142,6 +160,7 @@ export default async function AdminRafflesPage() {
       pastRafflesWithEntries={pastRafflesWithEntries}
       pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
       cancelledRecoveryRafflesWithEntries={cancelledRecoveryRafflesWithEntries}
+      pendingCancellationRafflesWithEntries={pendingCancellationRafflesWithEntries}
     />
   )
 }

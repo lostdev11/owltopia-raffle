@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LiveActivityPopups } from '@/components/LiveActivityPopups'
 import type { Raffle } from '@/lib/types'
 import { LIVE_ACTIVITY_REFETCH_MS } from '@/lib/dev-budget'
@@ -16,8 +16,11 @@ const MAX_RETRIES = 3
  */
 export function GlobalLiveActivity() {
   const [raffles, setRaffles] = useState<Raffle[]>([])
+  const inFlightRef = useRef<Promise<Raffle[]> | null>(null)
 
   const fetchRaffles = useCallback(async () => {
+    if (inFlightRef.current) return inFlightRef.current
+    const request = (async () => {
     let lastErr: unknown
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
@@ -35,12 +38,21 @@ export function GlobalLiveActivity() {
       }
     }
     return []
+    })()
+    inFlightRef.current = request
+    try {
+      return await request
+    } finally {
+      inFlightRef.current = null
+    }
   }, [])
 
   useEffect(() => {
     let cancelled = false
 
     const run = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
       const list = await fetchRaffles()
       if (!cancelled) setRaffles(list)
     }

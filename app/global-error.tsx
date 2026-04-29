@@ -1,6 +1,7 @@
 'use client'
 
 import type React from 'react'
+import Link from 'next/link'
 
 /**
  * Minimal global error boundary. Must provide its own <html> and <body>.
@@ -43,7 +44,6 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  const isServer = typeof window === 'undefined'
   return (
     <html lang="en">
       <body style={bodyStyle}>
@@ -52,20 +52,16 @@ export default function GlobalError({
           An unexpected error occurred. On mobile this can happen when the wallet or page is still loading. Please try again or go home.
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'center' }}>
-          {isServer ? (
-            <a href="/" style={linkStyle}>Try again</a>
-          ) : (
-            <button
-              type="button"
-              onClick={reset}
-              style={{ ...linkStyle, border: 'none', font: 'inherit' }}
-            >
-              Try again
-            </button>
-          )}
-          <a href="/" style={{ ...linkStyle, backgroundColor: 'transparent', color: '#64748b', border: '1px solid #334155' }}>
+          <button
+            type="button"
+            onClick={reset}
+            style={{ ...linkStyle, border: 'none', font: 'inherit' }}
+          >
+            Try again
+          </button>
+          <Link href="/" style={{ ...linkStyle, backgroundColor: 'transparent', color: '#64748b', border: '1px solid #334155' }}>
             Go home
-          </a>
+          </Link>
         </div>
       </body>
     </html>

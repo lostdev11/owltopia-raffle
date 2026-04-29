@@ -11,7 +11,7 @@ import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-t
 interface TransferCompressedNftToEscrowArgs {
   connection: Connection
   // Wallet adapter instance from useWallet().wallet
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   wallet: any
   assetId: string
   escrowAddress: string
@@ -33,7 +33,7 @@ export async function transferCompressedNftToEscrow({
     (connection as any).rpcEndpoint || (connection as any)._rpcEndpoint
 
   // Build Umi with wallet signer + DAS + Bubblegum plugins.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint)
     .use(walletAdapterIdentity(wallet as any))
     .use(dasApi())
@@ -53,7 +53,7 @@ export async function transferCompressedNftToEscrow({
     asset
   )
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const result: any = await builder.sendAndConfirm(umi)
   return String(result.signature ?? result)
 }

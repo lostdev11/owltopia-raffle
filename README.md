@@ -14,7 +14,7 @@ Transparency and anti-spam scoring system that calculates a trust score (0-100) 
 The score is displayed as a badge on each raffle card with a detailed tooltip showing the breakdown.
 
 ### 2. Hoot Boost Entry Multiplier
-A cosmetic animation that displays when users select ticket quantities. The meter animates based on the number of tickets selected, but **does not affect winner odds** - each ticket equals one entry. This is purely for visual engagement.
+A cosmetic animation that displays when users select ticket quantities. The meter animates based on the number of tickets selected, but **does not affect winner odds** — the draw picks uniformly among wallets with at least one confirmed ticket (ticket quantity does not change win probability). This is purely for visual engagement.
 
 ### 3. Night Mode Scheduling Presets
 Quick preset buttons in the Create Raffle form that set both the end time and theme accent:
@@ -52,8 +52,9 @@ npm install
 2. Set up environment variables:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key  # Required for server-side writes (API). Get from Supabase Dashboard → Settings → API. Never expose to the client.
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...   # Preferred; see Supabase Dashboard → Settings → API keys
+SUPABASE_SECRET_KEY=sb_secret_...   # Server-only; never expose to the client. Legacy JWT keys still work via lib/supabase-env.ts.
+# Legacy env names still supported: NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY (see lib/supabase-env.ts)
 NEXT_PUBLIC_SOLANA_RPC_URL=your_solana_rpc_url  # Recommended: private RPC (Helius, Alchemy, etc.) for production. For local dev you can use https://solana.drpc.org or set NEXT_PUBLIC_DEV_SOLANA_RPC_URL (see .env.example).
 NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET=your_wallet_address  # Required: Wallet address that receives ticket payments
 ```

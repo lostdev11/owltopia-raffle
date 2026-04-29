@@ -27,6 +27,10 @@ import {
   parseNftFloorPrice,
   parseNftTicketPrice,
 } from '@/lib/raffles/nft-raffle-economics'
+import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+} from '@/lib/raffles/admin-hard-delete'
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -67,8 +71,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
   )
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(null)
+  const [adminRole, setAdminRole] = useState<'full' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [adminHardDeleteReason, setAdminHardDeleteReason] = useState('')
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
   const [selectingWinner, setSelectingWinner] = useState(false)
@@ -91,13 +96,40 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     setNftDraftFloor(raffle.floor_price ?? '')
     setNftDraftTicket(raffle.ticket_price != null ? String(raffle.ticket_price) : '')
   }, [raffle.id, raffle.floor_price, raffle.ticket_price])
-  const nftDraftDerivedMin = useMemo(() => {
-    if (!isDraftNft) return null
+
+  const noWinnerNft = !(raffle.winner_wallet ?? '').trim() && !raffle.winner_selected_at
+  const statusLcNft = (raffle.status ?? '').toLowerCase()
+  const allowNftEconomicsStatuses = new Set([
+    'live',
+    'ready_to_draw',
+    'pending_min_not_met',
+    'failed_refund_available',
+    'cancelled',
+    'completed',
+  ])
+  const canOverrideNftEconomics =
+    isNonDraftNft && noWinnerNft && allowNftEconomicsStatuses.has(statusLcNft)
+
+  const [nftLiveEconomicsConfirm, setNftLiveEconomicsConfirm] = useState(false)
+  useEffect(() => {
+    setNftLiveEconomicsConfirm(false)
+  }, [raffle.id])
+
+  const nftComputedMin = useMemo(() => {
+    const forDraftOrAdminNft =
+      isDraftNft || (isNonDraftNft && canOverrideNftEconomics)
+    if (!forDraftOrAdminNft) return null
     const fp = parseNftFloorPrice(nftDraftFloor)
     const tp = parseNftTicketPrice(nftDraftTicket)
     if (!fp.ok || !tp.ok) return null
     return computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
-  }, [isDraftNft, nftDraftFloor, nftDraftTicket])
+  }, [
+    isDraftNft,
+    isNonDraftNft,
+    canOverrideNftEconomics,
+    nftDraftFloor,
+    nftDraftTicket,
+  ])
   const hasSettlement =
     !!raffle.settled_at &&
     raffle.platform_fee_amount != null &&
@@ -154,12 +186,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const roleRaw = data?.role
-        const role: 'full' | 'raffle_creator' | null =
-          roleRaw === 'full' || roleRaw === 'raffle_creator' ? roleRaw : null
-        setCachedAdmin(addr, admin)
+        const role: 'full' | null = admin ? 'full' : null
+        setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(admin ? role : null)
+        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) {
@@ -233,7 +263,43 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
       data.floor_price = fp.string
     } else if (isNonDraftNft) {
-      // Server keeps existing pricing; do not send fields that could clear columns.
+      if (adminRole === 'full' && canOverrideNftEconomics) {
+        if (!nftLiveEconomicsConfirm) {
+          alert('Confirm that you intend to change live ticket economics before saving.')
+          setLoading(false)
+          return
+        }
+        const fp = parseNftFloorPrice(nftDraftFloor)
+        if (!fp.ok) {
+          alert(fp.error)
+          setLoading(false)
+          return
+        }
+        const tp = parseNftTicketPrice(nftDraftTicket)
+        if (!tp.ok) {
+          alert(tp.error)
+          setLoading(false)
+          return
+        }
+        const computedMin = computeNftMinTicketsFromFloorAndTicket(fp.value, tp.value)
+        data.nft_economics_admin_override = true
+        data.floor_price = fp.string
+        data.ticket_price = tp.value
+        data.min_tickets = computedMin
+        const cur = (formData.get('currency') as string | null)?.trim()
+        if (cur) {
+          data.currency = cur
+        }
+        if (maxTicketsValue?.trim()) {
+          const parsed = parseInt(maxTicketsValue.trim(), 10)
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            alert('Max tickets must be a positive whole number, or leave empty to keep the current cap.')
+            setLoading(false)
+            return
+          }
+          data.max_tickets = parsed
+        }
+      }
     } else {
       const minTicketsValue = formData.get('min_tickets') as string
       const floorPriceValue = formData.get('floor_price') as string
@@ -243,7 +309,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       data.min_tickets = minTicketsValue ? parseInt(minTicketsValue, 10) : null
       data.floor_price = floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null
     }
-    if (adminRole === 'full') {
+    if (adminRole !== null) {
       const fb = (formData.get('image_fallback_url') as string)?.trim()
       data.image_fallback_url = fb ? fb : null
     }
@@ -252,6 +318,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       const response = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(data),
       })
 
@@ -279,6 +346,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       alert('Only admins can delete raffles')
       return
     }
+    if (isAdmin && adminRole === null) {
+      alert('Loading your admin role. Please try again in a moment.')
+      return
+    }
+
+    const reasonTrimmed = adminHardDeleteReason.trim()
+    if (reasonTrimmed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
+      alert(
+        `Enter a delete reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters). Required for permanent admin deletes.`
+      )
+      return
+    }
+    if (reasonTrimmed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
+      alert(`Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`)
+      return
+    }
 
     setDeleting(true)
 
@@ -289,10 +372,14 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           'Content-Type': 'application/json',
           'x-wallet-address': publicKey.toBase58()
         },
-        body: JSON.stringify({ wallet_address: publicKey.toBase58() }),
+        body: JSON.stringify({
+          wallet_address: publicKey.toBase58(),
+          delete_reason: reasonTrimmed,
+        }),
       })
 
       if (response.ok) {
+        setAdminHardDeleteReason('')
         router.push('/admin')
       } else {
         const errorData = await response.json()
@@ -448,7 +535,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     isNftRaffle &&
     !!creatorWalletRaffle &&
     !!raffle.prize_deposited_at &&
-    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
@@ -1051,7 +1137,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 ) : (
                   <p className="text-sm text-muted-foreground">No image stored for this raffle.</p>
                 )}
-                {adminRole === 'full' && (
+                {adminRole !== null && (
                   <div className="space-y-2 pt-2 border-t border-border mt-2">
                     <Label htmlFor="image_fallback_url">Fallback listing image (optional)</Label>
                     <p className="text-xs text-muted-foreground">
@@ -1071,30 +1157,127 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
               </div>
 
               {isNonDraftNft ? (
-                <div className="rounded-md border border-border px-3 py-2.5 text-sm space-y-1.5 text-muted-foreground">
-                  <p className="font-medium text-foreground">Ticket economics (locked)</p>
-                  <p>
-                    <span className="text-foreground font-medium">Currency:</span> {raffle.currency}
-                  </p>
-                  <p>
-                    <span className="text-foreground font-medium">Floor price:</span> {raffle.floor_price ?? '—'}
-                  </p>
-                  <p>
-                    <span className="text-foreground font-medium">Ticket price:</span> {raffle.ticket_price ?? '—'}
-                  </p>
-                  <p>
-                    <span className="text-foreground font-medium">Draw goal:</span>{' '}
-                    {getRaffleMinimum(raffle) ?? raffle.min_tickets ?? '—'} tickets
-                  </p>
-                  <p>
-                    <span className="text-foreground font-medium">Max tickets:</span>{' '}
-                    {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
-                  </p>
-                  <p className="text-xs pt-1">
-                    These values cannot be changed after the raffle leaves draft (live economics are locked in the
-                    database).
-                  </p>
-                </div>
+                adminRole === 'full' && canOverrideNftEconomics ? (
+                  <div className="rounded-md border border-amber-600/40 bg-amber-500/[0.07] px-3 py-3 space-y-4 text-sm">
+                    <div>
+                      <p className="font-medium text-foreground">Ticket economics (full admin)</p>
+                      <p className="text-muted-foreground text-xs pt-1">
+                        Floor and ticket price are editable here. Draw goal is set to match round(floor ÷ ticket
+                        price) when you save, consistent with the public NFT raffle rules. For draw threshold, max
+                        cap, and currency in other states, use the deeper controls on the admin actions page.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="currency_nft_live">Currency *</Label>
+                        {raffle.currency === 'OWL' && (
+                          <p className="text-xs text-amber-600 dark:text-amber-500">
+                            This listing used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                          </p>
+                        )}
+                        <select
+                          id="currency_nft_live"
+                          name="currency"
+                          defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                          className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+                        >
+                          <option value="SOL">SOL</option>
+                          <option value="USDC">USDC</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="ticket_price_nft_live">Ticket price *</Label>
+                        <Input
+                          id="ticket_price_nft_live"
+                          name="ticket_price_nft_live"
+                          type="number"
+                          step="any"
+                          className="min-h-[44px] touch-manipulation"
+                          value={nftDraftTicket}
+                          onChange={(e) => setNftDraftTicket(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Suggested: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="max_tickets_nft_live">Max tickets (optional)</Label>
+                      <Input
+                        id="max_tickets_nft_live"
+                        name="max_tickets"
+                        type="number"
+                        min={nftComputedMin ?? 1}
+                        defaultValue={raffle.max_tickets ?? undefined}
+                        placeholder="Leave empty to keep current (or unlimited)"
+                        className="min-h-[44px] touch-manipulation"
+                        key={raffle.id + String(raffle.max_tickets ?? '')}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        If set, must be at least the new draw goal ({nftComputedMin ?? '—'}). Empty leaves the current
+                        cap unchanged.
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-border/80 bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">Draw goal (computed on save):</span>{' '}
+                      {nftComputedMin != null
+                        ? `${nftComputedMin} tickets`
+                        : 'Enter valid floor and ticket price.'}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="floor_price_nft_live">Floor price (prize value) *</Label>
+                      <Input
+                        id="floor_price_nft_live"
+                        name="floor_price_nft_live"
+                        type="text"
+                        inputMode="decimal"
+                        value={nftDraftFloor}
+                        onChange={(e) => setNftDraftFloor(e.target.value)}
+                        placeholder="e.g. 0.25 (in raffle currency)"
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                    </div>
+                    <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1">
+                      <input
+                        type="checkbox"
+                        checked={nftLiveEconomicsConfirm}
+                        onChange={(e) => setNftLiveEconomicsConfirm(e.target.checked)}
+                        className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                        aria-label="Confirm changing live ticket economics"
+                      />
+                      <span className="text-muted-foreground leading-snug">
+                        I understand this is a live (or pre-draw) listing and I intend to change floor and/or ticket
+                        prices shown to buyers.
+                      </span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-border px-3 py-2.5 text-sm space-y-1.5 text-muted-foreground">
+                    <p className="font-medium text-foreground">Ticket economics (read-only)</p>
+                    <p>
+                      <span className="text-foreground font-medium">Currency:</span> {raffle.currency}
+                    </p>
+                    <p>
+                      <span className="text-foreground font-medium">Floor price:</span> {raffle.floor_price ?? '—'}
+                    </p>
+                    <p>
+                      <span className="text-foreground font-medium">Ticket price:</span> {raffle.ticket_price ?? '—'}
+                    </p>
+                    <p>
+                      <span className="text-foreground font-medium">Draw goal:</span>{' '}
+                      {getRaffleMinimum(raffle) ?? raffle.min_tickets ?? '—'} tickets
+                    </p>
+                    <p>
+                      <span className="text-foreground font-medium">Max tickets:</span>{' '}
+                      {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
+                    </p>
+                    <p className="text-xs pt-1">
+                      {adminRole === null
+                        ? 'Checking admin permissions…'
+                        : adminRole === 'full' && !canOverrideNftEconomics
+                          ? 'A winner is already set or this status is not eligible to change floor/ticket here. Use the admin actions page for “NFT draw goal & ticket economics” (with optional draw threshold) or other tools.'
+                          : "Only full admins can change live floor and ticket from this form when the listing is eligible. Otherwise use the admin actions page."}
+                    </p>
+                  </div>
+                )
               ) : isDraftNft ? (
                 <>
                   <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -1143,19 +1326,19 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
-                      min={nftDraftDerivedMin ?? 1}
+                      min={nftComputedMin ?? 1}
                       defaultValue={raffle.max_tickets || ''}
                       placeholder="Leave empty for unlimited"
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      If set, must be at least the draw goal ({nftDraftDerivedMin ?? '—'}), or leave empty for unlimited.
+                      If set, must be at least the draw goal ({nftComputedMin ?? '—'}), or leave empty for unlimited.
                     </p>
                   </div>
                   <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
                     <span className="font-medium text-foreground">Draw goal (computed):</span>{' '}
-                    {nftDraftDerivedMin != null
-                      ? `${nftDraftDerivedMin} tickets`
+                    {nftComputedMin != null
+                      ? `${nftComputedMin} tickets`
                       : 'Enter valid floor and ticket price.'}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1393,7 +1576,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <Button
                         type="button"
                         variant="destructive"
-                        disabled={loading || deleting}
+                        disabled={
+                          loading || deleting || (Boolean(isAdmin) && adminRole === null)
+                        }
                         className="flex items-center gap-2"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -1404,9 +1589,27 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       <DialogHeader>
                         <DialogTitle>Delete Raffle</DialogTitle>
                         <DialogDescription>
-                          Are you sure you want to delete "{raffle.title}"? This action cannot be undone and will also delete all associated entries.
+                          Are you sure you want to delete &quot;{raffle.title}&quot;? This action cannot be undone and will also delete all associated entries.
+                          <span className="block mt-2 font-medium text-foreground">
+                            Enter a short reason for the audit log (required).
+                          </span>
                         </DialogDescription>
                       </DialogHeader>
+                      <div className="space-y-2 py-2">
+                        <Label htmlFor="edit-raffle-delete-reason">Delete reason (required)</Label>
+                        <textarea
+                          id="edit-raffle-delete-reason"
+                          value={adminHardDeleteReason}
+                          onChange={(e) => setAdminHardDeleteReason(e.target.value)}
+                          placeholder="e.g. Duplicate NFT prize listing — removing extra draft."
+                          maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
+                          rows={4}
+                          className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {ADMIN_HARD_DELETE_REASON_MIN_CHARS}–{ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.
+                        </p>
+                      </div>
                       <DialogFooter>
                         <Button
                           type="button"
@@ -1420,7 +1623,11 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                           type="button"
                           variant="destructive"
                           onClick={handleDelete}
-                          disabled={deleting}
+                          disabled={
+                            deleting ||
+                            adminRole === null ||
+                            adminHardDeleteReason.trim().length < ADMIN_HARD_DELETE_REASON_MIN_CHARS
+                          }
                         >
                           {deleting ? 'Deleting...' : 'Delete Raffle'}
                         </Button>

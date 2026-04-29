@@ -13,20 +13,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+} from '@/lib/raffles/admin-hard-delete'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
+import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
-
-const FULL_REFUND_WINDOW_HOURS = 24
-function isWithinFullRefundWindow(createdAt: string): boolean {
-  const created = new Date(createdAt).getTime()
-  const hours = (Date.now() - created) / (60 * 60 * 1000)
-  return hours <= FULL_REFUND_WINDOW_HOURS
-}
+import {
+  canCompleteCancellationForAdmin,
+  raffleRequiresCancellationFee,
+} from '@/lib/raffles/cancellation-fee-policy'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
 
 const PRIZE_RETURN_REASONS = [
   { value: 'cancelled', label: 'Raffle cancelled' },
@@ -47,6 +50,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const { connected, publicKey } = useWallet()
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null)
   const [returning, setReturning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [returnReason, setReturnReason] = useState<string>('cancelled')
@@ -178,11 +183,11 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const pendingSectionEligible = isNftRaffle
+  /** Matches server rules: verified deposit timestamp is enough (legacy rows may omit prize_deposit_tx). */
   const canReturnNft =
     isNftRaffle &&
     !!creatorWallet &&
     !!raffle.prize_deposited_at &&
-    !!raffle.prize_deposit_tx &&
     !raffle.nft_transfer_transaction &&
     !raffle.prize_returned_at
 
@@ -222,7 +227,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const cancellationRequested = !!raffle.cancellation_requested_at
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
-  const fullRefundEligible = raffle.created_at ? isWithinFullRefundWindow(raffle.created_at) : false
+  const feeApplies = raffleRequiresCancellationFee(raffle)
+  const canAcceptCancel = canCompleteCancellationForAdmin(raffle)
+  const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
     isNftRaffle &&
@@ -587,25 +594,50 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }
 
   const handleDelete = async () => {
+    const trimmedReason = deleteReason.trim()
+    setDeleteDialogError(null)
+    if (trimmedReason.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS) {
+      const msg = `Enter a delete reason (at least ${ADMIN_HARD_DELETE_REASON_MIN_CHARS} characters), e.g. duplicate NFT listing cleanup.`
+      setDeleteDialogError(msg)
+      setMessage({ type: 'error', text: msg })
+      return
+    }
+    if (trimmedReason.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS) {
+      const msg = `Delete reason must be at most ${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters.`
+      setDeleteDialogError(msg)
+      setMessage({ type: 'error', text: msg })
+      return
+    }
     setDeleting(true)
     setMessage(null)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify({ delete_reason: trimmedReason }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
       if (res.ok) {
         setDeleteDialogOpen(false)
+        setDeleteReason('')
+        setDeleteDialogError(null)
         router.push('/admin/raffles')
         router.refresh()
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to delete raffle' })
+        const errText =
+          typeof data?.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : `Delete failed (${res.status}).`
+        setDeleteDialogError(errText)
+        setMessage({ type: 'error', text: errText })
       }
     } catch (e) {
+      const errText = e instanceof Error ? e.message : 'Failed to delete raffle'
+      setDeleteDialogError(errText)
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Failed to delete raffle',
+        text: errText,
       })
     } finally {
       setDeleting(false)
@@ -671,7 +703,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           raffleCurrency={raffle.currency || 'SOL'}
           entries={entries}
           onRecorded={() => router.refresh()}
-          adminFundsEscrowRefundEnabled={raffle.status === 'failed_refund_available'}
+          adminFundsEscrowRefundEnabled={raffleAllowsAdminFundsEscrowRefund(raffle)}
         />
 
         <Card>
@@ -986,10 +1018,15 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     )}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {fullRefundEligible
-                      ? 'Within 24h: ticket buyers get refunds (treasury sends). No fee to host.'
-                      : 'After 24h: ticket buyers get refunds (treasury sends). Host is charged a cancellation fee.'}
+                    {feeApplies
+                      ? `Raffle has started. The creator must pay ${feeSol} SOL to treasury before you can accept. Ticket buyers can claim refunds in-app (funds escrow).`
+                      : 'Raffle has not started yet (by start time). No post-start cancellation fee. Ticket buyers can still claim refunds if this raffle used funds escrow.'}
                   </p>
+                  {feeApplies && !raffle.cancellation_fee_paid_at && (
+                    <p className="mt-2 text-xs font-medium text-destructive">
+                      Waiting for creator to complete the on-chain cancellation fee payment.
+                    </p>
+                  )}
                 </div>
                 <Dialog open={acceptCancelDialogOpen} onOpenChange={setAcceptCancelDialogOpen}>
                   <Button
@@ -997,7 +1034,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => setAcceptCancelDialogOpen(true)}
-                    disabled={acceptingCancel}
+                    disabled={acceptingCancel || !canAcceptCancel}
+                    title={!canAcceptCancel ? 'Creator must pay the cancellation fee on-chain first' : undefined}
                   >
                     <XCircle className="h-4 w-4 mr-2 shrink-0" />
                     Accept cancellation
@@ -1007,10 +1045,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       <DialogTitle>Accept cancellation</DialogTitle>
                       <DialogDescription>
                         This will mark the raffle as cancelled.
-                        {fullRefundEligible ? (
-                          <> Ticket buyers get refunds (treasury sends). Within 24h: no fee to host.</>
+                        {canAcceptCancel ? (
+                          feeApplies ? (
+                            <> The creator already paid the {feeSol} SOL post-start fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
+                          ) : (
+                            <> No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
+                          )
                         ) : (
-                          <> Ticket buyers get refunds (treasury sends). After 24h: host will be charged the cancellation fee.</>
+                          <> You cannot accept until the creator pays the {feeSol} SOL fee to the platform wallet (on-chain) from their creator wallet.</>
                         )}
                       </DialogDescription>
                     </DialogHeader>
@@ -1025,7 +1067,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       </Button>
                       <Button
                         onClick={handleAcceptCancellation}
-                        disabled={acceptingCancel}
+                        disabled={acceptingCancel || !canAcceptCancel}
                         className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}
@@ -1314,7 +1356,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             ) : null}
 
             <div className="pt-2">
-              <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <Dialog
+                open={deleteDialogOpen}
+                onOpenChange={(open) => {
+                  setDeleteDialogOpen(open)
+                  if (!open) setDeleteDialogError(null)
+                }}
+              >
                 <Button
                   type="button"
                   variant="destructive"
@@ -1339,16 +1387,50 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       )}
                     </DialogDescription>
                   </DialogHeader>
+                  {deleteDialogError ? (
+                    <div
+                      role="alert"
+                      className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      {deleteDialogError}
+                    </div>
+                  ) : null}
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="admin-delete-reason">Delete reason (required)</Label>
+                    <textarea
+                      id="admin-delete-reason"
+                      value={deleteReason}
+                      onChange={(e) => setDeleteReason(e.target.value)}
+                      placeholder="e.g. Duplicate listing for the same NFT — removing the extra draft after migration 070."
+                      maxLength={ADMIN_HARD_DELETE_REASON_MAX_CHARS}
+                      rows={4}
+                      className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {deleteReason.trim().length}/{ADMIN_HARD_DELETE_REASON_MIN_CHARS}+ characters (max{' '}
+                      {ADMIN_HARD_DELETE_REASON_MAX_CHARS}). Logged for audit.
+                    </p>
+                  </div>
                   <DialogFooter className="gap-2">
                     <Button
                       variant="outline"
+                      type="button"
                       onClick={() => setDeleteDialogOpen(false)}
                       disabled={deleting}
                       className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                     >
                       Cancel
                     </Button>
-                    <Button variant="destructive" onClick={handleDelete} disabled={deleting} className="touch-manipulation min-h-[44px] w-full sm:w-auto">
+                    <Button
+                      variant="destructive"
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={
+                        deleting ||
+                        deleteReason.trim().length < ADMIN_HARD_DELETE_REASON_MIN_CHARS
+                      }
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
                       {deleting ? 'Deleting...' : 'Delete raffle'}
                     </Button>
                   </DialogFooter>

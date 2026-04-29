@@ -2,11 +2,11 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy } from 'lucide-react'
+import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
 import { SocialGlassCard } from '@/components/SocialGlassCard'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { COMMUNITY_DISCORD_INVITE_URL, PLATFORM_NAME } from '@/lib/site-config'
 
 const externalLinks = [
   { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
@@ -14,7 +14,7 @@ const externalLinks = [
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
   { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Discord', url: 'https://discord.gg/nRD2wyg2vq' },
+  { name: 'Discord', url: COMMUNITY_DISCORD_INVITE_URL },
 ]
 
 const iconByLink: Record<string, React.ReactNode> = {
@@ -36,6 +36,16 @@ const glassCardItems = [
     label: 'Leaderboard',
     href: '/leaderboard',
     icon: <Trophy className="h-6 w-6" />,
+  },
+  {
+    label: 'Partner program',
+    href: '/partner-program',
+    icon: <HeartHandshake className="h-6 w-6" />,
+  },
+  {
+    label: 'Owl Council',
+    href: '/council',
+    icon: <Landmark className="h-6 w-6" />,
   },
   ...externalLinks.map((link) => ({
     label: link.name,
@@ -60,14 +70,17 @@ export function Footer() {
           </div>
           
           {/* Copyright and Terms Section */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground border-t border-green-500/40 pt-3 sm:pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs sm:text-sm border-t border-green-500/40 pt-3 sm:pt-4 text-zinc-300">
             <div className="flex items-center gap-3 sm:gap-4">
-              <span>© {new Date().getFullYear()} {PLATFORM_NAME}</span>
+              <span>
+                © {new Date().getFullYear()}{' '}
+                <span className="font-semibold text-white">{PLATFORM_NAME}</span>
+              </span>
             </div>
             <div className="flex items-center gap-4 sm:gap-6">
-              <Link 
-                href="/terms" 
-                className="hover:text-foreground transition-colors underline-offset-4 hover:underline touch-manipulation min-h-[44px] flex items-center"
+              <Link
+                href="/terms"
+                className="text-zinc-300 hover:text-white transition-colors underline-offset-4 hover:underline touch-manipulation min-h-[44px] flex items-center"
               >
                 Terms of Service
               </Link>

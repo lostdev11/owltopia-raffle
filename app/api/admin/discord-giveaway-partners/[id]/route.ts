@@ -49,6 +49,34 @@ export async function PATCH(
       }
       patch.webhook_url = w
     }
+    if (body.raffle_webhook_url_created !== undefined) {
+      if (body.raffle_webhook_url_created === null) {
+        patch.raffle_webhook_url_created = null
+      } else if (typeof body.raffle_webhook_url_created === 'string') {
+        const w = body.raffle_webhook_url_created.trim()
+        if (w && !isAllowedDiscordIncomingWebhookUrl(w)) {
+          return NextResponse.json(
+            { error: 'raffle_webhook_url_created must be a valid Discord incoming webhook' },
+            { status: 400 }
+          )
+        }
+        patch.raffle_webhook_url_created = w || null
+      }
+    }
+    if (body.raffle_webhook_url_winner !== undefined) {
+      if (body.raffle_webhook_url_winner === null) {
+        patch.raffle_webhook_url_winner = null
+      } else if (typeof body.raffle_webhook_url_winner === 'string') {
+        const w = body.raffle_webhook_url_winner.trim()
+        if (w && !isAllowedDiscordIncomingWebhookUrl(w)) {
+          return NextResponse.json(
+            { error: 'raffle_webhook_url_winner must be a valid Discord incoming webhook' },
+            { status: 400 }
+          )
+        }
+        patch.raffle_webhook_url_winner = w || null
+      }
+    }
     if (body.discord_guild_id !== undefined) {
       patch.discord_guild_id =
         typeof body.discord_guild_id === 'string' && body.discord_guild_id.trim()

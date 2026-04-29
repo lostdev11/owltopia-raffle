@@ -4,7 +4,54 @@
 
 @layer base {
   :root {
-    /* Base palette (unchanged) */
+    /* Light palette */
+    --background: 120 16% 95%;
+    --foreground: 220 14% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 12%;
+    --primary: 142 76% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 120 12% 91%;
+    --secondary-foreground: 220 12% 24%;
+    --muted: 120 10% 90%;
+    --muted-foreground: 220 10% 38%;
+    --accent: 120 12% 89%;
+    --accent-foreground: 220 12% 20%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 120 8% 78%;
+    --input: 120 8% 80%;
+    --ring: 142 76% 36%;
+    --radius: 0.5rem;
+
+    /* M3-inspired surface hierarchy */
+    --surface: 120 16% 95%;
+    --surface-container-lowest: 0 0% 100%;
+    --surface-container-low: 120 14% 93%;
+    --surface-container: 120 12% 91%;
+    --surface-container-high: 120 10% 88%;
+    --surface-container-highest: 120 9% 85%;
+    --on-surface: 220 15% 12%;
+    --on-surface-variant: 220 10% 34%;
+    --outline: 220 8% 62%;
+    --outline-variant: 220 8% 75%;
+
+    /* M3-inspired: shape scale (small 4px, medium 8px, large 12px) */
+    --shape-sm: 0.25rem;
+    --shape-md: 0.5rem;
+    --shape-lg: 0.75rem;
+    --shape-full: 9999px;
+
+    /* M3 state layer opacity (for hover/focus overlays) */
+    --state-hover: 0.08;
+    --state-focus: 0.12;
+    --state-pressed: 0.12;
+  }
+
+  .dark {
+    /* Existing dark palette */
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
     --card: 0 0% 3.9%;
@@ -24,9 +71,7 @@
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
     --ring: 142 76% 36%;
-    --radius: 0.5rem;
 
-    /* M3-inspired: surface hierarchy (tone-based, not elevation) for clearer hierarchy */
     --surface: 0 0% 3.9%;
     --surface-container-lowest: 0 0% 4.5%;
     --surface-container-low: 0 0% 6%;
@@ -37,17 +82,6 @@
     --on-surface-variant: 0 0% 63.9%;
     --outline: 0 0% 18%;
     --outline-variant: 0 0% 12%;
-
-    /* M3-inspired: shape scale (small 4px, medium 8px, large 12px) */
-    --shape-sm: 0.25rem;
-    --shape-md: 0.5rem;
-    --shape-lg: 0.75rem;
-    --shape-full: 9999px;
-
-    /* M3 state layer opacity (for hover/focus overlays) */
-    --state-hover: 0.08;
-    --state-focus: 0.12;
-    --state-pressed: 0.12;
   }
 }
 
@@ -57,15 +91,27 @@
   }
   /* M3: use outline variant for subtle dividers where appropriate */
   /* Safe area: respect notch/home indicator on mobile (most users are on mobile wallets) */
+  /* /raffles list owl: RaffleOwlPlayer sets body[data-owl-raffle-list-owl="1"]; hide duplicate corner control with CSS, not setState in PlatformMusic (avoids Radix "Maximum update depth"). */
+  body[data-owl-raffle-list-owl='1'] .platform-music-floating-ctl {
+    display: none;
+  }
+
   body {
     @apply bg-background text-foreground;
     background-image: 
-      radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.05) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(0, 212, 255, 0.05) 0%, transparent 50%),
-      radial-gradient(circle at 40% 20%, rgba(168, 255, 0, 0.05) 0%, transparent 50%);
+      radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.04) 0%, transparent 42%),
+      radial-gradient(circle at 80% 80%, rgba(0, 212, 255, 0.035) 0%, transparent 42%),
+      radial-gradient(circle at 40% 20%, rgba(168, 255, 0, 0.03) 0%, transparent 42%);
     background-attachment: fixed;
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.05) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(0, 212, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(circle at 40% 20%, rgba(168, 255, 0, 0.05) 0%, transparent 50%);
   }
 }
 
@@ -379,6 +425,56 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 
 [data-radix-dialog-content] {
   z-index: 10001 !important;
+}
+
+/* Partner raffles: seamless horizontal loop without scrollLeft (mobile-friendly). */
+@keyframes partner-raffles-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.partner-raffles-marquee-track {
+  --partner-marquee-duration: 40s;
+  display: flex;
+  width: max-content;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  animation: partner-raffles-marquee var(--partner-marquee-duration) linear infinite;
+  will-change: transform;
+}
+
+@keyframes partner-logos-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.partner-logos-marquee-track {
+  --partner-logos-marquee-duration: 30s;
+  animation: partner-logos-marquee var(--partner-logos-marquee-duration) linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .partner-raffles-marquee-outer {
+    overflow-x: auto;
+  }
+  .partner-raffles-marquee-track {
+    animation: none !important;
+  }
+  .partner-logos-marquee-outer {
+    overflow-x: auto;
+  }
+  .partner-logos-marquee-track {
+    animation: none !important;
+  }
 }
 
 /* Winner golden tint animation */
@@ -996,5 +1092,43 @@ input[type="submit"] {
   .glass-icon-card.glass-icon-card-mobile .glass-icon-iso span.glass-icon-layer {
     height: 44px;
     width: 44px;
+  }
+}
+
+@layer utilities {
+  /**
+   * Dark-surface scrollbar using theme tokens (primary green thumb, muted track).
+   * Use on overflow-auto regions so default OS scrollbars don’t clash with the UI.
+   */
+  .scrollbar-themed {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.55) hsl(var(--muted) / 0.35);
+  }
+  .scrollbar-themed::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  .scrollbar-themed::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.35);
+    border-radius: 9999px;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.5);
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--card) / 0.9);
+    background-clip: padding-box;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.72);
+    border: 2px solid hsl(var(--card) / 0.9);
+    background-clip: padding-box;
+  }
+  .scrollbar-themed::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .scrollbar-themed::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }

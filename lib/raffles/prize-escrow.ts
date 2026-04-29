@@ -29,8 +29,8 @@ import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { getSolanaConnection } from '@/lib/solana/connection'
-import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
+import { resolveServerSolanaRpcUrl, resolveServerSolanaReadRpcUrl } from '@/lib/solana-rpc-url'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
@@ -132,7 +132,7 @@ async function getEscrowTokenProgramForMint(
   mint: PublicKey,
   escrowOwner: PublicKey
 ): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -159,7 +159,7 @@ async function getEscrowTokenProgramForMint(
 export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<PublicKey | null> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return null
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -210,7 +210,7 @@ export async function assertEscrowSplPrizeNotFrozen(
   const tokenProgram = await getEscrowTokenProgramForMint(mint, keypair.publicKey)
   if (!tokenProgram) return { blocked: false }
 
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const ata = await getAssociatedTokenAddress(
     mint,
     keypair.publicKey,
@@ -253,7 +253,7 @@ export type EscrowHeldNft = { mint: string; tokenProgram: PublicKey }
 export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return []
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const results: EscrowHeldNft[] = []
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
@@ -282,10 +282,10 @@ export async function getEscrowHeldNftMints(): Promise<EscrowHeldNft[]> {
 export async function isMplCoreAssetInEscrow(mint: string): Promise<boolean> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return false
-  const endpoint = resolveServerSolanaRpcUrl()
+  const endpoint = resolveServerSolanaReadRpcUrl()
 
   // createUmi has multiple overloads; use any to avoid version-specific type issues.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
   const asset: any = await fetchAssetV1(umi, umiPublicKey(mint))
   return asset.owner?.toString() === keypair.publicKey.toBase58()
@@ -303,6 +303,7 @@ export async function payoutSplFromEscrowToRecipient(
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(mintAddress)
   const recipientPubkey = new PublicKey(recipientWallet)
@@ -328,7 +329,7 @@ export async function payoutSplFromEscrowToRecipient(
   )
 
   try {
-    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    const sourceAcc = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
     if (sourceAcc.amount < NFT_AMOUNT) {
       return {
         ok: false,
@@ -343,7 +344,7 @@ export async function payoutSplFromEscrowToRecipient(
   }
   let destAccountExists = false
   try {
-    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
+    const destAcc = await getAccount(readConn, destAta, 'confirmed', tokenProgram)
     destAccountExists = true
     if (destAcc.isFrozen) {
       return {
@@ -430,6 +431,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(mintAddress)
   const recipientPubkey = new PublicKey(recipientWallet)
@@ -455,7 +457,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
   )
 
   try {
-    const sourceAcc = await getAccount(connection, sourceAta, 'confirmed', tokenProgram)
+    const sourceAcc = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
     if (sourceAcc.amount < amount) {
       return {
         ok: false,
@@ -471,7 +473,7 @@ export async function payoutFungibleSplFromEscrowToRecipient(
 
   let destAccountExists = false
   try {
-    const destAcc = await getAccount(connection, destAta, 'confirmed', tokenProgram)
+    const destAcc = await getAccount(readConn, destAta, 'confirmed', tokenProgram)
     destAccountExists = true
     if (destAcc.isFrozen) {
       return {
@@ -541,7 +543,7 @@ export async function payoutMplCoreFromEscrowToRecipient(
 
   const endpoint = resolveServerSolanaRpcUrl()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
 
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
@@ -550,22 +552,22 @@ export async function payoutMplCoreFromEscrowToRecipient(
 
   const asset = umiPublicKey(assetMintAddress)
   const newOwner = umiPublicKey(recipientWallet)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const assetAccount: any = await fetchAsset(umi as any, asset)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'
       ? assetAccount.updateAuthority.address
       : undefined
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = transferV1(umi as any, {
       asset,
       newOwner,
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi as any)
     const sig = String(result.signature ?? result)
     return { ok: true, signature: sig }
@@ -595,7 +597,7 @@ export async function payoutCompressedFromEscrowToRecipient(
   const escrowBase58 = keypair.publicKey.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
@@ -603,7 +605,7 @@ export async function payoutCompressedFromEscrowToRecipient(
   umi.use(signerIdentity(signer))
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const asset: any = await getAssetWithProof(umi, umiPublicKey(trimmedAsset), { truncateCanopy: true })
     const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
     if (leafOwnerStr !== escrowBase58) {
@@ -614,7 +616,7 @@ export async function payoutCompressedFromEscrowToRecipient(
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = await buildBubblegumLeafTransferBuilder(
       umi,
       signer,
@@ -622,7 +624,7 @@ export async function payoutCompressedFromEscrowToRecipient(
       umiPublicKey(recipientWallet.trim()),
       asset
     )
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)
     return { ok: true, signature: sig }
@@ -960,20 +962,24 @@ async function detectPrizeReturnKind(
   if (standard === 'mpl_core') return 'mpl_core'
   if (standard === 'compressed') return 'compressed'
 
+  // Declared SPL / Token-2022: confirm escrow holds that mint as a token account first.
+  // Legacy rows sometimes left `prize_standard` as spl while the prize is Core or compressed
+  // (same situation as winner claim-prize fallback). When no SPL token account exists, fall
+  // through to legacy probes below instead of returning null.
   if (standard === 'spl' || standard === 'token2022') {
-    if (!preferredMint) return null
-    try {
-      const mint = new PublicKey(preferredMint)
-      const tp = await getEscrowTokenProgramForMint(mint, escrowPk)
-      if (tp) return 'spl'
-    } catch {
-      return null
+    if (preferredMint) {
+      try {
+        const mint = new PublicKey(preferredMint)
+        const tp = await getEscrowTokenProgramForMint(mint, escrowPk)
+        if (tp) return 'spl'
+      } catch {
+        // invalid mint address — continue to legacy probes
+      }
     }
-    return null
   }
 
   // Legacy / unknown: SPL Token or Token-2022 ATA first
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   if (preferredMint) {
     try {
       const mint = new PublicKey(preferredMint)
@@ -1016,7 +1022,7 @@ async function detectPrizeReturnKind(
   const escrowBase58 = escrowPk.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
     const assetIdCandidates = Array.from(
       new Set(
@@ -1027,7 +1033,7 @@ async function detectPrizeReturnKind(
     )
     for (const assetId of assetIdCandidates) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
         const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
         if (leafOwnerStr === escrowBase58) return 'compressed'
@@ -1076,6 +1082,7 @@ async function transferSplPrizeToCreatorFromEscrow(
     }
   }
 
+  const readConn = getSolanaReadConnection()
   const connection = getSolanaConnection()
   const mint = new PublicKey(chosen.mint)
   const creatorPubkey = new PublicKey(creatorWallet)
@@ -1099,7 +1106,7 @@ async function transferSplPrizeToCreatorFromEscrow(
   const CONFIRMED = 'confirmed' as const
   let sourceAccount
   try {
-    sourceAccount = await getAccount(connection, sourceAta, CONFIRMED, tokenProgram)
+    sourceAccount = await getAccount(readConn, sourceAta, CONFIRMED, tokenProgram)
     if (sourceAccount.amount < NFT_AMOUNT) {
       return {
         ok: false,
@@ -1124,7 +1131,7 @@ async function transferSplPrizeToCreatorFromEscrow(
 
   let destAccountExists = false
   try {
-    await getAccount(connection, destAta, CONFIRMED, tokenProgram)
+    await getAccount(readConn, destAta, CONFIRMED, tokenProgram)
     destAccountExists = true
   } catch {
     destAccountExists = false
@@ -1226,7 +1233,7 @@ async function transferMplCorePrizeToCreatorFromEscrow(
   }
 
   const endpoint = resolveServerSolanaRpcUrl()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any)
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
   const signer = createSignerFromKeypair(umi, umiKeypair)
@@ -1234,22 +1241,22 @@ async function transferMplCorePrizeToCreatorFromEscrow(
 
   const asset = umiPublicKey(mintStr)
   const newOwner = umiPublicKey(creatorWallet.trim())
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const assetAccount: any = await fetchAsset(umi as any, asset)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'
       ? assetAccount.updateAuthority.address
       : undefined
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = transferV1(umi as any, {
       asset,
       newOwner,
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi as any)
     const sig = String(result.signature ?? result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
@@ -1280,14 +1287,14 @@ async function transferCompressedPrizeToCreatorFromEscrow(
 
   const escrowBase58 = keypair.publicKey.toBase58()
   const endpoint = resolveServerSolanaRpcUrl()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
   const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
   const signer = createSignerFromKeypair(umi, umiKeypair)
   umi.use(signerIdentity(signer))
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
     const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
     if (leafOwnerStr !== escrowBase58) {
@@ -1298,7 +1305,7 @@ async function transferCompressedPrizeToCreatorFromEscrow(
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const builder: any = await buildBubblegumLeafTransferBuilder(
       umi,
       signer,
@@ -1306,7 +1313,7 @@ async function transferCompressedPrizeToCreatorFromEscrow(
       umiPublicKey(creatorWallet.trim()),
       asset
     )
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result: any = await builder.sendAndConfirm(umi)
     const sig = String(result.signature ?? result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
@@ -1456,7 +1463,7 @@ export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{
   if (!keypair) {
     return { holds: false, error: 'Prize escrow not configured' }
   }
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const mint = new PublicKey(partner.mint)
   const tokenProgram =
     partner.tokenProgram === 'token2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
@@ -1484,7 +1491,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
   if (!keypair) {
     return { holds: false, error: 'Prize escrow not configured' }
   }
-  const connection = getSolanaConnection()
+  const connection = getSolanaReadConnection()
   const standard = raffle.prize_standard ?? null
   const escrowPk = keypair.publicKey
 
@@ -1520,7 +1527,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
     const escrowBase58 = escrowPk.toBase58()
     const endpoint = resolveServerSolanaRpcUrl()
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
       const assetIdCandidates = Array.from(
         new Set(
@@ -1531,7 +1538,7 @@ export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{
       )
       for (const assetId of assetIdCandidates) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const asset: any = await getAssetWithProof(umi, umiPublicKey(assetId), { truncateCanopy: true })
           const leafOwner = asset?.leafOwner
           if (leafOwner && String(leafOwner) === escrowBase58) return true

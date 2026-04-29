@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Coins } from 'lucide-react'
+import { Coins, Landmark } from 'lucide-react'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 import { Logo } from '@/components/Logo'
 import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
@@ -74,7 +74,7 @@ export function EnterOwlTopia() {
   return (
     <div
       ref={scrollRef}
-      className="relative min-h-screen flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8 overflow-auto overflow-x-hidden"
+      className="relative min-h-screen flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8 overflow-y-auto"
     >
       {/* Background: matrix-style falling "owltopia" columns */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden>
@@ -114,15 +114,16 @@ export function EnterOwlTopia() {
 
       {/* Hero content: scrollable so button is always reachable */}
       <div
-        className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto overflow-x-hidden transition-transform duration-300 ease-out shrink-0"
+        className="relative z-10 min-h-screen w-full flex flex-col items-center overflow-y-auto transition-transform duration-300 ease-out shrink-0"
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
         <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">
-        {/* In-flow brand above announcements (all breakpoints; matches landing layout). */}
+        {/* In-flow brand: logo.gif is authored for the dark header — on the light home background the wordmark
+            washes out, so we sit it on a dark panel (same read as the nav bar). */}
         <div className="w-full flex justify-center animate-enter-fade-in" style={fadeIn('0.05s')}>
           <Link
             href="/"
-            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center"
+            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center rounded-2xl border border-zinc-800/70 bg-zinc-950 px-3 py-2.5 sm:px-4 sm:py-3 shadow-lg shadow-black/25 ring-1 ring-white/10"
             aria-label="Owltopia home"
           >
             <Logo className="w-full max-w-full h-auto" width={600} height={150} />
@@ -144,7 +145,7 @@ export function EnterOwlTopia() {
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mb-3">
-            Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators). 50% of that site revenue goes to holders.
+            Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators, 2% verified partner program creators). 50% of that site revenue goes to holders.
           </p>
           <div className="space-y-3">
             <div>
@@ -176,12 +177,21 @@ export function EnterOwlTopia() {
         >
           Trusted raffles with full transparency
         </p>
-        <Link
-          href="/raffles"
-          className="w-full max-w-[200px] min-h-[44px] inline-flex items-center justify-center rounded-lg px-8 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation opacity-100"
-        >
-          Enter Raffles
-        </Link>
+        <div className="w-full max-w-sm flex flex-col sm:flex-row gap-3 items-stretch justify-center animate-enter-fade-in" style={fadeIn('0.55s')}>
+          <Link
+            href="/raffles"
+            className="flex-1 min-h-[44px] inline-flex items-center justify-center rounded-lg px-6 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+          >
+            Enter Raffles
+          </Link>
+          <Link
+            href="/council"
+            className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg px-6 py-4 text-base font-semibold border border-green-500/40 bg-background/80 text-theme-prime hover:bg-white/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
+          >
+            <Landmark className="h-5 w-5 shrink-0" aria-hidden />
+            Owl Council
+          </Link>
+        </div>
         </div>
       </div>
       {/* Spacer so page can scroll and trigger scroll-based animation */}

@@ -57,7 +57,8 @@ export function isEscrowSplPrizeFrozenVerifyError(message: string): boolean {
 }
 
 /**
- * Retries on transient outcomes (400, 5xx, network). Stops immediately on 401/403/404.
+ * Retries on transient outcomes (network, 5xx, and 429).
+ * Stops immediately on non-retryable 4xx responses.
  */
 export async function verifyPrizeDepositWithRetries(
   raffleId: string,
@@ -126,7 +127,9 @@ export async function verifyPrizeDepositWithRetries(
       }
     }
 
-    if (res.status === 401 || res.status === 403 || res.status === 404) {
+    const isClientError = res.status >= 400 && res.status < 500
+    const isRetryableClientError = res.status === 429
+    if (isClientError && !isRetryableClientError) {
       return {
         ok: false,
         error: lastError,
@@ -217,7 +220,9 @@ export async function verifyCommunityGiveawayDepositWithRetries(
       }
     }
 
-    if (res.status === 401 || res.status === 403 || res.status === 404) {
+    const isClientError = res.status >= 400 && res.status < 500
+    const isRetryableClientError = res.status === 429
+    if (isClientError && !isRetryableClientError) {
       return {
         ok: false,
         error: lastError,

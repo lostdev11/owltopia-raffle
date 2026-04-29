@@ -35,14 +35,14 @@ function computeMin(floor, ticket) {
 }
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
 const apply = process.argv.includes('--apply')
 const confirmApply = process.argv.includes('--confirm-apply')
 const includeNonDraft = process.argv.includes('--include-non-draft')
 const confirmNonDraft = process.argv.includes('--confirm-non-draft')
 
 if (!url || !key) {
-  console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY')
   process.exit(1)
 }
 

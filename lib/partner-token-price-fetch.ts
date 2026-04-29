@@ -1,6 +1,6 @@
 /**
- * Spot USD prices for Solana mints — Jupiter lite API (v3 then v2), then Helius getAsset when configured.
- * Used to suggest raffle floor (listing currency) for partner token prizes.
+ * Spot USD prices for Solana mints — Jupiter lite API (v3 then v2) only.
+ * Used to suggest raffle floor (listing currency) for partner token prizes (no Helius DAS fallback).
  */
 
 const JUPITER_LITE_ENDPOINTS = ['https://lite-api.jup.ag/price/v3', 'https://lite-api.jup.ag/price/v2'] as const
@@ -62,56 +62,12 @@ export async function fetchUsdPricesForMints(mints: string[]): Promise<{
   return { prices: {}, source: 'none' }
 }
 
-async function fetchHeliusMintUsdPrice(mint: string): Promise<number | null> {
-  const heliusApiKey = process.env.HELIUS_API_KEY?.trim()
-  if (!heliusApiKey) return null
-  try {
-    const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusApiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'partner-token-helius-price',
-        method: 'getAsset',
-        params: { id: mint.trim() },
-      }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!res.ok) return null
-    const json: {
-      result?: { token_info?: { price_info?: { price_per_token?: number; currency?: string } } }
-      error?: { message?: string }
-    } = await res.json().catch(() => ({}))
-    if (json.error) return null
-    const v = json.result?.token_info?.price_info?.price_per_token
-    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
-  } catch {
-    return null
-  }
-}
-
 /**
- * USD price per token unit for each mint. Fills gaps from Jupiter using Helius per-mint (when key set).
+ * USD price per token unit for each mint (Jupiter only).
  */
 export async function resolveUsdPricesForMints(mints: string[]): Promise<{
   prices: Record<string, number>
   source: TokenUsdPriceSource
 }> {
-  const unique = [...new Set(mints.map((m) => m.trim()).filter(Boolean))]
-  const { prices: jup, source: jupSource } = await fetchUsdPricesForMints(unique)
-  const out = { ...jup }
-  let source: TokenUsdPriceSource = jupSource
-
-  for (const mint of unique) {
-    if (out[mint] != null) continue
-    const h = await fetchHeliusMintUsdPrice(mint)
-    if (h != null) {
-      out[mint] = h
-      if (jupSource !== 'jupiter') source = 'helius'
-    }
-  }
-  if (Object.keys(out).length === 0) return { prices: {}, source: 'none' }
-  if (source === 'none') source = 'helius'
-  return { prices: out, source }
+  return fetchUsdPricesForMints(mints)
 }

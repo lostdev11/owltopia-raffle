@@ -15,6 +15,7 @@ import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
+import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -24,16 +25,26 @@ import {
   getThemeAccentClasses,
   getThemeAccentColor,
   getThemeAccentRgbChannels,
+  softOuterGlowFromChannels,
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
-import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import {
+  ReferralComplimentaryHint,
+  clearReferralComplimentarySessionCache,
+} from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
+import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
+import {
+  RaffleOverThresholdPngButton,
+  buildOverThresholdFlexMetaLines,
+} from '@/components/RaffleOverThresholdPngButton'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { Trophy, Share2, BadgeCheck, Loader2 } from 'lucide-react'
+import { Trophy, Share2, BadgeCheck, Loader2, Users } from 'lucide-react'
 import Image from 'next/image'
 import {
   Transaction,
@@ -83,9 +94,24 @@ interface RaffleCardProps {
   priority?: boolean
   /** Server time for consistent "Starts in X" / "Starts X ago" (avoids wrong PC clock) */
   serverNow?: Date
+  /** Partner community creator (2% platform fee); show badge on card */
+  isPartnerCommunity?: boolean
+  /** Featured partner marquee: softer rim + ambient glow so halos blend on dark backgrounds */
+  partnerFeaturedStrip?: boolean
 }
 
-export function RaffleCard({ raffle, entries, size = 'medium', section, profitInfo, onDeleted, priority = false, serverNow }: RaffleCardProps) {
+export function RaffleCard({
+  raffle,
+  entries,
+  size = 'medium',
+  section,
+  profitInfo,
+  onDeleted,
+  priority = false,
+  serverNow,
+  isPartnerCommunity = false,
+  partnerFeaturedStrip = false,
+}: RaffleCardProps) {
   const router = useRouter()
   const pathname = usePathname()
   const { publicKey, connected } = useWallet()
@@ -108,7 +134,22 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
-  const displayImageSrc = getRaffleDisplayImageUrl(raffle.image_url)
+  const displayImageSrc = useMemo(() => {
+    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
+    const isLegacyOwltopiaPlaceholder =
+      typeof raffle.image_url === 'string' &&
+      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const cryptoCurrencyArt =
+      (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
+      (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
+        ? prizeCurrency === 'SOL'
+          ? '/solana-mark.svg'
+          : '/usdc.png'
+        : null
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
+    return fromDb
+  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
   const displayAdminDisp = useMemo(
     () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
     [raffle.image_fallback_url]
@@ -120,7 +161,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const modalImageChain = useMemo(
     () =>
       buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean),
-    [raffle.id, raffle.image_url, raffle.image_fallback_url]
+    [raffle.image_url, raffle.image_fallback_url]
   )
   const [modalImgIdx, setModalImgIdx] = useState(0)
   const listThumbFallbackRaw = useMemo(
@@ -172,7 +213,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   useEffect(() => {
     setListMintThumbSrc(null)
-    const hasPrimary = !!raffle.image_url?.trim()
+    const hasPrimary = !!displayImageSrc?.trim()
     if (hasPrimary) {
       setListThumbPhase('primary')
     } else if (displayAdminDisp) {
@@ -182,7 +223,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
     } else {
       setListThumbPhase('dead')
     }
-  }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canListMintThumb])
+  }, [raffle.id, displayImageSrc, raffle.image_fallback_url, displayAdminDisp, canListMintThumb])
 
   useEffect(() => {
     if (imageModalOpen) setModalImgIdx(0)
@@ -227,6 +268,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           : listThumbPhase === 'admin'
             ? (displayAdminDisp ?? '')
             : displayImageSrc ?? ''
+  const listThumbUseContain =
+    listThumbSrc === '/solana-mark.svg' || listThumbSrc === '/usdc.png'
   const listThumbDead = listThumbPhase === 'dead'
   const listThumbMintLoading = listThumbPhase === 'mint_loading'
 
@@ -253,13 +296,21 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   
   // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
-  const borderStyle = isPendingDraft
-    ? { borderColor: '#f59e0b', boxShadow: '0 0 20px rgba(245, 158, 11, 0.45)' }
+  const borderStyleBase = isPendingDraft
+    ? { borderColor: '#f59e0b', boxShadow: softOuterGlowFromChannels('245 158 11') }
     : isFuture
-    ? { borderColor: '#ef4444', boxShadow: '0 0 20px rgba(239, 68, 68, 0.5)' }
-    : !isActive
-      ? { borderColor: '#3b82f6', boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)' } // blue-500, blue glow
-      : baseBorderStyle
+      ? { borderColor: '#ef4444', boxShadow: softOuterGlowFromChannels('239 68 68') }
+      : !isActive
+        ? { borderColor: '#3b82f6', boxShadow: softOuterGlowFromChannels('59 130 246') }
+        : baseBorderStyle
+  const borderStyle =
+    partnerFeaturedStrip && isActive && !isPendingDraft && !isFuture
+      ? {
+          ...borderStyleBase,
+          borderColor: `rgb(${getThemeAccentRgbChannels(raffle.theme_accent)} / 0.82)`,
+          boxShadow: 'none',
+        }
+      : borderStyleBase
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const cardSurfaceStyle: CSSProperties =
     isWinner
@@ -291,6 +342,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
+  const showPartnerBadge = isPartnerCommunity
+  const partnerDisplayName = raffle.creator_partner_display_name?.trim() ?? ''
+  const partnerBadgeTitle = partnerDisplayName
+    ? `Partner: ${partnerDisplayName} — 2% platform fee on ticket sales`
+    : 'Partner community — 2% platform fee on ticket sales'
+  const partnerBadgeAria = partnerDisplayName ? `Partner: ${partnerDisplayName}` : 'Partner community'
 
   // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
   useEffect(() => {
@@ -364,12 +421,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           // Create AbortController for timeout (30 seconds for mobile)
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 30000)
-          
           createResponse = await fetch('/api/entries/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
+            credentials: 'include',
             body: JSON.stringify({
               raffleId: raffle.id,
               walletAddress: publicKey.toBase58(),
@@ -426,8 +483,45 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
         throw new Error(errorData.error || 'Failed to create entry')
       }
 
-      const { entryId, paymentDetails } = await createResponse.json()
-      if (!entryId) throw new Error('Invalid create response')
+      const createData = await createResponse.json()
+
+      if (createData.complimentary === true && createData.complimentaryToken && createData.entryId) {
+        const confRes = await fetch('/api/entries/confirm-complimentary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            entryId: createData.entryId,
+            token: createData.complimentaryToken,
+            walletAddress: publicKey.toBase58(),
+          }),
+        })
+        if (!confRes.ok) {
+          let msg = 'Could not activate your free referral ticket. Try again in a moment.'
+          try {
+            const j = await confRes.json()
+            if (typeof j?.error === 'string') msg = j.error
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg)
+        }
+        clearReferralComplimentarySessionCache()
+        setSuccess(true)
+        requestAnimationFrame(() => fireGreenConfetti())
+        router.refresh()
+        setTimeout(() => {
+          setShowQuickBuy(false)
+          setSuccess(false)
+          setTicketQuantity(1)
+          setTicketQuantityDisplay('1')
+        }, 2000)
+        return
+      }
+
+      const entryId = createData.entryId as string
+      const paymentDetails = createData.paymentDetails
+      if (!entryId || !paymentDetails) throw new Error('Invalid create response')
 
       // Step 2: Build transaction
       let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
@@ -489,9 +583,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
                 'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
               )
-            } else {
-              throw new Error('Failed to get blockhash. Please try again.')
             }
+            if (isSolanaRpcRateLimitError(rpcError)) {
+              throw new Error(
+                'RPC endpoint is rate-limited or over quota (balances and purchases need a reliable RPC). ' +
+                'Please set NEXT_PUBLIC_SOLANA_RPC_URL to a private RPC endpoint ' +
+                '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
+              )
+            }
+            throw new Error('Failed to get blockhash. Please try again.')
           }
           // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
           const backoffDelay = isFetchError ? 2000 * (3 - retries) : 1000 * (3 - retries)
@@ -900,29 +1000,28 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   // Small size - List format (horizontal)
   if (size === 'small') {
+    const smallRaffleHref = `/raffles/${raffle.slug}`
     return (
-      <div className="relative z-10 md:hover:z-50">
-        <Link 
-          href={`/raffles/${raffle.slug}`}
-          onTouchStart={(e) => {
-            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            scrollDetectedRef.current = false
-          }}
-          onTouchMove={(e) => {
-            const { x, y } = touchStartRef.current
-            if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
-              scrollDetectedRef.current = true
-            }
-          }}
-          onTouchEnd={handleTouchEnd}
-          onClick={(e) => handleLinkClick(e)}
-        >
-          <LinkifiedTextInsideLinkProvider>
+      <div
+        className="relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col md:hover:z-50"
+        onTouchStart={(e) => {
+          touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+          scrollDetectedRef.current = false
+        }}
+        onTouchMove={(e) => {
+          const { x, y } = touchStartRef.current
+          if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+            scrollDetectedRef.current = true
+          }
+        }}
+        onTouchEnd={handleTouchEnd}
+      >
           <Card
-            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex flex-col p-0 overflow-hidden')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
+            className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent, 'hover:scale-[1.02] cursor-pointer flex h-full min-h-0 w-full min-w-0 flex-col p-0 rounded-[1.25rem]')} ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
             style={cardSurfaceStyle}
           >
-            <div className="flex flex-row items-stretch flex-1 min-h-0">
+            {/* Clip inner content only; outer Card keeps theme / entered box-shadow uncropped */}
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem]">
             {isWinner && (
               <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
             )}
@@ -935,9 +1034,11 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               style={{ background: themeColor }}
               aria-hidden
             />
+            {/* List row layout aligned with production c248996: flex row, square thumb (bg-muted), deadline row mt-auto in one right column */}
+            <div className="flex min-h-0 flex-1 flex-row items-stretch">
             {!listThumbDead && (
-              <div 
-                className="!relative w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 overflow-hidden cursor-pointer z-10 m-0 p-0 rounded-l-[1.25rem] bg-muted"
+              <div
+                className="!relative z-10 m-0 flex w-24 min-w-[96px] flex-shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-l-[1.25rem] bg-muted p-0 aspect-square sm:w-32 md:w-40"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -958,7 +1059,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     height={160}
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="absolute inset-0 h-full w-full object-cover object-center"
+                    className={`pointer-events-none absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-3' : 'object-cover object-center'}`}
                     onError={() => {
                       setListThumbPhase((phase) => {
                         if (phase === 'primary') {
@@ -989,13 +1090,23 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               </div>
             )}
             {listThumbDead && (
-              <div className="w-24 min-w-[96px] sm:w-32 md:w-40 aspect-square flex-shrink-0 flex items-center justify-center bg-muted border rounded-l-[1.25rem] z-10 relative">
+              <Link
+                href={smallRaffleHref}
+                className="relative z-10 flex aspect-square w-24 min-w-[96px] flex-shrink-0 items-center justify-center rounded-l-[1.25rem] bg-muted sm:w-32 md:w-40"
+                onClick={(e) => handleLinkClick(e)}
+              >
                 <span className="text-[9px] sm:text-[10px] text-muted-foreground text-center px-1">Image unavailable</span>
-              </div>
+              </Link>
             )}
-            <div className="flex-1 flex flex-col p-1.5 sm:p-2 min-w-0 z-10 relative overflow-hidden">
+            <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <Link
+                href={smallRaffleHref}
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-1.5 sm:p-2"
+                onClick={(e) => handleLinkClick(e)}
+              >
+                <LinkifiedTextInsideLinkProvider>
               <div className="flex items-center justify-between gap-1.5 mb-0.5 sm:mb-1 min-w-0">
-                <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.8125rem] !leading-tight line-clamp-1 sm:line-clamp-2 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5">
+                <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.875rem] !leading-snug line-clamp-3 sm:line-clamp-4 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5 break-words">
                   {raffle.title}
                 </CardTitle>
                 <div className="flex items-center gap-0.5 sm:gap-1 group/owlvision flex-shrink-0 self-center">
@@ -1009,10 +1120,29 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <BadgeCheck className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
                     </span>
                   )}
+                  {showPartnerBadge && (
+                    <span
+                      className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                      title={partnerBadgeTitle}
+                      role="img"
+                      aria-label={partnerBadgeAria}
+                    >
+                      <Users className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                    </span>
+                  )}
                   <OwlVisionBadge
                     score={owlVisionScore}
                     className="!gap-1 !px-1.5 !py-0 !text-[10px] sm:!text-[11px] !leading-none [&_svg]:!h-2.5 [&_svg]:!w-2.5 sm:[&_svg]:!h-3 sm:[&_svg]:!w-3"
                   />
+                  {profitInfo?.isProfitable && section === 'active' && (
+                    <span
+                      className="inline-flex items-center justify-center gap-0.5 rounded-full border border-emerald-500/45 bg-emerald-500/15 px-1 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase leading-none tracking-wide text-emerald-200"
+                      title="Ticket revenue is past the platform revenue bar (e.g. floor or draw goal)."
+                    >
+                      <Trophy className="h-2.5 w-2.5 sm:h-2.5 sm:w-2.5" aria-hidden />
+                      Flex
+                    </span>
+                  )}
                 </div>
               </div>
             <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 text-[11px] leading-tight mb-0.5 sm:mb-1 mt-0">
@@ -1022,12 +1152,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   <span className="font-semibold inline-flex items-center gap-1">
                     {raffle.prize_amount} {raffle.prize_currency}
                     {(() => {
-                      const u = raffle.prize_currency.trim().toUpperCase()
-                      const cur =
-                        u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
-                          ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
-                          : null
-                      return cur ? <CurrencyIcon currency={cur} size={12} className="inline-block" /> : null
+                      const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
+                      const showPrizeIcon =
+                        u === 'SOL' ||
+                        u === 'USDC' ||
+                        u === 'OWL' ||
+                        (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                      return showPrizeIcon ? (
+                        <CurrencyIcon currency={u || 'OWL'} size={12} className="inline-block" />
+                      ) : null
                     })()}
                   </span>
                 </span>
@@ -1050,52 +1183,55 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 </span>
               )}
             </div>
-            {/* Raffle description — single secondary text below title */}
-            {raffle.description && (
-              <p
-                className="text-[11px] text-muted-foreground line-clamp-2 mb-1 sm:mb-1 mt-0 break-words min-w-0 leading-snug"
-                title={raffle.description}
-              >
-                <RaffleDescriptionText raffle={raffle} />
-              </p>
-            )}
-              <div className="mt-auto flex max-sm:pt-0 flex-wrap items-center gap-x-1 gap-y-1 min-w-0 [&_a]:relative [&_a]:z-20">
-                  <span className="text-[11px] text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
-                {isFuture ? (
-                  <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                    {serverNow && new Date(raffle.start_time) <= serverNow
-                      ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
-                      : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
-                  </span>
-                ) : isActive ? (
-                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                    {serverNow && new Date(raffle.end_time) <= serverNow
-                      ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
-                      : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
-                  </span>
-                ) : isPendingDraft ? (
-                  <span>Pending escrow deposit</span>
-                ) : (
-                  <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
-                )}
+                </LinkifiedTextInsideLinkProvider>
+              </Link>
+              <div className="relative z-10 mt-auto flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 px-1.5 pb-1.5 pt-0.5 sm:px-2 sm:pb-2 sm:pt-1 [&_a]:relative [&_a]:z-20">
+                <Link
+                  href={smallRaffleHref}
+                  className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1"
+                  onClick={(e) => handleLinkClick(e)}
+                >
+                  <span className="text-[11px] text-foreground/75 dark:text-muted-foreground min-w-0 max-sm:truncate max-sm:leading-snug">
+                    {isFuture ? (
+                      <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                        {serverNow && new Date(raffle.start_time) <= serverNow
+                          ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
+                      </span>
+                    ) : isActive ? (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>
+                        {serverNow && new Date(raffle.end_time) <= serverNow
+                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                          : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
+                      </span>
+                    ) : isPendingDraft ? (
+                      <span>Pending escrow deposit</span>
+                    ) : (
+                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
+                    )}
                   </span>
                   <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
-                  {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-                    <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
-                  )}
                   {section !== 'active' && (
-                    <Badge 
-                      variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'} 
+                    <Badge
+                      variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'}
                       className={`rounded-full text-[9px] sm:text-[10px] min-h-[22px] inline-flex items-center px-1.5 py-0.5 ${statusBadgeClass}`}
                     >
                       {statusLabel}
                     </Badge>
                   )}
-            </div>
+                </Link>
+                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
+                  <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
+                )}
+              </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
-              <div className="mt-1 pt-1 sm:mt-1.5 sm:pt-1.5 border-t flex items-center gap-1 min-w-0">
-                <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-500 flex-shrink-0" />
-                <span className="text-[11px] text-muted-foreground truncate min-w-0">
+              <Link
+                href={smallRaffleHref}
+                className="relative z-10 mt-1 flex items-center gap-1 border-t border-border/40 px-1.5 pt-1 min-w-0 sm:mt-1.5 sm:px-2 sm:pt-1.5"
+                onClick={(e) => handleLinkClick(e)}
+              >
+                <Trophy className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0 text-yellow-500" />
+                <span className="truncate text-[11px] text-muted-foreground min-w-0">
                   Winner:{' '}
                   {winnerDisplayName ? (
                     <span className="font-semibold text-foreground">{winnerDisplayName}</span>
@@ -1105,19 +1241,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                     </span>
                   )}
                 </span>
-              </div>
+              </Link>
             )}
-          </div>
-          </div>
-            {/* Accent strip (theme color) - full width at bottom */}
-            <div
-              className="raffle-card-accent-strip flex-shrink-0"
-              style={{ color: themeColor }}
-              aria-hidden
-            />
+            </div>
+            </div>
+            </div>
         </Card>
-          </LinkifiedTextInsideLinkProvider>
-      </Link>
       {isAdmin && (
         <>
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
@@ -1153,14 +1282,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
   const sizeClasses = {
     medium: {
       title: 'text-lg',
-      description: 'text-sm line-clamp-2',
       content: 'text-sm',
       footer: 'text-xs',
       badge: 'text-xs',
     },
     large: {
       title: 'text-xl',
-      description: 'text-base line-clamp-2',
       content: 'text-base',
       footer: 'text-sm',
       badge: 'text-sm',
@@ -1169,29 +1296,29 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
 
   const displaySize = size === 'medium' ? 'medium' : 'large'
   const classes = sizeClasses[displaySize]
+  const mediumRaffleHref = `/raffles/${raffle.slug}`
 
   return (
-    <div className="relative z-10 md:hover:z-50">
-      <Link 
-        href={`/raffles/${raffle.slug}`}
-        onTouchStart={(e) => {
-          touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-          scrollDetectedRef.current = false
-        }}
-        onTouchMove={(e) => {
-          const { x, y } = touchStartRef.current
-          if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
-            scrollDetectedRef.current = true
-          }
-        }}
-        onTouchEnd={handleTouchEnd}
-        onClick={(e) => handleLinkClick(e, isFuture)}
-      >
-        <LinkifiedTextInsideLinkProvider>
+    <div
+      className="relative z-10 flex h-full min-h-0 flex-col md:hover:z-50"
+      onTouchStart={(e) => {
+        touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        scrollDetectedRef.current = false
+      }}
+      onTouchMove={(e) => {
+        const { x, y } = touchStartRef.current
+        if (Math.hypot(e.touches[0].clientX - x, e.touches[0].clientY - y) > TOUCH_MOVE_THRESHOLD) {
+          scrollDetectedRef.current = true
+        }
+      }}
+      onTouchEnd={handleTouchEnd}
+    >
         <Card
-          className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} h-full flex flex-col hover:scale-[1.02] cursor-pointer p-0 overflow-hidden ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
+          className={`raffle-card-modern relative ${getThemeAccentClasses(raffle.theme_accent)} flex h-full min-h-0 flex-col rounded-[1.25rem] hover:scale-[1.02] cursor-pointer p-0 ${isWinner ? 'ring-4 ring-yellow-400 ring-offset-2 winner-golden-card' : ''} ${userHasEntered && !isWinner ? 'raffle-entered-card' : ''}`}
           style={cardSurfaceStyle}
         >
+          {/* Inner clip: keep overflow off the shadowed shell so theme / entered glow is not cut to a hard box */}
+          <div className="relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem]">
           {isWinner && (
             <div className="winner-golden-overlay absolute inset-0 rounded-[1.25rem] pointer-events-none z-0" />
           )}
@@ -1206,7 +1333,13 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           />
           {!listThumbDead && (
             <>
-            <div className="!relative w-full aspect-square overflow-hidden z-10 rounded-t-[1.25rem] m-0 p-0">
+            <Link
+              href={mediumRaffleHref}
+              className="block min-h-0 w-full shrink-0 rounded-t-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              onClick={(e) => handleLinkClick(e, isFuture)}
+            >
+              <LinkifiedTextInsideLinkProvider>
+            <div className="!relative z-10 m-0 flex aspect-square w-full min-h-0 items-center justify-center overflow-hidden rounded-t-[1.25rem] bg-muted p-0">
               {listThumbMintLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted/60 z-20" aria-hidden>
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
@@ -1217,8 +1350,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   src={listThumbSrc}
                   alt={raffle.title}
                   fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 400px"
-                  className="object-cover !w-full !h-full"
+                  sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
+                  className={listThumbUseContain ? 'object-contain p-2' : 'object-cover object-center'}
                   priority={priority}
                   onError={() => {
                     setListThumbPhase((phase) => {
@@ -1250,7 +1383,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
               )}
               {/* Metadata overlay on image */}
               <div 
-                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-100 transition-opacity z-10 cursor-pointer"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1258,14 +1391,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 }}
               >
                 <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      {raffle.description && (
-                        <p className={`${classes.description} text-white/90 line-clamp-3`}>
-                          <RaffleDescriptionText raffle={raffle} />
-                        </p>
-                      )}
-                    </div>
+                  <div className="flex justify-end mb-2">
                     <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
                       {showHolderBadge && (
                         <span
@@ -1275,6 +1401,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                           aria-label="Owl holder"
                         >
                           <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                        </span>
+                      )}
+                      {showPartnerBadge && (
+                        <span
+                          className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                          title={partnerBadgeTitle}
+                          role="img"
+                          aria-label={partnerBadgeAria}
+                        >
+                          <Users className="h-3.5 w-3.5 flex-shrink-0" />
                         </span>
                       )}
                       <OwlVisionBadge score={owlVisionScore} />
@@ -1333,6 +1469,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                 )}
               </div>
             </div>
+              </LinkifiedTextInsideLinkProvider>
+            </Link>
             {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
               <div className="relative z-20 flex flex-col gap-2 px-2 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:px-3 border-t border-border/50 bg-background/90 backdrop-blur-sm">
                 <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
@@ -1344,6 +1482,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
           {/* Fallback if no usable image */}
           {listThumbDead && (
             <>
+              <Link href={mediumRaffleHref} className="block min-h-0" onClick={(e) => handleLinkClick(e, isFuture)}>
+                <LinkifiedTextInsideLinkProvider>
               <CardHeader className="p-3 sm:p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className={`raffle-card-title-soft ${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>
@@ -1360,6 +1500,16 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         <BadgeCheck className="h-3 w-3 flex-shrink-0" />
                       </span>
                     )}
+                    {showPartnerBadge && (
+                      <span
+                        className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
+                        title={partnerBadgeTitle}
+                        role="img"
+                        aria-label={partnerBadgeAria}
+                      >
+                        <Users className="h-3 w-3 flex-shrink-0" />
+                      </span>
+                    )}
                     <OwlVisionBadge score={owlVisionScore} />
                   </div>
                 </div>
@@ -1372,12 +1522,15 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <span className="font-semibold inline-flex items-center gap-1.5">
                         {raffle.prize_amount} {raffle.prize_currency}
                         {(() => {
-                          const u = raffle.prize_currency.trim().toUpperCase()
-                          const cur =
-                            u === 'SOL' || u === 'USDC' || u === 'TRQ' || u === 'OWL'
-                              ? (u as 'SOL' | 'USDC' | 'TRQ' | 'OWL')
-                              : null
-                          return cur ? <CurrencyIcon currency={cur} size={16} className="inline-block" /> : null
+                          const u = raffle.prize_currency?.trim().toUpperCase() ?? ''
+                          const showPrizeIcon =
+                            u === 'SOL' ||
+                            u === 'USDC' ||
+                            u === 'OWL' ||
+                            (u.length > 0 && getPartnerPrizeTokenByCurrency(u) != null)
+                          return showPrizeIcon ? (
+                            <CurrencyIcon currency={u || 'OWL'} size={16} className="inline-block" />
+                          ) : null
                         })()}
                       </span>
                     </div>
@@ -1399,33 +1552,39 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   )}
                 </div>
               </CardContent>
+              </LinkifiedTextInsideLinkProvider>
+              </Link>
               <CardFooter className={`flex flex-col ${classes.footer} p-4`}>
-                <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>
-                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                <div className={`w-full flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-foreground/75 dark:text-muted-foreground`}>
+                  <Link
+                    href={mediumRaffleHref}
+                    className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+                    onClick={(e) => handleLinkClick(e, isFuture)}
+                  >
                     <span className="min-w-0">
-                    {isFuture ? (
-                      <span title={formatDateTimeWithTimezone(raffle.start_time)}>
-                        {serverNow && new Date(raffle.start_time) <= serverNow
-                          ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
-                          : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
-                      </span>
-                    ) : isActive ? (
-                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>
-                        {serverNow && new Date(raffle.end_time) <= serverNow
-                          ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
-                          : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
-                      </span>
-                    ) : isPendingDraft ? (
-                      <span>Pending escrow deposit</span>
-                    ) : (
-                      <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
-                    )}
+                      {isFuture ? (
+                        <span title={formatDateTimeWithTimezone(raffle.start_time)}>
+                          {serverNow && new Date(raffle.start_time) <= serverNow
+                            ? `Started ${serverNow ? formatDistance(new Date(raffle.start_time), serverNow, { addSuffix: true }) : formatDistanceToNow(new Date(raffle.start_time), { addSuffix: true })}`
+                            : `Starts ${formatDateTimeLocal(raffle.start_time)}`}
+                        </span>
+                      ) : isActive ? (
+                        <span title={formatDateTimeWithTimezone(raffle.end_time)}>
+                          {serverNow && new Date(raffle.end_time) <= serverNow
+                            ? `Ended ${formatDistance(new Date(raffle.end_time), serverNow, { addSuffix: true })}`
+                            : `Ends ${formatDateTimeLocal(raffle.end_time)}`}
+                        </span>
+                      ) : isPendingDraft ? (
+                        <span>Pending escrow deposit</span>
+                      ) : (
+                        <span title={formatDateTimeWithTimezone(raffle.end_time)}>Ended {formatDateTimeLocal(raffle.end_time)}</span>
+                      )}
                     </span>
                     <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact />
-                  </div>
+                  </Link>
                   {section !== 'active' && (
                     <div className="flex items-center gap-2 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
-                      <Badge 
+                      <Badge
                         variant={(isFuture || isActive || isPendingDraft) ? 'default' : 'secondary'}
                         className={statusBadgeClass}
                       >
@@ -1435,8 +1594,12 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   )}
                 </div>
                 {!isActive && !isFuture && raffle.winner_wallet && (
-                  <div className={`w-full mt-2 pt-2 border-t flex items-center gap-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}>
-                    <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} text-yellow-500 flex-shrink-0`} />
+                  <Link
+                    href={mediumRaffleHref}
+                    className={`mt-2 flex w-full items-center gap-2 border-t pt-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}
+                    onClick={(e) => handleLinkClick(e, isFuture)}
+                  >
+                    <Trophy className={`${displaySize === 'large' ? 'h-4 w-4' : 'h-3 w-3'} flex-shrink-0 text-yellow-500`} />
                     <span className="text-muted-foreground">
                       Winner:{' '}
                       {winnerDisplayName ? (
@@ -1447,7 +1610,7 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                         </span>
                       )}
                     </span>
-                  </div>
+                  </Link>
                 )}
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
                   <div className="mt-2 flex w-full flex-col gap-2 border-t border-border/50 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -1481,10 +1644,48 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
                     </Button>
+                    <RafflePromoPngButton
+                      title={raffle.title}
+                      slug={raffle.slug}
+                      ticketPrice={raffle.ticket_price}
+                      currency={raffle.currency}
+                      endTime={raffle.end_time}
+                      imageUrl={listThumbDead ? null : listThumbSrc}
+                      buttonLabel="Download PNG for X"
+                    />
+                    <ReferralComplimentaryHint
+                      variant="compact"
+                      className="mt-2"
+                      walletAddress={wallet || undefined}
+                      show={
+                        isActive &&
+                        !isFuture &&
+                        !purchasesBlocked &&
+                        (availableTickets === null || availableTickets > 0) &&
+                        !userHasEntered
+                      }
+                    />
                   </>
                 )}
                 {showQuickBuy && isActive && !isFuture && !purchasesBlocked && (
             <div className="w-full space-y-3 pt-2">
+              {profitInfo?.isProfitable && profitInfo && (
+                <div
+                  className="relative z-20 w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <RaffleOverThresholdPngButton
+                    title={raffle.title}
+                    slug={raffle.slug}
+                    ticketPrice={raffle.ticket_price}
+                    currency={raffle.currency}
+                    endTime={raffle.end_time}
+                    imageUrl={listThumbDead ? null : listThumbSrc}
+                    metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfo)}
+                    buttonLabel="Download flex PNG (social)"
+                  />
+                </div>
+              )}
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <div className="p-2 rounded-lg bg-muted border">
                   <div className="flex items-center justify-between text-xs">
@@ -1514,9 +1715,18 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
                   </p>
                 )}
               </div>
-              {displaySize === 'large' && (
+                {displaySize === 'large' && (
                 <HootBoostMeter quantity={ticketQuantity} />
               )}
+              <ReferralComplimentaryHint
+                variant="dialog"
+                walletAddress={wallet || undefined}
+                show={
+                  ticketQuantity === 1 &&
+                  !userHasEntered &&
+                  (availableTickets === null || availableTickets > 0)
+                }
+              />
               <div className="flex items-center justify-between pt-2 border-t">
                 <span className={`${displaySize === 'large' ? 'text-sm' : 'text-xs'} text-muted-foreground`}>Total Cost</span>
                 <div className={`${displaySize === 'large' ? 'text-xl' : 'text-lg'} font-bold flex items-center gap-2`}>
@@ -1566,9 +1776,8 @@ export function RaffleCard({ raffle, entries, size = 'medium', section, profitIn
             style={{ color: themeColor }}
             aria-hidden
           />
+          </div>
         </Card>
-        </LinkifiedTextInsideLinkProvider>
-      </Link>
     {isAdmin && (
       <>
         <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>

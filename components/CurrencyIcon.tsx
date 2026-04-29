@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
-import type { RaffleCurrency } from '@/lib/types'
+import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import { cn } from '@/lib/utils'
 
 interface CurrencyIconProps {
-  currency: 'SOL' | 'USDC' | 'OWL' | 'TRQ'
+  /** Ticket currency (SOL, USDC, …) or partner prize ticker (TRQ, CANE, …) when used next to a prize. */
+  currency: string
   className?: string
   size?: number
 }
@@ -17,6 +18,11 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
   const [owlImageError, setOwlImageError] = useState(false)
   const [owlTrySvg, setOwlTrySvg] = useState(false)
   const [trqImageError, setTrqImageError] = useState(false)
+  const [partnerPrizeImageError, setPartnerPrizeImageError] = useState(false)
+
+  useEffect(() => {
+    setPartnerPrizeImageError(false)
+  }, [currency])
 
   if (currency === 'SOL') {
     const w = size
@@ -150,6 +156,34 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
               setUsdcImageError(true)
             }
           }}
+        />
+      </div>
+    )
+  }
+
+  const otherPartnerPrize = getPartnerPrizeTokenByCurrency(currency)
+  if (otherPartnerPrize) {
+    if (partnerPrizeImageError) {
+      const letter = otherPartnerPrize.currencyCode.charAt(0) || '?'
+      return (
+        <span
+          className={`inline-flex items-center justify-center rounded-sm bg-muted px-0.5 font-bold ${className}`}
+          style={{ fontSize: size * 0.45 }}
+          title={otherPartnerPrize.currencyCode}
+        >
+          {letter}
+        </span>
+      )
+    }
+    return (
+      <div className={`inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+        <Image
+          src={otherPartnerPrize.defaultImagePath}
+          alt={otherPartnerPrize.currencyCode}
+          width={size}
+          height={size}
+          className="object-contain"
+          onError={() => setPartnerPrizeImageError(true)}
         />
       </div>
     )

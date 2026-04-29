@@ -41,3 +41,6 @@ docs/SECURITY_MINDSET.md
 
 # devnet keypair for mint script (never commit)
 scripts/phantom-devnet-keypair.json
+
+# Anchor / Rust build output (local only)
+governance-anchor/target/

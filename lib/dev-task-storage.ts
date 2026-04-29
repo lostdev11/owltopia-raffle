@@ -18,11 +18,12 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'image/avif': 'avif',
   'image/heic': 'heic',
   'image/heif': 'heif',
 }
 
-const SAFE_EXT = new Set(['jpg', 'png', 'webp', 'gif', 'heic', 'heif'])
+const SAFE_EXT = new Set(['jpg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif'])
 
 function normalizeExt(ext: string): string {
   const e = ext.toLowerCase()
@@ -102,11 +103,15 @@ export async function uploadDevTaskScreenshots(
       upsert: false,
     })
     if (error) {
-      console.error('uploadDevTaskScreenshots:', error)
+      console.error('uploadDevTaskScreenshots:', error.message || error)
       if (paths.length) {
         await admin.storage.from(DEV_TASK_SCREENSHOTS_BUCKET).remove(paths)
       }
-      return { error: 'Upload failed. Check that the dev-task-screenshots storage bucket exists.' }
+      const hint =
+        typeof error.message === 'string' && error.message.toLowerCase().includes('bucket')
+          ? ' Storage bucket may be missing — run migrations or create dev-task-screenshots in Supabase.'
+          : ''
+      return { error: `Upload failed.${hint}` }
     }
     paths.push(path)
   }

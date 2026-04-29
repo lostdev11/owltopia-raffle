@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -14,6 +15,7 @@ import {
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
@@ -45,7 +47,7 @@ import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
-import type { NftHolderInWallet, WalletNft, WalletToken } from '@/lib/solana/wallet-tokens'
+import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
@@ -63,11 +65,10 @@ import {
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
+  listPartnerPrizeTokens,
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
-
-type TokenPrizeCurrency = 'SOL' | 'USDC' | 'TRQ'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -124,34 +125,38 @@ export function CreateRaffleForm() {
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [prizeMode, setPrizeMode] = useState<'nft' | 'token'>('nft')
-  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<TokenPrizeCurrency>('TRQ')
+  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('TRQ')
   const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
-  const [walletTokens, setWalletTokens] = useState<WalletToken[] | null>(null)
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
   /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
-  const [floorPriceLoading, setFloorPriceLoading] = useState(false)
-  const [floorPriceCurrency, setFloorPriceCurrency] = useState<string | null>(null)
-  const [floorPriceAutoNote, setFloorPriceAutoNote] = useState<string | null>(null)
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
   const [ticketPrice, setTicketPrice] = useState('')
+  /** When non-null, ticket was last set by floor autofill; floor edits re-suggest only if ticket still matches. */
+  const lastAutofillTicketRef = useRef<string | null>(null)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
+  /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
+  const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
+  const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
 
   useEffect(() => {
     if (prizeMode === 'token') {
       setSelectedNft(null)
       setImageUrl(getPartnerPrizeListingImageUrl(tokenPrizeCurrency))
       setFloorPrice('')
-      setFloorPriceCurrency(null)
-      setFloorPriceAutoNote(null)
+      lastAutofillTicketRef.current = null
     }
   }, [prizeMode, tokenPrizeCurrency])
+
+  useEffect(() => {
+    lastAutofillTicketRef.current = null
+  }, [prizeMode])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -170,10 +175,7 @@ export function CreateRaffleForm() {
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const role =
-          admin && (data?.role === 'full' || data?.role === 'raffle_creator')
-            ? (data.role as AdminRole)
-            : null
+        const role: AdminRole | null = admin && data?.role === 'full' ? 'full' : null
         setCachedAdmin(addr, admin, role)
         setViewerIsAdmin(admin)
       })
@@ -185,182 +187,74 @@ export function CreateRaffleForm() {
     }
   }, [connected, publicKey])
 
-  /** Suggest ticket = floor ÷ default ticket count (editable after). */
-  const suggestTicketFromFloor = useCallback((floorValue: string) => {
+  useEffect(() => {
+    if (typeof window === 'undefined' || !connected) {
+      setCanSetLinkOnlyVisibility(false)
+      setHideFromPublicBrowse(false)
+      return
+    }
+    let cancelled = false
+    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+      .then((r) => (cancelled || !r.ok ? null : r.json()))
+      .then((d: { canSetLinkOnly?: boolean } | null) => {
+        if (cancelled || !d) return
+        const ok = d.canSetLinkOnly === true
+        setCanSetLinkOnlyVisibility(ok)
+        if (!ok) setHideFromPublicBrowse(false)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCanSetLinkOnlyVisibility(false)
+          setHideFromPublicBrowse(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
+
+  /**
+   * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
+   * still exactly the last value we autofill (so a manual price is not cleared when the user fixes floor).
+   */
+  const applyFloorToTicketAutofill = useCallback((floorValue: string) => {
     const trimmed = floorValue.trim()
     if (!trimmed) {
-      setTicketPrice('')
+      if (ticketPrice === '' || (lastAutofillTicketRef.current !== null && ticketPrice === lastAutofillTicketRef.current)) {
+        setTicketPrice('')
+      }
+      lastAutofillTicketRef.current = null
       return
     }
     const floor = parseFloat(trimmed)
-    if (Number.isFinite(floor) && floor > 0) {
-      const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
-      if (!Number.isFinite(calculated)) {
-        setTicketPrice('')
-        return
-      }
-      const formatted =
-        calculated >= 1
-          ? calculated.toFixed(2)
-          : calculated >= 0.01
-            ? calculated.toFixed(4)
-            : calculated.toFixed(6)
+    if (!Number.isFinite(floor) || floor <= 0) {
+      return
+    }
+    const calculated = suggestTicketPriceFromFloor(floor, NFT_DEFAULT_SUGGEST_TICKET_COUNT)
+    if (!Number.isFinite(calculated)) {
+      return
+    }
+    const formatted =
+      calculated >= 1
+        ? calculated.toFixed(2)
+        : calculated >= 0.01
+          ? calculated.toFixed(4)
+          : calculated.toFixed(6)
+    const shouldAutofill =
+      ticketPrice === '' || (lastAutofillTicketRef.current !== null && ticketPrice === lastAutofillTicketRef.current)
+    if (shouldAutofill) {
       setTicketPrice(formatted)
+      lastAutofillTicketRef.current = formatted
     }
-  }, [])
+  }, [ticketPrice])
 
+  /** When the prize NFT (or mode) changes, reset floor and ticket so values are not carried over. */
   useEffect(() => {
-    if (prizeMode !== 'nft') {
-      setFloorPriceLoading(false)
-      return
-    }
-    if (!selectedNft) {
-      setFloorPrice('')
-      setFloorPriceLoading(false)
-      setFloorPriceCurrency(null)
-      setFloorPriceAutoNote(null)
-      setTicketPrice('')
-      return
-    }
-    let cancelled = false
-    setFloorPriceLoading(true)
-    setFloorPriceCurrency(null)
-    setFloorPriceAutoNote(null)
-    fetch(`/api/nft/floor-price?mint=${encodeURIComponent(selectedNft.mint)}`, { credentials: 'include' })
-      .then((r) => {
-        if (cancelled) return undefined
-        return r.json().then((data) => ({ ok: r.ok, data }))
-      })
-      .then(
-        (
-          wrapped:
-            | { ok: boolean; data: { floorPrice?: string | null; currency?: string | null; message?: string | null } }
-            | undefined
-        ) => {
-          if (cancelled) return
-          if (!wrapped) {
-            setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
-            return
-          }
-          const { ok, data } = wrapped
-          if (!ok) {
-            setFloorPriceAutoNote(
-              typeof data?.message === 'string' && data.message
-                ? data.message
-                : 'Could not check floor price. Enter the prize value manually in your raffle currency.'
-            )
-            return
-          }
-          if (data?.floorPrice != null && data.floorPrice !== '') {
-            const fp = String(data.floorPrice)
-            setFloorPrice(fp)
-            setFloorPriceCurrency(data.currency ?? null)
-            suggestTicketFromFloor(fp)
-            setFloorPriceAutoNote(typeof data.message === 'string' && data.message ? data.message : null)
-          } else if (typeof data?.message === 'string' && data.message) {
-            setFloorPriceAutoNote(data.message)
-          } else {
-            setFloorPriceAutoNote('No automatic price for this NFT. Enter a fair floor price in your raffle currency.')
-          }
-        }
-      )
-      .catch(() => {
-        if (!cancelled) {
-          setFloorPriceAutoNote('Could not check floor price. Enter the prize value manually in your raffle currency.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFloorPriceLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [selectedNft?.mint, prizeMode, suggestTicketFromFloor])
-
-  useEffect(() => {
-    if (prizeMode !== 'token') return
-    const amt = partnerPrizeAmount.trim()
-    if (!amt || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
-      setFloorPriceLoading(false)
-      setFloorPriceAutoNote(null)
-      return
-    }
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      setFloorPriceLoading(true)
-      setFloorPriceAutoNote(null)
-      const q = new URLSearchParams({
-        prizeCurrency: tokenPrizeCurrency,
-        prizeAmount: amt,
-        listingCurrency: raffleCurrency,
-      })
-      fetch(`/api/partner-token/suggested-floor?${q.toString()}`, { credentials: 'include' })
-        .then((r) => {
-          if (cancelled) return undefined
-          return r.json().then((data) => ({ ok: r.ok, data }))
-        })
-        .then(
-          (
-            wrapped:
-              | {
-                  ok: boolean
-                  data: {
-                    floorPrice?: string | null
-                    listingCurrency?: string | null
-                    message?: string | null
-                    hint?: string | null
-                  }
-                }
-              | undefined
-          ) => {
-            if (cancelled) return
-            if (!wrapped) {
-              setFloorPriceAutoNote(
-                'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-              )
-              return
-            }
-            const { ok, data } = wrapped
-            if (!ok) {
-              setFloorPriceAutoNote(
-                typeof data?.message === 'string' && data.message
-                  ? data.message
-                  : 'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-              )
-              return
-            }
-            if (data?.floorPrice != null && data.floorPrice !== '') {
-              const fp = String(data.floorPrice)
-              setFloorPrice(fp)
-              setFloorPriceCurrency(data.listingCurrency ?? raffleCurrency)
-              suggestTicketFromFloor(fp)
-              const hint = typeof data?.hint === 'string' && data.hint.trim() ? data.hint.trim() : null
-              const msg = typeof data?.message === 'string' && data.message ? data.message : null
-              setFloorPriceAutoNote(hint ?? msg)
-            } else if (typeof data?.message === 'string' && data.message) {
-              setFloorPriceAutoNote(data.message)
-            } else {
-              setFloorPriceAutoNote(
-                'No automatic price for this token pair. Enter a fair floor price in your ticket currency.'
-              )
-            }
-          }
-        )
-        .catch(() => {
-          if (!cancelled) {
-            setFloorPriceAutoNote(
-              'Could not load a spot price. Enter the prize value manually in your ticket currency.'
-            )
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setFloorPriceLoading(false)
-        })
-    }, 450)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-      setFloorPriceLoading(false)
-    }
-  }, [prizeMode, tokenPrizeCurrency, partnerPrizeAmount, raffleCurrency, suggestTicketFromFloor])
+    if (prizeMode !== 'nft') return
+    setFloorPrice('')
+    setTicketPrice('')
+    lastAutofillTicketRef.current = null
+  }, [prizeMode, selectedNft?.mint])
 
   const derivedDrawGoal = useMemo(() => {
     const fp = parseNftFloorPrice(floorPrice)
@@ -374,6 +268,13 @@ export function CreateRaffleForm() {
     if (!Number.isFinite(n) || n < 1) return null
     return n
   }, [partnerMinTickets])
+
+  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
+
+  const partnerPrizeAmountPlaceholder = useMemo(() => {
+    const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
+    return dec <= 6 ? 'e.g. 100 or 50.25' : 'e.g. 1000 or 250.5'
+  }, [tokenPrizeCurrency])
 
   const loadWalletAssets = async () => {
     if (!publicKey) return
@@ -393,7 +294,7 @@ export function CreateRaffleForm() {
       }
       // Fallback to client RPC when API is unavailable (e.g. no HELIUS_API_KEY) or fails
       if (nfts.length === 0 || apiRes.status === 503) {
-        const { getWalletNfts, getWalletTokens } = await import('@/lib/solana/wallet-tokens')
+        const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)
         } catch (rpcErr) {
@@ -412,21 +313,12 @@ export function CreateRaffleForm() {
           // ignore
         }
       }
-      let tokens: WalletToken[] = []
-      try {
-        const { getWalletTokens } = await import('@/lib/solana/wallet-tokens')
-        tokens = await getWalletTokens(connection, publicKey)
-      } catch {
-        // tokens are optional for raffle creation
-      }
       setWalletNfts(nfts)
-      setWalletTokens(tokens)
       setNftSearchQuery('')
     } catch (e) {
       console.error('Load wallet assets:', e)
       setWalletAssetsError(e instanceof Error ? e.message : 'Failed to load wallet assets')
       setWalletNfts(null)
-      setWalletTokens(null)
     } finally {
       setLoadingWalletAssets(false)
     }
@@ -454,7 +346,9 @@ export function CreateRaffleForm() {
     if (loading || createStep !== 'idle' || createSubmitInFlightRef.current) {
       return
     }
-    
+
+    createSubmitInFlightRef.current = true
+    try {
     if (!connected || !publicKey) {
       alert('Please connect your wallet to create a raffle')
       return
@@ -608,7 +502,6 @@ export function CreateRaffleForm() {
       return
     }
 
-    createSubmitInFlightRef.current = true
     setSubmissionError(null)
     setCreateStep('saving')
     setLoading(true)
@@ -644,10 +537,16 @@ export function CreateRaffleForm() {
       data.nft_metadata_uri = selectedNft!.metadataUri ?? undefined
       data.nft_collection_name = selectedNft!.collectionName ?? undefined
     }
+    if (hideFromPublicBrowse) {
+      data.list_on_platform = false
+    }
     try {
       const response = await fetch('/api/raffles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-connected-wallet': publicKey.toBase58(),
+        },
         body: JSON.stringify(data),
         credentials: 'include',
       })
@@ -742,8 +641,7 @@ export function CreateRaffleForm() {
                 // Fall through to holder lookup retries.
               }
             }
-            const maxHolderAttempts = 10
-            for (let attempt = 0; attempt < maxHolderAttempts; attempt++) {
+            for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
               if (resolvedHolder) break
               const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
               if (h && 'delegated' in h && h.delegated) {
@@ -757,7 +655,7 @@ export function CreateRaffleForm() {
                 resolvedHolder = h
                 break
               }
-              if (attempt < maxHolderAttempts - 1) {
+              if (attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1) {
                 await new Promise((r) => setTimeout(r, 700))
               }
             }
@@ -1009,7 +907,11 @@ export function CreateRaffleForm() {
                 rawNeed,
                 'processed'
               )
-              for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+              for (
+                let attempt = 0;
+                attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+                attempt++
+              ) {
                 await new Promise((r) => setTimeout(r, 700))
                 resolvedHolder = await getFungibleHolderInWallet(
                   connection,
@@ -1118,7 +1020,11 @@ export function CreateRaffleForm() {
             ? errorData.existing_slug.trim()
             : ''
         if (response.status === 401) {
-          alert(`${msg} Sign in from your dashboard first, then try again.`)
+          alert(
+            typeof msg === 'string' && msg.trim()
+              ? msg.trim()
+              : 'Sign in required. Open your dashboard, sign in with your wallet, then try again.'
+          )
           router.push('/dashboard')
         } else if (response.status === 409 && existingSlug) {
           alert(`${msg}\n\nOpening your existing raffle…`)
@@ -1143,6 +1049,7 @@ export function CreateRaffleForm() {
           .getElementById('create-raffle-submit-error')
           ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
+    }
     } finally {
       createSubmitInFlightRef.current = false
       setLoading(false)
@@ -1159,7 +1066,8 @@ export function CreateRaffleForm() {
         <CardHeader>
           <CardTitle>Create a raffle</CardTitle>
           <CardDescription>
-            Connect your wallet to create a raffle (NFT or token prize: SOL, USDC, TRQ). Sign in from your dashboard first so we can save your listing.
+            Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your
+            dashboard first so we can save your listing.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -1183,7 +1091,14 @@ export function CreateRaffleForm() {
       </CardHeader>
       <CardContent>
         <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <p><strong>Platform fee (deducted from every ticket sale):</strong> 3% for Owltopia (Owl NFT) holders, 6% for non-holders. The fee is taken from each ticket payment at purchase time.</p>
+          <p>
+            <strong>Platform fee (deducted from every ticket sale):</strong> 2% for verified{' '}
+            <Link href="/partner-program" className="text-primary underline-offset-4 hover:underline touch-manipulation">
+              partner program
+            </Link>{' '}
+            creators, 3% for Owltopia (Owl NFT) holders, 6% for other non-holders. The fee is taken from each ticket
+            payment at purchase time.
+          </p>
         </div>
 
         <form
@@ -1211,51 +1126,71 @@ export function CreateRaffleForm() {
           </div>
 
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-            <Label className="text-base">Prize type</Label>
-            <p className="text-xs text-muted-foreground">
-              Tickets are always paid in SOL or USDC. Choose whether the <strong>prize</strong> is an NFT
-              or a token (SOL, USDC, or TRQ — same prize escrow as NFTs). <strong>OWL</strong> as a prize token is off for now.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="space-y-1.5">
+              <Label className="text-base">Prize type</Label>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Ticket sales use SOL or USDC. What you give away is separate: an <strong>NFT</strong> from
+                your wallet, or an <strong>allowlisted partner</strong> token (escrowed the same way as
+                NFTs). <strong>OWL</strong> as a partner prize token is off for now.
+              </p>
+            </div>
+            <div
+              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              role="group"
+              aria-label="Prize type"
+            >
               <Button
                 type="button"
                 variant={prizeMode === 'nft' ? 'default' : 'outline'}
-                className="min-h-[44px] touch-manipulation justify-start"
+                className="min-h-[44px] w-full touch-manipulation"
                 onClick={() => setPrizeMode('nft')}
+                aria-pressed={prizeMode === 'nft'}
               >
-                NFT prize
+                NFT from wallet
               </Button>
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-[240px]">
-                <Label htmlFor="token_prize_select" className="text-sm font-medium">
-                  tokens
+              <Button
+                type="button"
+                variant={prizeMode === 'token' ? 'default' : 'outline'}
+                className="min-h-[44px] w-full touch-manipulation"
+                onClick={() => setPrizeMode('token')}
+                aria-pressed={prizeMode === 'token'}
+              >
+                Partner token
+              </Button>
+            </div>
+            {prizeMode === 'token' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="token_prize_select" className="text-sm">
+                  Prize token
                 </Label>
                 <select
                   id="token_prize_select"
-                  value={prizeMode === 'nft' ? '' : tokenPrizeCurrency}
+                  value={tokenPrizeCurrency}
                   onChange={(e) => {
                     const v = e.target.value
                     if (v === 'OWL') return
-                    if (v === 'SOL' || v === 'USDC' || v === 'TRQ') {
+                    if (v && isPartnerPrizeCurrency(v)) {
                       setPrizeMode('token')
                       setTokenPrizeCurrency(v)
                     }
                   }}
                   className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  aria-label="Token prize type"
+                  aria-label="Prize token"
                 >
-                  {/* Placeholder when NFT prize is selected — hidden so it never appears in the open list */}
-                  <option value="" disabled hidden>
-                    &nbsp;
-                  </option>
-                  <option value="SOL">SOL</option>
-                  <option value="USDC">USDC</option>
-                  <option value="TRQ">TRQ</option>
+                  {allowedPartnerPrizeList.map((t) => {
+                    const label = t.displayLabel ? `${t.displayLabel} (${t.currencyCode})` : t.currencyCode
+                    return (
+                      <option key={t.currencyCode} value={t.currencyCode}>
+                        {label}
+                      </option>
+                    )
+                  })}
                   <option value="OWL" disabled={!PARTNER_OWL_PRIZE_UI_ENABLED}>
                     OWL
                   </option>
                 </select>
               </div>
-            </div>
+            )}
           </div>
 
           {prizeMode === 'token' && (
@@ -1272,7 +1207,9 @@ export function CreateRaffleForm() {
                   ? 'Mainnet wrapped SOL (wSOL) in your wallet — you sign one SPL transfer of this amount to the platform escrow after the raffle is saved.'
                   : tokenPrizeCurrency === 'USDC'
                     ? 'Mainnet USDC only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
-                    : 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'}
+                    : tokenPrizeCurrency === 'TRQ'
+                      ? 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
+                      : `Mainnet ${tokenPrizeCurrency} (SPL, allowlisted mint). You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.`}
               </p>
               <Input
                 id="partner_prize_amount"
@@ -1280,11 +1217,7 @@ export function CreateRaffleForm() {
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                placeholder={
-                  tokenPrizeCurrency === 'USDC'
-                    ? 'e.g. 100 or 50.25'
-                    : 'e.g. 1000 or 250.5'
-                }
+                placeholder={partnerPrizeAmountPlaceholder}
                 className="min-h-[44px] touch-manipulation text-base sm:text-sm"
                 value={partnerPrizeAmount}
                 onChange={(e) => setPartnerPrizeAmount(e.target.value)}
@@ -1330,7 +1263,7 @@ export function CreateRaffleForm() {
                 onClick={loadWalletAssets}
                 disabled={loadingWalletAssets || !publicKey}
               >
-                {loadingWalletAssets ? 'Loading…' : 'Load NFTs & tokens from wallet'}
+                {loadingWalletAssets ? 'Loading…' : 'Load NFTs from wallet'}
               </Button>
               {walletAssetsError && (
                 <p className="text-sm text-destructive">{walletAssetsError}</p>
@@ -1484,11 +1417,19 @@ export function CreateRaffleForm() {
                 required
                 className="text-base sm:text-sm touch-manipulation min-h-[44px]"
                 value={ticketPrice ?? ''}
-                onChange={(e) => setTicketPrice(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setTicketPrice(v)
+                  if (lastAutofillTicketRef.current !== null && v !== lastAutofillTicketRef.current) {
+                    lastAutofillTicketRef.current = null
+                  }
+                }}
                 aria-describedby="ticket_price_help"
               />
               <p id="ticket_price_help" className="text-xs text-muted-foreground">
-                Pre-filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when you enter floor; adjust as needed.
+                Filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when ticket is empty; changing floor
+                re-fills only while the ticket still matches the last auto-filled value (manual prices are
+                not overwritten).
               </p>
             </div>
           </div>
@@ -1541,14 +1482,7 @@ export function CreateRaffleForm() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="floor_price">
-                Floor price (prize value) *
-                {floorPriceLoading && (
-                  <span className="ml-2 text-muted-foreground font-normal">
-                    {prizeMode === 'token' ? 'Fetching spot price…' : 'Checking marketplace…'}
-                  </span>
-                )}
-              </Label>
+              <Label htmlFor="floor_price">Floor price (prize value) *</Label>
               <Input
                 id="floor_price"
                 name="floor_price"
@@ -1559,7 +1493,7 @@ export function CreateRaffleForm() {
                 onChange={(e) => {
                   const v = e.target.value
                   setFloorPrice(v)
-                  suggestTicketFromFloor(v)
+                  applyFloorToTicketAutofill(v)
                 }}
                 placeholder="e.g., 0.25 or 5.5 (same as currency above)"
                 required
@@ -1567,30 +1501,18 @@ export function CreateRaffleForm() {
               <p className="text-xs text-muted-foreground">
                 {prizeMode === 'token' ? (
                   <>
-                    When the prize is a token, we estimate advertised value from a <strong>spot price</strong> (Jupiter,
-                    with Helius as backup) using your <strong>prize amount</strong> and <strong>ticket currency</strong>{' '}
-                    below. Estimates can be wrong on thin markets — always verify before publishing.
+                    Enter the <strong>advertised prize value</strong> in your ticket currency (same as the currency
+                    you chose above) — e.g. from a price chart or the amount you are committing. This sets the revenue
+                    threshold for rev share.
                   </>
                 ) : (
                   <>
-                    We try to load a suggested price from the marketplace when you pick an NFT; if none appears, enter a
-                    fair value in <strong className="font-medium text-foreground">{raffleCurrency}</strong>.
+                    Enter a <strong>fair value</strong> in <strong className="font-medium text-foreground">{raffleCurrency}</strong>{' '}
+                    (check Magic Eden or Tensor for collection floor, then type it here). This sets the revenue threshold
+                    for rev share.
                   </>
-                )}{' '}
-                This sets the revenue threshold for rev share.
-              </p>
-              {floorPriceCurrency &&
-                floorPrice &&
-                raffleCurrency &&
-                floorPriceCurrency.toUpperCase() !== raffleCurrency.toUpperCase() && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Suggested price is in {floorPriceCurrency}; your raffle currency is {raffleCurrency}. Adjust the number
-                    if needed so it matches {raffleCurrency}.
-                  </p>
                 )}
-              {floorPriceAutoNote && (
-                <p className="text-xs text-muted-foreground">{floorPriceAutoNote}</p>
-              )}
+              </p>
             </div>
           </div>
 
@@ -1635,6 +1557,26 @@ export function CreateRaffleForm() {
               <option value="coral">Coral (Rose)</option>
             </select>
           </div>
+
+          {canSetLinkOnlyVisibility && (
+            <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5">
+              <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0"
+                  checked={hideFromPublicBrowse}
+                  onChange={(e) => setHideFromPublicBrowse(e.target.checked)}
+                  id="hide-from-public-browse"
+                />
+                <span className="min-w-0 text-sm sm:text-base leading-relaxed text-foreground/95">
+                  <span className="font-medium">Discord / direct link only</span>
+                  {': '}
+                  do not show this raffle on the public raffles list. People can still enter using the
+                  page link (e.g. from your partner Discord or a shared link).
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="space-y-4">
             <Label>Night Mode Presets (optional)</Label>

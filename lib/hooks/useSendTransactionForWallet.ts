@@ -1,6 +1,5 @@
 'use client'
 
-import { useCallback } from 'react'
 import type { SendTransactionOptions } from '@solana/wallet-adapter-base'
 import { useWallet } from '@solana/wallet-adapter-react'
 import type { Connection } from '@solana/web3.js'
@@ -16,24 +15,21 @@ import { sendTransactionPreferPhantomSignAndSend } from '@/lib/solana/phantom-si
 export function useSendTransactionForWallet() {
   const { wallet, publicKey, sendTransaction, connected } = useWallet()
 
-  return useCallback(
-    async (
-      transaction: Transaction | VersionedTransaction,
-      connection: Connection,
-      options?: SendTransactionOptions
-    ) => {
-      if (!connected || !wallet?.adapter) {
-        return sendTransaction(transaction, connection, options)
-      }
-      return sendTransactionPreferPhantomSignAndSend({
-        transaction,
-        connection,
-        options,
-        adapter: wallet.adapter,
-        publicKey,
-        fallbackSendTransaction: sendTransaction,
-      })
-    },
-    [connected, wallet?.adapter, publicKey, sendTransaction]
-  )
+  return async (
+    transaction: Transaction | VersionedTransaction,
+    connection: Connection,
+    options?: SendTransactionOptions
+  ) => {
+    if (!connected || !wallet?.adapter) {
+      return sendTransaction(transaction, connection, options)
+    }
+    return sendTransactionPreferPhantomSignAndSend({
+      transaction,
+      connection,
+      options,
+      adapter: wallet.adapter,
+      publicKey,
+      fallbackSendTransaction: sendTransaction,
+    })
+  }
 }

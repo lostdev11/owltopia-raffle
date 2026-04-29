@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateNonce, buildSignInMessage } from '@/lib/auth-server'
+import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
+
+const NONCE_IP_LIMIT = 45
+const NONCE_WALLET_LIMIT = 25
+const NONCE_WINDOW_MS = 60_000
 
 /**
  * GET /api/auth/nonce?wallet=<address>
@@ -16,14 +21,28 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       )
     }
-    
+
+    const ip = getClientIp(request)
+    const ipRl = rateLimit(`auth-nonce:ip:${ip}`, NONCE_IP_LIMIT, NONCE_WINDOW_MS)
+    if (!ipRl.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
+    }
+    const walletRl = rateLimit(`auth-nonce:wallet:${wallet}`, NONCE_WALLET_LIMIT, NONCE_WINDOW_MS)
+    if (!walletRl.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
+    }
+
     // Check if SESSION_SECRET is available before proceeding
     const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET
     if (!secret || secret.length < 16) {
       console.error('[auth/nonce] SESSION_SECRET or AUTH_SECRET missing or too short')
-      console.error('[auth/nonce] NODE_ENV:', process.env.NODE_ENV)
-      console.error('[auth/nonce] Available env vars:', Object.keys(process.env).filter(k => k.includes('SESSION') || k.includes('AUTH')))
-      
+
       const isDev = process.env.NODE_ENV === 'development'
       const errorMessage = isDev
         ? 'Server configuration error: SESSION_SECRET or AUTH_SECRET not found. Please ensure .env.local exists with SESSION_SECRET set (min 16 chars) and restart your dev server.'
@@ -40,10 +59,7 @@ export async function GET(request: NextRequest) {
     const message = buildSignInMessage(nonce, expiresAt)
     return NextResponse.json({ nonce, message, expiresAt: expiresAt.toISOString() })
   } catch (error) {
-    console.error('[auth/nonce] Error:', error instanceof Error ? error.message : String(error))
-    if (error instanceof Error && error.stack) {
-      console.error('[auth/nonce] Stack:', error.stack)
-    }
+    console.error('[auth/nonce]', error instanceof Error ? error.message : String(error))
     const message = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
       { error: message },

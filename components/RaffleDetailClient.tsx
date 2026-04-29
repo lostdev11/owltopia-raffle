@@ -11,8 +11,13 @@ import { Badge } from '@/components/ui/badge'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
+import {
+  ReferralComplimentaryHint,
+  clearReferralComplimentarySessionCache,
+} from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
+import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
 import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { Input } from '@/components/ui/input'
@@ -26,13 +31,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore, PrizeStandard } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '@/lib/types'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getRaffleProfitInfo } from '@/lib/raffle-profit'
+import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
+  raffleAllowsAdminFundsEscrowRefund,
 } from '@/lib/raffles/ticket-escrow-policy'
 import {
   getThemeAccentBorderStyle,
@@ -43,6 +49,7 @@ import {
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { isOwlEnabled } from '@/lib/tokens'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
@@ -82,6 +89,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
@@ -112,11 +120,18 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
-import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
+import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
+import {
+  RaffleOverThresholdPngButton,
+  buildOverThresholdFlexMetaLines,
+} from '@/components/RaffleOverThresholdPngButton'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { getCancellationFeeSol } from '@/lib/config/raffles'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -132,6 +147,12 @@ function solscanAccountUrl(address: string): string {
 
 function solscanTokenUrl(mint: string): string {
   return `https://solscan.io/token/${encodeURIComponent(mint.trim())}${solscanClusterQuery()}`
+}
+
+function formatOfferAmount(amount: number, currency: string): string {
+  if (!Number.isFinite(amount)) return `0 ${currency}`
+  if (currency === 'USDC') return `${amount.toFixed(2)} ${currency}`
+  return `${amount.toFixed(4)} ${currency}`
 }
 
 interface RaffleDetailClientProps {
@@ -206,11 +227,19 @@ export function RaffleDetailClient({
   const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
+  const [raffleOffers, setRaffleOffers] = useState<RaffleOffer[]>([])
+  const [offersLoading, setOffersLoading] = useState(false)
+  const [offersError, setOffersError] = useState<string | null>(null)
+  const [newOfferAmount, setNewOfferAmount] = useState('')
+  const [submitOfferLoading, setSubmitOfferLoading] = useState(false)
+  const [acceptOfferIdLoading, setAcceptOfferIdLoading] = useState<string | null>(null)
+  const [offerWindowEndsAt, setOfferWindowEndsAt] = useState<string | null>(null)
   const [refundTerminalLoading, setRefundTerminalLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
+  const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator = connected && walletAddress && creatorWallet === walletAddress
@@ -233,7 +262,22 @@ export function RaffleDetailClient({
   const [heroImgPhase, setHeroImgPhase] = useState<HeroImgPhase>('primary')
   const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const displayImageUrl = getRaffleDisplayImageUrl(raffle.image_url)
+  const displayImageUrl = useMemo(() => {
+    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
+    const isLegacyOwltopiaPlaceholder =
+      typeof raffle.image_url === 'string' &&
+      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const cryptoCurrencyArt =
+      (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
+      (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
+        ? prizeCurrency === 'SOL'
+          ? '/solana-mark.svg'
+          : '/usdc.png'
+        : null
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
+    return fromDb
+  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
   const displayAdminDisp = useMemo(
     () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
     [raffle.image_fallback_url]
@@ -253,7 +297,7 @@ export function RaffleDetailClient({
 
   useEffect(() => {
     setMintHeroSrc(null)
-    if (raffle.image_url?.trim()) {
+    if (displayImageUrl?.trim()) {
       setHeroImgPhase('primary')
     } else if (displayAdminDisp) {
       setHeroImgPhase('admin')
@@ -262,7 +306,7 @@ export function RaffleDetailClient({
     } else {
       setHeroImgPhase('dead')
     }
-  }, [raffle.id, raffle.image_url, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+  }, [raffle.id, displayImageUrl, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
 
   useEffect(() => {
     if (!depositEscrowError || !isEscrowSplPrizeFrozenVerifyError(depositEscrowError)) {
@@ -315,6 +359,11 @@ export function RaffleDetailClient({
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
   const nowMs = serverTime.getTime()
+  const cancellationFeeApplies = useMemo(
+    () => raffleRequiresCancellationFee(raffle, serverTime),
+    [raffle.start_time, raffle.cancellation_fee_paid_at, serverTime]
+  )
+  const needsPayCancellationFee = cancellationFeeApplies && !raffle.cancellation_fee_paid_at
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
@@ -398,6 +447,8 @@ export function RaffleDetailClient({
     initialEntries, // Initialize with server-side entries
   })
 
+  const profitInfoForSocialFlex = useMemo(() => getRaffleProfitInfo(raffle, entries), [raffle, entries])
+
   // Refresh entries when wallet connection status changes
   // This ensures user tickets are recalculated when user connects/disconnects
   useEffect(() => {
@@ -429,8 +480,7 @@ export function RaffleDetailClient({
       .then((data) => {
         if (cancelled) return
         const admin = data?.isAdmin === true
-        const role: AdminRole | null =
-          admin && (data?.role === 'full' || data?.role === 'raffle_creator') ? data.role : null
+        const role: AdminRole | null = admin && data?.role === 'full' ? 'full' : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
         setAdminRole(role)
@@ -734,12 +784,12 @@ export function RaffleDetailClient({
           // Create AbortController for timeout (30 seconds for mobile)
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 30000)
-          
           createResponse = await fetch('/api/entries/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
+            credentials: 'include',
             body: JSON.stringify({
               raffleId: raffle.id,
               walletAddress: publicKey.toBase58(),
@@ -817,6 +867,38 @@ export function RaffleDetailClient({
       }
       try {
         const data = await createResponse.json()
+        if (data?.complimentary === true && data?.complimentaryToken && data?.entryId && publicKey) {
+          const confRes = await fetch('/api/entries/confirm-complimentary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              entryId: data.entryId,
+              token: data.complimentaryToken,
+              walletAddress: publicKey.toBase58(),
+            }),
+          })
+          if (!confRes.ok) {
+            let msg = 'Could not activate your free referral ticket. Try again in a moment.'
+            try {
+              const j = await confRes.json()
+              if (typeof j?.error === 'string') msg = j.error
+            } catch {
+              /* ignore */
+            }
+            throw new Error(msg)
+          }
+          clearReferralComplimentarySessionCache()
+          setSuccess(true)
+          requestAnimationFrame(() => fireGreenConfetti())
+          router.refresh()
+          setTimeout(() => {
+            setSuccess(false)
+            setTicketQuantity(1)
+            setTicketQuantityDisplay('1')
+          }, 2000)
+          return
+        }
         entryId = data?.entryId
         paymentDetails = data?.paymentDetails
       } catch {
@@ -885,10 +967,11 @@ export function RaffleDetailClient({
             errorMessage.includes('CORS') ||
             errorMessage.includes('network')
           
-          // Check for retryable errors: 403 (rate limit), 19 (temporary internal error), 500, network issues
+          // Check for retryable errors: 403/429 (RPC quota), -32429, 19, 500, network issues
           if (isFetchError ||
               errorMessage.includes('403') || 
               errorMessage.includes('Access forbidden') ||
+              isSolanaRpcRateLimitError(rpcError) ||
               errorCode === 19 ||
               errorMessage.includes('Temporary internal error') ||
               errorMessage.includes('500') ||
@@ -903,9 +986,13 @@ export function RaffleDetailClient({
                   'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
                   'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
                 )
-              } else if (errorMessage.includes('403') || errorMessage.includes('Access forbidden')) {
+              } else if (
+                errorMessage.includes('403') ||
+                errorMessage.includes('Access forbidden') ||
+                isSolanaRpcRateLimitError(rpcError)
+              ) {
                 throw new Error(
-                  'RPC endpoint is rate-limited or requires authentication. ' +
+                  'RPC endpoint is rate-limited or over quota (balances and purchases need a reliable RPC). ' +
                   'Please set NEXT_PUBLIC_SOLANA_RPC_URL in your .env.local file to a private RPC endpoint ' +
                   '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
                 )
@@ -1909,7 +1996,11 @@ export function RaffleDetailClient({
           rawNeed,
           'processed'
         )
-        for (let attempt = 0; attempt < 8 && !resolvedHolder; attempt++) {
+        for (
+          let attempt = 0;
+          attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+          attempt++
+        ) {
           await new Promise((r) => setTimeout(r, 700))
           resolvedHolder = await getFungibleHolderInWallet(
             connection,
@@ -2015,7 +2106,11 @@ export function RaffleDetailClient({
 
       // SPL / Token‑2022 path (existing behavior)
       let holder = await getNftHolderInWallet(connection, mint, publicKey)
-      for (let attempt = 0; attempt < 4 && !holder; attempt++) {
+      for (
+        let attempt = 0;
+        attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !holder;
+        attempt++
+      ) {
         await new Promise((r) => setTimeout(r, 800))
         holder = await getNftHolderInWallet(connection, mint, publicKey)
       }
@@ -2362,23 +2457,136 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, returnPrizeReason, router])
 
-  const handleRequestCancellation = useCallback(async () => {
-    setRequestCancelLoading(true)
-    try {
+  const postRequestCancellation = useCallback(
+    async (feeTransactionSignature: string | null) => {
       const res = await fetch(`/api/raffles/${raffle.id}/request-cancellation`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify(
+          feeTransactionSignature ? { feeTransactionSignature } : {}
+        ),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError((data as { error?: string }).error ?? 'Failed to request cancellation')
-        return
+        const err =
+          (data as { error?: string }).error ?? 'Failed to request cancellation'
+        setError(err)
+        return { ok: false as const, data }
       }
-      router.refresh()
+      return { ok: true as const, data }
+    },
+    [raffle.id]
+  )
+
+  const postPayCancellationFeeWhenCancelled = useCallback(
+    async (feeTransactionSignature: string) => {
+      const res = await fetch(`/api/raffles/${raffle.id}/pay-cancellation-fee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ feeTransactionSignature }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const err = (data as { error?: string }).error ?? 'Failed to record cancellation fee'
+        setError(err)
+        return { ok: false as const }
+      }
+      return { ok: true as const }
+    },
+    [raffle.id]
+  )
+
+  const sendCancellationFeeAndGetSignature = useCallback(async () => {
+    if (!publicKey) {
+      setError('Connect your wallet to pay the cancellation fee.')
+      return null
+    }
+    const treasury = getRaffleTreasuryWalletAddress()
+    if (!treasury) {
+      setError('Treasury is not configured (NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET).')
+      return null
+    }
+    const feeSol = getCancellationFeeSol()
+    const lamports = Math.round(feeSol * LAMPORTS_PER_SOL)
+    const latestBlockhash = await connection.getLatestBlockhash('confirmed')
+    const tx = new Transaction()
+    tx.recentBlockhash = latestBlockhash.blockhash
+    tx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight
+    tx.feePayer = publicKey
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: publicKey,
+        toPubkey: new PublicKey(treasury),
+        lamports,
+      })
+    )
+    const signature = await sendTransaction(tx, connection, { maxRetries: 3 })
+    await connection.confirmTransaction(
+      {
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        signature,
+      },
+      'confirmed'
+    )
+    return signature
+  }, [connection, publicKey, sendTransaction])
+
+  const handleConfirmRequestCancellation = useCallback(async () => {
+    setRequestCancelLoading(true)
+    setError(null)
+    try {
+      let feeSig: string | null = null
+      if (cancellationFeeApplies) {
+        feeSig = await sendCancellationFeeAndGetSignature()
+        if (!feeSig) {
+          return
+        }
+      }
+      const out = await postRequestCancellation(feeSig)
+      if (out?.ok) {
+        setRequestCancelDialogOpen(false)
+        router.refresh()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to request cancellation')
     } finally {
       setRequestCancelLoading(false)
     }
-  }, [raffle.id, router])
+  }, [
+    cancellationFeeApplies,
+    postRequestCancellation,
+    router,
+    sendCancellationFeeAndGetSignature,
+  ])
+
+  const handleStragglerPayCancellationFee = useCallback(async () => {
+    setRequestCancelLoading(true)
+    setError(null)
+    try {
+      const feeSig = await sendCancellationFeeAndGetSignature()
+      if (!feeSig) return
+      if (raffle.status === 'cancelled') {
+        const out = await postPayCancellationFeeWhenCancelled(feeSig)
+        if (out?.ok) router.refresh()
+      } else {
+        const out = await postRequestCancellation(feeSig)
+        if (out?.ok) router.refresh()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Payment failed')
+    } finally {
+      setRequestCancelLoading(false)
+    }
+  }, [
+    postPayCancellationFeeWhenCancelled,
+    postRequestCancellation,
+    raffle.status,
+    router,
+    sendCancellationFeeAndGetSignature,
+  ])
 
   const handleClaimProceeds = useCallback(async () => {
     setClaimProceedsError(null)
@@ -2405,12 +2613,105 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const fetchOffers = useCallback(async () => {
+    setOffersLoading(true)
+    setOffersError(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/offers`, {
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to load offers')
+        return
+      }
+      setRaffleOffers(Array.isArray(data?.offers) ? data.offers : [])
+      setOfferWindowEndsAt(typeof data?.offerWindowEndsAt === 'string' ? data.offerWindowEndsAt : null)
+    } catch (e) {
+      setOffersError(e instanceof Error ? e.message : 'Failed to load offers')
+    } finally {
+      setOffersLoading(false)
+    }
+  }, [raffle.id])
+
+  const handleSubmitOffer = useCallback(async () => {
+    setOffersError(null)
+    const amount = Number(newOfferAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setOffersError('Enter a valid offer amount')
+      return
+    }
+    setSubmitOfferLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/offers`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to submit offer')
+        return
+      }
+      setNewOfferAmount('')
+      await fetchOffers()
+    } catch (e) {
+      setOffersError(e instanceof Error ? e.message : 'Failed to submit offer')
+    } finally {
+      setSubmitOfferLoading(false)
+    }
+  }, [fetchOffers, newOfferAmount, raffle.id])
+
+  const handleAcceptOffer = useCallback(
+    async (offerId: string) => {
+      setOffersError(null)
+      setAcceptOfferIdLoading(offerId)
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}/offers/${offerId}/accept`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setOffersError(typeof data?.error === 'string' ? data.error : 'Failed to accept offer')
+          return
+        }
+        await fetchOffers()
+      } catch (e) {
+        setOffersError(e instanceof Error ? e.message : 'Failed to accept offer')
+      } finally {
+        setAcceptOfferIdLoading(null)
+      }
+    },
+    [fetchOffers, raffle.id]
+  )
+
+  useEffect(() => {
+    const winnerWallet = (raffle.winner_wallet ?? '').trim()
+    if (!winnerWallet) return
+    const raffleEndMs = new Date(raffle.end_time).getTime()
+    const ended = !Number.isNaN(raffleEndMs) && raffleEndMs <= Date.now()
+    if (!ended) return
+    void fetchOffers()
+  }, [fetchOffers, raffle.end_time, raffle.winner_wallet])
+
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
   const winnerWalletNorm = (raffle.winner_wallet ?? '').trim()
   const walletNorm = walletAddress.trim()
   const isWinnerDetail = hasEnded && !!winnerWalletNorm && walletNorm === winnerWalletNorm
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
+  const offerWindowEndsDate = offerWindowEndsAt ? new Date(offerWindowEndsAt) : null
+  const offerWindowOpen =
+    !!offerWindowEndsDate &&
+    !Number.isNaN(offerWindowEndsDate.getTime()) &&
+    offerWindowEndsDate.getTime() > Date.now()
+  const prizeStillInEscrowForOffers =
+    !(raffle.nft_transfer_transaction ?? '').trim() && !raffle.prize_returned_at
+  const canViewOfferPanel = hasEnded && !!winnerWalletNorm
+  const isOfferBuyer =
+    connected && !!walletNorm && walletNorm !== winnerWalletNorm && prizeStillInEscrowForOffers
 
   const detailHeroCardStyle: CSSProperties =
     showEnteredStyle && userHasEnteredDetail
@@ -2452,9 +2753,12 @@ export function RaffleDetailClient({
     isAdmin && 
     !raffle.nft_transfer_transaction
 
+  const claimableEscrowPrize =
+    (raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()) || isPartnerSplPrizeRaffle(raffle)
+
   const showClaimPrizeButton =
     hasEnded &&
-    raffle.prize_type === 'nft' &&
+    claimableEscrowPrize &&
     !!winnerWalletNorm &&
     walletNorm === winnerWalletNorm &&
     !!raffle.prize_deposited_at &&
@@ -2578,28 +2882,102 @@ export function RaffleDetailClient({
             <Share2 className="mr-2 h-4 w-4" />
             {shareCopied ? 'Copied!' : 'Share'}
           </Button>
-          <RaffleOwlPlayer enabled={isActive && !purchasesBlocked} />
-          {isCreator && (raffle.status === 'live' || raffle.status === 'ready_to_draw') && !raffle.cancellation_requested_at && (
-            <Button
-              variant="outline"
-              size="default"
-              onClick={handleRequestCancellation}
-              disabled={requestCancelLoading}
-              className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
-              title="Request cancellation. Ticket buyers get refunds in all cases. Within 24h: no fee to host. After 24h: host is charged cancellation fee."
-            >
-              {requestCancelLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <XCircle className="mr-2 h-4 w-4" />
-              )}
-              Request cancellation
-            </Button>
+          <RafflePromoPngButton
+            title={raffle.title}
+            slug={raffle.slug}
+            ticketPrice={raffle.ticket_price}
+            currency={raffle.currency}
+            endTime={raffle.end_time}
+            imageUrl={heroImageDead ? null : heroImageSrc}
+            buttonLabel="PNG for X"
+            fullWidth={false}
+          />
+          {isActive && profitInfoForSocialFlex.isProfitable && (
+            <RaffleOverThresholdPngButton
+              title={raffle.title}
+              slug={raffle.slug}
+              ticketPrice={raffle.ticket_price}
+              currency={raffle.currency}
+              endTime={raffle.end_time}
+              imageUrl={heroImageDead ? null : heroImageSrc}
+              metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfoForSocialFlex)}
+              buttonLabel="Flex PNG (social)"
+              fullWidth={false}
+            />
           )}
+          {isCreator &&
+            (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+            !raffle.cancellation_requested_at && (
+              <Button
+                variant="outline"
+                size="default"
+                onClick={() => {
+                  setError(null)
+                  setRequestCancelDialogOpen(true)
+                }}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                title="Request cancellation. If the raffle has already started, you must pay a SOL fee to the platform. Buyers on funds-escrow raffles can claim refunds in their dashboard."
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="mr-2 h-4 w-4" />
+                )}
+                Request cancellation
+              </Button>
+            )}
+          {isCreator &&
+            (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
+            !!raffle.cancellation_requested_at &&
+            needsPayCancellationFee && (
+              <Button
+                variant="outline"
+                size="default"
+                onClick={() => void handleStragglerPayCancellationFee()}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] text-sm sm:text-base border-amber-500/50 text-amber-600 hover:bg-amber-500/10"
+                title="Pay the cancellation fee so an admin can accept the request"
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="mr-2 h-4 w-4" />
+                )}
+                Pay {getCancellationFeeSol()} SOL cancellation fee
+              </Button>
+            )}
           {isCreator && raffle.cancellation_requested_at && (raffle.status !== 'cancelled') && (
             <span className="text-sm text-amber-600 dark:text-amber-400 self-center">
-              Cancellation requested — waiting for admin
+              {needsPayCancellationFee
+                ? 'Cancellation requested — pay the fee above so an admin can finish'
+                : 'Cancellation requested — waiting for admin'}
             </span>
+          )}
+          {isCreator && raffle.status === 'cancelled' && needsPayCancellationFee && (
+            <div
+              className="w-full sm:w-auto rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+              role="status"
+            >
+              <p className="font-medium">Pay cancellation fee to claim your prize from escrow</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                This raffle was cancelled after it started. Pay {getCancellationFeeSol()} SOL to the platform
+                wallet, then you can use Claim prize on your dashboard.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 touch-manipulation min-h-[44px]"
+                disabled={requestCancelLoading}
+                onClick={() => void handleStragglerPayCancellationFee()}
+              >
+                {requestCancelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Pay {getCancellationFeeSol()} SOL
+              </Button>
+            </div>
           )}
           {isCreator &&
             raffle.status === 'successful_pending_claims' &&
@@ -2623,10 +3001,148 @@ export function RaffleDetailClient({
               </Button>
             )}
         </div>
+        <Dialog open={requestCancelDialogOpen} onOpenChange={setRequestCancelDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Request cancellation?</DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {cancellationFeeApplies ? (
+                    <>
+                      <p>
+                        This raffle has already started. You will be charged {getCancellationFeeSol()} SOL to the
+                        platform treasury (plus a small network fee). If your wallet does not have enough SOL, the
+                        request will not complete.
+                      </p>
+                      <p className="text-xs">
+                        Buyers on funds-escrow raffles can claim ticket refunds from their dashboard. An admin must
+                        still approve this cancellation in Owl Vision.
+                      </p>
+                    </>
+                  ) : (
+                    <p>
+                      No post-start cancellation fee applies (the public start time has not passed yet). An admin
+                      will review the request in Owl Vision.
+                    </p>
+                  )}
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRequestCancelDialogOpen(false)}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+              >
+                Not now
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleConfirmRequestCancellation()}
+                disabled={requestCancelLoading}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto bg-amber-600 hover:bg-amber-700"
+              >
+                {requestCancelLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin inline" />
+                    Working…
+                  </>
+                ) : cancellationFeeApplies ? (
+                  `Yes — pay ${getCancellationFeeSol()} SOL & request`
+                ) : (
+                  'Yes, request cancellation'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {claimProceedsError && (
           <p className="text-sm text-destructive mb-2" role="alert">
             {claimProceedsError}
           </p>
+        )}
+        {canViewOfferPanel && (
+          <Card className="border-primary/25">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Post-win offers</CardTitle>
+              <CardDescription>
+                Offers are active for 24 hours after winner selection.
+                {offerWindowEndsDate && ` Window ends ${formatDateTimeWithTimezone(offerWindowEndsDate.toISOString())}.`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {offersError && <p className="text-sm text-destructive">{offersError}</p>}
+              {!offerWindowOpen && (
+                <p className="text-sm text-muted-foreground">
+                  Offer window has closed for this raffle.
+                </p>
+              )}
+              {!prizeStillInEscrowForOffers && (
+                <p className="text-sm text-muted-foreground">
+                  Offers are disabled because this raffle prize has already been claimed or returned.
+                </p>
+              )}
+              {isOfferBuyer && offerWindowOpen && prizeStillInEscrowForOffers && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={newOfferAmount}
+                    onChange={(e) => setNewOfferAmount(e.target.value)}
+                    placeholder={`Your offer in ${raffle.currency}`}
+                    className="touch-manipulation min-h-[44px]"
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleSubmitOffer}
+                    disabled={submitOfferLoading}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {submitOfferLoading ? 'Submitting…' : 'Submit offer'}
+                  </Button>
+                </div>
+              )}
+              {offersLoading ? (
+                <p className="text-sm text-muted-foreground">Loading offers…</p>
+              ) : raffleOffers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No offers yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {raffleOffers.map((offer) => (
+                    <div
+                      key={offer.id}
+                      className="rounded-md border border-border/60 bg-muted/25 p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {formatOfferAmount(Number(offer.amount), offer.currency)}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-mono break-all">
+                          {offer.buyer_wallet}
+                        </p>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                          {offer.status}
+                        </p>
+                      </div>
+                      {isWinnerDetail && offer.status === 'pending' && offerWindowOpen && prizeStillInEscrowForOffers && (
+                        <Button
+                          size="sm"
+                          onClick={() => void handleAcceptOffer(offer.id)}
+                          disabled={acceptOfferIdLoading === offer.id}
+                          className="touch-manipulation min-h-[44px] sm:min-h-9"
+                        >
+                          {acceptOfferIdLoading === offer.id ? 'Accepting…' : 'Accept'}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
         {showCreatorRefundCandidates && creatorRefundCandidates.length > 0 && (
           <Card className="border-amber-500/30 bg-amber-500/5">
@@ -3197,8 +3713,8 @@ export function RaffleDetailClient({
                   <div className="flex flex-col gap-1">
                     {raffle.ticket_price > 0 && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-emerald-100/80">Price</span>
-                        <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-50`}>
+                        <span className="text-[11px] text-emerald-700 dark:text-emerald-100/80">Price</span>
+                        <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-900 dark:text-emerald-50`}>
                           {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
                           <CurrencyIcon
                             currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
@@ -3209,8 +3725,8 @@ export function RaffleDetailClient({
                       </div>
                     )}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-emerald-100/80">Tickets</span>
-                      <span className={`${classes.description} font-semibold text-emerald-50`}>{totalTicketsSold}</span>
+                      <span className="text-[11px] text-emerald-700 dark:text-emerald-100/80">Tickets</span>
+                      <span className={`${classes.description} font-semibold text-emerald-900 dark:text-emerald-50`}>{totalTicketsSold}</span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -3219,13 +3735,13 @@ export function RaffleDetailClient({
                         isFuture
                           ? 'border-amber-300/80 bg-amber-500/20 text-amber-100'
                           : isActive
-                            ? 'border-emerald-300/80 bg-emerald-500/25 text-emerald-50'
+                            ? 'border-emerald-600/40 bg-emerald-100 text-emerald-800 dark:border-emerald-300/80 dark:bg-emerald-500/25 dark:text-emerald-50'
                             : 'border-sky-300/80 bg-sky-500/20 text-sky-50'
                       }`}
                     >
                       {statusPillLabel}
                     </span>
-                    <span className="text-[11px] text-emerald-50/80">
+                    <span className="text-[11px] text-emerald-700 dark:text-emerald-50/80">
                       {timeToEndLabel}
                     </span>
                   </div>
@@ -3402,7 +3918,7 @@ export function RaffleDetailClient({
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-foreground">You won this raffle</p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      The prize NFT is in platform escrow (verified). Tap Claim prize and we&apos;ll send it to your connected wallet on Solana. If something fails, contact support — an admin can retry the escrow transfer.
+                      The prize is in platform escrow (verified). Tap Claim prize and we&apos;ll send it to your connected wallet on Solana. If something fails, contact support — an admin can retry the escrow transfer.
                     </p>
                   </div>
                 </div>
@@ -3422,13 +3938,21 @@ export function RaffleDetailClient({
                 )}
               </div>
             )}
+            {raffle.prize_type === 'nft' && (
+              <RaffleBuyoutPanel raffleId={raffle.id} winnerWallet={raffle.winner_wallet} />
+            )}
             <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 ${classes.statsGrid}`}>
               {raffle.prize_amount != null && raffle.prize_amount > 0 && raffle.prize_currency && (
                 <div>
                   <p className={classes.labelText + ' text-muted-foreground'}>Prize</p>
-                  <p className={classes.contentText + ' font-bold'}>
+                  <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
                     {raffle.prize_amount} {raffle.prize_currency}
-                  </p>
+                    <CurrencyIcon
+                      currency={raffle.prize_currency}
+                      size={imageSize === 'small' ? 16 : 20}
+                      className="inline-block"
+                    />
+                  </div>
                 </div>
               )}
               {raffle.ticket_price > 0 && (
@@ -3557,8 +4081,12 @@ export function RaffleDetailClient({
 
             {(() => {
               const profitInfo = getRaffleProfitInfo(raffle, entries)
-              const cur = profitInfo.thresholdCurrency ?? raffle.currency
-              const revenueInCur = cur === 'USDC' ? profitInfo.revenue.usdc : cur === 'SOL' ? profitInfo.revenue.sol : profitInfo.revenue.owl
+              const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
+              const thresholdCur =
+                profitInfo.thresholdCurrency != null
+                  ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
+                  : ticketCur
+              const ticketRevenue = revenueInCurrency(profitInfo.revenue, ticketCur)
               const threshold = profitInfo.threshold
               const amountOver = profitInfo.surplusOverThreshold
               const thresholdLabel =
@@ -3570,14 +4098,14 @@ export function RaffleDetailClient({
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>Revenue (from tickets)</p>
                       <p className={classes.contentText + ' font-semibold'}>
-                        {revenueInCur.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                        {ticketRevenue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
                       </p>
                     </div>
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>{thresholdLabel}</p>
                       <p className={classes.contentText + ' font-semibold'}>
                         {threshold != null && threshold > 0
-                          ? `${threshold.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`
+                          ? `${threshold.toFixed(thresholdCur === 'USDC' ? 2 : 4)} ${thresholdCur}`
                           : 'Not set'}
                       </p>
                     </div>
@@ -3585,7 +4113,7 @@ export function RaffleDetailClient({
                       <div>
                         <p className={classes.labelText + ' text-muted-foreground'}>Amount over threshold</p>
                         <p className={classes.contentText + ' font-semibold text-emerald-600 dark:text-emerald-400'}>
-                          +{amountOver.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
+                          +{amountOver.toFixed(thresholdCur === 'USDC' ? 2 : 4)} {thresholdCur}
                         </p>
                         <p className={classes.labelText + ' text-muted-foreground mt-1.5'}>
                           That surplus is profit you keep above the cost side you set (prize, floor, or draw minimum). Net
@@ -3629,7 +4157,7 @@ export function RaffleDetailClient({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <p className="text-xs text-muted-foreground">💡 Don't see your entry?</p>
+                  <p className="text-xs text-muted-foreground">💡 Don&apos;t see your entry?</p>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -3827,6 +4355,15 @@ export function RaffleDetailClient({
                     Ticket purchases are temporarily blocked. Please check back later.
                   </p>
                 )}
+                <ReferralComplimentaryHint
+                  variant="compact"
+                  walletAddress={walletAddress || undefined}
+                  show={
+                    !purchasesBlocked &&
+                    (availableTickets === null || availableTickets > 0) &&
+                    userTickets === 0
+                  }
+                />
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
                   disabled={purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
@@ -3981,7 +4518,7 @@ export function RaffleDetailClient({
                         void fetchEntries()
                         router.refresh()
                       }}
-                      adminFundsEscrowRefundEnabled={raffle.status === 'failed_refund_available'}
+                      adminFundsEscrowRefundEnabled={raffleAllowsAdminFundsEscrowRefund(raffle)}
                     />
                   )}
                 </div>
@@ -4099,7 +4636,7 @@ export function RaffleDetailClient({
                 className="text-base sm:text-sm h-11 sm:h-10 font-mono"
               />
               <p className="text-xs text-muted-foreground">
-                The Solana transaction signature that transferred the NFT to the winner's wallet.
+                The Solana transaction signature that transferred the NFT to the winner&apos;s wallet.
               </p>
             </div>
             
@@ -4213,6 +4750,16 @@ export function RaffleDetailClient({
             
             <HootBoostMeter quantity={ticketQuantity} />
             
+            <ReferralComplimentaryHint
+              variant="dialog"
+              walletAddress={walletAddress || undefined}
+              show={
+                ticketQuantity === 1 &&
+                userTickets === 0 &&
+                (availableTickets === null || availableTickets > 0)
+              }
+            />
+
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">
@@ -4231,7 +4778,7 @@ export function RaffleDetailClient({
               <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
                 <p>Tickets purchased successfully! Transaction confirmed.</p>
                 <p className="text-xs opacity-90">
-                  Your entry should appear shortly. If you don't see it, please refresh the page.
+                  Your entry should appear shortly. If you don&apos;t see it, please refresh the page.
                 </p>
               </div>
             )}

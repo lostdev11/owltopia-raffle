@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Switch } from '@/components/ui/switch'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Megaphone, Plus, Pencil, Trash2, Loader2, ArrowLeft } from 'lucide-react'
 
 interface Announcement {
@@ -39,9 +39,7 @@ export default function AdminAnnouncementsPage() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
-  const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loadingList, setLoadingList] = useState(true)
@@ -72,14 +70,12 @@ export default function AdminAnnouncementsPage() {
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
-      setAdminRole(null)
       setLoading(false)
       return
     }
     const addr = publicKey.toBase58()
     if (getCachedAdmin(addr) === true) {
       setIsAdmin(true)
-      setAdminRole(getCachedAdminRole(addr))
       setLoading(false)
       return
     }
@@ -93,7 +89,6 @@ export default function AdminAnnouncementsPage() {
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
-        setAdminRole(role)
       })
       .catch(() => {
         if (!cancelled) setIsAdmin(false)
@@ -105,12 +100,6 @@ export default function AdminAnnouncementsPage() {
       cancelled = true
     }
   }, [connected, publicKey])
-
-  useEffect(() => {
-    if (isAdmin && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, adminRole, router])
 
   const fetchAnnouncements = useCallback(async () => {
     if (!wallet) return

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createRaffle,
+  DuplicateActiveNftPrizeError,
+  findNonTerminalNftRaffleByPrizeAssetId,
   findNonTerminalPartnerCryptoRaffleByCreator,
-  findNonTerminalRaffleByCreatorAndPrizeMint,
   generateUniqueSlug,
   getRaffleCreationCountForCreatorToday,
   getRafflesViaRest,
@@ -12,10 +13,11 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { getSessionFromRequest, requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import { PublicKey } from '@solana/web3.js'
-import { getSolanaConnection } from '@/lib/solana/connection'
+import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, ThemeAccent } from '@/lib/types'
+import { isNonRetryableDbErrorMessage } from '@/lib/db-retry'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getAdminRole } from '@/lib/db/admins'
@@ -39,11 +41,16 @@ import {
   listPartnerPrizeTokens,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 /** Vercel Pro serverless cap (seconds). Hobby is 10s; keep routes deployable on either tier by not relying on >10s in critical paths without testing. */
 export const maxDuration = 60
+
+/** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
+const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
@@ -97,8 +104,12 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       const isConfig = error.code === 'CONFIG'
+      const isSchemaOrPostgrestBad =
+        isNonRetryableDbErrorMessage(error.message) || /\bpgrst\d{3}\b|postgrest/i.test(error.message)
       const isUpstreamUnavailable =
-        isConfig || /503|service unavailable|connection|timeout|missing/i.test(error.message)
+        isConfig ||
+        isSchemaOrPostgrestBad ||
+        /503|service unavailable|connection|timeout|missing/i.test(error.message)
       const status = isUpstreamUnavailable ? 503 : 502
       const bodyMessage =
         status === 503
@@ -152,8 +163,36 @@ export async function POST(request: NextRequest) {
         )
       }
     }
-    
-    const walletAddress = session.wallet
+
+    const rawWalletIntent =
+      (typeof body.wallet_address === 'string' ? body.wallet_address : '').trim() ||
+      request.headers.get(CONNECTED_WALLET_HEADER)?.trim() ||
+      ''
+    if (!rawWalletIntent) {
+      return NextResponse.json(
+        { error: 'Missing wallet_address. Refresh the page and try again.' },
+        { status: 400 }
+      )
+    }
+    const sessionNorm = normalizeSolanaWalletAddress(session.wallet)
+    const intentNorm = normalizeSolanaWalletAddress(rawWalletIntent)
+    if (!sessionNorm || !intentNorm) {
+      return NextResponse.json(
+        { error: 'Invalid wallet address. Refresh the page and try again.' },
+        { status: 400 }
+      )
+    }
+    if (sessionNorm !== intentNorm) {
+      return NextResponse.json(
+        {
+          error:
+            'Your signed-in wallet does not match the wallet connected in your browser. Open Dashboard, sign in again with the wallet you are using, then create the raffle.',
+        },
+        { status: 401 }
+      )
+    }
+
+    const walletAddress = sessionNorm
 
     const walletCreateRl = rateLimit(`raffles:create:${walletAddress}`, 6, 60_000)
     if (!walletCreateRl.allowed) {
@@ -263,6 +302,31 @@ export async function POST(request: NextRequest) {
     }
 
     const adminRole = await getAdminRole(walletAddress)
+
+    let discordPartnerTenantId: string | null = null
+    try {
+      discordPartnerTenantId = await withTimeout(
+        getDiscordPartnerTenantIdForCreatorWallet(walletAddress),
+        SUPABASE_TIMEOUT_MS,
+        'supabase error'
+      )
+    } catch {
+      discordPartnerTenantId = null
+    }
+
+    const requestUnlisted = body.list_on_platform === false || body.listOnPlatform === false
+    if (requestUnlisted) {
+      if (adminRole === null && (discordPartnerTenantId == null || !String(discordPartnerTenantId).trim())) {
+        return NextResponse.json(
+          {
+            error:
+              'Hiding a raffle from public browse is only available for partners with a linked Discord (partner program) or for admins. Leave list_on_platform unset to list the raffle for everyone.',
+          },
+          { status: 400 }
+        )
+      }
+    }
+    const list_on_platform = !requestUnlisted
 
     let raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>
 
@@ -381,6 +445,8 @@ export async function POST(request: NextRequest) {
         cancellation_fee_amount: null,
         cancellation_fee_currency: null,
         cancellation_refund_policy: null,
+        cancellation_fee_paid_at: null,
+        cancellation_fee_payment_tx: null,
         prize_returned_at: null,
         prize_return_reason: null,
         prize_return_tx: null,
@@ -392,14 +458,24 @@ export async function POST(request: NextRequest) {
         creator_funds_claim_locked_at: null,
         prize_standard:
           getPartnerPrizeTokenByCurrency(prizeCurrency)?.tokenProgram === 'token2022' ? 'token2022' : 'spl',
+        discord_partner_tenant_id: discordPartnerTenantId,
+        list_on_platform,
       }
     } else {
       const prizeType: 'nft' = 'nft'
       const prizeAmount: number | null = null
       const prizeCurrency: string | null = null
 
-      const nftMintAddress = body.nft_mint_address || null
-      const nftTokenId = body.nft_token_id || null
+      let nftMintAddress =
+        typeof body.nft_mint_address === 'string' && body.nft_mint_address.trim()
+          ? body.nft_mint_address.trim()
+          : null
+      let nftTokenId =
+        typeof body.nft_token_id === 'string' && body.nft_token_id.trim()
+          ? body.nft_token_id.trim()
+          : null
+      if (nftMintAddress) nftMintAddress = normalizePrizeAssetIdForRaffle(nftMintAddress) ?? nftMintAddress
+      if (nftTokenId) nftTokenId = normalizePrizeAssetIdForRaffle(nftTokenId) ?? nftTokenId
 
       if (!nftMintAddress && !nftTokenId) {
         return NextResponse.json(
@@ -423,7 +499,7 @@ export async function POST(request: NextRequest) {
         try {
           const mintPk = new PublicKey(nftMintAddress)
           const creatorPk = new PublicKey(walletAddress)
-          const holder = await getNftHolderInWallet(getSolanaConnection(), mintPk, creatorPk, 'confirmed')
+          const holder = await getNftHolderInWallet(getSolanaReadConnection(), mintPk, creatorPk, 'confirmed')
           if (holder && 'delegated' in holder && holder.delegated) {
             return NextResponse.json(
               {
@@ -457,9 +533,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: maxCheck.error }, { status: 400 })
       }
 
-      if (adminRole === null && prizeAssetId) {
+      if (prizeAssetId) {
         const existingForPrize = await withTimeout(
-          findNonTerminalRaffleByCreatorAndPrizeMint(walletAddress, prizeAssetId),
+          findNonTerminalNftRaffleByPrizeAssetId(prizeAssetId),
           SUPABASE_TIMEOUT_MS,
           'supabase error'
         )
@@ -467,7 +543,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             {
               error:
-                'You already have a raffle using this NFT. Open that listing or wait until it is completed or cancelled before creating another with the same prize.',
+                'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
               existing_slug: existingForPrize.slug,
             },
             { status: 409 }
@@ -528,6 +604,8 @@ export async function POST(request: NextRequest) {
         cancellation_fee_amount: null,
         cancellation_fee_currency: null,
         cancellation_refund_policy: null,
+        cancellation_fee_paid_at: null,
+        cancellation_fee_payment_tx: null,
         prize_returned_at: null,
         prize_return_reason: null,
         prize_return_tx: null,
@@ -537,22 +615,27 @@ export async function POST(request: NextRequest) {
         creator_claimed_at: null,
         creator_claim_tx: null,
         creator_funds_claim_locked_at: null,
+        discord_partner_tenant_id: discordPartnerTenantId,
+        list_on_platform,
       }
     }
 
     if (adminRole === null) {
       const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
-      const isHolder = isOwlEnabled() && feeTier.reason === 'holder'
-      const maxRafflesPerDay = isHolder ? 3 : 1
+      // Owltopia Owl NFT holders + partner-community creators: 3 raffles/day (partners use allowlist only; no holder DAS).
+      const isHolderForLimit =
+        isOwlEnabled() &&
+        (feeTier.reason === 'holder' || feeTier.reason === 'partner_community')
+      const maxRafflesPerDay = isHolderForLimit ? 3 : 1
       const createdToday = await withTimeout(
         getRaffleCreationCountForCreatorToday(walletAddress),
         SUPABASE_TIMEOUT_MS,
         'supabase error'
       )
       if (createdToday >= maxRafflesPerDay) {
-        const message = isHolder
-          ? 'Owltopia holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
-          : 'You can host 1 raffle per day. Owltopia (Owl NFT) holders can host up to 3. Try again tomorrow (UTC).'
+        const message = isHolderForLimit
+          ? 'Owltopia partners and Owl NFT holders can host up to 3 raffles per day. You’ve reached today’s limit. Try again tomorrow (UTC).'
+          : 'You can host 1 raffle per day. Owltopia partners and Owl NFT holders can host up to 3. Try again tomorrow (UTC).'
         return NextResponse.json(
           { error: message },
           { status: 429 }
@@ -571,11 +654,39 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
+    try {
+      const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
-    await notifyRaffleCreated(raffle)
+      await notifyRaffleCreated(raffle)
 
-    return NextResponse.json(raffle, { status: 201 })
+      return NextResponse.json(raffle, { status: 201 })
+    } catch (createErr) {
+      if (createErr instanceof DuplicateActiveNftPrizeError) {
+        const mintRaw =
+          typeof body.nft_mint_address === 'string'
+            ? body.nft_mint_address.trim()
+            : typeof body.nft_token_id === 'string'
+              ? body.nft_token_id.trim()
+              : ''
+        const normalizedMint = mintRaw ? normalizePrizeAssetIdForRaffle(mintRaw) ?? mintRaw : ''
+        const existing = normalizedMint
+          ? await withTimeout(
+              findNonTerminalNftRaffleByPrizeAssetId(normalizedMint),
+              SUPABASE_TIMEOUT_MS,
+              'supabase error'
+            ).catch(() => null)
+          : null
+        return NextResponse.json(
+          {
+            error:
+              'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
+            existing_slug: existing?.slug,
+          },
+          { status: 409 }
+        )
+      }
+      throw createErr
+    }
   } catch (error) {
     console.error('Error creating raffle:', error)
     const err = error as Error & { step?: 'timeout' | 'supabase error' }

@@ -11,12 +11,12 @@
  * Run from repo root:
  *   npm run audit:owl-tiers
  *
- * Requires: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, HELIUS_API_KEY,
+ * Requires: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY, HELIUS_API_KEY,
  *   OWLTOPIA_COLLECTION_ADDRESS (or NEXT_PUBLIC_*), same as production holder checks.
  */
 import { loadEnvConfig } from '@next/env'
 import { createClient } from '@supabase/supabase-js'
-import { HOLDER_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import { HOLDER_FEE_BPS, PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { devSaveApiCredits } from '@/lib/dev-budget'
 
@@ -38,6 +38,7 @@ function creatorKey(row: RaffleRow): string {
 function expectedBpsForReason(reason: string | null): number | null {
   if (reason === 'holder') return HOLDER_FEE_BPS
   if (reason === 'standard') return STANDARD_FEE_BPS
+  if (reason === 'partner_community') return PARTNER_COMMUNITY_FEE_BPS
   return null
 }
 
@@ -64,9 +65,9 @@ async function main() {
   loadEnvConfig(process.cwd())
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY')
     process.exit(1)
   }
 
@@ -98,7 +99,7 @@ async function main() {
   console.log(`Raffle rows: ${rows.length}`)
   console.log(`Concurrency (Helius): ${HOLDER_LOOKUP_CONCURRENCY}\n`)
 
-  const tierByWallet = new Map<string, { feeBps: number; reason: 'holder' | 'standard' }>()
+  const tierByWallet = new Map<string, { feeBps: number; reason: 'holder' | 'standard' | 'partner_community' }>()
   const tierResults = await mapWithConcurrency(walletList, HOLDER_LOOKUP_CONCURRENCY, async (w) => {
     try {
       const tier = await getCreatorFeeTier(w, { skipCache: true, listDisplayOnly: false })
@@ -163,10 +164,12 @@ async function main() {
 
   const currentHolders = walletList.filter((w) => tierByWallet.get(w)?.reason === 'holder')
   const currentStandards = walletList.filter((w) => tierByWallet.get(w)?.reason === 'standard')
+  const currentPartners = walletList.filter((w) => tierByWallet.get(w)?.reason === 'partner_community')
 
   console.log('--- Summary (live holder check, today) ---')
   console.log(`Wallets resolved as holder (3% tier if hosting now): ${currentHolders.length}`)
   console.log(`Wallets resolved as standard (6% tier if hosting now): ${currentStandards.length}`)
+  console.log(`Wallets resolved as partner community (2% tier if hosting now): ${currentPartners.length}`)
 
   console.log('\n--- Internal DB: fee_bps_applied vs fee_tier_reason ---')
   if (bpsMismatch.length === 0) {

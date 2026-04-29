@@ -5,6 +5,7 @@ import {
   DEV_TASK_MAX_SCREENSHOTS_TOTAL,
   getDevTaskScreenshotPathCount,
 } from '@/lib/db/dev-tasks'
+import { readFormDataFileParts } from '@/lib/form-data-file-parts'
 import { DEV_TASK_SCREENSHOT_MAX_FILES, uploadDevTaskScreenshots } from '@/lib/dev-task-storage'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -32,13 +33,7 @@ export async function POST(
     }
 
     const form = await request.formData()
-    const files: Array<{ buffer: Buffer; type: string; name: string }> = []
-    for (const value of form.getAll('screenshots')) {
-      if (value instanceof File && value.size > 0) {
-        const buffer = Buffer.from(await value.arrayBuffer())
-        files.push({ buffer, type: value.type, name: value.name })
-      }
-    }
+    const files = await readFormDataFileParts(form, 'screenshots')
 
     if (files.length === 0) {
       return NextResponse.json({ error: 'Add at least one image' }, { status: 400 })

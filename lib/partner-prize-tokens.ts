@@ -18,6 +18,11 @@ export type PartnerPrizeTokenProgram = 'token2022' | 'spl'
 export interface PartnerPrizeTokenDefinition {
   /** Stored in `raffles.prize_currency` (uppercase). */
   currencyCode: string
+  /**
+   * Optional short label for UI (e.g. create-raffle dropdown). When set, the dropdown can show
+   * "Cane (CANE)" instead of just the ticker.
+   */
+  displayLabel?: string
   mint: string
   tokenProgram: PartnerPrizeTokenProgram
   /** Decimals on mainnet (override if env wrong). */
@@ -53,7 +58,37 @@ const SOL_DEFINITION: PartnerPrizeTokenDefinition = {
   defaultImagePath: '/icon.png',
 }
 
-const PARTNERS: PartnerPrizeTokenDefinition[] = [TRQ_DEFINITION, USDC_DEFINITION, SOL_DEFINITION]
+/** Cane (mainnet SPL). */
+const CANE_MINT_MAINNET = '8fYyHb9KnZHCGAJbwkdfyFri6vZVjpQe9Km3FN3aURUq'
+
+const CANE_DEFINITION: PartnerPrizeTokenDefinition = {
+  currencyCode: 'CANE',
+  displayLabel: 'Cane',
+  mint: CANE_MINT_MAINNET,
+  tokenProgram: 'spl',
+  decimals: 6,
+  defaultImagePath: '/icon.png',
+}
+
+/** Bamboo (mainnet SPL). */
+const BAMBOO_MINT_MAINNET = 'Cndm5E8m1EnCvduCp1EsakUjEw2jKGTUCTa3iL48dSuB'
+
+const BAMBOO_DEFINITION: PartnerPrizeTokenDefinition = {
+  currencyCode: 'BAMBOO',
+  displayLabel: 'Bamboo',
+  mint: BAMBOO_MINT_MAINNET,
+  tokenProgram: 'spl',
+  decimals: 9,
+  defaultImagePath: '/icon.png',
+}
+
+const PARTNERS: PartnerPrizeTokenDefinition[] = [
+  TRQ_DEFINITION,
+  USDC_DEFINITION,
+  SOL_DEFINITION,
+  CANE_DEFINITION,
+  BAMBOO_DEFINITION,
+]
 
 /**
  * When true, the create-raffle token dropdown enables selecting OWL (still requires an OWL row in PARTNERS).

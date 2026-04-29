@@ -14,6 +14,8 @@ export type DiscordIncomingEmbed = {
   url?: string
   color: number
   fields?: { name: string; value: string; inline?: boolean }[]
+  /** Large embed image (HTTPS). Prefer `/api/proxy-image` URLs from `resolveNftPrizeImageForDiscordEmbed`. */
+  image?: { url: string }
   timestamp?: string
 }
 

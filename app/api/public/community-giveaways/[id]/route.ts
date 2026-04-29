@@ -61,6 +61,7 @@ export async function GET(
     return NextResponse.json({
       id: g.id,
       title: g.title,
+      nft_mint_address: g.nft_mint_address,
       description: g.description,
       access_gate: g.access_gate,
       status: g.status,

@@ -78,6 +78,13 @@ export interface DiscordGiveawayPartnerTenant {
   discord_guild_id: string | null
   /** Null until the server owner runs /owltopia-partner webhook (slash). */
   webhook_url: string | null
+  /**
+   * Optional. Same idea as `DISCORD_WEBHOOK_RAFFLE_*` for Owltopia: announce new ticket raffles
+   * hosted by a partner-linked creator, in this Discord.
+   */
+  raffle_webhook_url_created: string | null
+  /** Optional. Winner-draw pings (claims happen on the Owltopia user dashboard). */
+  raffle_webhook_url_winner: string | null
   api_secret_hash: string
   status: DiscordGiveawayPartnerStatus
   active_until: string | null
@@ -100,6 +107,8 @@ export type RaffleStatus =
 
 /** Supported raffle ticket currencies */
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
+
+export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
 
 export interface Raffle {
   id: string
@@ -152,7 +161,7 @@ export interface Raffle {
   prize_deposited_at: string | null
   /** Tx signature when creator deposited NFT to escrow. Used to identify mint when escrow holds multiple NFTs. */
   prize_deposit_tx: string | null
-  /** Set when prize was returned from escrow to creator (admin-only, controlled reasons). */
+  /** Set when prize was returned from escrow to creator (admin, terminal min-threshold flow, or creator retry). */
   prize_returned_at: string | null
   /** Reason for return (includes min_threshold_not_met after terminal extension exhaustion). */
   prize_return_reason: string | null
@@ -160,11 +169,28 @@ export interface Raffle {
   prize_return_tx: string | null
   /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
   creator_is_holder?: boolean
+  /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
+  creator_is_partner?: boolean
+  /**
+   * Enriched at list time for partner creators: `wallet_profiles.display_name` when set, else optional
+   * `partner_community_creators.display_label`. Used for partner badge copy / accessibility.
+   */
+  creator_partner_display_name?: string | null
   /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */
   description_urls_clickable?: boolean
+  /**
+   * When the creator wallet is allowlisted in `partner_community_creators` with a linked
+   * `discord_partner_tenant_id`, the raffle is stamped for partner Discord webhooks.
+   */
+  discord_partner_tenant_id: string | null
+  /**
+   * When true (default), the raffle is included in the public /raffles list and list APIs.
+   * When false, it is for partner Discord / direct link only: still at `/raffles/{slug}` for entry.
+   */
+  list_on_platform: boolean
   /** When creator requested cancellation (pending admin approval). */
   cancellation_requested_at: string | null
   /** When admin accepted cancellation. */
@@ -173,8 +199,15 @@ export interface Raffle {
   cancellation_fee_amount: number | null
   /** Currency of cancellation fee (e.g. SOL, USDC). */
   cancellation_fee_currency: string | null
-  /** full_refund = within 24h; no_refund = after 24h. */
+  /**
+   * full_refund = no post-start cancellation fee paid by host; no_refund = host paid the post-start fee
+   * (recorded on admin accept). Ticket buyers can still get refunds in both cases when treasury processes them.
+   */
   cancellation_refund_policy: 'full_refund' | 'no_refund' | null
+  /** Set when the creator’s on-chain cancellation-fee transfer was verified (post-start raffles). */
+  cancellation_fee_paid_at: string | null
+  /** Solana signature of the cancellation-fee transfer. */
+  cancellation_fee_payment_tx: string | null
   /** On-chain standard for NFT prize (SPL / Token-2022 / Mpl Core). Defaults to 'spl' when null. */
   prize_standard?: PrizeStandard | null
   /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */
@@ -189,6 +222,58 @@ export interface Raffle {
   creator_claimed_at?: string | null
   creator_claim_tx?: string | null
   creator_funds_claim_locked_at?: string | null
+  /** Set when a buyout offer was accepted; no further bids allowed. */
+  buyout_closed_at?: string | null
+}
+
+/** Post-draw buyout bid on an NFT prize (v1: no pre-bids). */
+export type RaffleBuyoutOfferStatus =
+  | 'pending_deposit'
+  | 'active'
+  | 'accepted'
+  | 'expired'
+  | 'refunded'
+  | 'superseded'
+
+export interface RaffleBuyoutOffer {
+  id: string
+  raffle_id: string
+  bidder_wallet: string
+  currency: 'SOL' | 'USDC'
+  amount: number
+  status: RaffleBuyoutOfferStatus
+  deposit_tx_signature: string | null
+  created_at: string
+  activated_at: string | null
+  expires_at: string | null
+  accepted_at: string | null
+  accepted_by_wallet: string | null
+  treasury_fee_bps: number
+  treasury_fee_amount: number | null
+  winner_net_amount: number | null
+  payout_tx_signature: string | null
+  refund_tx_signature: string | null
+  refunded_at: string | null
+}
+
+export interface RaffleOffer {
+  id: string
+  raffle_id: string
+  buyer_wallet: string
+  amount: number
+  currency: RaffleCurrency
+  status: RaffleOfferStatus
+  created_at: string
+  updated_at: string
+  expires_at: string
+  accepted_at: string | null
+  accepted_by_wallet: string | null
+  treasury_fee_bps: number
+  treasury_fee_amount: number | null
+  winner_net_amount: number | null
+  funded_at: string
+  refunded_at: string | null
+  refund_tx_signature: string | null
 }
 
 export interface Entry {
@@ -207,6 +292,13 @@ export interface Entry {
   refunded_at?: string | null
   refund_transaction_signature?: string | null
   refund_lock_started_at?: string | null
+  /** Owltopia referral attribution (active code at purchase time). */
+  referrer_wallet?: string | null
+  referral_code_used?: string | null
+  /** Promotional free ticket via referral (amount_paid 0); confirm with token RPC. */
+  referral_complimentary?: boolean
+  complimentary_confirm_token?: string | null
+  complimentary_token_expires_at?: string | null
 }
 
 export interface OwlVisionScore {

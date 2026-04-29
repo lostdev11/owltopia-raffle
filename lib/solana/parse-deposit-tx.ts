@@ -44,6 +44,28 @@ type TxResponse = {
   }
 }
 
+async function fetchTransactionForParsing(
+  connection: Connection,
+  signature: string
+): Promise<TxResponse | null> {
+  const fetchOptions = [
+    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'confirmed' as const },
+    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'finalized' as const },
+  ]
+  for (const opts of fetchOptions) {
+    try {
+      const tx = (await connection.getTransaction(signature, opts as any)) as TxResponse | null
+      if (tx?.transaction?.message) return tx
+    } catch {
+      // Try the next option.
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  return null
+}
+
 function accountKeyEntryToBase58(k: unknown): string | null {
   if (typeof k === 'string' && k.trim()) return k.trim()
   if (k && typeof k === 'object' && 'pubkey' in k && typeof (k as { pubkey?: string }).pubkey === 'string') {
@@ -132,15 +154,7 @@ export async function sumIncomingSplToEscrowForMint(
     return null
   }
 
-  let tx: TxResponse
-  try {
-    tx = (await connection.getTransaction(signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    })) as TxResponse
-  } catch {
-    return null
-  }
+  const tx = await fetchTransactionForParsing(connection, signature)
   if (!tx?.transaction?.message) return null
 
   const accountKeys = getAccountKeys(tx)
@@ -226,15 +240,7 @@ export async function getMintFromDepositTx(
     return null
   }
 
-  let tx: TxResponse
-  try {
-    tx = (await connection.getTransaction(signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
-    })) as TxResponse
-  } catch {
-    return null
-  }
+  const tx = await fetchTransactionForParsing(connection, signature)
   if (!tx?.transaction?.message) return null
 
   const accountKeys = getAccountKeys(tx)

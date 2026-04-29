@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Eye, ChevronDown, ChevronUp, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction } from 'lucide-react'
+import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -77,25 +78,6 @@ function isoToLocalDatetimeValue(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-interface RafflePendingSummary {
-  raffleId: string
-  raffle: { id: string; slug: string; title: string }
-  pendingEntries: Array<{
-    id: string
-    wallet_address: string
-    ticket_quantity: number
-    transaction_signature: string | null
-    amount_paid: number
-    currency: string
-    created_at: string
-  }>
-  withTx: Array<{ id: string; transaction_signature: string | null }>
-  withoutTx: Array<{ id: string }>
-  currentScore: number
-  potentialScore: number
-  scoreImprovement: number
-}
-
 export default function AdminDashboardPage() {
   const router = useRouter()
   const { publicKey, connected, signMessage: walletSignMessage } = useWallet()
@@ -104,7 +86,7 @@ export default function AdminDashboardPage() {
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | 'raffle_creator' | null>(() => cachedRole)
+  const [adminRole, setAdminRole] = useState<'full' | null>(() => cachedRole)
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -124,15 +106,6 @@ export default function AdminDashboardPage() {
   const [verifyErrorMessage, setVerifyErrorMessage] = useState<string | null>(null)
   const [verifyErrorSuggestion, setVerifyErrorSuggestion] = useState<string | null>(null)
 
-  // Entries to confirm (Owl Vision) state
-  const [entriesToConfirm, setEntriesToConfirm] = useState<{
-    byRaffle: RafflePendingSummary[]
-    summary: { totalPending: number; withTx: number; withoutTx: number; raffleCount: number }
-  } | null>(null)
-  const [loadingEntriesToConfirm, setLoadingEntriesToConfirm] = useState(false)
-  const [verifyingRaffleId, setVerifyingRaffleId] = useState<string | null>(null)
-  const [expandedConfirmRaffles, setExpandedConfirmRaffles] = useState<Set<string>>(new Set())
-  const [removingEntryId, setRemovingEntryId] = useState<string | null>(null)
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
     message?: string
@@ -276,13 +249,6 @@ export default function AdminDashboardPage() {
     runAdminCheck()
   }, [connected, publicKey, runAdminCheck, visibilityTick])
 
-  // Junior admin (raffle_creator) must not see Owl Vision dashboard; redirect to create raffle
-  useEffect(() => {
-    if (isAdmin && sessionReady === true && adminRole === 'raffle_creator') {
-      router.replace('/admin/raffles/new')
-    }
-  }, [isAdmin, sessionReady, adminRole, router])
-
   // Re-check session when connection/admin change or user returns to tab.
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin) {
@@ -403,40 +369,6 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (isAdmin && sessionReady) {
       fetchRestoredEntries()
-    }
-  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
-
-  const fetchEntriesToConfirm = async () => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady) return
-
-    setLoadingEntriesToConfirm(true)
-    try {
-      const response = await fetch(
-        `/api/admin/entries-to-confirm?wallet=${publicKey.toBase58()}`,
-        { credentials: 'include', cache: 'no-store' }
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setEntriesToConfirm({
-          byRaffle: data.byRaffle || [],
-          summary: data.summary || {
-            totalPending: 0,
-            withTx: 0,
-            withoutTx: 0,
-            raffleCount: 0,
-          },
-        })
-      }
-    } catch (error) {
-      console.error('Error fetching entries to confirm:', error)
-    } finally {
-      setLoadingEntriesToConfirm(false)
-    }
-  }
-
-  useEffect(() => {
-    if (isAdmin && sessionReady) {
-      fetchEntriesToConfirm()
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
@@ -778,15 +710,14 @@ export default function AdminDashboardPage() {
       for (let i = 0; i < list.length; i++) {
         if (next.length >= DEV_TASK_SCREENSHOT_MAX_FILES) break
         const file = list[i]
-        const okType = file.type.startsWith('image/')
-        const okName = /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
-        if (!okType && !okName) continue
+        if (file.size < 1) continue
         if (file.size > DEV_TASK_SCREENSHOT_MAX_BYTES) {
           setDevTaskPhotoError(
             `Skipped "${file.name}" — larger than ${DEV_TASK_SCREENSHOT_MAX_BYTES / (1024 * 1024)}MB.`
           )
           continue
         }
+        // Do not filter by MIME/filename here: mobile often sends empty type or odd names; the API validates.
         next.push({ file, url: URL.createObjectURL(file) })
       }
       return next
@@ -946,61 +877,11 @@ export default function AdminDashboardPage() {
         })
       } else {
         setBulkReverifyResult(data)
-        fetchEntriesToConfirm()
       }
     } catch {
       setBulkReverifyResult({ message: 'Network error', errors: [] })
     } finally {
       setBulkReverifyRunning(false)
-    }
-  }
-
-  const handleBatchVerifyRaffle = async (raffleId: string) => {
-    if (!publicKey) return
-
-    setVerifyingRaffleId(raffleId)
-    try {
-      const response = await fetch('/api/admin/verify-entries', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raffleId,
-          adminWallet: publicKey.toBase58(),
-        }),
-      })
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        fetchEntriesToConfirm()
-      }
-    } catch (error) {
-      console.error('Error batch verifying:', error)
-    } finally {
-      setVerifyingRaffleId(null)
-    }
-  }
-
-  const handleRemovePendingEntry = async (entryId: string) => {
-    if (!confirm('Remove this pending entry? It will be deleted and cannot be recovered.')) return
-    setRemovingEntryId(entryId)
-    try {
-      const response = await fetch(`/api/entries/${entryId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (response.ok) {
-        fetchEntriesToConfirm()
-      } else {
-        const data = await response.json().catch(() => ({}))
-        alert(data.error || 'Failed to remove entry')
-      }
-    } catch (error) {
-      console.error('Error removing entry:', error)
-      alert('Failed to remove entry')
-    } finally {
-      setRemovingEntryId(null)
     }
   }
 
@@ -1034,11 +915,10 @@ export default function AdminDashboardPage() {
         // Clear the input on success
         setTxSignature('')
         
-        // If entry was restored, refresh the restored entries and entries-to-confirm lists
+        // If entry was restored, refresh the restored entries list
         if (data.restored) {
           setTimeout(() => {
             fetchRestoredEntries()
-            fetchEntriesToConfirm()
           }, 500)
         }
       }
@@ -1189,19 +1069,22 @@ export default function AdminDashboardPage() {
         </div>
 
         {adminRole === 'full' && (
-          <Card className="mb-8 border-amber-500/25 bg-amber-500/[0.04]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Construction className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="amber"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Construction className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
                 Public maintenance window
-              </CardTitle>
-              <CardDescription>
-                While the window is active, a scrolling banner appears at the top of the site warning that things may
-                not work as expected. Set start and end in your local time; the optional message is included in the
-                banner after the default notice.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              While the window is active, a scrolling banner appears at the top of the site warning that things may
+              not work as expected. Set start and end in your local time; the optional message is included in the
+              banner after the default notice.
+            </CardDescription>
+            <div className="space-y-4">
               {siteMaintError && <p className="text-sm text-destructive">{siteMaintError}</p>}
               {loadingSiteMaint ? (
                 <p className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -1333,31 +1216,34 @@ export default function AdminDashboardPage() {
               ) : (
                 <p className="text-sm text-muted-foreground">Could not load maintenance settings.</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </OwlVisionDisclosure>
         )}
 
         {/* Dev tasks — backlog from Discord / support for platform fixes */}
-        <Card className="mb-8 border-green-500/20 bg-green-500/[0.03]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ListTodo className="h-5 w-5 text-green-500" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="green"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <ListTodo className="h-5 w-5 shrink-0 text-green-500" />
               Dev tasks
-            </CardTitle>
-            <CardDescription>
-              When users report issues in Discord, add a task here so nothing is lost. Open tasks are listed first; mark done when shipped or fixed. Attach screenshots from your phone gallery or desktop files (up to{' '}
-              {DEV_TASK_SCREENSHOT_MAX_FILES} per upload, {DEV_TASK_MAX_SCREENSHOTS_TOTAL} per task).
-              {devTasks.length > 0 && (
-                <span className="block mt-1 text-foreground/80">
-                  {devTasks.filter((t) => t.status === 'open').length} open
-                  {devTasks.filter((t) => t.status === 'done').length > 0
-                    ? ` · ${devTasks.filter((t) => t.status === 'done').length} done`
-                    : ''}
-                </span>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            When users report issues in Discord, add a task here so nothing is lost. Open tasks are listed first; mark done when shipped or fixed. Attach screenshots from your phone gallery or desktop files (up to{' '}
+            {DEV_TASK_SCREENSHOT_MAX_FILES} per upload, {DEV_TASK_MAX_SCREENSHOTS_TOTAL} per task).
+            {devTasks.length > 0 && (
+              <span className="block mt-1 text-foreground/80">
+                {devTasks.filter((t) => t.status === 'open').length} open
+                {devTasks.filter((t) => t.status === 'done').length > 0
+                  ? ` · ${devTasks.filter((t) => t.status === 'done').length} done`
+                  : ''}
+              </span>
+            )}
+          </CardDescription>
+          <div className="space-y-6">
             <div className="space-y-3 rounded-lg border bg-background/60 p-4">
               <p className="text-sm font-medium">Add task</p>
               <div>
@@ -1561,21 +1447,24 @@ export default function AdminDashboardPage() {
               tabIndex={-1}
               onChange={(e) => void onDevTaskAppendSelected(e)}
             />
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
         {/* Projected Revenue - confirmed entries only */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <DollarSign className="h-5 w-5 shrink-0" />
               Projected Revenue
-            </CardTitle>
-            <CardDescription>
-              Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
+          </CardDescription>
+          <div>
             {loadingRevenue ? (
               <p className="text-muted-foreground flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1747,21 +1636,24 @@ export default function AdminDashboardPage() {
             ) : (
               <p className="text-muted-foreground">No revenue data</p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
         {/* Next Rev Share — founder-editable date and total SOL/USDC for homepage */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Coins className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <Coins className="h-5 w-5 shrink-0" />
               Next Rev Share (homepage)
-            </CardTitle>
-            <CardDescription>
-              Set the date and total amounts for the next rev share. Shown on the main page. Not auto-calculated — add and edit as needed.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            Set the date and total amounts for the next rev share. Shown on the main page. Not auto-calculated — add and edit as needed.
+          </CardDescription>
+          <div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
               <div>
                 <Label htmlFor="rev-next-date">Next rev share date</Label>
@@ -1815,21 +1707,24 @@ export default function AdminDashboardPage() {
                 'Save'
               )}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
         {adminRole === 'full' && (
-          <Card className="mb-8 border-amber-500/20 bg-amber-500/[0.03]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Radar className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="amber-soft"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Radar className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
                 Creator Radar
-              </CardTitle>
-              <CardDescription>
-                Per-creator signals to spot raffles that may struggle to sell out or clash with platform rules: min-ticket extensions (deadline extended once when the ticket minimum was not met at end), edits after entries, cancellation requests, blocked purchases, weak sell-through on completed raffles, and pending ticket rows that still need verification.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              Per-creator signals to spot raffles that may struggle to sell out or clash with platform rules: min-ticket extensions (deadline extended once when the ticket minimum was not met at end), edits after entries, cancellation requests, blocked purchases, weak sell-through on completed raffles, and pending ticket rows that still need verification.
+            </CardDescription>
+            <div>
               {loadingCreatorHealth ? (
                 <p className="text-muted-foreground flex items-center gap-2 touch-manipulation min-h-[44px]">
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -1916,25 +1811,28 @@ export default function AdminDashboardPage() {
                   <strong className="text-foreground">Health</strong> is a 0–100 heuristic (higher is better): it down-weights extensions, post-entry edits, moderation flags, cancellations, weak sell-through, and pending verifications. Use it for triage, not as proof of bad behavior.
                 </p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </OwlVisionDisclosure>
         )}
 
         {adminRole === 'full' && (
-          <Card className="mb-8 border-violet-500/20 bg-violet-500/[0.03]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="violet"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Share2 className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
                 Share live raffles to Discord
-              </CardTitle>
-              <CardDescription>
-                Lists raffles that are still active (end time in the future). Post to Discord sends an embed with a direct
-                link to that raffle page. Set <span className="font-mono text-xs">DISCORD_WEBHOOK_LIVE_RAFFLES</span> in
-                env (or use <span className="font-mono text-xs">DISCORD_WEBHOOK_URL</span> as fallback). Winner draws
-                stay on each raffle’s admin edit page.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              Lists raffles that are still active (end time in the future). Post to Discord sends an embed with a direct
+              link to that raffle page. Set <span className="font-mono text-xs">DISCORD_WEBHOOK_LIVE_RAFFLES</span> in
+              env (or use <span className="font-mono text-xs">DISCORD_WEBHOOK_URL</span> as fallback). Winner draws
+              stay on each raffle’s admin edit page.
+            </CardDescription>
+            <div className="space-y-4">
               <Button
                 type="button"
                 variant="outline"
@@ -1970,7 +1868,7 @@ export default function AdminDashboardPage() {
                     liveDiscordMessage.xTemplates.length > 0 && (
                       <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
                         <p className="text-xs text-muted-foreground">
-                          One-click X templates for "{liveDiscordMessage.raffleTitle ?? 'this raffle'}":
+                          One-click X templates for &quot;{liveDiscordMessage.raffleTitle ?? 'this raffle'}&quot;:
                         </p>
                         <div className="flex flex-wrap gap-2">
                           {liveDiscordMessage.xTemplates.map((template) => (
@@ -2068,8 +1966,8 @@ export default function AdminDashboardPage() {
                     </table>
                   </div>
                 ))}
-            </CardContent>
-          </Card>
+            </div>
+          </OwlVisionDisclosure>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
@@ -2159,6 +2057,33 @@ export default function AdminDashboardPage() {
                 </Link>
               </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/partner-creators">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <HeartHandshake className="h-5 w-5" />
+                      Partner program creators
+                    </CardTitle>
+                    <CardDescription>
+                      Allowlist creator wallets for the 2% partner fee tier and partner raffles spotlight — add, edit,
+                      activate, or remove without running SQL.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/council">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Landmark className="h-5 w-5" />
+                      Owl Council
+                    </CardTitle>
+                    <CardDescription>
+                      Moderate proposal status. OWL holders create proposals from the site; votes are OWL-weighted.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/users">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -2202,18 +2127,20 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Transaction Verification Tool */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
               Verify & Restore Transaction
-            </CardTitle>
-            <CardDescription>
-              Enter a transaction signature to verify and restore a ticket entry
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            Enter a transaction signature to verify and restore a ticket entry
+          </CardDescription>
+          <div className="space-y-4">
               <div>
                 <Label htmlFor="tx-signature">Transaction Signature</Label>
                 <div className="flex gap-2 mt-2">
@@ -2303,22 +2230,24 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
               )}
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
               Bulk re-verify stuck tickets
-            </CardTitle>
-            <CardDescription>
-              One click: re-run verification for pending entries that already have a tx signature (any raffle
-              status, including old USDC / pre-escrow). Uses up to 60 rows per run — repeat until no more confirm.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            One click: re-run verification for pending entries that already have a tx signature (any raffle
+            status, including old USDC / pre-escrow). Uses up to 60 rows per run — repeat until no more confirm.
+          </CardDescription>
+          <div className="space-y-4">
             <div className="flex flex-col sm:flex-row flex-wrap gap-2">
               <Button
                 type="button"
@@ -2383,22 +2312,25 @@ export default function AdminDashboardPage() {
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
-        <Card className="mb-8 border-teal-500/25 bg-teal-500/[0.04]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Banknote className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="teal"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <Banknote className="h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400" />
               Manual ticket refunds
-            </CardTitle>
-            <CardDescription>
-              After you send refunds from treasury or funds escrow, open a raffle below, select ticket rows, and paste
-              the payout transaction signature so buyers see refunded/sent on their dashboards. Same tool as on each
-              raffle&apos;s Owl Vision tab.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            After you send refunds from treasury or funds escrow, open a raffle below, select ticket rows, and paste
+            the payout transaction signature so buyers see refunded/sent on their dashboards. Same tool as on each
+            raffle&apos;s Owl Vision tab.
+          </CardDescription>
+          <div>
             {loadingPendingManualRefunds ? (
               <p className="text-center text-muted-foreground py-4">Loading…</p>
             ) : pendingManualRefundRaffles.length === 0 ? (
@@ -2435,169 +2367,25 @@ export default function AdminDashboardPage() {
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Entries to Confirm - Owl Vision Section */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5" />
-              Entries to Confirm
-            </CardTitle>
-            <CardDescription>
-              Pending entries that improve Owl Vision scores when verified
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingEntriesToConfirm ? (
-              <p className="text-center text-muted-foreground py-4">Loading...</p>
-            ) : !entriesToConfirm || entriesToConfirm.summary.totalPending === 0 ? (
-              <p className="text-center text-muted-foreground py-4">All entries confirmed</p>
-            ) : (
-              <div className="space-y-4">
-                {entriesToConfirm.byRaffle.map((row) => {
-                  const isExpanded = expandedConfirmRaffles.has(row.raffleId)
-                  const toggleExpand = () => {
-                    setExpandedConfirmRaffles((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(row.raffleId)) next.delete(row.raffleId)
-                      else next.add(row.raffleId)
-                      return next
-                    })
-                  }
-                  return (
-                    <div
-                      key={row.raffleId}
-                      className="rounded-lg border overflow-hidden"
-                    >
-                      <div
-                        className="flex items-center justify-between gap-4 p-3 cursor-pointer hover:bg-muted/50"
-                        onClick={toggleExpand}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            toggleExpand()
-                          }
-                        }}
-                        aria-expanded={isExpanded}
-                        aria-label={isExpanded ? `Collapse ${row.raffle.title}` : `Expand ${row.raffle.title}`}
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {isExpanded ? (
-                            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          )}
-                          <Link
-                            href={`/admin/raffles/${row.raffleId}`}
-                            className="font-medium hover:underline text-sm truncate"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {row.raffle.title}
-                          </Link>
-                        </div>
-                        <span className="text-sm text-muted-foreground shrink-0">
-                          {row.pendingEntries.length} pending
-                        </span>
-                        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {row.withTx.length > 0 ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleBatchVerifyRaffle(row.raffleId)}
-                              disabled={verifyingRaffleId === row.raffleId}
-                            >
-                              {verifyingRaffleId === row.raffleId ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <>
-                                  <CheckCircle2 className="h-4 w-4 mr-1" />
-                                  Verify
-                                </>
-                              )}
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              Use TX tool above
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {isExpanded && (
-                        <div className="border-t bg-muted/30 px-3 py-2 text-xs space-y-1">
-                          {row.pendingEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1"
-                            >
-                              <span className="font-mono text-muted-foreground break-all" title={entry.wallet_address}>
-                                {entry.wallet_address}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {entry.ticket_quantity} tickets · {entry.amount_paid} {entry.currency}
-                              </span>
-                              {entry.transaction_signature ? (
-                                <a
-                                  href={`https://solscan.io/tx/${entry.transaction_signature}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-primary hover:underline font-mono"
-                                >
-                                  Solscan ↗
-                                </a>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400">
-                                  No TX — use TX tool above
-                                </span>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleRemovePendingEntry(entry.id)
-                                }}
-                                disabled={removingEntryId === entry.id}
-                              >
-                                {removingEntryId === entry.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                                    Remove
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
         {/* Restored Entries Section */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <RotateCcw className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <RotateCcw className="h-5 w-5 shrink-0" />
               Restored Entries
-            </CardTitle>
-            <CardDescription>
-              View all raffle entries that have been restored via transaction verification. 
-              This helps track wallets with multiple failed entries.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            View all raffle entries that have been restored via transaction verification.
+            This helps track wallets with multiple failed entries.
+          </CardDescription>
+          <div>
             {loadingRestored ? (
               <p className="text-center text-muted-foreground py-4">Loading restored entries...</p>
             ) : restoredEntries.length === 0 ? (
@@ -2744,21 +2532,22 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
 
         {/* Deleted Entries Section */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Trash2 className="h-5 w-5" />
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <Trash2 className="h-5 w-5 shrink-0" />
               Deleted Entries
-            </CardTitle>
-            <CardDescription>
-              View all raffle entries that have been deleted
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">View all raffle entries that have been deleted</CardDescription>
+          <div>
             {loadingDeleted ? (
               <p className="text-center text-muted-foreground py-4">Loading deleted entries...</p>
             ) : deletedEntries.length === 0 ? (
@@ -2819,8 +2608,8 @@ export default function AdminDashboardPage() {
                 </table>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </OwlVisionDisclosure>
       </div>
     </div>
   )

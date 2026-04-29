@@ -9,7 +9,7 @@
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
  * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -18,8 +18,22 @@ import { RaffleCard } from '@/components/RaffleCard'
 import { MyEntriesList } from '@/components/MyEntriesList'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Raffle, Entry } from '@/lib/types'
-import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { Eye, Shield, Megaphone, Flame, Trophy, Ticket, PlusCircle, Medal, Loader2, Crown, ShoppingCart, Gift } from 'lucide-react'
+import { normalizeRaffleTicketCurrency, type RaffleProfitInfo } from '@/lib/raffle-profit'
+import {
+  Eye,
+  Shield,
+  Megaphone,
+  Flame,
+  Trophy,
+  Ticket,
+  PlusCircle,
+  Medal,
+  Loader2,
+  Crown,
+  ShoppingCart,
+  Gift,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnnouncementsBlock, type AnnouncementItem } from '@/components/AnnouncementsBlock'
@@ -33,8 +47,26 @@ import {
   CommunityGiveawayBrowseCard,
   type CommunityGiveawayBrowseItem,
 } from '@/components/CommunityGiveawayBrowseCard'
+import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
+import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
+import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
+import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
+
+/**
+ * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: rows that are listed on-platform,
+ * owned by `wallet`, or unlisted crypto/SPL/USDC prizes (not unlisted NFT link-only rows).
+ */
+function supabaseBrowseListOr(wallet: string | null): string {
+  const w = wallet?.trim() || ''
+  const parts = ['list_on_platform.eq.true']
+  if (w) {
+    parts.push(`created_by.eq.${w}`, `creator_wallet.eq.${w}`)
+  }
+  parts.push('and(list_on_platform.eq.false,or(prize_type.is.null,prize_type.neq.nft))')
+  return parts.join(',')
+}
 
 interface RafflesPageClientProps {
   activeRafflesWithEntries: Array<{ raffle: Raffle; entries: Entry[] }>
@@ -47,6 +79,8 @@ interface RafflesPageClientProps {
   initialError?: { message: string; code?: string }
   /** Total raffles returned by server (for debug panel) */
   rafflesTotalCount?: number
+  /** Partner community creator wallets (2% fee tier); used for tab + carousel + badges */
+  partnerCreatorWallets?: string[]
 }
 
 function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntries[]; pausedPending: RaffleWithEntries[]; future: RaffleWithEntries[]; past: RaffleWithEntries[] } {
@@ -91,22 +125,42 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
   return { active, pausedPending, future, past }
 }
 
+/** Scheduled / opening soon: open, no winner yet, prize not in escrow, entry deadline not passed (if set). */
+function isPendingFutureCommunityGiveaway(g: CommunityGiveawayBrowseItem, now: Date): boolean {
+  if (g.status !== 'open' || g.winnerDrawn || g.prizeDeposited) return false
+  const nowMs = now.getTime()
+  if (g.ends_at) {
+    const endMs = new Date(g.ends_at).getTime()
+    if (!Number.isNaN(endMs) && endMs <= nowMs) return false
+  }
+  return true
+}
+
 type RaffleWithEntries = { raffle: Raffle; entries: Entry[] }
 type RaffleWithEntriesAndProfit = RaffleWithEntries & { profitInfo?: RaffleProfitInfo }
 
-function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
+/** Stable empty ref so `?? []` does not create a new array every render (prevents RafflesList sync effect / max update depth). */
+const EMPTY_RAFFLE_BUCKET: RaffleWithEntries[] = []
+
+function PastRafflesCarousel({
+  items,
+  partnerWalletSet,
+}: {
+  items: RaffleWithEntries[]
+  partnerWalletSet?: Set<string>
+}) {
   const list = items ?? []
   const [index, setIndex] = useState(0)
   const [rotationVersion, setRotationVersion] = useState(0)
   const lastNavAtRef = useRef(0)
   const total = list.length
 
-  const clampIndex = (value: number) => {
+  const clampIndex = useCallback((value: number) => {
     if (total === 0) return 0
     if (value < 0) return total - 1
     if (value >= total) return 0
     return value
-  }
+  }, [total])
 
   // Auto-advance through past raffles when there is more than one. Must run unconditionally (Rules of Hooks).
   useEffect(() => {
@@ -115,7 +169,7 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
       setIndex((prev) => clampIndex(prev + 1))
     }, 6000)
     return () => clearInterval(id)
-  }, [total, rotationVersion])
+  }, [total, rotationVersion, clampIndex])
 
   if (total === 0) return null
 
@@ -174,6 +228,10 @@ function PastRafflesCarousel({ items }: { items: RaffleWithEntries[] }) {
           size="small"
           section="past"
           priority
+          isPartnerCommunity={(() => {
+            const w = (current.raffle.creator_wallet || current.raffle.created_by || '').trim()
+            return w ? partnerWalletSet?.has(w) ?? false : false
+          })()}
         />
       </div>
     </div>
@@ -213,6 +271,23 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
   return m.includes('503') || m.includes('service unavailable')
 }
 
+type RafflesPageTab =
+  | 'all'
+  | 'partner-raffles'
+  | 'giveaways'
+  | 'my-entries'
+  | 'owl-vision'
+  | 'announcements'
+  | 'leaderboard'
+
+/** URL ?tab=… for deep links; must stay in sync with tab buttons below. */
+function tabFromSearchParams(sp: { get(name: string): string | null }): RafflesPageTab {
+  const t = sp.get('tab')
+  if (t === 'giveaways' || t === 'giveaway') return 'giveaways'
+  if (t === 'partners' || t === 'partner' || t === 'partner-raffles') return 'partner-raffles'
+  return 'all'
+}
+
 export function RafflesPageClient({
   activeRafflesWithEntries,
   pausedPendingRafflesWithEntries,
@@ -221,6 +296,7 @@ export function RafflesPageClient({
   fetchStatus = 'success',
   initialError,
   rafflesTotalCount = 0,
+  partnerCreatorWallets = [],
 }: RafflesPageClientProps) {
   const featuredCardTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   // Defensive: coerce null/undefined to [] so we never read .length on null (e.g. after serialization)
@@ -285,6 +361,12 @@ export function RafflesPageClient({
    */
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Admins already get the authoritative server-rendered list (includes pending moderation items).
+    // Avoid client-side wallet fallback overriding that list with narrower visibility.
+    if (viewerIsAdmin) {
+      setClientBuckets(null)
+      return
+    }
     if (!connected || !wallet || !isSupabaseConfigured()) {
       setClientBuckets(null)
       return
@@ -292,16 +374,22 @@ export function RafflesPageClient({
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error } = await supabase
+        const listQ = supabase
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-          .order('created_at', { ascending: false })
+        // Parity with server REST browse rules (include unlisted partner SPL/crypto, not link-only NFT).
+        const listWithVisibility =
+          viewerIsAdmin
+            ? listQ
+            : listQ.or(supabaseBrowseListOr(wallet || null))
+        const { data, error } = await listWithVisibility.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
         const list = (data || []) as Partial<Raffle>[]
         const normalized = list.map((r: Partial<Raffle>) => ({
           ...r,
+          currency: normalizeRaffleTicketCurrency(r.currency as string | null | undefined),
           prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
           nft_mint_address: r.nft_mint_address ?? null,
           nft_collection_name: r.nft_collection_name ?? null,
@@ -321,8 +409,7 @@ export function RafflesPageClient({
     }
   }, [connected, wallet, viewerIsAdmin])
 
-  type Tab = 'all' | 'giveaways' | 'my-entries' | 'owl-vision' | 'announcements' | 'leaderboard'
-  const [tab, setTab] = useState<Tab>('all')
+  const [tab, setTab] = useState<RafflesPageTab>(() => tabFromSearchParams(searchParams))
   const [giveawaysList, setGiveawaysList] = useState<CommunityGiveawayBrowseItem[] | null>(null)
   const [giveawaysLoading, setGiveawaysLoading] = useState(false)
   const [giveawaysError, setGiveawaysError] = useState<string | null>(null)
@@ -341,10 +428,12 @@ export function RafflesPageClient({
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [leaderboardDisplayNames, setLeaderboardDisplayNames] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    const t = searchParams.get('tab')
-    if (t === 'giveaways' || t === 'giveaway') setTab('giveaways')
-  }, [searchParams])
+  const tabQueryKey = searchParams.get('tab') ?? ''
+  useLayoutEffect(() => {
+    setTab(tabFromSearchParams(searchParams))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keep this keyed to tabQueryKey only.
+    // `searchParams` by identity would reset Owl Vision / Leaderboard after in-app tab clicks.
+  }, [tabQueryKey])
 
   const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
     const touch = e.touches[0]
@@ -391,7 +480,7 @@ export function RafflesPageClient({
   useEffect(() => {
     if (tab !== 'leaderboard') return
     setLeaderboardLoading(true)
-    fetch('/api/leaderboard', { cache: 'no-store' })
+    fetch('/api/leaderboard')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
       .then((json: Record<string, unknown>) => {
         const { period, ...rest } = json
@@ -467,11 +556,12 @@ export function RafflesPageClient({
       if (!isSupabaseConfigured() || cancelled) return
       try {
         // Direct browser→Supabase fetch; often works when server→Supabase times out
-        const { data, error } = await supabase
+        const listQ = supabase
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-          .order('created_at', { ascending: false })
+        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr(wallet || null))
+        const { data, error } = await q.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
         const list = (data || []) as Partial<Raffle>[]
@@ -545,35 +635,80 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected])
+  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected, serverTime])
 
-  const useWalletVisibilityBuckets = Boolean(connected && wallet && clientBuckets)
+  const useWalletVisibilityBuckets = Boolean(!viewerIsAdmin && connected && wallet && clientBuckets)
   const active = useWalletVisibilityBuckets
     ? (clientBuckets!.active)
     : serverActive.length > 0
       ? serverActive
-      : (clientBuckets?.active ?? [])
+      : (clientBuckets?.active ?? EMPTY_RAFFLE_BUCKET)
   const pausedPending = useWalletVisibilityBuckets
     ? clientBuckets!.pausedPending
     : serverPausedPending.length > 0
       ? serverPausedPending
-      : (clientBuckets?.pausedPending ?? [])
+      : (clientBuckets?.pausedPending ?? EMPTY_RAFFLE_BUCKET)
   const future = useWalletVisibilityBuckets
     ? clientBuckets!.future
     : serverFuture.length > 0
       ? serverFuture
-      : (clientBuckets?.future ?? [])
+      : (clientBuckets?.future ?? EMPTY_RAFFLE_BUCKET)
   const past = useWalletVisibilityBuckets
     ? clientBuckets!.past
     : serverPast.length > 0
       ? serverPast
-      : (clientBuckets?.past ?? [])
+      : (clientBuckets?.past ?? EMPTY_RAFFLE_BUCKET)
   const allRafflesFlat: Raffle[] = [
     ...active.map((item) => item.raffle),
     ...pausedPending.map((item) => item.raffle),
     ...future.map((item) => item.raffle),
     ...past.map((item) => item.raffle),
   ]
+
+  const partnerWalletSet = useMemo(
+    () => new Set((partnerCreatorWallets ?? []).map((w) => w.trim()).filter(Boolean)),
+    [partnerCreatorWallets]
+  )
+
+  const partnerOnly = tab === 'partner-raffles'
+  /** Match RafflesList / RaffleCard: DB flag or allowlisted partner wallet. */
+  const isPartnerCommunityRaffle = useCallback(
+    (raffle: Raffle) => {
+      const w = (raffle.creator_wallet || raffle.created_by || '').trim()
+      return (
+        raffle.creator_is_partner === true ||
+        Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+        (w ? partnerWalletSet.has(w) : false)
+      )
+    },
+    [partnerWalletSet]
+  )
+  /** Partner tab: only community partner raffles. Main tab: show all raffles. */
+  const filterPartnerBucket = useCallback(
+    (items: RaffleWithEntries[]) => {
+      if (partnerOnly) {
+        return items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle))
+      }
+      return items
+    },
+    [partnerOnly, isPartnerCommunityRaffle]
+  )
+
+  const activeView = useMemo(() => filterPartnerBucket(active), [active, filterPartnerBucket])
+  const pausedPendingView = useMemo(() => filterPartnerBucket(pausedPending), [pausedPending, filterPartnerBucket])
+  const futureView = useMemo(() => filterPartnerBucket(future), [future, filterPartnerBucket])
+  const pastView = useMemo(() => filterPartnerBucket(past), [past, filterPartnerBucket])
+
+  const partnerFeaturedActive = useMemo(
+    () => active.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)),
+    [active, isPartnerCommunityRaffle]
+  )
+
+  const isEmptyPartnerView =
+    activeView.length === 0 &&
+    pausedPendingView.length === 0 &&
+    futureView.length === 0 &&
+    pastView.length === 0
 
   // Client-only logging: only when ?debug=1. No secrets (no env, no full keys).
   useEffect(() => {
@@ -593,8 +728,10 @@ export function RafflesPageClient({
 
   // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
   useEffect(() => {
-    if (tab !== 'all') return
+    if (tab !== 'all' && tab !== 'partner-raffles') return
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
       router.refresh()
     }, RAFFLES_PAGE_SERVER_REFRESH_MS)
     return () => clearInterval(interval)
@@ -602,7 +739,7 @@ export function RafflesPageClient({
 
   // Refresh when user returns to the tab so threshold/raffle edits are visible
   useEffect(() => {
-    if (tab !== 'all') return
+    if (tab !== 'all' && tab !== 'partner-raffles') return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const handler = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -627,7 +764,7 @@ export function RafflesPageClient({
     let cancelled = false
     setGiveawaysLoading(true)
     setGiveawaysError(null)
-    fetch('/api/public/community-giveaways', { cache: 'no-store' })
+    fetch('/api/public/community-giveaways')
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
         if (cancelled) return
@@ -654,6 +791,30 @@ export function RafflesPageClient({
     }
   }, [tab])
 
+  const giveawaysBuckets = useMemo(() => {
+    if (!giveawaysList || giveawaysList.length === 0) {
+      return {
+        pending: [] as CommunityGiveawayBrowseItem[],
+        main: [] as CommunityGiveawayBrowseItem[],
+      }
+    }
+    const pending: CommunityGiveawayBrowseItem[] = []
+    const main: CommunityGiveawayBrowseItem[] = []
+    for (const g of giveawaysList) {
+      if (isPendingFutureCommunityGiveaway(g, serverTime)) pending.push(g)
+      else main.push(g)
+    }
+    pending.sort((a, b) => {
+      const aEnd = a.ends_at ? new Date(a.ends_at).getTime() : Number.POSITIVE_INFINITY
+      const bEnd = b.ends_at ? new Date(b.ends_at).getTime() : Number.POSITIVE_INFINITY
+      const safe = (t: number) => (Number.isNaN(t) ? Number.POSITIVE_INFINITY : t)
+      const dr = safe(aEnd) - safe(bEnd)
+      if (dr !== 0) return dr
+      return new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    })
+    return { pending, main }
+  }, [giveawaysList, serverTime])
+
   const isEmpty = active.length === 0 && pausedPending.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
   const recoveredFromError =
@@ -673,6 +834,7 @@ export function RafflesPageClient({
 
   return (
   <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4">
+      <RaffleOwlPlayer enabled />
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
@@ -694,59 +856,19 @@ export function RafflesPageClient({
       )}
 
       <div className="mb-6 sm:mb-8">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 bg-gradient-to-r from-white via-green-400 to-green-300 bg-clip-text text-transparent drop-shadow-lg tracking-tight">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 tracking-tight text-emerald-950 drop-shadow-sm dark:bg-gradient-to-r dark:from-white dark:via-green-400 dark:to-green-300 dark:bg-clip-text dark:text-transparent dark:drop-shadow-lg">
           {PLATFORM_NAME}
         </h1>
-        <p className="text-base sm:text-lg font-medium tracking-wide bg-gradient-to-r from-gray-300 via-green-400 to-gray-300 bg-clip-text text-transparent">
+        <p className="text-base sm:text-lg font-medium tracking-wide text-foreground/90 dark:bg-gradient-to-r dark:from-gray-300 dark:via-green-400 dark:to-gray-300 dark:bg-clip-text dark:text-transparent">
           Trusted raffles with full transparency. Every entry verified on-chain.
         </p>
         {tab === 'all' && topProfitableActive.length > 0 && (
-          <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {topProfitableActive.slice(0, 3).map(({ raffle, profitInfo }) => {
-              const threshold = profitInfo?.threshold ?? null
-              const cur = profitInfo?.thresholdCurrency ?? raffle.currency
-              let revenueValue: number | null = null
-              if (profitInfo) {
-                if (profitInfo.thresholdCurrency === 'USDC') revenueValue = profitInfo.revenue.usdc
-                else if (profitInfo.thresholdCurrency === 'SOL') revenueValue = profitInfo.revenue.sol
-                else if (profitInfo.thresholdCurrency === 'OWL') revenueValue = profitInfo.revenue.owl
-              }
-              return (
-                <Link
-                  key={raffle.id}
-                  href={`/raffles/${raffle.slug}`}
-                  className="relative overflow-hidden rounded-xl border border-emerald-400/70 bg-gradient-to-br from-emerald-500/15 via-emerald-400/5 to-transparent shadow-[0_0_25px_rgba(16,185,129,0.7)] px-3 py-3 sm:px-4 sm:py-4 hover:border-emerald-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.85)] transition-all cursor-pointer"
-                  onTouchStart={handleFeaturedCardTouchStart}
-                  onTouchMove={handleFeaturedCardTouchMove}
-                  onTouchEnd={handleFeaturedCardTouchEnd}
-                >
-                  <div className="pointer-events-none absolute -inset-px bg-[radial-gradient(circle_at_0_0,rgba(74,222,128,0.35),transparent_55%),radial-gradient(circle_at_100%_0,rgba(16,185,129,0.4),transparent_50%)] opacity-70" />
-                  <div className="relative flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm sm:text-base font-semibold text-emerald-50">
-                        {raffle.title}
-                      </p>
-                      <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-emerald-200">
-                        Over threshold
-                      </span>
-                    </div>
-                    {revenueValue != null && (
-                      <p className="text-[11px] sm:text-xs text-emerald-100/80">
-                        Revenue:{' '}
-                        <span className="font-semibold">
-                          {revenueValue.toFixed(cur === 'USDC' ? 2 : 4)} {cur}
-                        </span>{' '}
-                        · {raffle.prize_type === 'nft' ? 'Floor' : 'Threshold'}:{' '}
-                        <span className="font-semibold">
-                          {threshold != null ? threshold.toFixed(cur === 'USDC' ? 2 : 4) : '0.0000'} {cur}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
+          <RaffleOverThresholdFlexShowcase
+            items={topProfitableActive}
+            onFeaturedTouchStart={handleFeaturedCardTouchStart}
+            onFeaturedTouchMove={handleFeaturedCardTouchMove}
+            onFeaturedTouchEnd={handleFeaturedCardTouchEnd}
+          />
         )}
         {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
         <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch]">
@@ -759,7 +881,19 @@ export function RafflesPageClient({
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            All raffles
+            Main
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('partner-raffles')}
+            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
+              tab === 'partner-raffles'
+                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Users className="h-4 w-4 shrink-0" aria-hidden />
+            Partner raffles
           </button>
           <button
             type="button"
@@ -830,7 +964,7 @@ export function RafflesPageClient({
       </div>
 
       {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
-      {hasError && tab === 'all' && (
+      {hasError && (tab === 'all' || tab === 'partner-raffles') && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showPausedMessage ? (
@@ -872,7 +1006,7 @@ export function RafflesPageClient({
       )}
 
       {/* Main content: All raffles tab hidden on fetch error; other tabs still render. */}
-      {(!hasError || tab !== 'all') && (
+      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles')) && (
         <>
           {tab === 'giveaways' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -898,81 +1032,130 @@ export function RafflesPageClient({
               {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length === 0 && (
                 <p className="text-muted-foreground py-8">No public giveaways right now. Check back soon.</p>
               )}
-              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
-                <ul
-                  className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
-                  role="list"
-                >
-                  {giveawaysList.map((g, i) => (
-                    <li key={g.id} className="min-w-0">
-                      <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
-                    </li>
-                  ))}
-                </ul>
+              {!giveawaysLoading && !giveawaysError &&
+                giveawaysList &&
+                giveawaysList.length > 0 &&
+                giveawaysBuckets.pending.length > 0 && (
+                  <section className="space-y-4" aria-labelledby="giveaways-pending-heading">
+                    <div className="max-w-3xl space-y-1">
+                      <h3 id="giveaways-pending-heading" className="text-lg font-semibold tracking-tight">
+                        Pending giveaways
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        Scheduled or opening soon — the prize NFT is not verified in escrow yet. Entries open once the
+                        deposit confirms; dates below show boost and entry deadlines when set.
+                      </p>
+                    </div>
+                    <ul
+                      className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                      role="list"
+                    >
+                      {giveawaysBuckets.pending.map((g, i) => (
+                        <li key={g.id} className="min-w-0">
+                          <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && giveawaysBuckets.main.length > 0 && (
+                <section className="space-y-4" aria-labelledby="giveaways-live-heading">
+                  {giveawaysBuckets.pending.length > 0 ? (
+                    <div className="max-w-3xl">
+                      <h3 id="giveaways-live-heading" className="text-lg font-semibold tracking-tight">
+                        Open giveaways
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Join now (sign in on the giveaway page), apply OWL boosts before the boost deadline, and watch for
+                        the draw after entries close.
+                      </p>
+                    </div>
+                  ) : null}
+                  <ul
+                    className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
+                    role="list"
+                  >
+                    {giveawaysBuckets.main.map((g, i) => (
+                      <li key={g.id} className="min-w-0">
+                        <CommunityGiveawayBrowseCard
+                          g={g}
+                          priorityImage={giveawaysBuckets.pending.length === 0 && i === 0}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               )}
             </div>
           ) : tab === 'owl-vision' ? (
-            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-6">
-              <Card className="border-green-500/30 bg-green-500/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Eye className="h-5 w-5 text-green-500" />
+            <div className="mb-8 sm:mb-12 w-full min-w-0 max-w-3xl space-y-3">
+              <OwlVisionDisclosure
+                variant="accent"
+                defaultOpen
+                contentClassName="text-sm text-muted-foreground"
+                title={
+                  <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                    <Eye className="h-5 w-5 shrink-0 text-green-500" />
                     What is Owl Vision?
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-muted-foreground">
+                  </span>
+                }
+              >
+                <div className="space-y-2">
                   <p>
                     Owl Vision is a <strong className="text-foreground">trust score (0–100)</strong> shown on each raffle. It helps you see how transparent and fair a raffle is — before you buy a ticket.
                   </p>
                   <p>
                     We believe on-chain raffles should be verifiable. Owl Vision summarizes three things that matter for trust: verified payments, wallet diversity, and time integrity.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Verified Payments (up to 60 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Verified Payments (up to 60 points)</span>}
+              >
+                <p>
                   What share of entries have been confirmed by on-chain verification? A high percentage means most tickets are backed by real, verified transactions.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Wallet Diversity (up to 30 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Wallet Diversity (up to 30 points)</span>}
+              >
+                <p>
                   Are many different wallets participating, or is it a few wallets with lots of tickets? Higher diversity suggests a broader, more organic participation.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Time Integrity (up to 10 points)</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+              <OwlVisionDisclosure
+                contentClassName="text-sm text-muted-foreground"
+                title={<span className="text-base font-semibold tracking-tight">Time Integrity (up to 10 points)</span>}
+              >
+                <p>
                   Was the raffle edited after people had already entered? If not, the raffle gets full integrity points; if it was edited after entries, it gets fewer points so you&apos;re aware.
-                </CardContent>
-              </Card>
+                </p>
+              </OwlVisionDisclosure>
 
-              <Card className="border-green-500/30 bg-green-500/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Shield className="h-4 w-4 text-green-500" />
+              <OwlVisionDisclosure
+                variant="accent"
+                contentClassName="text-sm text-muted-foreground"
+                title={
+                  <span className="flex items-center gap-2 text-base font-semibold tracking-tight">
+                    <Shield className="h-4 w-4 shrink-0 text-green-500" />
                     How to read the score
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground space-y-2">
+                  </span>
+                }
+              >
+                <div className="space-y-2">
                   <p>
                     Hover or tap the <strong className="text-foreground">Owl Vision</strong> badge on any raffle card to see the breakdown. On a raffle&apos;s detail page, use the <strong className="text-foreground">Owl Vision</strong> tab for the full breakdown.
                   </p>
                   <p>
                     A higher score means more verified entries, better diversity, and no (or minimal) edits after entries — all signals of a trustworthy raffle.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </OwlVisionDisclosure>
 
               <p className="text-sm text-muted-foreground pt-2">
                 <Link href="/how-it-works" className="text-green-500 hover:underline">How it works</Link> — full guide to raffles, winner selection, and Owl Vision.
@@ -1144,85 +1327,170 @@ export function RafflesPageClient({
                 </div>
               )}
             </div>
-          ) : (
+          ) : (tab === 'all' || tab === 'partner-raffles') ? (
+            partnerOnly && isEmptyPartnerView ? (
+              <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
+                {clientFetchStarted && !clientBuckets && !clientFetchError ? (
+                  <p className="text-xl text-muted-foreground">Loading raffles…</p>
+                ) : (
+                  <>
+                    <p className="text-xl text-muted-foreground mb-4">No partner raffles to show yet</p>
+                    <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                      Raffles from verified partner communities (2% platform fee on tickets). See the{' '}
+                      <Link
+                        href="/partner-program"
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
+                      >
+                        Owltopia Partner Program
+                      </Link>
+                      {' '}or switch to{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('all')}
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                      >
+                        Main
+                      </button>{' '}
+                      to see non-partner listings, or the{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('partner-raffles')}
+                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                      >
+                        Partner raffles
+                      </button>{' '}
+                      tab.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
+                    >
+                      Refresh
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
             <>
+              {partnerOnly && partnerFeaturedActive.length > 0 && (
+                <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
+              )}
+              {partnerOnly && (
+                <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+                  Only raffles from verified partner community hosts (2% platform fee on tickets).{' '}
+                  <Link href="/partner-program" className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
+                    Partner program
+                  </Link>
+                  . Use the Main tab for the rest of the site&apos;s raffles, or the{' '}
+                  <Link
+                    href="/partners/dashboard"
+                    className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
+                  >
+                    partner hub
+                  </Link>
+                  {` `}if you host for a community.
+                </p>
+              )}
           <div className="mb-8 sm:mb-12 w-full min-w-0">
-            {active.length > 0 ? (
+            {activeView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={active}
-                title="Active Raffles"
+                rafflesWithEntries={activeView}
+                title={partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
                 section="active"
                 serverNow={serverTime}
-                onTopProfitableChange={setTopProfitableActive}
+                onTopProfitableChange={partnerOnly ? undefined : setTopProfitableActive}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Active Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
+                </h2>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No active raffles at the moment. Check back soon!</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly
+                      ? 'No active raffles from partner communities right now.'
+                      : 'No active raffles at the moment. Check back soon!'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            {future.length > 0 ? (
+            {futureView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={future}
-                title="Future Raffles"
+                rafflesWithEntries={futureView}
+                title={partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
                 section="future"
                 serverNow={serverTime}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Future Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
+                </h2>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No upcoming raffles scheduled at this time</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly
+                      ? 'No upcoming partner raffles scheduled.'
+                      : 'No upcoming raffles scheduled at this time'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
           <div className="mb-8 sm:mb-12">
-            {pausedPending.length > 0 ? (
+            {pausedPendingView.length > 0 ? (
               <RafflesList
-                rafflesWithEntries={pausedPending}
-                title="Pending / Paused Raffles"
+                rafflesWithEntries={pausedPendingView}
+                title={partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
                 titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
                 section="future"
                 serverNow={serverTime}
+                partnerWalletSet={partnerWalletSet}
               />
             ) : (
               <>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Pending / Paused Raffles</h2>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                  {partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
+                </h2>
                 <p className="text-sm text-muted-foreground mb-4">
                   NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
                 </p>
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No pending or paused raffles right now.</p>
+                  <p className="text-muted-foreground">
+                    {partnerOnly ? 'No pending partner raffles right now.' : 'No pending or paused raffles right now.'}
+                  </p>
                 </div>
               </>
             )}
           </div>
 
-          {past.length > 0 && (
+          {pastView.length > 0 && (
             <div className="mb-8 sm:mb-12 w-full min-w-0">
-              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Past Raffles</h2>
-              {past.length > 3 ? (
-                <PastRafflesCarousel items={past} />
+              <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
+                {partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
+              </h2>
+              {pastView.length > 3 ? (
+                <PastRafflesCarousel items={pastView} partnerWalletSet={partnerWalletSet} />
               ) : (
                 <RafflesList
-                  rafflesWithEntries={past}
+                  rafflesWithEntries={pastView}
                   title={undefined}
                   section="past"
                   serverNow={serverTime}
+                  partnerWalletSet={partnerWalletSet}
                 />
               )}
             </div>
           )}
 
-          {/* Empty state: no raffles at all — show message + refresh (or loading while client fallback runs) */}
-          {isEmpty && (
+          {/* Empty state on All tab only (partner empty uses consolidated block above). */}
+          {tab === 'all' && isEmpty && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>
@@ -1241,7 +1509,8 @@ export function RafflesPageClient({
             </div>
           )}
             </>
-          )}
+          )
+          ) : null}
         </>
       )}
     </div>

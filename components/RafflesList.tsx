@@ -6,7 +6,7 @@ import { RaffleScrollReveal } from '@/components/RaffleScrollReveal'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
  import type { Raffle, Entry } from '@/lib/types'
  import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { getRaffleProfitInfo } from '@/lib/raffle-profit'
+import { getRaffleProfitInfo, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
 import { Flame } from 'lucide-react'
 import Link from 'next/link'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
@@ -37,6 +37,8 @@ interface RafflesListProps {
   serverNow?: Date
   /** Optional callback with active raffles that are over the profit threshold */
   onTopProfitableChange?: (items: RaffleWithEntriesItem[]) => void
+  /** When set, cards show partner badge for these creator wallets */
+  partnerWalletSet?: Set<string>
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
@@ -57,13 +59,38 @@ function getThresholdProgress(profitInfo?: RaffleProfitInfo): number | null {
   }
   const { revenue, threshold, thresholdCurrency } = profitInfo
   if (!threshold || threshold <= 0) return null
+  const thCur = normalizeRaffleTicketCurrency(thresholdCurrency)
   let revenueInThreshold = 0
-  if (thresholdCurrency === 'USDC') revenueInThreshold = revenue.usdc
-  else if (thresholdCurrency === 'SOL') revenueInThreshold = revenue.sol
-  else if (thresholdCurrency === 'OWL') revenueInThreshold = revenue.owl
+  if (thCur === 'USDC') revenueInThreshold = revenue.usdc
+  else if (thCur === 'SOL') revenueInThreshold = revenue.sol
+  else if (thCur === 'OWL') revenueInThreshold = revenue.owl
   const progress = revenueInThreshold / threshold
   if (!Number.isFinite(progress) || progress < 0) return null
   return progress
+}
+
+/**
+ * `/raffles` server props always send `entries: []` (see `toRaffleWithEntries`); entries load via poll below.
+ * Without this merge, `router.refresh()` replaces props and wipes fetched entries until the next poll → flicker.
+ */
+function mergeRafflesListProps(
+  prev: RaffleWithEntriesItem[],
+  next: RaffleWithEntriesItem[]
+): RaffleWithEntriesItem[] {
+  const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
+  return next.map((item) => {
+    const prevItem = prevById.get(item.raffle.id)
+    const nextEmpty = !item.entries?.length
+    const prevHas = !!(prevItem?.entries?.length)
+    if (nextEmpty && prevHas && prevItem) {
+      return {
+        raffle: item.raffle,
+        entries: prevItem.entries,
+        profitInfo: getRaffleProfitInfo(item.raffle, prevItem.entries),
+      }
+    }
+    return item
+  })
 }
 
 export function RafflesList({
@@ -77,6 +104,7 @@ export function RafflesList({
   onRaffleDeleted,
   serverNow,
   onTopProfitableChange,
+  partnerWalletSet,
 }: RafflesListProps) {
   // Defensive: coerce null/undefined to [] so we never read properties on null
   const list = rafflesWithEntries ?? []
@@ -153,8 +181,11 @@ export function RafflesList({
   // Update filtered raffles when props change (e.g., after server refresh)
   useEffect(() => {
     const next = rafflesWithEntries ?? []
-    setFilteredRaffles(next)
-    rafflesRef.current = next
+    setFilteredRaffles((prev) => {
+      const merged = mergeRafflesListProps(prev, next)
+      rafflesRef.current = merged
+      return merged
+    })
   }, [rafflesWithEntries])
 
   // Keep ref in sync with state changes (e.g., from handleRaffleDeleted or fetch updates)
@@ -395,7 +426,13 @@ export function RafflesList({
         </div>
       )}
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
-        {otherRaffles.map(({ raffle, entries, profitInfo }, index) => (
+        {otherRaffles.map(({ raffle, entries, profitInfo }, index) => {
+          const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
+          const isPartnerCommunity =
+            raffle.creator_is_partner === true ||
+            Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+            (creator ? partnerWalletSet?.has(creator) ?? false : false)
+          return (
           <RaffleScrollReveal key={raffle.id}>
             <RaffleCard
               raffle={raffle}
@@ -406,9 +443,11 @@ export function RafflesList({
               onDeleted={handleRaffleDeleted}
               priority={index < 6}
               serverNow={serverNow}
+              isPartnerCommunity={isPartnerCommunity}
             />
           </RaffleScrollReveal>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

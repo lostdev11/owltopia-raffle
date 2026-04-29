@@ -1,2 +1,6 @@
-/** Static path under `public/audio/` — add your MP3 (or OGG) file at this location. */
-export const RAFFLE_AMBIENT_AUDIO_PATH = '/audio/owl-raffle-ambient.mp3'
+/** Place the file at `public/audio/` with this exact name (URL-safe). */
+export const RAFFLE_AMBIENT_FILENAME = 'owltopia-move-in-silence.wav'
+
+export const RAFFLE_AMBIENT_TRACK_TITLE = 'Owltopia (Move in Silence)'
+
+export const RAFFLE_AMBIENT_AUDIO_PATH = `/audio/${RAFFLE_AMBIENT_FILENAME}`

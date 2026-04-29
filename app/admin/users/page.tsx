@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Users, Loader2, ArrowLeft } from 'lucide-react'
-import { getCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
+import { getCachedAdmin } from '@/lib/admin-check-cache'
 
 type UserRow = {
   wallet: string
@@ -44,13 +44,12 @@ export default function AdminUsersPage() {
     }
     const addr = publicKey.toBase58()
     const cached = getCachedAdmin(addr)
-    const role = getCachedAdminRole(addr)
     if (cached === false) {
       setIsFullAdmin(false)
       setLoading(false)
       return
     }
-    if (cached === true && role === 'full') {
+    if (cached === true) {
       setIsFullAdmin(true)
       setLoading(true)
       setError(null)
@@ -67,7 +66,7 @@ export default function AdminUsersPage() {
     fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
       .then((r) => r.json())
       .then((data: { isAdmin?: boolean; role?: string }) => {
-        if (data?.isAdmin && data?.role === 'full') {
+        if (data?.isAdmin) {
           setIsFullAdmin(true)
           setLoading(true)
           fetch('/api/admin/users', { credentials: 'include' })

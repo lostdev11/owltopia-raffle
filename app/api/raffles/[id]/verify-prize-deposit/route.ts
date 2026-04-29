@@ -16,6 +16,7 @@ import { requireSession } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { PublicKey } from '@solana/web3.js'
+import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey as umiPublicKey } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
@@ -23,6 +24,66 @@ import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubble
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
+
+async function sumIncomingNativeSolToEscrowLamports(
+  connection: ReturnType<typeof getSolanaConnection>,
+  signature: string,
+  escrowAddress: string
+): Promise<bigint | null> {
+  let escrowPk: PublicKey
+  try {
+    escrowPk = new PublicKey(escrowAddress)
+  } catch {
+    return null
+  }
+  const escrowBase58 = escrowPk.toBase58()
+
+  const fetchOptions = [
+    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'confirmed' as const },
+    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
+    { commitment: 'finalized' as const },
+  ]
+  let tx: Awaited<ReturnType<typeof connection.getTransaction>> | null = null
+  for (const opts of fetchOptions) {
+    tx = await connection.getTransaction(signature, opts as any).catch(() => null)
+    if (tx?.meta) break
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  if (!tx?.meta) return null
+
+  const keyToBase58 = (k: unknown): string | null => {
+    if (typeof k === 'string' && k.trim()) return k.trim()
+    if (k && typeof k === 'object' && 'pubkey' in k && typeof (k as { pubkey?: string }).pubkey === 'string') {
+      const p = (k as { pubkey: string }).pubkey.trim()
+      return p || null
+    }
+    try {
+      if (k instanceof PublicKey) return k.toBase58()
+      if (k != null) return new PublicKey(k as ConstructorParameters<typeof PublicKey>[0]).toBase58()
+    } catch {
+      return null
+    }
+    return null
+  }
+
+  const msg = tx.transaction.message as {
+    staticAccountKeys?: unknown[]
+    accountKeys?: unknown[]
+  }
+  const baseKeys = msg.staticAccountKeys ?? msg.accountKeys ?? []
+  const loadedWritable = (tx.meta.loadedAddresses?.writable ?? []) as unknown[]
+  const loadedReadonly = (tx.meta.loadedAddresses?.readonly ?? []) as unknown[]
+  const accountKeys = [...baseKeys, ...loadedWritable, ...loadedReadonly]
+    .map((k) => keyToBase58(k))
+    .filter((k): k is string => !!k)
+  const recipientIndex = accountKeys.findIndex((k) => k === escrowBase58)
+  if (recipientIndex < 0) return null
+  const pre = tx.meta.preBalances?.[recipientIndex] ?? 0
+  const post = tx.meta.postBalances?.[recipientIndex] ?? 0
+  const increase = BigInt(post - pre)
+  return increase > 0n ? increase : null
+}
 
 /**
  * POST /api/raffles/[id]/verify-prize-deposit
@@ -73,12 +134,6 @@ export async function POST(
 
     // Partner SPL (fungible) prizes: require deposit_tx; sum incoming transfers to escrow for the mint.
     if (isPartnerSplPrizeRaffle(raffle)) {
-      if (!depositTx) {
-        return NextResponse.json(
-          { error: 'Partner token prizes require the deposit transaction signature in the request body (deposit_tx).' },
-          { status: 400 }
-        )
-      }
       const partner = getPartnerPrizeTokenByCurrency(raffle.prize_currency)
       if (!partner) {
         return NextResponse.json({ error: 'Unsupported partner prize currency' }, { status: 400 })
@@ -92,22 +147,56 @@ export async function POST(
         return NextResponse.json({ error: 'Prize escrow is not configured' }, { status: 503 })
       }
       const connection = getSolanaConnection()
-      const incoming = await sumIncomingSplToEscrowForMint(
-        connection,
-        depositTx,
-        escrowAddress,
-        partner.mint
-      )
-      if (incoming == null || incoming < requiredRaw) {
-        return NextResponse.json(
-          {
-            error:
-              incoming == null
-                ? 'Could not read this deposit transaction, or it does not transfer the partner token to escrow.'
-                : `Deposit transfer sum (${incoming.toString()} raw units) is below the declared prize (${requiredRaw.toString()} raw units).`,
-          },
-          { status: 400 }
+      let verifiedByTx = false
+      if (depositTx) {
+        const incoming = await sumIncomingSplToEscrowForMint(
+          connection,
+          depositTx,
+          escrowAddress,
+          partner.mint
         )
+        let txIncomingRaw = incoming
+        if (txIncomingRaw == null && partner.currencyCode === 'SOL') {
+          txIncomingRaw = await sumIncomingNativeSolToEscrowLamports(connection, depositTx, escrowAddress)
+        }
+        if (txIncomingRaw != null && txIncomingRaw >= requiredRaw) {
+          verifiedByTx = true
+        } else {
+          return NextResponse.json(
+            {
+              error:
+                txIncomingRaw == null
+                  ? 'Could not read this deposit transaction, or it does not transfer the prize amount to escrow.'
+                  : `Deposit transfer sum (${txIncomingRaw.toString()} raw units) is below the declared prize (${requiredRaw.toString()} raw units).`,
+            },
+            { status: 400 }
+          )
+        }
+      }
+
+      if (!verifiedByTx) {
+        const escrowOwner = new PublicKey(escrowAddress)
+        const mintPk = new PublicKey(partner.mint)
+        const tokenProgram =
+          partner.tokenProgram === 'token2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+        const escrowAta = await getAssociatedTokenAddress(
+          mintPk,
+          escrowOwner,
+          false,
+          tokenProgram,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        const escrowBalanceRes = await connection.getTokenAccountBalance(escrowAta).catch(() => null)
+        const escrowRaw = BigInt(escrowBalanceRes?.value?.amount || '0')
+        if (escrowRaw < requiredRaw) {
+          return NextResponse.json(
+            {
+              error:
+                'Escrow balance for this prize token is still below the declared prize amount. If you just transferred, wait for confirmation and retry, or provide deposit_tx.',
+            },
+            { status: 400 }
+          )
+        }
       }
       try {
         const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(partner.mint))
@@ -270,7 +359,7 @@ export async function POST(
           if (assetIdCandidates.length > 0) {
             const endpoint = resolveServerSolanaRpcUrl()
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
             for (const assetId of assetIdCandidates) {
@@ -401,7 +490,7 @@ export async function POST(
             )
             const endpoint = resolveServerSolanaRpcUrl()
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
 
             for (const assetId of assetIdCandidates) {

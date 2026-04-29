@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
@@ -18,6 +19,8 @@ import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 import { MaintenanceBanner } from '@/components/MaintenanceBanner'
+import { ReferralCapture } from '@/components/ReferralCapture'
+import { PlatformMusicProvider } from '@/components/PlatformMusic'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -115,12 +118,18 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full dark" suppressHydrationWarning>
       <body className={`${plusJakartaSans.variable} ${bebasNeue.variable} font-sans min-h-full flex flex-col`}>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
+                try {
+                  const theme = localStorage.getItem('owl-theme');
+                  const root = document.documentElement;
+                  root.classList.toggle('dark', theme !== 'light');
+                } catch (_) {}
+
                 // Catch errors immediately, before React hydrates
                 const originalError = console.error;
                 
@@ -237,17 +246,22 @@ export default function RootLayout({
         />
         <ErrorHandler />
         <SolflareTouchFix />
-        <WalletContextProvider>
-          <div className="flex flex-col min-h-screen">
-            <MaintenanceBanner />
-            <ConditionalHeader />
-            <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
-              <PageTransition>{children}</PageTransition>
-              <GlobalLiveActivity />
-            </main>
-            <ConditionalFooter />
-          </div>
-        </WalletContextProvider>
+        <PlatformMusicProvider>
+          <WalletContextProvider>
+            <Suspense fallback={null}>
+              <ReferralCapture />
+            </Suspense>
+            <div className="flex flex-col min-h-screen">
+              <MaintenanceBanner />
+              <ConditionalHeader />
+              <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
+                <PageTransition>{children}</PageTransition>
+                <GlobalLiveActivity />
+              </main>
+              <ConditionalFooter />
+            </div>
+          </WalletContextProvider>
+        </PlatformMusicProvider>
         <Analytics />
       </body>
     </html>

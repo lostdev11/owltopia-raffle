@@ -3,6 +3,7 @@ import {
   postDiscordIncomingWebhookEmbed,
   type IncomingWebhookMentionOptions,
 } from '@/lib/discord-incoming-webhook'
+import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 import {
   getDiscordGiveawayPartnerById,
   isPartnerTenantEntitled,
@@ -52,6 +53,8 @@ export async function notifyDiscordPartnerGiveawayReady(g: NftGiveaway): Promise
           }
         : undefined
 
+    const prizeImage = await resolveNftPrizeImageForDiscordEmbed(g.nft_mint_address, g.nft_token_id)
+
     await postIfEntitled(
       tenant,
       {
@@ -67,6 +70,7 @@ export async function notifyDiscordPartnerGiveawayReady(g: NftGiveaway): Promise
           },
           { name: 'Claim link', value: giveawayPageUrl(g), inline: false },
         ],
+        ...(prizeImage ? { image: { url: prizeImage } } : {}),
         timestamp: new Date().toISOString(),
       },
       mention
@@ -93,6 +97,8 @@ export async function notifyDiscordPartnerGiveawayClaimed(g: NftGiveaway): Promi
           }
         : undefined
 
+    const prizeImage = await resolveNftPrizeImageForDiscordEmbed(g.nft_mint_address, g.nft_token_id)
+
     await postIfEntitled(
       tenant,
       {
@@ -109,6 +115,7 @@ export async function notifyDiscordPartnerGiveawayClaimed(g: NftGiveaway): Promi
               },
             ]
           : undefined,
+        ...(prizeImage ? { image: { url: prizeImage } } : {}),
         timestamp: new Date().toISOString(),
       },
       mention

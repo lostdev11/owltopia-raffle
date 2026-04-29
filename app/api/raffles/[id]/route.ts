@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
-import { getAdminRole } from '@/lib/db/admins'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
   checkEscrowHoldsNft,
@@ -11,6 +10,11 @@ import {
   transferPartnerSplPrizeToCreator,
 } from '@/lib/raffles/prize-escrow'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import {
+  ADMIN_HARD_DELETE_REASON_MAX_CHARS,
+  ADMIN_HARD_DELETE_REASON_MIN_CHARS,
+  recordRaffleAdminDeletion,
+} from '@/lib/raffles/admin-hard-delete'
 import {
   parseNftFloorPrice,
   parseNftTicketPrice,
@@ -359,6 +363,8 @@ export async function PATCH(
         patch.cancellation_fee_amount = null
         patch.cancellation_fee_currency = null
         patch.cancellation_refund_policy = null
+        patch.cancellation_fee_paid_at = null
+        patch.cancellation_fee_payment_tx = null
       }
 
       if (nextStatus === 'live') {
@@ -410,7 +416,6 @@ export async function PATCH(
       return NextResponse.json(raffle)
     }
 
-    const role = await getAdminRole(session.wallet)
     const status = (existingRaffle.status ?? '').toLowerCase()
     const isDraft = status === 'draft'
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
@@ -441,21 +446,12 @@ export async function PATCH(
     const isTimeEdit = isStartTimeChanged || isEndTimeChanged
 
     const isNftEconomicsAdminOverride =
-      role === 'full' &&
-      isNft &&
-      body.nft_economics_admin_override === true
+      isNft && body.nft_economics_admin_override === true
 
     // Non-draft edits are restricted:
-    // - raffle_creator: cannot edit non-draft raffles (this route requires full admin session)
-    // - full admin: may edit time for live/ready_to_draw only when there are no confirmed entries
-    // - full admin: may override NFT floor/ticket/min/max on active NFT raffles (nft_economics_admin_override)
+    // - may edit time for live/ready_to_draw only when there are no confirmed entries
+    // - may override NFT floor/ticket/min/max on active NFT raffles (nft_economics_admin_override)
     if (!isDraft) {
-      if (role !== 'full') {
-        return NextResponse.json(
-          { error: 'Only draft raffles can be edited' },
-          { status: 403 }
-        )
-      }
       if (isNftEconomicsAdminOverride) {
         const st = (existingRaffle.status ?? '').toLowerCase()
         const allowedNftEconomicsStatuses = [
@@ -648,8 +644,8 @@ export async function PATCH(
 
     // Preserve Owl Vision integrity signal:
     // - any edit after confirmed entries
-    // - any full-admin time edit on live/ready_to_draw raffles
-    if (hasConfirmedEntries || (!isDraft && role === 'full' && isLiveLike && isTimeEdit)) {
+    // - any time edit on live/ready_to_draw raffles
+    if (hasConfirmedEntries || (!isDraft && isLiveLike && isTimeEdit)) {
       updates.edited_after_entries = true
     }
 
@@ -892,6 +888,16 @@ export async function DELETE(
     const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
+    let deleteReasonParsed: string | undefined
+    try {
+      const raw = await request.json()
+      if (raw && typeof raw === 'object' && typeof (raw as Record<string, unknown>).delete_reason === 'string') {
+        deleteReasonParsed = String((raw as Record<string, unknown>).delete_reason).trim()
+      }
+    } catch {
+      // No JSON body (or empty)
+    }
+
     // Check if raffle exists
     const existingRaffle = await getRaffleById(raffleId)
     if (!existingRaffle) {
@@ -901,26 +907,17 @@ export async function DELETE(
       )
     }
 
-    const role = await getAdminRole(session.wallet)
-    if (role === 'raffle_creator') {
-      const wallet = session.wallet.trim()
-      const createdBy = (existingRaffle.created_by ?? '').trim()
-      const creatorWallet = (existingRaffle.creator_wallet ?? '').trim()
-      const isCreator = createdBy === wallet || creatorWallet === wallet
-      if (!isCreator) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
-      // Only draft raffles can be deleted by raffle_creator
-      if ((existingRaffle.status ?? '').toLowerCase() !== 'draft') {
-        return NextResponse.json(
-          { error: 'Only draft raffles can be deleted' },
-          { status: 403 }
-        )
-      }
-    } else if (role === 'full') {
-      // Full admin can delete any raffle (any status)
-    } else {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (
+      !deleteReasonParsed ||
+      deleteReasonParsed.length < ADMIN_HARD_DELETE_REASON_MIN_CHARS ||
+      deleteReasonParsed.length > ADMIN_HARD_DELETE_REASON_MAX_CHARS
+    ) {
+      return NextResponse.json(
+        {
+          error: `Admin delete requires delete_reason (${ADMIN_HARD_DELETE_REASON_MIN_CHARS}–${ADMIN_HARD_DELETE_REASON_MAX_CHARS} characters).`,
+        },
+        { status: 400 }
+      )
     }
 
     let escrowCurrentlyHoldsPrize = false
@@ -958,11 +955,15 @@ export async function DELETE(
       escrowCurrentlyHoldsPrize = escrowCheck.holds
     }
 
-    // Safety net: only require return when escrow wallet currently holds the NFT.
-    // DB flags can be stale; live escrow state is authoritative.
+    // Safety net: only auto-return when escrow holds the prize **and** this listing has a verified
+    // deposit. Otherwise duplicate listings (same mint as another row that actually deposited) look
+    // like escrow holds the NFT on-chain while `prize_deposited_at` is null — transfer would fail with
+    // "Prize deposit is not verified". Full admin can then delete the orphan DB row without return.
+    const depositVerifiedForThisListing = Boolean(existingRaffle.prize_deposited_at)
     const requiresPrizeReturnBeforeDelete =
       (existingRaffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(existingRaffle)) &&
       escrowCurrentlyHoldsPrize &&
+      depositVerifiedForThisListing &&
       !existingRaffle.prize_returned_at &&
       !existingRaffle.nft_transfer_transaction
     if (requiresPrizeReturnBeforeDelete) {
@@ -979,23 +980,32 @@ export async function DELETE(
       }
     }
 
-    if (role === 'raffle_creator') {
-      // Creator delete = soft delete so creators can review deleted raffles in dashboard history.
-      const now = new Date().toISOString()
-      await updateRaffle(raffleId, {
-        status: 'cancelled',
-        cancelled_at: now,
-        is_active: false,
+    // Hard delete (entries cascade delete).
+    try {
+      await recordRaffleAdminDeletion({
+        raffle: existingRaffle,
+        adminWallet: session.wallet,
+        deleteReason: deleteReasonParsed!,
       })
-      return NextResponse.json({ success: true, message: 'Raffle moved to deleted section' })
+    } catch (auditErr) {
+      const detail = auditErr instanceof Error ? auditErr.message : String(auditErr)
+      console.error('[DELETE raffle] audit insert failed:', auditErr)
+      return NextResponse.json(
+        {
+          error: `Could not save the deletion audit log (${detail}). Apply Supabase migration 071 (table raffle_admin_deletions), confirm RLS is enabled, then retry. The raffle was not deleted.`,
+        },
+        { status: 503 }
+      )
     }
 
-    // Full admin delete = hard delete (entries cascade delete).
     const success = await deleteRaffle(raffleId)
 
     if (!success) {
       return NextResponse.json(
-        { error: 'Failed to delete raffle' },
+        {
+          error:
+            'Database could not delete this raffle (row missing or FK conflict). Check Supabase logs.',
+        },
         { status: 500 }
       )
     }

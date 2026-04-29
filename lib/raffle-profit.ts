@@ -6,6 +6,16 @@ import {
 
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
 
+/**
+ * Canonical ticket currency for comparisons and revenue display.
+ * DB/API may return mixed case; strict `=== 'USDC'` checks would otherwise read the wrong revenue bucket.
+ */
+export function normalizeRaffleTicketCurrency(input: string | null | undefined): RaffleCurrency {
+  const c = String(input ?? 'SOL').trim().toUpperCase()
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL') return c
+  return 'SOL'
+}
+
 export interface RaffleRevenue {
   usdc: number
   sol: number
@@ -116,9 +126,11 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
 }
 
 /**
- * Revenue in a specific currency (from RaffleRevenue).
+ * Ticket gross in one bucket (from {@link getRaffleRevenue}).
+ * Use the raffle’s **ticket** currency for display; the profit threshold may use
+ * {@link getRaffleThreshold}’s currency (e.g. SOL prize on a USDC-ticket raffle).
  */
-function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): number {
+export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurrency): number {
   switch (currency) {
     case 'USDC': return revenue.usdc
     case 'SOL': return revenue.sol

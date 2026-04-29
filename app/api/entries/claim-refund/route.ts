@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
     }
 
-    if (raffle.status !== 'failed_refund_available') {
+    const raffleStatus = String(raffle.status ?? '').toLowerCase()
+    if (raffleStatus !== 'failed_refund_available' && raffleStatus !== 'cancelled') {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 

@@ -9,6 +9,14 @@ function mapRow(row: Record<string, unknown>): DiscordGiveawayPartnerTenant {
     discord_guild_id: row.discord_guild_id != null ? String(row.discord_guild_id) : null,
     webhook_url:
       row.webhook_url != null && String(row.webhook_url).trim() ? String(row.webhook_url).trim() : null,
+    raffle_webhook_url_created:
+      row.raffle_webhook_url_created != null && String(row.raffle_webhook_url_created).trim()
+        ? String(row.raffle_webhook_url_created).trim()
+        : null,
+    raffle_webhook_url_winner:
+      row.raffle_webhook_url_winner != null && String(row.raffle_webhook_url_winner).trim()
+        ? String(row.raffle_webhook_url_winner).trim()
+        : null,
     api_secret_hash: String(row.api_secret_hash),
     status: row.status as DiscordGiveawayPartnerTenant['status'],
     active_until: row.active_until != null ? String(row.active_until) : null,
@@ -137,6 +145,8 @@ export async function createDiscordGiveawayPartner(
     .insert({
       name: input.name.trim(),
       webhook_url: input.webhook_url.trim(),
+      raffle_webhook_url_created: null,
+      raffle_webhook_url_winner: null,
       discord_guild_id: input.discord_guild_id?.trim() || null,
       api_secret_hash,
       status: input.status ?? 'trial',
@@ -171,6 +181,8 @@ export async function createSlashDiscordPartnerTenant(input: {
     .insert({
       name: input.guildName.trim() || `Discord server ${input.guildId}`,
       webhook_url: null,
+      raffle_webhook_url_created: null,
+      raffle_webhook_url_winner: null,
       discord_guild_id: input.guildId.trim(),
       api_secret_hash,
       status: 'active',
@@ -206,6 +218,8 @@ export async function updateDiscordGiveawayPartner(
   patch: Partial<{
     name: string
     webhook_url: string | null
+    raffle_webhook_url_created: string | null
+    raffle_webhook_url_winner: string | null
     discord_guild_id: string | null
     status: DiscordGiveawayPartnerTenant['status']
     active_until: string | null

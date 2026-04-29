@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { Gift, Loader2, Users } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
+import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 
 export type CommunityGiveawayBrowseItem = {
   id: string
@@ -51,7 +52,8 @@ export function CommunityGiveawayBrowseCard({
   /** First card: eager image load for mobile LCP */
   priorityImage?: boolean
 }) {
-  const [artUrl, setArtUrl] = useState<string | null>(null)
+  const [imageAttemptChain, setImageAttemptChain] = useState<string[]>([])
+  const [imageAttemptIdx, setImageAttemptIdx] = useState(0)
   const [artLoading, setArtLoading] = useState(true)
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
@@ -90,14 +92,22 @@ export function CommunityGiveawayBrowseCard({
     let cancelled = false
     const mint = g.nft_mint_address?.trim()
     if (!mint) {
+      setImageAttemptChain([])
+      setImageAttemptIdx(0)
       setArtLoading(false)
       return
     }
+    setImageAttemptIdx(0)
     fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((json: { image?: string | null } | null) => {
-        if (cancelled || !json?.image?.trim()) return
-        setArtUrl(json.image.trim())
+        if (cancelled) return
+        const raw = json?.image?.trim()
+        if (!raw) {
+          setImageAttemptChain([])
+          return
+        }
+        setImageAttemptChain(buildRaffleImageAttemptChain(raw, null))
       })
       .catch(() => {})
       .finally(() => {
@@ -122,15 +132,19 @@ export function CommunityGiveawayBrowseCard({
       <Card className="group flex h-full flex-col overflow-hidden border-green-500/25 bg-card/50 p-0 rounded-xl transition-[transform,colors,box-shadow] duration-200 ease-out active:scale-[0.99] hover:border-green-500/50 hover:bg-card/80 sm:rounded-[1.25rem] sm:hover:scale-[1.01] sm:active:scale-100">
         {/* Full-width square hero — same visual weight as raffle cards on phones */}
         <div className="relative z-10 m-0 w-full aspect-square min-h-[200px] overflow-hidden rounded-t-xl bg-muted p-0 sm:min-h-0 sm:rounded-t-[1.25rem]">
-          {artUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- remote NFT URIs (ipfs/https) from Helius
+          {!artLoading &&
+          imageAttemptChain.length > 0 &&
+          imageAttemptIdx < imageAttemptChain.length ? (
+            // eslint-disable-next-line @next/next/no-img-element -- remote NFT URIs (ipfs/https) via proxy chain
             <img
-              src={artUrl}
+              key={`${g.id}-${imageAttemptIdx}-${imageAttemptChain[imageAttemptIdx]?.slice(0, 48)}`}
+              src={imageAttemptChain[imageAttemptIdx]}
               alt=""
               className="h-full w-full object-cover"
               loading={priorityImage ? 'eager' : 'lazy'}
               fetchPriority={priorityImage ? 'high' : undefined}
               decoding={priorityImage ? 'sync' : 'async'}
+              onError={() => setImageAttemptIdx((i) => i + 1)}
             />
           ) : artLoading ? (
             <div className="flex h-full min-h-[200px] w-full items-center justify-center text-muted-foreground sm:min-h-0">

@@ -5,6 +5,9 @@
 const raw = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_PLATFORM_NAME?.trim()
 export const PLATFORM_NAME = raw || 'Owl Raffle'
 
+/** Owltopia Discord invite (same link as Footer). */
+export const COMMUNITY_DISCORD_INVITE_URL = 'https://discord.gg/nRD2wyg2vq'
+
 /** Default OG/twitter alt and tagline suffix. */
 export const OG_TAGLINE = 'Trusted raffles with full transparency. Every entry verified on-chain.'
 export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`
@@ -21,7 +24,7 @@ export const DEFAULT_OG_IMAGE_DIMS = { width: 986, height: 647 } as const
 export const DEFAULT_OG_IMAGE_TYPE = 'image/jpeg' as const
 
 /** Bump when the default OG asset or path changes so social caches refresh. */
-export const OG_IMAGE_CACHE_VERSION = '5'
+export const OG_IMAGE_CACHE_VERSION = '12'
 
 /** Canonical site origin for metadata, OG URLs, and canonical links (no trailing slash). */
 export function getSiteBaseUrl(): string {

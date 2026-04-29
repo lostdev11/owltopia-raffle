@@ -90,16 +90,54 @@ export async function PATCH(
     }
 
     if (body.status === 'open') {
-      if (existing.status !== 'draft') {
-        return NextResponse.json({ error: 'Can only open from draft' }, { status: 400 })
-      }
-      if (!existing.prize_deposited_at) {
+      if (existing.status === 'draft') {
+        if (!existing.prize_deposited_at) {
+          return NextResponse.json(
+            { error: 'Verify NFT deposit in escrow before opening' },
+            { status: 400 }
+          )
+        }
+        patch.status = 'open' as CommunityGiveawayStatus
+      } else if (existing.status === 'cancelled') {
+        if (existing.winner_wallet) {
+          return NextResponse.json(
+            { error: 'Cannot restore after a winner is drawn' },
+            { status: 400 }
+          )
+        }
+        if (!existing.prize_deposited_at) {
+          return NextResponse.json(
+            { error: 'Cannot restore without a verified prize in escrow' },
+            { status: 400 }
+          )
+        }
+        const startMs = new Date(existing.starts_at).getTime()
+        if (Number.isNaN(startMs)) {
+          return NextResponse.json({ error: 'Invalid starts_at on giveaway' }, { status: 400 })
+        }
+        if (Date.now() >= startMs) {
+          return NextResponse.json(
+            { error: 'Cannot restore: the scheduled start time has already passed' },
+            { status: 400 }
+          )
+        }
+        const endMs = existing.ends_at ? new Date(existing.ends_at).getTime() : null
+        if (endMs != null && !Number.isNaN(endMs) && Date.now() > endMs) {
+          return NextResponse.json(
+            { error: 'Cannot restore: the entry period has already ended' },
+            { status: 400 }
+          )
+        }
+        patch.status = 'open' as CommunityGiveawayStatus
+      } else {
         return NextResponse.json(
-          { error: 'Verify NFT deposit in escrow before opening' },
+          {
+            error:
+              'Can only open from draft, or restore a cancelled giveaway before its scheduled start',
+          },
           { status: 400 }
         )
       }
-      patch.status = 'open' as CommunityGiveawayStatus
     }
 
     if (body.status === 'cancelled') {

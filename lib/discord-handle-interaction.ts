@@ -132,7 +132,7 @@ export async function handleDiscordApplicationCommand(
     } catch (e) {
       console.error('subscribe intent:', e)
       return ephemeral(
-        'Could not create a payment session (database error). On the host, set SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
+        'Could not create a payment session (database error). On the host, set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
       )
     }
 
@@ -251,6 +251,34 @@ export async function handleDiscordApplicationCommand(
     return ephemeral('Webhook saved. Linked NFT giveaways will post here when deposit is verified or claimed.')
   }
 
+  if (sub === 'webhook-raffle-created' || sub === 'webhook-raffle-winner') {
+    if (!memberCanManageWebhooks(interaction.member)) {
+      return ephemeral('You need **Manage Webhooks** permission to set the webhook URL.')
+    }
+    const url = (strOptions.url ?? '').trim()
+    if (!url || !isAllowedDiscordIncomingWebhookUrl(url)) {
+      return ephemeral('Invalid webhook URL. Use a Discord **incoming** webhook (`https://discord.com/api/webhooks/…`).')
+    }
+    const partner = await getDiscordGiveawayPartnerByGuildId(guildId)
+    if (!partner) {
+      return ephemeral('No partner record for this server. Complete `/owltopia-partner subscribe` and `/verify` first.')
+    }
+    if (!isPartnerTenantEntitled(partner)) {
+      return ephemeral('Subscription is not active. Renew with subscribe + verify.')
+    }
+    const field =
+      sub === 'webhook-raffle-created'
+        ? { raffle_webhook_url_created: url as string }
+        : { raffle_webhook_url_winner: url as string }
+    const updated = await updateDiscordGiveawayPartner(partner.id, field)
+    if (!updated) return ephemeral('Could not save webhook.')
+    return ephemeral(
+      sub === 'webhook-raffle-created'
+        ? 'Raffle **created** webhook saved. New ticket raffles from a linked partner creator will post here (when Owltopia also posts main feeds).'
+        : 'Raffle **winner** webhook saved. When a draw completes, a ping will post here; winners claim on the Owltopia user **dashboard**.'
+    )
+  }
+
   if (sub === 'status') {
     let partner
     let pending
@@ -260,7 +288,7 @@ export async function handleDiscordApplicationCommand(
     } catch (e) {
       console.error('status partner query:', e)
       return ephemeral(
-        'Could not load status (database error). Set SUPABASE_SERVICE_ROLE_KEY on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
+        'Could not load status (database error). Set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
       )
     }
     if (!partner && !pending) {
@@ -271,11 +299,15 @@ export async function handleDiscordApplicationCommand(
       lines.push(`**Pending quote:** ${pending.amount_usdc} USDC — memo \`${pending.memo}\` — expires ${pending.expires_at}`)
     }
     if (partner) {
+      const rwc = partner.raffle_webhook_url_created ? 'set' : '**not set**'
+      const rww = partner.raffle_webhook_url_winner ? 'set' : '**not set**'
       lines.push(
         `**Partner id:** \`${partner.id}\``,
         `**Status:** ${partner.status}`,
         `**Active until:** ${partner.active_until ?? '—'}`,
-        `**Webhook:** ${partner.webhook_url ? 'configured' : '**not set** — run /webhook'}`,
+        `**Webhook (NFT / API):** ${partner.webhook_url ? 'configured' : '**not set** — run /webhook'}`,
+        `**Raffle created channel:** ${rwc} — \`/owltopia-partner webhook-raffle-created\``,
+        `**Raffle winner channel:** ${rww} — \`/owltopia-partner webhook-raffle-winner\``,
         `**Entitled:** ${isPartnerTenantEntitled(partner) ? 'yes' : 'no'}`
       )
     }

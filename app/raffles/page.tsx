@@ -6,7 +6,7 @@
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { cookies } from 'next/headers'
-import { getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
+import { getRaffles, getRafflesViaRest, promoteDraftRafflesToLive, type GetRafflesResult } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import {
@@ -18,6 +18,7 @@ import {
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { RafflesPageClient } from './RafflesPageClient'
+import { getActivePartnerCommunityCreatorWallets } from '@/lib/raffles/partner-communities'
 import type { Raffle, Entry } from '@/lib/types'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
@@ -71,7 +72,9 @@ export default async function RafflesPage() {
               <p className="text-destructive mb-4">{configError}</p>
               <p className="text-sm text-muted-foreground mb-4">
                 Set <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
-                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment.
+                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> in your
+                environment (legacy{' '}
+                <code className="bg-muted px-1 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> is still read if unset).
               </p>
               <p className="text-sm text-muted-foreground mt-4">See README.md for setup.</p>
             </div>
@@ -85,6 +88,13 @@ export default async function RafflesPage() {
     const session = parseSessionCookieValue(sessionValue)
     const viewerWallet = session?.wallet ?? null
     const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
+
+    let partnerCreatorWallets: string[] = []
+    try {
+      partnerCreatorWallets = await getActivePartnerCommunityCreatorWallets()
+    } catch {
+      partnerCreatorWallets = []
+    }
 
     const requestStartedAt = Date.now()
 
@@ -131,12 +141,40 @@ export default async function RafflesPage() {
             pastRafflesWithEntries={[]}
             fetchStatus="error"
             initialError={{ message: fetchError.message, code: fetchError.code }}
+            partnerCreatorWallets={partnerCreatorWallets}
           />
         </Suspense>
       )
     }
 
-    // Pending NFT raffles should only be visible to admins and the creator.
+    // Admins should see the full raffle dataset (including unlisted), so moderation/verify
+    // actions are available directly from /raffles.
+    if (viewerIsAdmin) {
+      const adminAll = await getRaffles(false, { includeDraft: true })
+      if (!adminAll.error && Array.isArray(adminAll.data) && adminAll.data.length > 0) {
+        allRaffles = adminAll.data
+      } else {
+        // Fallback: keep REST/public rows, but at least merge pending items from admin query.
+        const adminRows = adminAll.data ?? []
+        const pendingById = new Map<string, Raffle>()
+        const nowMs = Date.now()
+        for (const row of adminRows) {
+          if (isPendingNftRaffleAtTime(row, nowMs)) {
+            pendingById.set(row.id, row)
+          }
+        }
+        for (const row of allRaffles) {
+          pendingById.set(row.id, row)
+        }
+        if (pendingById.size > 0) {
+          allRaffles = Array.from(pendingById.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+        }
+      }
+    }
+
+    // Pending raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
     // Enrich with creator Owl holder status — reserve wall clock under maxDuration.
@@ -200,6 +238,7 @@ export default async function RafflesPage() {
           pastRafflesWithEntries={pastRafflesWithEntries}
           fetchStatus={fetchStatus}
           rafflesTotalCount={totalCount}
+          partnerCreatorWallets={partnerCreatorWallets}
         />
       </Suspense>
     )
@@ -214,6 +253,7 @@ export default async function RafflesPage() {
           pastRafflesWithEntries={[]}
           fetchStatus="error"
           initialError={{ message, code: 'PAGE_ERROR' }}
+          partnerCreatorWallets={[]}
         />
       </Suspense>
     )
