@@ -73,7 +73,7 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
               'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
           }
         }
-        // Threshold not met: extend raffle by its original duration (or 7 days fallback)
+        // Threshold not met: rerun once for the raffle's original configured duration.
         const originalEndTime = raffle.original_end_time || raffle.end_time
         const startTimeMs = new Date(raffle.start_time).getTime()
         const originalEndMs = new Date(originalEndTime).getTime()
@@ -98,7 +98,7 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
           error: `Minimum ticket threshold not met (min: ${
             getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
           }, sold: ${entries
-            .filter((e) => e.status === 'confirmed')
+            .filter((e) => e.status === 'confirmed' && !e.refunded_at)
             .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
             durationMs / (24 * 60 * 60 * 1000)
           } days.`,
