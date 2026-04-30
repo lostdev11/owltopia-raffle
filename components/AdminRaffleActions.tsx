@@ -76,6 +76,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const noWinner =
     !(raffle.winner_wallet ?? '').trim() && !raffle.winner_selected_at
   const statusLc = (raffle.status ?? '').toLowerCase()
+  const hasPrizeReturnTx = !!(raffle.prize_return_tx ?? '').trim()
+  const prizeReturnRecorded = !!raffle.prize_returned_at && hasPrizeReturnTx
   /** Ended or terminal-ish states where full admin can set a new end_time and return sales/draw flow (no winner, prize still in escrow). */
   const RESTORE_ELIGIBLE_STATUSES = [
     'live',
@@ -93,12 +95,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const canDeadlineAdminOverride =
     noWinner &&
-    !raffle.prize_returned_at &&
+    !prizeReturnRecorded &&
     RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
   const deadlineOverrideBlockedReason = !canDeadlineAdminOverride
     ? !noWinner
       ? 'Winner already selected. Use "Void winner & reopen" first if this was a bad draw and no prize transfer/claim happened.'
-      : raffle.prize_returned_at
+      : prizeReturnRecorded
         ? 'Prize was returned to the creator. Reopen only after a new verified escrow deposit.'
         : `Status "${raffle.status ?? 'unknown'}" is not supported for deadline restore.`
     : null
@@ -107,14 +109,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     !!(raffle.winner_wallet ?? '').trim() || !!raffle.winner_selected_at
   const canVoidWinner =
     hasWinner &&
-    !raffle.prize_returned_at &&
+    !prizeReturnRecorded &&
     !(raffle.nft_transfer_transaction ?? '').trim() &&
     !raffle.creator_claimed_at &&
     !(raffle.creator_funds_claim_locked_at ?? '').trim()
 
   const voidWinnerBlockedReason =
     hasWinner && !canVoidWinner
-      ? raffle.prize_returned_at
+      ? prizeReturnRecorded
         ? 'Prize was returned to the creator — resolve escrow before changing draw state.'
         : (raffle.nft_transfer_transaction ?? '').trim()
           ? 'NFT transfer to the winner is already on-chain; the app cannot void this draw.'
@@ -196,7 +198,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     !!creatorWallet &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
-    !raffle.prize_returned_at
+    !prizeReturnRecorded
 
   const handleReturnNft = async () => {
     // No wallet signature needed — server signs with escrow keypair; only admin session required

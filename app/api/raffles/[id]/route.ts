@@ -71,6 +71,9 @@ export async function PATCH(
         { status: 404 }
       )
     }
+    const prizeReturnRecorded =
+      !!existingRaffle.prize_returned_at &&
+      !!(existingRaffle.prize_return_tx ?? '').trim()
 
     const bodyKeys = Object.keys(body).filter(
       (k) => k !== 'wallet_address' && (body as Record<string, unknown>)[k] !== undefined
@@ -127,7 +130,7 @@ export async function PATCH(
           { status: 400 }
         )
       }
-      if (existingRaffle.prize_returned_at) {
+      if (prizeReturnRecorded) {
         return NextResponse.json(
           {
             error:
@@ -285,7 +288,7 @@ export async function PATCH(
           { status: 400 }
         )
       }
-      if (existingRaffle.prize_returned_at) {
+      if (prizeReturnRecorded) {
         return NextResponse.json(
           {
             error:
