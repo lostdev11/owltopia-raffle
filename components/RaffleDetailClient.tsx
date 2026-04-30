@@ -2700,6 +2700,8 @@ export function RaffleDetailClient({
 
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
+  const prizeReturnRecorded =
+    !!raffle.prize_returned_at && !!(raffle.prize_return_tx ?? '').trim()
   const winnerWalletNorm =
     normalizeSolanaWalletAddress(raffle.winner_wallet ?? '') ??
     (raffle.winner_wallet ?? '').trim()
@@ -2712,7 +2714,7 @@ export function RaffleDetailClient({
     !Number.isNaN(offerWindowEndsDate.getTime()) &&
     offerWindowEndsDate.getTime() > Date.now()
   const prizeStillInEscrowForOffers =
-    !(raffle.nft_transfer_transaction ?? '').trim() && !raffle.prize_returned_at
+    !(raffle.nft_transfer_transaction ?? '').trim() && !prizeReturnRecorded
   const canViewOfferPanel = hasEnded && !!winnerWalletNorm
   const isOfferBuyer =
     connected && !!walletNorm && walletNorm !== winnerWalletNorm && prizeStillInEscrowForOffers
@@ -2767,7 +2769,7 @@ export function RaffleDetailClient({
     walletNorm === winnerWalletNorm &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
-    !raffle.prize_returned_at
+    !prizeReturnRecorded
 
   // Show "Return prize to creator" when: admin, NFT raffle, prize in escrow, not yet sent to winner, not already returned
   const showReturnPrizeButton =
@@ -2775,7 +2777,7 @@ export function RaffleDetailClient({
     raffle.prize_type === 'nft' &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
-    !raffle.prize_returned_at
+    !prizeReturnRecorded
 
   const handleShareRaffle = useCallback(async () => {
     if (typeof window === 'undefined') return

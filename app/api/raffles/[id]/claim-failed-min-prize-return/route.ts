@@ -105,7 +105,9 @@ export async function POST(
       return NextResponse.json({ error: 'Prize was already sent to a winner' }, { status: 400 })
     }
 
-    if (raffle.prize_returned_at) {
+    const prizeReturnRecorded =
+      !!raffle.prize_returned_at && !!(raffle.prize_return_tx ?? '').trim()
+    if (prizeReturnRecorded) {
       return NextResponse.json({
         success: true as const,
         alreadyReturned: true,
