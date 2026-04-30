@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { getSiteBaseUrl } from '@/lib/site-config'
+import { PROMO_SOLANA_MARK_INSET_SIDE_FRAC } from '@/lib/promo-png-art-draw'
 import { OG_FONT_SANS } from '@/lib/og/og-image-fonts'
 import { OWLTOPIA_OG_H, OWLTOPIA_OG_W, OWLTOPIA_OG_SIZE } from '@/lib/og/og-constants'
 
@@ -42,6 +43,11 @@ export type OwltopiaLinkPreviewOgProps = {
   line1: string
   line2?: string
   imageUrl: string | null
+  /**
+   * When true, scales the art with padding inside the neon square (SOL brand mark shares
+   * the same inset as downloadable X promo PNGs).
+   */
+  insetBrandArt?: boolean
 }
 
 /**
@@ -54,6 +60,7 @@ export function owltopiaLinkPreviewOg({
   line1,
   line2,
   imageUrl,
+  insetBrandArt = false,
 }: OwltopiaLinkPreviewOgProps): ReactElement {
   const site = getSiteBaseUrl()
   let host = 'owltopia.xyz'
@@ -65,6 +72,9 @@ export function owltopiaLinkPreviewOg({
   const safeTitle = title.length > 110 ? `${title.slice(0, 106).trimEnd()}...` : title
   const showKind = kindLabel && kindLabel.trim().length > 0
   const kl = (kindLabel ?? '').trim().toUpperCase()
+  const innerArt = Math.round(L.art * PROMO_SOLANA_MARK_INSET_SIDE_FRAC)
+  const artSide = insetBrandArt ? innerArt : L.art
+  const artFit = insetBrandArt ? 'contain' : 'cover'
 
   return (
     <div
@@ -280,18 +290,20 @@ export function owltopiaLinkPreviewOg({
                 overflow: 'hidden',
                 border: '2px solid rgba(0, 255, 136, 0.5)',
                 display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 boxShadow: '0 0 10px rgba(0, 255, 136, 0.25), 0 0 1px rgba(0,0,0,0.2)',
                 flexShrink: 0,
               }}
             >
               <img
                 src={imageUrl}
-                width={L.art}
-                height={L.art}
+                width={artSide}
+                height={artSide}
                 style={{
-                  objectFit: 'cover',
-                  width: L.art,
-                  height: L.art,
+                  objectFit: artFit,
+                  width: artSide,
+                  height: artSide,
                 }}
                 alt=""
               />

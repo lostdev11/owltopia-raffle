@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ImageDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
 import type { Raffle } from '@/lib/types'
 import {
   normalizeRaffleTicketCurrency,
@@ -297,11 +298,7 @@ export function RaffleOverThresholdPngButton({
       if (imageUrl?.trim()) {
         const loaded = await tryLoadImage(imageUrl)
         if (loaded) {
-          const scale = Math.max(imageBox.w / loaded.width, imageBox.h / loaded.height)
-          const drawW = loaded.width * scale
-          const drawH = loaded.height * scale
-          const drawX = imageBox.x - (drawW - imageBox.w) / 2
-          const drawY = imageBox.y - (drawH - imageBox.h) / 2
+          const { drawX, drawY, drawW, drawH } = computePromoPngArtDrawRect(loaded, imageBox, imageUrl)
           ctx.drawImage(loaded, drawX, drawY, drawW, drawH)
         } else {
           ctx.fillStyle = 'rgba(6, 20, 12, 0.75)'

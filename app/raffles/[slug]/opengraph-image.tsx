@@ -11,6 +11,7 @@ import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-
 import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
 import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 import { getPartnerPrizeListingImageUrl, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { urlChainIncludesSolanaMark } from '@/lib/promo-png-art-draw'
 
 export const runtime = 'nodejs'
 /** Allow slow `/api/proxy-image` IPFS gateway races while prefetching art for Satori. */
@@ -137,6 +138,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
 
     const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
     const line2 = `Ends ${endStr}`
+    const insetBrandArt = urlChainIncludesSolanaMark(absolutized)
 
     let artData: string | null = null
     for (const abs of absolutized) {
@@ -153,6 +155,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
           line1,
           line2,
           imageUrl: artData,
+          insetBrandArt,
         }),
         { ...ogOpts }
       )
@@ -164,6 +167,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
           line1,
           line2,
           imageUrl: null,
+          insetBrandArt,
         }),
         { ...ogOpts }
       )
