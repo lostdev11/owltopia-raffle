@@ -1680,7 +1680,9 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
   // Get all confirmed entries for this raffle
   const entries = await getEntriesByRaffleId(raffleId)
-  const confirmedEntries = entries.filter(e => e.status === 'confirmed')
+  const confirmedEntries = entries.filter(
+    (e) => e.status === 'confirmed' && !e.refunded_at
+  )
 
   if (confirmedEntries.length === 0) {
     console.warn(`No confirmed entries found for raffle ${raffleId}`)
@@ -1898,7 +1900,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
  */
 export function calculateTicketsSold(entries: Entry[]): number {
   return entries
-    .filter(e => e.status === 'confirmed')
+    .filter((e) => e.status === 'confirmed' && !e.refunded_at)
     .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
 }
 
@@ -1908,7 +1910,7 @@ export function calculateTicketsSold(entries: Entry[]): number {
 export function calculateUniqueParticipants(entries: Entry[]): number {
   const uniqueWallets = new Set(
     entries
-      .filter(e => e.status === 'confirmed')
+      .filter((e) => e.status === 'confirmed' && !e.refunded_at)
       .map(e => e.wallet_address)
   )
   return uniqueWallets.size

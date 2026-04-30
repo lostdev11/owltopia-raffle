@@ -95,6 +95,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     noWinner &&
     !raffle.prize_returned_at &&
     RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
+  const deadlineOverrideBlockedReason = !canDeadlineAdminOverride
+    ? !noWinner
+      ? 'Winner already selected. Use "Void winner & reopen" first if this was a bad draw and no prize transfer/claim happened.'
+      : raffle.prize_returned_at
+        ? 'Prize was returned to the creator. Reopen only after a new verified escrow deposit.'
+        : `Status "${raffle.status ?? 'unknown'}" is not supported for deadline restore.`
+    : null
 
   const hasWinner =
     !!(raffle.winner_wallet ?? '').trim() || !!raffle.winner_selected_at
@@ -900,8 +907,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           </Card>
         )}
 
-        {canDeadlineAdminOverride && (
-          <Card className="border-sky-600/40 bg-sky-500/[0.07]">
+        <Card className="border-sky-600/40 bg-sky-500/[0.07]">
             <CardHeader>
               <CardTitle>Restore ended raffle / extend deadline (full admin)</CardTitle>
               <CardDescription>
@@ -916,6 +922,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {deadlineOverrideBlockedReason && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    Restore is unavailable for this raffle right now: {deadlineOverrideBlockedReason}
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="admin-reopen-end">New end time</Label>
@@ -925,6 +938,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     value={reopenEndLocal}
                     onChange={(e) => setReopenEndLocal(e.target.value)}
                     className="touch-manipulation min-h-[44px]"
+                    disabled={!canDeadlineAdminOverride}
                   />
                 </div>
                 <div className="space-y-2">
@@ -934,6 +948,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     value={reopenStatus}
                     onChange={(e) => setReopenStatus(e.target.value as 'live' | 'ready_to_draw')}
                     className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background touch-manipulation min-h-[44px]"
+                    disabled={!canDeadlineAdminOverride}
                   >
                     <option value="live">live (ticket sales)</option>
                     <option value="ready_to_draw">ready_to_draw (ended, draw winner)</option>
@@ -949,6 +964,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     placeholder="Leave empty to keep DB value"
                     className="touch-manipulation min-h-[44px]"
                     autoComplete="off"
+                    disabled={!canDeadlineAdminOverride}
                   />
                 </div>
               </div>
@@ -959,6 +975,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   onChange={(e) => setReopenDeadlineConfirm(e.target.checked)}
                   className="mt-1 h-5 w-5 shrink-0 rounded border-input"
                   aria-label="Confirm extending raffle deadline"
+                  disabled={!canDeadlineAdminOverride}
                 />
                 <span className="text-muted-foreground leading-snug">
                   I confirm this raffle has no winner yet and I am intentionally changing the end time and
@@ -973,6 +990,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     onChange={(e) => setReopenRestoreCancelledConfirm(e.target.checked)}
                     className="mt-1 h-5 w-5 shrink-0 rounded border-input"
                     aria-label="Confirm restoring raffle from cancelled status"
+                    disabled={!canDeadlineAdminOverride}
                   />
                   <span className="text-muted-foreground leading-snug">
                     This raffle is <strong className="text-foreground">cancelled</strong>. I have checked
@@ -985,14 +1003,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 type="button"
                 variant="secondary"
                 onClick={handleSaveDeadline}
-                disabled={savingDeadline}
+                disabled={savingDeadline || !canDeadlineAdminOverride}
                 className="touch-manipulation min-h-[44px] w-full sm:w-auto border-sky-600/50"
               >
                 {savingDeadline ? 'Saving…' : 'Save / restore raffle'}
               </Button>
             </CardContent>
           </Card>
-        )}
 
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardHeader>
