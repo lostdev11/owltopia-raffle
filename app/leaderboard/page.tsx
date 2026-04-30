@@ -83,15 +83,18 @@ function tableDescriptions(meta: LeaderboardPeriodMeta | null): {
   const scope =
     meta == null || meta.kind === 'all' ? 'all time (UTC)' : meta.label
 
+  const antiAbuse =
+    'Raffles priced at or below the floor do not count (default: must be above 0.001 SOL; USDC/OWL use the same ratio as referral dust rules). Entries exclude complimentary, refunded, or zero-amount rows. Tickets purchased: capped per wallet per raffle. Tickets sold: needs enough distinct paying buyers besides the creator.'
+
   const entered =
     meta == null || meta.kind === 'all'
-      ? 'Users with the most distinct raffles participated in (confirmed entries). Display names are set in My Dashboard.'
-      : `Users with the most distinct raffles participated in during this period (${scope}). Display names are set in My Dashboard.`
+      ? `Users with the most distinct raffles participated in (paid, confirmed entries). ${antiAbuse} Display names are set in My Dashboard.`
+      : `Users with the most distinct raffles participated in during this period (${scope}). ${antiAbuse} Display names are set in My Dashboard.`
 
   const purchased =
     meta == null || meta.kind === 'all'
-      ? 'Players who have bought the most tickets across all raffles (confirmed entries).'
-      : `Players who bought the most tickets in this period (${scope}), ranked by confirmation time.`
+      ? `Players who have bought the most tickets across all raffles (paid, confirmed entries). ${antiAbuse}`
+      : `Players who bought the most tickets in this period (${scope}), ranked by confirmation time. ${antiAbuse}`
 
   const created =
     meta == null || meta.kind === 'all'
@@ -105,8 +108,8 @@ function tableDescriptions(meta: LeaderboardPeriodMeta | null): {
 
   const sold =
     meta == null || meta.kind === 'all'
-      ? 'Creators whose raffles have sold the most tickets (confirmed entries).'
-      : `Creators whose raffles sold the most tickets in this period (${scope}).`
+      ? `Creators whose raffles have sold the most paid tickets from non-creator buyers, only when enough distinct buyers participated. ${antiAbuse}`
+      : `Creators whose raffles sold the most eligible tickets in this period (${scope}). ${antiAbuse}`
 
   return {
     rafflesEntered: entered,

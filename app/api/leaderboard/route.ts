@@ -7,6 +7,8 @@ const PUBLIC_CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=60, stale-whil
 /**
  * GET /api/leaderboard
  * Returns top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (creators).
+ * Raffles below the leaderboard ticket-price floor are excluded everywhere. Entries omit complimentary/refunded/zero paid.
+ * Tickets purchased cap per wallet per raffle; tickets sold need distinct non-creator buyers — lib/leaderboard/hardening.ts.
  * Query (UTC calendar):
  * - Default: period=month for the current UTC month.
  * - period=all — all-time (no date filter).

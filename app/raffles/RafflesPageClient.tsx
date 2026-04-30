@@ -1196,7 +1196,9 @@ export function RafflesPageClient({
                 Leaderboard
               </h2>
               <p className="text-muted-foreground text-sm mb-2">
-                Top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold.
+                Top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold. Rankings ignore
+                ultra-cheap raffle prices; the tickets-purchased board caps volume per wallet per raffle; tickets-sold needs
+                distinct paying buyers besides the creator.
                 {leaderboardPeriodLabel ? (
                   <>
                     {' '}
