@@ -29,13 +29,11 @@ import {
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
-import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+import { executeRafflePurchase } from '@/lib/client/execute-raffle-purchase'
+import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
-import {
-  ReferralComplimentaryHint,
-  clearReferralComplimentarySessionCache,
-} from '@/components/ReferralComplimentaryHint'
+import { ReferralComplimentaryHint } from '@/components/ReferralComplimentaryHint'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import {
@@ -44,21 +42,8 @@ import {
 } from '@/components/RaffleOverThresholdPngButton'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { Trophy, Share2, BadgeCheck, Loader2, Users } from 'lucide-react'
+import { Trophy, Share2, BadgeCheck, Loader2, Users, ShoppingCart } from 'lucide-react'
 import Image from 'next/image'
-import {
-  Transaction,
-  SystemProgram,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-} from '@solana/web3.js'
-import {
-  getAssociatedTokenAddress,
-  createTransferInstruction,
-  getMint,
-  getAccount,
-  createAssociatedTokenAccountInstruction,
-} from '@solana/spl-token'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import {
   buildRaffleImageAttemptChain,
@@ -66,6 +51,7 @@ import {
   getRaffleImageFallbackRawUrl,
   isDirectRaffleImageHost,
 } from '@/lib/raffle-display-image-url'
+import { useCart } from '@/components/cart/CartProvider'
 
 /** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
 function raffleImageUnoptimized(src: string): boolean {
@@ -117,6 +103,7 @@ export function RaffleCard({
   const { publicKey, connected } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
+  const { addItem: addCartItem } = useCart()
   const wallet = publicKey?.toBase58() ?? ''
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState<Date | null>(null)
@@ -133,6 +120,7 @@ export function RaffleCard({
   const purchaseAmount = raffle.ticket_price * ticketQuantity
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [cartAddedHint, setCartAddedHint] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
   const displayImageSrc = useMemo(() => {
     const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
@@ -332,9 +320,10 @@ export function RaffleCard({
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
-  const maxPurchaseQuantity = availableTickets !== null 
-    ? Math.max(0, availableTickets) 
-    : 100
+  const maxPurchaseQuantity =
+    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY
+
+  const quantityInputMax = availableTickets !== null ? maxPurchaseQuantity : undefined
   
   // Calculate minimum eligibility
   const minTickets = getRaffleMinimum(raffle)
@@ -393,13 +382,21 @@ export function RaffleCard({
     return () => { cancelled = true }
   }, [connected, publicKey])
 
+  const dismissQuickBuyAfterSuccess = () => {
+    setTimeout(() => {
+      setShowQuickBuy(false)
+      setSuccess(false)
+      setTicketQuantity(1)
+      setTicketQuantityDisplay('1')
+    }, 2000)
+  }
+
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
       setError('Please connect your wallet first')
       return
     }
 
-    // OWL: block checkout with friendly message if mint not configured
     if (raffle.currency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
       return
@@ -410,518 +407,46 @@ export function RaffleCard({
     setSuccess(false)
 
     try {
-      // Step 1: Create entry and get payment details
-      // Add retry logic and timeout for mobile connections
-      let createResponse: Response | null = null
-      let fetchRetries = 3
-      let fetchError: Error | null = null
-      
-      while (fetchRetries > 0) {
-        try {
-          // Create AbortController for timeout (30 seconds for mobile)
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 30000)
-          createResponse = await fetch('/api/entries/create', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-              raffleId: raffle.id,
-              walletAddress: publicKey.toBase58(),
-              ticketQuantity,
-              amountPaid: purchaseAmount,
-            }),
-            signal: controller.signal,
-          })
-          
-          clearTimeout(timeoutId)
-          
-          // If we get a response (even if not ok), break retry loop
-          break
-        } catch (fetchErr: any) {
-          fetchRetries--
-          fetchError = fetchErr
-          
-          // Check if it's a network/fetch error
-          const errorMessage = fetchErr?.message || ''
-          const errorName = fetchErr?.name || ''
-          const isFetchError = 
-            errorMessage.includes('failed to fetch') ||
-            errorMessage.includes('Failed to fetch') ||
-            errorMessage.includes('NetworkError') ||
-            errorMessage.includes('Network request failed') ||
-            errorName === 'TypeError' ||
-            errorName === 'AbortError' ||
-            errorMessage.includes('timeout') ||
-            errorMessage.includes('CORS') ||
-            errorMessage.includes('network')
-          
-          if (fetchRetries === 0) {
-            if (isFetchError || errorName === 'AbortError') {
-              throw new Error(
-                'Network connection failed. This may be a connectivity issue on mobile. ' +
-                'Please check your internet connection and try again. ' +
-                'If the issue persists, try switching between WiFi and mobile data.'
-              )
-            }
-            throw fetchErr
-          }
-          
-          // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, 2000 * (3 - fetchRetries)))
-        }
-      }
+      const res = await executeRafflePurchase({
+        raffle,
+        ticketQuantity,
+        publicKey,
+        connection,
+        sendTransaction,
+        routerRefresh: () => router.refresh(),
+        celebrateOnComplimentary: true,
+        celebrateOnPaymentConfirmed: true,
+        onComplimentarySuccess: () => setSuccess(true),
+        afterPaymentTxConfirmed: () => setSuccess(true),
+        onVerifyPending: async () => {
+          router.refresh()
+          setSuccess(true)
+        },
+      })
 
-      if (!createResponse) {
-        throw fetchError || new Error('Failed to create entry: Network error')
-      }
-
-      if (!createResponse.ok) {
-        const errorData = await createResponse.json()
-        throw new Error(errorData.error || 'Failed to create entry')
-      }
-
-      const createData = await createResponse.json()
-
-      if (createData.complimentary === true && createData.complimentaryToken && createData.entryId) {
-        const confRes = await fetch('/api/entries/confirm-complimentary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            entryId: createData.entryId,
-            token: createData.complimentaryToken,
-            walletAddress: publicKey.toBase58(),
-          }),
-        })
-        if (!confRes.ok) {
-          let msg = 'Could not activate your free referral ticket. Try again in a moment.'
-          try {
-            const j = await confRes.json()
-            if (typeof j?.error === 'string') msg = j.error
-          } catch {
-            /* ignore */
-          }
-          throw new Error(msg)
-        }
-        clearReferralComplimentarySessionCache()
-        setSuccess(true)
-        requestAnimationFrame(() => fireGreenConfetti())
-        router.refresh()
-        setTimeout(() => {
-          setShowQuickBuy(false)
-          setSuccess(false)
-          setTicketQuantity(1)
-          setTicketQuantityDisplay('1')
-        }, 2000)
+      if (!res.ok) {
+        setError(res.error)
+        if (res.isUnconfirmedPayment) router.refresh()
         return
       }
 
-      const entryId = createData.entryId as string
-      const paymentDetails = createData.paymentDetails
-      if (!entryId || !paymentDetails) throw new Error('Invalid create response')
-
-      // Step 2: Build transaction
-      let latestBlockhash: { blockhash: string; lastValidBlockHeight: number } | null = null
-      let retries = 3
-      while (retries > 0) {
-        try {
-          try {
-            const result = await connection.getLatestBlockhash('confirmed')
-            latestBlockhash = result
-            break
-          } catch (latestError: any) {
-            // If getLatestBlockhash doesn't exist or isn't supported, try getRecentBlockhash (older API)
-            const errorMsg = latestError?.message || ''
-            if (errorMsg.includes('does not exist') || errorMsg.includes('not available') || latestError?.code === -32601) {
-              // Fallback to getRecentBlockhash for older RPC endpoints
-              // Try to get lastValidBlockHeight separately using getSlot for mobile wallet compatibility
-              try {
-                const recentResult = await connection.getRecentBlockhash('confirmed')
-                const slot = await connection.getSlot('confirmed')
-                latestBlockhash = {
-                  blockhash: recentResult.blockhash,
-                  lastValidBlockHeight: slot, // Use current slot as approximate lastValidBlockHeight
-                }
-              } catch (fallbackError) {
-                // If we can't get slot, still try with 0 (wallet will handle it)
-                const recentResult = await connection.getRecentBlockhash('confirmed')
-                latestBlockhash = {
-                  blockhash: recentResult.blockhash,
-                  lastValidBlockHeight: 0,
-                }
-              }
-              break
-            } else {
-              // Re-throw if it's a different error
-              throw latestError
-            }
-          }
-        } catch (rpcError: any) {
-          retries--
-          const errorMessage = rpcError?.message || ''
-          const errorName = rpcError?.name || ''
-          
-          // Check for network/fetch errors (common on mobile)
-          const isFetchError = 
-            errorMessage.includes('failed to fetch') ||
-            errorMessage.includes('Failed to fetch') ||
-            errorMessage.includes('NetworkError') ||
-            errorMessage.includes('Network request failed') ||
-            errorName === 'TypeError' ||
-            (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
-            errorMessage.includes('CORS') ||
-            errorMessage.includes('network')
-          
-          if (retries === 0) {
-            if (isFetchError) {
-              throw new Error(
-                'Network connection failed. This may be a network issue or CORS restriction on mobile. ' +
-                'Please check your internet connection and try again. ' +
-                'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
-              )
-            }
-            if (isSolanaRpcRateLimitError(rpcError)) {
-              throw new Error(
-                'RPC endpoint is rate-limited or over quota (balances and purchases need a reliable RPC). ' +
-                'Please set NEXT_PUBLIC_SOLANA_RPC_URL to a private RPC endpoint ' +
-                '(e.g., Helius, Alchemy, or another private RPC). Public RPC endpoints are rate-limited.'
-              )
-            }
-            throw new Error('Failed to get blockhash. Please try again.')
-          }
-          // Exponential backoff: wait longer for each retry (longer delays for fetch errors)
-          const backoffDelay = isFetchError ? 2000 * (3 - retries) : 1000 * (3 - retries)
-          await new Promise(resolve => setTimeout(resolve, backoffDelay))
-        }
-      }
-      
-      if (!latestBlockhash) {
-        throw new Error('Failed to get recent blockhash')
-      }
-
-      // Construct transaction with proper blockhash and lastValidBlockHeight for mobile wallet compatibility
-      // Setting lastValidBlockHeight is critical for Android mobile wallets (MWA)
-      const transaction = new Transaction()
-      transaction.recentBlockhash = latestBlockhash.blockhash
-      if (latestBlockhash.lastValidBlockHeight) {
-        transaction.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight
-      }
-      transaction.feePayer = publicKey
-      
-      const payments: { recipient: string; amount: number }[] =
-        paymentDetails.split?.length === 2
-          ? paymentDetails.split
-          : [{ recipient: paymentDetails.recipient, amount: paymentDetails.amount }]
-
-      if (raffle.currency === 'SOL') {
-        for (const p of payments) {
-          transaction.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: new PublicKey(p.recipient),
-              lamports: Math.round(p.amount * LAMPORTS_PER_SOL),
-            })
-          )
-        }
-      } else if (raffle.currency === 'OWL' && !paymentDetails.owlMint) {
-        throw new Error('OWL entry is not enabled yet — mint address pending.')
-      } else if (raffle.currency === 'USDC') {
-        const usdcMint = new PublicKey(paymentDetails.usdcMint)
-        const mintInfo = await getMint(connection, usdcMint)
-        const decimals = mintInfo.decimals
-        const senderTokenAddress = await getAssociatedTokenAddress(usdcMint, publicKey)
-        for (const p of payments) {
-          const recipientPubkey = new PublicKey(p.recipient)
-          const amount = BigInt(Math.round(p.amount * Math.pow(10, decimals)))
-          const recipientTokenAddress = await getAssociatedTokenAddress(usdcMint, recipientPubkey)
-          let accountExists = false
-          try {
-            await getAccount(connection, recipientTokenAddress)
-            accountExists = true
-          } catch (error: any) {
-            if (!error?.message?.includes('TokenAccountNotFoundError') && !error?.message?.includes('could not find account')) throw error
-          }
-          if (!accountExists) {
-            transaction.add(createAssociatedTokenAccountInstruction(publicKey, recipientTokenAddress, recipientPubkey, usdcMint))
-          }
-          transaction.add(createTransferInstruction(senderTokenAddress, recipientTokenAddress, publicKey, amount, []))
-        }
-      } else if (raffle.currency === 'OWL') {
-        // OWL (SPL Token) transfer
-        if (!paymentDetails.owlMint) {
-          throw new Error('OWL mint address not configured in payment details')
-        }
-        const owlMint = new PublicKey(paymentDetails.owlMint)
-        
-        // Get mint info with retry logic for RPC errors
-        let mintInfo
-        let mintRetries = 3
-        while (mintRetries > 0) {
-          try {
-            mintInfo = await getMint(connection, owlMint)
-            break
-          } catch (rpcError: any) {
-            mintRetries--
-            const errorMessage = rpcError?.message || ''
-            const errorCode = rpcError?.code || rpcError?.error?.code
-            const errorName = rpcError?.name || ''
-            
-            const isFetchError = 
-              errorMessage.includes('failed to fetch') ||
-              errorMessage.includes('Failed to fetch') ||
-              errorMessage.includes('NetworkError') ||
-              errorMessage.includes('Network request failed') ||
-              errorName === 'TypeError' ||
-              (errorName === 'TypeError' && errorMessage.includes('fetch')) ||
-              errorMessage.includes('CORS') ||
-              errorMessage.includes('network')
-            
-            if (isFetchError ||
-                errorCode === 19 || 
-                errorMessage.includes('Temporary internal error') ||
-                errorMessage.includes('500') ||
-                errorMessage.includes('Network') ||
-                errorMessage.includes('timeout')) {
-              if (mintRetries === 0) {
-                if (isFetchError) {
-                  throw new Error(
-                    'Network connection failed while fetching OWL mint information. This may be a network issue or CORS restriction on mobile. ' +
-                    'Please check your internet connection and try again. ' +
-                    'If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC) that supports mobile access.'
-                  )
-                } else {
-                  throw new Error(
-                    'Failed to fetch OWL mint information after retries. This may be a temporary RPC issue. ' +
-                    'Please try again in a moment. If the issue persists, ensure you have set NEXT_PUBLIC_SOLANA_RPC_URL ' +
-                    'to a private RPC endpoint (Helius, Alchemy, or another private RPC).'
-                  )
-                }
-              }
-              const backoffDelay = isFetchError ? 2000 * (3 - mintRetries) : 1000 * (3 - mintRetries)
-              await new Promise(resolve => setTimeout(resolve, backoffDelay))
-            } else {
-              throw rpcError
-            }
-          }
-        }
-        
-        if (!mintInfo) {
-          throw new Error('Failed to get OWL mint information')
-        }
-        
-        const decimals = mintInfo.decimals
-        const senderTokenAddress = await getAssociatedTokenAddress(owlMint, publicKey)
-        for (const p of payments) {
-          const recipientPubkey = new PublicKey(p.recipient)
-          const amount = BigInt(Math.round(p.amount * Math.pow(10, decimals)))
-          const recipientTokenAddress = await getAssociatedTokenAddress(owlMint, recipientPubkey)
-          let accountExists = false
-          let accountRetries = 3
-          while (accountRetries > 0 && !accountExists) {
-            try {
-              await getAccount(connection, recipientTokenAddress)
-              accountExists = true
-            } catch (error: any) {
-              const errorMessage = error?.message || ''
-              const errorCode = error?.code || error?.error?.code
-              const errorName = error?.name || ''
-              if (errorMessage.includes('TokenAccountNotFoundError') || errorMessage.includes('could not find account')) {
-                accountExists = false
-                break
-              }
-              const isFetchError = errorMessage.includes('failed to fetch') || errorMessage.includes('Failed to fetch') || errorName === 'TypeError' || errorMessage.includes('network')
-              if (isFetchError || errorCode === 19 || errorMessage.includes('Temporary internal error') || errorMessage.includes('500') || errorMessage.includes('timeout')) {
-                accountRetries--
-                if (accountRetries === 0) { accountExists = false; break }
-                await new Promise(resolve => setTimeout(resolve, isFetchError ? 2000 * (3 - accountRetries) : 1000 * (3 - accountRetries)))
-              } else { accountExists = false; break }
-            }
-          }
-          if (!accountExists) {
-            transaction.add(createAssociatedTokenAccountInstruction(publicKey, recipientTokenAddress, recipientPubkey, owlMint))
-          }
-          transaction.add(createTransferInstruction(senderTokenAddress, recipientTokenAddress, publicKey, amount, []))
-        }
-      } else {
-        throw new Error(`Unsupported currency: ${raffle.currency}`)
-      }
-
-      // Step 3: Send transaction for signing
-      // For Android mobile wallets, ensure transaction is properly constructed
-      let signature: string
-      try {
-        // Validate transaction before sending (especially important for mobile wallets)
-        if (transaction.instructions.length === 0) {
-          throw new Error('Transaction has no instructions. Please try again.')
-        }
-        
-        // Ensure blockhash is still valid (especially important for slower mobile connections)
-        if (!transaction.recentBlockhash) {
-          throw new Error('Transaction blockhash is missing. Please try again.')
-        }
-        
-        signature = await sendTransaction(transaction, connection, {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-          maxRetries: 3,
-        })
-      } catch (walletError: any) {
-        console.error('Wallet error details:', walletError)
-        
-        // Provide more helpful error messages for wallet errors
-        const errorMessage = walletError?.message || walletError?.toString() || 'Unknown error'
-        const errorCode = walletError?.code
-        const errorName = walletError?.name || ''
-        
-        // Check if this is an Android/mobile device
-        const isMobile = typeof window !== 'undefined' && /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-          navigator.userAgent || navigator.vendor || (window as any).opera || ''
-        )
-        const isAndroid = typeof window !== 'undefined' && /android/i.test(
-          navigator.userAgent || navigator.vendor || (window as any).opera || ''
-        )
-        
-        if (errorCode === 4001 || errorMessage.includes('User rejected') || errorMessage.includes('rejected')) {
-          throw new Error('Transaction was cancelled. Please try again if you want to continue.')
-        }
-        if (errorMessage.includes('insufficient funds') || errorMessage.includes('Insufficient')) {
-          throw new Error('Insufficient funds in your wallet. Please ensure you have enough SOL/USDC to cover the transaction and fees.')
-        }
-        // Android/Mobile-specific errors
-        if (isAndroid && (errorMessage.includes('blockhash') || errorMessage.includes('Blockhash') || errorMessage.includes('expired'))) {
-          throw new Error('Transaction blockhash expired. This can happen on slower connections. Please try again - the transaction will use a fresh blockhash.')
-        }
-        if (isMobile && (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))) {
-          throw new Error('Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.')
-        }
-        // Solflare-specific: give clearer guidance
-        if (errorMessage.toLowerCase().includes('solflare')) {
-          throw new Error('Solflare wallet error. Please try: 1) Refreshing the page and reconnecting Solflare, 2) Updating the Solflare extension to the latest version, 3) Using Solflare in a different browser if the issue persists.')
-        }
-        if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
-          throw new Error('Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.')
-        }
-        if (errorMessage.includes('Network') || errorMessage.includes('connection')) {
-          throw new Error('Network error. Please check your internet connection and try again.')
-        }
-        if (isMobile && errorMessage.includes('timeout')) {
-          throw new Error('Transaction timeout. This can happen on slower mobile connections. Please try again.')
-        }
-        // Re-throw with original message for other errors
-        throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
-      }
-
-      // Step 4: Wait for confirmation
-      const maxAttempts = 30
-      let attempts = 0
-      let confirmed = false
-      
-      while (attempts < maxAttempts && !confirmed) {
-        try {
-          const status = await connection.getSignatureStatus(signature)
-          if (status?.value?.confirmationStatus === 'confirmed' || status?.value?.confirmationStatus === 'finalized') {
-            confirmed = true
-            break
-          }
-          if (status?.value?.err) {
-            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`)
-          }
-        } catch (error) {
-          // Ignore errors during polling
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        attempts++
-      }
-      
-      if (!confirmed) {
-        throw new Error('Transaction confirmation timeout')
-      }
-
-      // Celebrate as soon as the transaction is confirmed (before verify) so OWL and others get confetti even if server verification is delayed or fails
-      setSuccess(true)
-      requestAnimationFrame(() => fireGreenConfetti())
-
-      // Step 5: Verify entry
-      const verifyResponse = await fetch('/api/entries/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          entryId,
-          transactionSignature: signature,
-        }),
-      })
-
-      if (!verifyResponse.ok) {
-        const errorData = await verifyResponse.json()
-        
-        // Handle temporary verification failures (202 Accepted)
-        if (verifyResponse.status === 202) {
-          // Transaction signature saved, verification will retry automatically (confetti already fired on tx confirm)
-          setSuccess(true)
-          setError(null)
-          console.log('Verification pending:', errorData.message || errorData.details)
-          
-          // Refresh to pick up the entry with saved signature
-          router.refresh()
-          
-          setTimeout(() => {
-            setShowQuickBuy(false)
-            setSuccess(false)
-            setTicketQuantity(1)
-            setTicketQuantityDisplay('1')
-          }, 2000)
-          return // Exit early - verification will complete in background
-        }
-        
-        // Permanent failure
-        throw new Error(errorData.error || 'Failed to verify transaction')
-      }
-
-      setSuccess(true)
+      dismissQuickBuyAfterSuccess()
       router.refresh()
-      
-      setTimeout(() => {
-        setShowQuickBuy(false)
-        setSuccess(false)
-        setTicketQuantity(1)
-        setTicketQuantityDisplay('1')
-      }, 2000)
-    } catch (err) {
-      console.error('Purchase error:', err)
-      
-      // Provide helpful error messages for common errors
-      let errorMessage = 'Failed to purchase tickets'
-      if (err instanceof Error) {
-        const errMsg = err.message || ''
-        const errorStr = err.toString()
-        
-        // Prioritize specific error messages from fetch retry logic
-        if (errMsg.includes('Network connection failed') || errMsg.includes('connectivity issue')) {
-          errorMessage = errMsg
-        } else if (errMsg.includes('Failed to fetch') || errMsg.includes('failed to fetch')) {
-          errorMessage = 'Network connection failed. Please check your internet connection and try again. If the issue persists, try switching between WiFi and mobile data.'
-        } else if (errMsg.includes('403') || errMsg.includes('Access forbidden')) {
-          errorMessage = errMsg
-        } else if (errMsg.includes('RPC endpoint') || errMsg.includes('RPC')) {
-          errorMessage = errMsg
-        } else if (errMsg.includes('Network') || errMsg.includes('timeout')) {
-          errorMessage = 'Network error. Please check your connection and try again.'
-        } else {
-          errorMessage = errMsg
-        }
-      }
-      
-      setError(errorMessage)
     } finally {
       setIsProcessing(false)
     }
+  }
+
+  const handleAddToCart = () => {
+    setCartAddedHint(false)
+    const res = addCartItem(raffle, ticketQuantity)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    setError(null)
+    setCartAddedHint(true)
+    setTimeout(() => setCartAddedHint(false), 2200)
   }
 
   const handleQuantityChange = (value: string) => {
@@ -1702,7 +1227,7 @@ export function RaffleCard({
                   id="card-quantity"
                   type="number"
                   min="1"
-                  max={maxPurchaseQuantity}
+                  max={quantityInputMax}
                   value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
                   onBlur={handleQuantityBlur}
@@ -1744,6 +1269,12 @@ export function RaffleCard({
                   Tickets purchased successfully!
                 </div>
               )}
+              {cartAddedHint && (
+                <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/40 text-blue-200 text-xs flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+                  Added to cart — open cart in the header to checkout multiple raffles.
+                </div>
+              )}
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-2">
                 <Button
                   variant="outline"
@@ -1752,6 +1283,20 @@ export function RaffleCard({
                   className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm"
                 >
                   Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleAddToCart}
+                  disabled={
+                    (availableTickets !== null && availableTickets <= 0) ||
+                    !connected ||
+                    isProcessing
+                  }
+                  className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm gap-1.5"
+                >
+                  <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+                  Cart
                 </Button>
                 <Button
                   onClick={handlePurchase}

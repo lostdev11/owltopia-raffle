@@ -18,7 +18,7 @@ function asPublicKey(k: PublicKey | string): PublicKey {
  * Matches indices used by `meta.preBalances`, `meta.postBalances`, and `meta.*TokenBalances[].accountIndex`.
  * Using only `staticAccountKeys` breaks verification for Phantom/Solflare v0 txs when ATAs are loaded from ALTs.
  */
-function getFullAccountKeysForTransaction(tx: {
+export function getFullAccountKeysForTransaction(tx: {
   transaction: { message: unknown }
   meta: NonNullable<NonNullable<Awaited<ReturnType<Connection['getTransaction']>>>['meta']>
 }): PublicKey[] {

@@ -59,6 +59,12 @@ function roundRectPath(
   ctx.closePath()
 }
 
+/** Owltopia site icon — same asset as X promo PNG watermarks (`RafflePromoPngButton`). */
+function watermarkIconUrl(): string {
+  if (typeof window === 'undefined') return '/icon.png'
+  return new URL('/icon.png', window.location.origin).href
+}
+
 export function RaffleWinnerPngButton({
   title,
   slug,
@@ -120,6 +126,23 @@ export function RaffleWinnerPngButton({
       ctx.fillStyle = panel
       ctx.fill()
       ctx.restore()
+
+      // Large centered Owltopia logo in the panel background (gold card stays readable on top).
+      {
+        const wm = await tryLoadImage(watermarkIconUrl())
+        if (wm) {
+          ctx.save()
+          roundRectPath(ctx, panelX, panelY, panelW, panelH, 30)
+          ctx.clip()
+          const s = Math.min(panelW, panelH) * 0.88
+          const wx = panelX + (panelW - s) / 2
+          const wy = panelY + (panelH - s) / 2
+          ctx.globalAlpha = 0.07
+          ctx.drawImage(wm, wx, wy, s, s)
+          ctx.globalAlpha = 1
+          ctx.restore()
+        }
+      }
 
       const artSize = 390
       const artX = panelX + panelW - artSize - 42

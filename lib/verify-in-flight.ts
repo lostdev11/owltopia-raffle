@@ -25,6 +25,12 @@ export function releaseVerificationLock(entryId: string): void {
   inVerification.delete(entryId)
 }
 
+export function releaseVerificationLocks(entryIds: readonly string[]): void {
+  for (const id of entryIds) {
+    inVerification.delete(id)
+  }
+}
+
 /**
  * Returns true if any of the given entry IDs are currently being verified.
  * Used by create() to avoid invalidating an entry that is mid-verification.

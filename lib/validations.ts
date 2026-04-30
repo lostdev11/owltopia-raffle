@@ -1,11 +1,12 @@
 import { z } from 'zod'
+import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 
 const solanaAddress = z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/)
 
 export const entriesCreateBody = z.object({
   raffleId: z.string().uuid(),
   walletAddress: solanaAddress,
-  ticketQuantity: z.coerce.number().int().min(1).max(1000),
+  ticketQuantity: z.coerce.number().int().min(1).max(MAX_TICKET_QUANTITY_PER_ENTRY),
 })
 
 export const referralVanityBody = z.object({
@@ -15,6 +16,25 @@ export const referralVanityBody = z.object({
 export const entriesVerifyBody = z.object({
   entryId: z.string().uuid(),
   transactionSignature: z.string().min(80).max(120),
+})
+
+/** Multi-raffle cart: creates several pending rows and returns merged payment splits (one Solana tx). */
+export const entriesCreateBatchBody = z.object({
+  walletAddress: solanaAddress,
+  items: z
+    .array(
+      z.object({
+        raffleId: z.string().uuid(),
+        ticketQuantity: z.coerce.number().int().min(1).max(MAX_TICKET_QUANTITY_PER_ENTRY),
+      })
+    )
+    .min(2)
+    .max(20),
+})
+
+export const entriesVerifyBatchBody = z.object({
+  transactionSignature: z.string().min(80).max(120),
+  entryIds: z.array(z.string().uuid()).min(2).max(20),
 })
 
 export const entriesConfirmComplimentaryBody = z.object({

@@ -13,12 +13,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, ShoppingCart } from 'lucide-react'
+import { useCart } from '@/components/cart/CartProvider'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 export function Header() {
   const { publicKey, connected } = useWallet()
+  const { ticketCount } = useCart()
   const wallet = publicKey?.toBase58() ?? ''
   const visibilityTick = useVisibilityTick()
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
@@ -73,7 +75,10 @@ export function Header() {
   const desktopNavButtonClass =
     'text-white/90 hover:text-white hover:bg-white/10 active:bg-white/15 text-xs sm:text-sm px-2 sm:px-3 h-9 sm:h-10'
 
+  const cartLabel = ticketCount > 0 ? `Cart (${ticketCount > 99 ? '99+' : ticketCount})` : 'Cart'
+
   const navLinks = [
+    { href: '/cart', label: cartLabel, icon: ShoppingCart },
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { href: '/council', label: 'Council', icon: Landmark },
     ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
@@ -82,6 +87,9 @@ export function Header() {
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
     ...(showCreateRaffle ? [{ href: '/admin/raffles/new', label: 'Create Raffle', icon: Plus }] : []),
   ]
+
+  /** Hamburger sheet: Cart is already the icon beside the menu on small screens */
+  const mobileNavLinks = navLinks.filter(link => link.href !== '/cart')
 
   return (
     <header className="w-full bg-black border-b border-green-500/20 text-white">
@@ -96,6 +104,15 @@ export function Header() {
           {/* Single right cluster: desktop nav + one wallet button (avoid duplicate WalletMultiButton). Mobile: menu + wallet. */}
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
             <div className="hidden md:flex items-center gap-2 lg:gap-4">
+              <Link href="/cart">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
+                  <ShoppingCart className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">
+                    {ticketCount > 0 ? `Cart (${ticketCount > 99 ? '99+' : ticketCount})` : 'Cart'}
+                  </span>
+                  <span className="sm:hidden">Cart</span>
+                </Button>
+              </Link>
               <Link href="/leaderboard">
                 <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                   <Trophy className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
@@ -163,6 +180,21 @@ export function Header() {
                 <Menu className="h-5 w-5" />
               </Button>
             </div>
+            {/* Mobile-only: desktop nav already includes Cart from md breakpoint up */}
+            <div className="shrink-0 md:hidden">
+              <Link
+                href="/cart"
+                aria-label={`Cart${ticketCount > 0 ? `, ${ticketCount} ticket${ticketCount === 1 ? '' : 's'}` : ''}`}
+                className="relative inline-flex items-center justify-center h-10 min-h-[44px] min-w-[44px] sm:w-11 sm:h-11 rounded-md px-2 text-white/90 hover:text-white hover:bg-white/10 active:bg-white/15 touch-manipulation"
+              >
+                <ShoppingCart className="h-[1.375rem] w-[1.375rem] mx-auto sm:mr-0" aria-hidden />
+                {ticketCount > 0 ? (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-[3px] rounded-full bg-red-600 text-[10px] font-bold leading-none text-white flex items-center justify-center shadow">
+                    {ticketCount > 99 ? '99+' : ticketCount}
+                  </span>
+                ) : null}
+              </Link>
+            </div>
             <div className="shrink-0">
               <ThemeToggle />
             </div>
@@ -180,7 +212,7 @@ export function Header() {
             <DialogTitle className="text-left text-base">Menu</DialogTitle>
           </DialogHeader>
           <nav className="flex flex-col p-2 pb-6">
-            {navLinks.map(({ href, label, icon: Icon }) => (
+            {mobileNavLinks.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
@@ -191,7 +223,7 @@ export function Header() {
                 {label}
               </Link>
             ))}
-            {navLinks.length === 0 && (
+            {mobileNavLinks.length === 0 && (
               <p className="px-4 py-3 text-muted-foreground text-sm">Connect your wallet for more options.</p>
             )}
           </nav>

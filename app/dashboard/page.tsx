@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -336,6 +337,21 @@ type RaffleEntrySummary = {
   referredByLabels: string[]
 }
 
+type DashboardTabId = 'overview' | 'hosting' | 'winnings' | 'account'
+
+function parseDashboardTabParam(value: string | null): DashboardTabId | null {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (
+    raw === 'overview' ||
+    raw === 'hosting' ||
+    raw === 'winnings' ||
+    raw === 'account'
+  ) {
+    return raw
+  }
+  return null
+}
+
 export default function DashboardPage() {
   const { publicKey, connected, signMessage } = useWallet()
   const { connection } = useConnection()
@@ -378,12 +394,42 @@ export default function DashboardPage() {
   const [referralVanitySaving, setReferralVanitySaving] = useState(false)
   const [referralVanityError, setReferralVanityError] = useState<string | null>(null)
   const [referralVanitySaved, setReferralVanitySaved] = useState(false)
-  const [dashboardTab, setDashboardTab] = useState<'overview' | 'hosting' | 'winnings' | 'account'>('overview')
+  const [dashboardTab, setDashboardTab] = useState<DashboardTabId>('overview')
   const [liveActivityMuted, setLiveActivityMuted] = useState(false)
   const hasRetried401OnMobile = useRef(false)
   const dashboardHydratedRef = useRef(false)
   const hasDashboardDataRef = useRef(false)
   const visibilityTick = useVisibilityTick()
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const applyDashboardTabToUrl = useCallback(
+    (tab: DashboardTabId) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (tab === 'overview') {
+        params.delete('tab')
+      } else {
+        params.set('tab', tab)
+      }
+      const q = params.toString()
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false })
+    },
+    [pathname, router, searchParams],
+  )
+
+  const setDashboardTabFromUi = useCallback(
+    (tab: DashboardTabId) => {
+      setDashboardTab(tab)
+      applyDashboardTabToUrl(tab)
+    },
+    [applyDashboardTabToUrl],
+  )
+
+  useLayoutEffect(() => {
+    const next = parseDashboardTabParam(searchParams.get('tab'))
+    if (next) setDashboardTab(next)
+  }, [searchParams])
 
   useEffect(() => {
     if (!claimPrizeSuccessTx) return
@@ -1767,7 +1813,7 @@ export default function DashboardPage() {
 
       <Tabs
         value={dashboardTab}
-        onValueChange={(v) => setDashboardTab(v as typeof dashboardTab)}
+        onValueChange={(v) => setDashboardTabFromUi(v as DashboardTabId)}
         className="space-y-6"
       >
         <TabsList className="flex h-auto min-h-[52px] w-full flex-wrap justify-stretch gap-1 rounded-xl border border-border/50 bg-muted/40 p-1.5 touch-manipulation sm:flex-nowrap sm:overflow-x-auto">
@@ -1966,7 +2012,7 @@ export default function DashboardPage() {
             <button
               type="button"
               className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-              onClick={() => setDashboardTab('hosting')}
+              onClick={() => setDashboardTabFromUi('hosting')}
             >
               Hosting
             </button>
@@ -1974,7 +2020,7 @@ export default function DashboardPage() {
             <button
               type="button"
               className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-              onClick={() => setDashboardTab('winnings')}
+              onClick={() => setDashboardTabFromUi('winnings')}
             >
               Wins
             </button>
@@ -2369,7 +2415,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-                  onClick={() => setDashboardTab('overview')}
+                  onClick={() => setDashboardTabFromUi('overview')}
                 >
                   Overview
                 </button>{' '}
@@ -3152,7 +3198,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-                    onClick={() => setDashboardTab('hosting')}
+                    onClick={() => setDashboardTabFromUi('hosting')}
                   >
                     Hosting
                   </button>{' '}

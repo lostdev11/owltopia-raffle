@@ -26,6 +26,7 @@ import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
+import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
 
 export const dynamic = 'force-dynamic'
 
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest) {
       offerRefundCandidates,
       partnerDiscordTenantId,
       buyoutOffers,
+      viewerIsSiteAdmin,
     ] = await Promise.all([
       getRafflesByCreator(wallet),
       getCreatorRevenueByWallet(wallet),
@@ -130,6 +132,10 @@ export async function GET(request: NextRequest) {
       listBuyoutOffersForBidder(wallet).catch((err) => {
         console.error('listBuyoutOffersForBidder:', err)
         return []
+      }),
+      isWalletRegisteredAdmin(wallet).catch((err) => {
+        console.error('[me/dashboard] admin check:', err instanceof Error ? err.message : err)
+        return false
       }),
     ])
 
@@ -233,6 +239,8 @@ export async function GET(request: NextRequest) {
           : null,
       buyoutOffers,
       engagement,
+      /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */
+      viewerIsSiteAdmin,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'

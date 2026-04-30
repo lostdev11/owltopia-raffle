@@ -30,6 +30,7 @@ import {
   raffleRequiresCancellationFee,
 } from '@/lib/raffles/cancellation-fee-policy'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
+import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 const PRIZE_RETURN_REASONS = [
   { value: 'cancelled', label: 'Raffle cancelled' },
@@ -72,6 +73,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
+  /** NFT or partner SPL prize held in platform escrow (same paths as return-prize-to-creator API). */
+  const isEscrowPrizeRaffle = isNftRaffle || isPartnerSplPrizeRaffle(raffle)
 
   const noWinner =
     !(raffle.winner_wallet ?? '').trim() && !raffle.winner_selected_at
@@ -191,10 +194,10 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }, [raffle.id, canVoidWinner])
 
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
-  const pendingSectionEligible = isNftRaffle
+  const pendingSectionEligible = isEscrowPrizeRaffle
   /** Matches server rules: verified deposit timestamp is enough (legacy rows may omit prize_deposit_tx). */
-  const canReturnNft =
-    isNftRaffle &&
+  const canReturnEscrowedPrize =
+    isEscrowPrizeRaffle &&
     !!creatorWallet &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
@@ -216,18 +219,18 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
         setMessage({
           type: 'success',
           text: data.transactionSignature
-            ? `NFT returned to creator. TX: ${data.transactionSignature}`
-            : 'NFT returned to creator successfully.',
+            ? `Prize returned to creator. TX: ${data.transactionSignature}`
+            : 'Prize returned to creator successfully.',
         })
         setReturnDialogOpen(false)
         router.refresh()
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to return NFT to creator' })
+        setMessage({ type: 'error', text: data.error || 'Failed to return prize to creator' })
       }
     } catch (e) {
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Failed to return NFT to creator',
+        text: e instanceof Error ? e.message : 'Failed to return prize to creator',
       })
     } finally {
       setReturning(false)
@@ -250,18 +253,18 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
         setMessage({
           type: 'success',
           text: data.transactionSignature
-            ? `NFT returned to creator. TX: ${data.transactionSignature}`
-            : 'NFT returned to creator successfully.',
+            ? `Prize returned to creator. TX: ${data.transactionSignature}`
+            : 'Prize returned to creator successfully.',
         })
         setReturnDialogOpen(false)
         router.refresh()
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to return NFT to creator' })
+        setMessage({ type: 'error', text: data.error || 'Failed to return prize to creator' })
       }
     } catch (e) {
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Failed to return NFT to creator',
+        text: e instanceof Error ? e.message : 'Failed to return prize to creator',
       })
     } finally {
       setReturning(false)
@@ -276,7 +279,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
-    isNftRaffle &&
+    isEscrowPrizeRaffle &&
     !isCancelled &&
     !!raffle.prize_deposited_at &&
     !!(raffle.winner_wallet ?? '').trim() &&
@@ -1052,8 +1055,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           <CardHeader>
             <CardTitle>Admin actions</CardTitle>
             <CardDescription>
-              Return the NFT prize to the creator&apos;s wallet, then delete the raffle if needed.
-              For NFT raffles, return the prize first so the creator gets their NFT back before
+              Return an escrowed prize (NFT or partner SPL) to the creator&apos;s wallet, then delete
+              the raffle if needed. Return the prize first so the creator gets it back before
               deleting.
             </CardDescription>
           </CardHeader>
@@ -1350,8 +1353,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 </Card>
               )
             })()}
-            {/* Return NFT — show only when escrow return is actually possible */}
-            {canReturnNft ? (
+            {/* Return escrowed prize — show only when on-chain return is possible */}
+            {canReturnEscrowedPrize ? (
               <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
                 {isFailedThreshold && (
                   <div className="flex flex-wrap items-center gap-2">
@@ -1363,7 +1366,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       disabled={returning}
                     >
                       <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
-                      Return NFT to creator (threshold failed)
+                      Return prize to creator (threshold failed)
                     </Button>
                     <span className="text-sm text-muted-foreground">
                       Uses reason <code className="text-xs">min_threshold_not_met</code>.
@@ -1379,14 +1382,14 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     disabled={returning}
                   >
                     <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
-                    Return NFT to creator
+                    Return prize to creator
                   </Button>
                 </div>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Return NFT to creator</DialogTitle>
+                    <DialogTitle>Return prize to creator</DialogTitle>
                     <DialogDescription>
-                      Send the raffle prize NFT from escrow back to the creator&apos;s wallet (
+                      Send the escrowed prize (NFT or SPL) back to the creator&apos;s wallet (
                       <code className="text-xs">{creatorWallet}</code>). Choose a reason for
                       records.
                     </DialogDescription>
@@ -1419,7 +1422,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       disabled={returning}
                       className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                     >
-                      {returning ? 'Returning...' : 'Return NFT'}
+                      {returning ? 'Returning...' : 'Return prize'}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -1450,10 +1453,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     <DialogDescription>
                       Permanently delete &quot;{raffle.title}&quot; and all its entries. This cannot
                       be undone.
-                      {canReturnNft && (
+                      {canReturnEscrowedPrize && (
                         <span className="block mt-2 text-amber-600 dark:text-amber-400">
-                          For NFT raffles, return the NFT to the creator first so they get their
-                          prize back.
+                          Return the escrowed prize to the creator first so they get it back.
                         </span>
                       )}
                     </DialogDescription>

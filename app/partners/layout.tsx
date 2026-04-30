@@ -5,7 +5,7 @@ const site = getSiteBaseUrl()
 
 export const metadata: Metadata = {
   title: `Partner hub | ${PLATFORM_NAME}`,
-  description: `Host tools and links for allowlisted ${PLATFORM_NAME} partner communities (public partner listings, main dashboard, Discord).`,
+  description: `Host tools for allowlisted partner communities; site admins may preview the hub with their wallet. Public partner listings, main dashboard, Discord.`,
   alternates: { canonical: `${site}/partners/dashboard` },
 }
 
