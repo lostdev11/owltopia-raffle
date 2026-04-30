@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   getEntryById,
-  confirmEntryWithTx,
+  confirmCartBatchWithTx,
   TxAlreadyUsedError,
   TransactionSignatureAlreadyUsedError,
   InsufficientTicketsError,
@@ -19,8 +19,9 @@ export const dynamic = 'force-dynamic'
 
 const ERROR_BODY = { success: false as const, error: 'server error' }
 
-const VERIFY_IP_LIMIT = 30
-const VERIFY_WALLET_LIMIT = 4
+/** One cart checkout hits verify-batch once; retries + dual tabs burned the old wallet limit quickly (429 ⇒ false "confirmation failed"). */
+const VERIFY_IP_LIMIT = 45
+const VERIFY_WALLET_LIMIT = 24
 const VERIFY_WINDOW_MS = 60_000
 
 export async function POST(request: NextRequest) {
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
 
       if (!blockchain.valid) {
         const err = blockchain.error || ''
+        console.warn('[entries/verify-batch] on-chain verify invalid', err.slice(0, 280))
         const isTemporary =
           err.includes('Transaction not found') ||
           err.includes('still be confirming') ||
@@ -104,16 +106,11 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        for (const { entry } of pairsSorted) {
-          await confirmEntryWithTx(
-            entry.id,
-            entry.raffle_id,
-            entry.wallet_address,
-            transactionSignatureRaw,
-            Number(entry.amount_paid),
-            entry.ticket_quantity
-          )
-        }
+        await confirmCartBatchWithTx(
+          pairsSorted[0]!.entry.wallet_address.trim(),
+          transactionSignatureRaw,
+          pairsSorted.map(p => p.entry.id)
+        )
       } catch (err) {
         if (
           err instanceof TxAlreadyUsedError ||

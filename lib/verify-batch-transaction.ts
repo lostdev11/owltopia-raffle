@@ -12,13 +12,10 @@ import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 import { mergeBatchPayoutLines } from '@/lib/entries/batch-payout-lines'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
 
-const SOL_TOLERANCE_LAMPORTS = 12_500n /** ~ micro rounding across many legs */
+/** Float merge + RPC balance noise: legacy 12.5µ lamports was too tight for SOL cart batches. */
+const SOL_TOLERANCE_LAMPORTS = 150_000n /** ~150k lamports ≈ 0.00015 SOL */
 /** Allow modest protocol/fee overrun per batch (mirror single-verify maxExtraFee-ish). */
 const SOL_MAX_BATCH_OVER_PER_RECIPIENT_LAMPORTS = BigInt(Math.ceil(0.012 * Number(LAMPORTS_PER_SOL)))
-
-function asPublicKey(k: PublicKey | string): PublicKey {
-  return k instanceof PublicKey ? k : new PublicKey(k)
-}
 
 function aggregateLamportDeltas(transaction: NonNullable<Awaited<ReturnType<Connection['getTransaction']>>>): {
   keys: PublicKey[]
@@ -82,7 +79,9 @@ async function verifySolBatchAgainstTx(
 
   for (const [recipient, lamportsNeeded] of expected.entries()) {
     const got = deltas.get(recipient) ?? 0n
-    const minRecv = lamportsNeeded > SOL_TOLERANCE_LAMPORTS ? lamportsNeeded - SOL_TOLERANCE_LAMPORTS : 0n
+    const tolerance =
+      SOL_TOLERANCE_LAMPORTS + (lamportsNeeded > 0n ? lamportsNeeded / 25_000n : 0n) /** ~0.004% proportional */
+    const minRecv = lamportsNeeded > tolerance ? lamportsNeeded - tolerance : 0n
     if (got < minRecv) {
       return {
         valid: false,
@@ -246,24 +245,6 @@ export async function verifyBatchPaidEntries(
       }
     }
 
-    const message = transaction.transaction.message
-    const accountKeys = 'staticAccountKeys' in message
-      ? (message as { staticAccountKeys: (PublicKey | string)[] }).staticAccountKeys
-      : (message as { accountKeys: (PublicKey | string)[] }).accountKeys
-    const feePayerKey = accountKeys?.[0]
-    const expectedWalletPubkey = new PublicKey(wallet0)
-    const feePayerMatches =
-      feePayerKey != null &&
-      (typeof feePayerKey === 'string'
-        ? feePayerKey === wallet0
-        : asPublicKey(feePayerKey).equals(expectedWalletPubkey))
-    if (!feePayerMatches) {
-      return {
-        valid: false,
-        error: 'Batch transaction wallet mismatch: fee payer is not the entry wallet.',
-      }
-    }
-
     if (transaction.meta?.err) {
       return {
         valid: false,
@@ -272,6 +253,19 @@ export async function verifyBatchPaidEntries(
     }
     if (!transaction.meta) {
       return { valid: false, error: 'Transaction metadata not available.' }
+    }
+
+    const keysResolved = getFullAccountKeysForTransaction({
+      transaction: transaction.transaction,
+      meta: transaction.meta,
+    })
+    const feePayerFromTx = keysResolved[0]
+    const expectedWalletPubkey = new PublicKey(wallet0)
+    if (feePayerFromTx == null || !feePayerFromTx.equals(expectedWalletPubkey)) {
+      return {
+        valid: false,
+        error: 'Batch transaction wallet mismatch: fee payer is not the entry wallet.',
+      }
     }
 
     if (currencyNorm === 'SOL') {

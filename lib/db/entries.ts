@@ -103,6 +103,7 @@ export interface ConfirmEntryWithTxResult {
 function mapRpcError(message: string): never {
   if (message.includes('tx_already_used')) throw new TxAlreadyUsedError()
   if (message.includes('insufficient_tickets')) throw new InsufficientTicketsError()
+  if (message.includes('batch_empty')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_state')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_token')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('token_expired')) throw new ConfirmEntryInvalidStateError(message)
@@ -145,6 +146,38 @@ export async function confirmEntryWithTx(
   }
 
   return { success: true, entry: data.entry as Entry }
+}
+
+/** One Solana signature confirms every cart row — single DB txn (migration 090). */
+export async function confirmCartBatchWithTx(
+  walletAddress: string,
+  txSig: string,
+  entryIds: readonly string[]
+): Promise<{ success: true; entryIds: string[] }> {
+  const uniqueSorted = [...new Set(entryIds.map(id => id.trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  )
+  if (uniqueSorted.length === 0) {
+    throw new ConfirmEntryInvalidStateError('batch_empty')
+  }
+
+  const { data, error } = await getSupabaseAdmin().rpc('confirm_cart_batch_with_tx', {
+    p_wallet_address: walletAddress.trim(),
+    p_tx_sig: txSig.trim(),
+    p_entry_ids: uniqueSorted,
+  })
+
+  if (error) {
+    mapRpcError(error.message)
+  }
+
+  const parsed = data as { success?: boolean } | null
+  if (!parsed || parsed.success !== true) {
+    console.error('Unexpected confirm_cart_batch_with_tx response:', data)
+    throw new Error('Invalid response from confirm_cart_batch_with_tx')
+  }
+
+  return { success: true, entryIds: uniqueSorted }
 }
 
 export async function hasConfirmedEntryForWalletInRaffle(
@@ -254,19 +287,23 @@ export async function getEntryById(id: string) {
 }
 
 export async function getEntryByTransactionSignature(transactionSignature: string) {
+  const sig = transactionSignature.trim()
+  if (!sig) return null
   return withRetry(async () => {
-    const { data, error } = await supabase
+    /** Batch cart confirms several rows with one signature; never use maybeSingle here. */
+    const { data, error } = await getSupabaseAdmin()
       .from('entries')
       .select('*')
-      .eq('transaction_signature', transactionSignature)
-      .maybeSingle()
+      .eq('transaction_signature', sig)
+      .order('verified_at', { ascending: false, nullsFirst: false })
+      .limit(1)
 
     if (error) {
       console.error('Error fetching entry by transaction signature:', error)
       return null
     }
-
-    return data as Entry | null
+    const row = Array.isArray(data) && data[0] ? data[0] : null
+    return row as Entry | null
   }, { maxRetries: 2 })
 }
 

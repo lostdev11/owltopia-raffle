@@ -106,6 +106,29 @@ function persistLines(lines: CartLine[]) {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/** Retries verification when the server RPC or rate limiting flaps; SOL is usually already landed. */
+async function fetchVerifyBatchWithRetries(entryIds: string[], transactionSignature: string): Promise<Response> {
+  const backoffMs = [0, 900, 2400, 5200]
+  let last!: Response
+  for (let i = 0; i < backoffMs.length; i++) {
+    if (backoffMs[i] > 0) await sleep(backoffMs[i])
+    last = await fetch('/api/entries/verify-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ entryIds, transactionSignature }),
+    })
+    if (last.ok || last.status === 202) return last
+    if (last.status === 429 || last.status >= 500) continue
+    return last
+  }
+  return last
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([])
   const [hydrated, setHydrated] = useState(false)
@@ -341,12 +364,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const verifyRes = await fetch('/api/entries/verify-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ entryIds, transactionSignature: signature }),
-        })
+        const verifyRes = await fetchVerifyBatchWithRetries(entryIds, signature)
 
         if (verifyRes.status === 202) {
           requestAnimationFrame(() => fireGreenConfetti())
@@ -356,7 +374,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         if (!verifyRes.ok) {
-          setCheckoutError('Payment sent, but ticket confirmation failed. Refresh in a moment or contact support with your signature.')
+          if (verifyRes.status === 429) {
+            setCheckoutError(
+              'Too many verification requests hit the server. Wait one minute, refresh the page — your payment may already be confirming and tickets can appear shortly.'
+            )
+          } else {
+            setCheckoutError(
+              'Payment sent, but ticket confirmation failed. Refresh in a moment — your seats often confirm on reload — or retry from your wallet activity signature if pending stays.'
+            )
+          }
           setLines(initialSnapshot)
           router.refresh()
           return
