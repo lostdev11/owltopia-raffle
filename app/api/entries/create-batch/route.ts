@@ -14,6 +14,7 @@ import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
 import { isReferralAttributionEnabled } from '@/lib/referrals/config'
 import { mergeBatchPayoutLines } from '@/lib/entries/batch-payout-lines'
+import { isAdmin } from '@/lib/db/admins'
 import {
   assertCartBatchGrossMatchesMergedSplit,
   CartBatchPaymentTotalMismatchError,
@@ -50,6 +51,16 @@ export async function POST(request: NextRequest) {
     const parsed = parseOr400(entriesCreateBatchBody, body)
     if (!parsed.ok) return NextResponse.json(ERROR_BODY, { status: 400 })
     const { walletAddress: walletAddressStr, items } = parsed.data
+
+    if (!(await isAdmin(walletAddressStr.trim()))) {
+      return NextResponse.json(
+        {
+          success: false as const,
+          error: 'Cart batch checkout is temporarily limited to admins while we finish testing.',
+        },
+        { status: 403 }
+      )
+    }
 
     const raffleIdsOrdered = items.map(it => it.raffleId)
     const idSet = new Set(raffleIdsOrdered)

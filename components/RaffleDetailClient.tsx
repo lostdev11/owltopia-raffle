@@ -4152,7 +4152,7 @@ export function RaffleDetailClient({
                 </p>
               </div>
             )}
-            {cartAddedHint && (
+            {Boolean(isAdmin) && cartAddedHint && (
               <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/40 text-blue-200 text-sm flex items-start gap-2">
                 <ShoppingCart className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
                 <span>Added to cart. Open the cart in the header to pay for multiple raffles in one session.</span>
@@ -4169,18 +4169,20 @@ export function RaffleDetailClient({
             >
               Cancel
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleAddToCart}
-              disabled={
-                (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
-              }
-              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
-            >
-              <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
-              Add to cart
-            </Button>
+            {Boolean(isAdmin) ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleAddToCart}
+                disabled={
+                  (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
+                }
+                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
+              >
+                <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+                Add to cart
+              </Button>
+            ) : null}
             <Button
               onClick={handlePurchase}
               disabled={

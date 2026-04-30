@@ -14,6 +14,7 @@ import { entriesVerifyBatchBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { tryAcquireVerificationLock, releaseVerificationLocks } from '@/lib/verify-in-flight'
 import { verifyBatchPaidEntries } from '@/lib/verify-batch-transaction'
+import { isAdmin } from '@/lib/db/admins'
 import type { VerifyBatchErrorCode } from '@/lib/api/verify-batch-response'
 
 export const dynamic = 'force-dynamic'
@@ -68,6 +69,10 @@ export async function POST(request: NextRequest) {
       }
 
       pairs.push({ entry, raffle })
+    }
+
+    if (!walletAnchor?.trim() || !(await isAdmin(walletAnchor.trim()))) {
+      return verifyBatchErr('admin_only', 403)
     }
 
     const pairsSorted = [...pairs].sort((a, b) => {
