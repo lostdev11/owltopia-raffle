@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   acquireNftPrizeClaimLock,
+  clearNftPrizeClaimLock,
   getRaffleById,
   maybeCompleteRaffleAfterClaims,
 } from '@/lib/db/raffles'
@@ -122,6 +123,7 @@ export async function POST(
     }
 
     if (!transferResult.ok || !transferResult.signature) {
+      await clearNftPrizeClaimLock(raffleId).catch(() => {})
       return NextResponse.json(
         { error: transferResult.error || 'Failed to claim prize from escrow' },
         { status: 400 }

@@ -11,7 +11,7 @@ export function CartPageClient() {
   const currencyLabel = lines[0]?.snapshot.currency ?? ''
   const intro =
     lines.length >= 2
-      ? `One wallet approval pays for all ${lines.length} raffles (merged on-chain). On slow mobile data or Wi‑Fi, wait for confirmation before leaving.`
+      ? `One wallet approval pays for all ${lines.length} raffles in one batch transaction. Each line keeps its own ticket count — raffle pages and sold totals update per raffle. On slow mobile data or Wi‑Fi, wait for confirmation before leaving.`
       : 'Add multiple live raffles, then check out. Two or more raffles in the same currency use a single on-chain payment when available.'
 
   return (

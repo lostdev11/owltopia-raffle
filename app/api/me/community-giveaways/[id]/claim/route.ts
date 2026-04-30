@@ -12,6 +12,7 @@ import {
 } from '@/lib/giveaways/payout-nft-giveaway'
 import { checkEscrowHoldsNft } from '@/lib/raffles/prize-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,11 +30,17 @@ export async function POST(
     if (session instanceof NextResponse) return session
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()
-    if (connectedWallet && connectedWallet !== session.wallet) {
-      return NextResponse.json(
-        { error: 'Connected wallet does not match session. Please sign in again.' },
-        { status: 401 }
-      )
+    if (connectedWallet) {
+      const cw = normalizeSolanaWalletAddress(connectedWallet)
+      const sw = normalizeSolanaWalletAddress(session.wallet)
+      const connectedMismatch =
+        cw && sw ? cw !== sw : connectedWallet !== session.wallet.trim()
+      if (connectedMismatch) {
+        return NextResponse.json(
+          { error: 'Connected wallet does not match session. Please sign in again.' },
+          { status: 401 }
+        )
+      }
     }
 
     const params = await context.params
@@ -49,7 +56,12 @@ export async function POST(
 
     const sessionWallet = session.wallet.trim()
     const winner = (g.winner_wallet || '').trim()
-    if (!winner || winner !== sessionWallet) {
+    const winnerNorm = normalizeSolanaWalletAddress(winner)
+    const sessionNorm = normalizeSolanaWalletAddress(sessionWallet)
+    const winnerOk =
+      winner &&
+      (winnerNorm && sessionNorm ? winnerNorm === sessionNorm : winner === sessionWallet)
+    if (!winnerOk) {
       return NextResponse.json({ error: 'Only the drawn winner can claim this giveaway' }, { status: 403 })
     }
     if (g.status !== 'drawn') {

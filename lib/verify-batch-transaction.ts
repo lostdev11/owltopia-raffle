@@ -10,6 +10,10 @@ import { getTokenInfo } from '@/lib/tokens'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 import { mergeBatchPayoutLines } from '@/lib/entries/batch-payout-lines'
+import {
+  assertCartBatchGrossMatchesMergedSplit,
+  CartBatchPaymentTotalMismatchError,
+} from '@/lib/entries/batch-invariants'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
 
 /** Float merge + RPC balance noise: legacy 12.5µ lamports was too tight for SOL cart batches. */
@@ -204,6 +208,19 @@ export async function verifyBatchPaidEntries(
     })
     if (mergedSplit.length === 0 || mergedSplit.some(l => !(l.amount > 0) || !l.recipient.trim())) {
       return { valid: false, error: 'Invalid merged payout splits for batch.' }
+    }
+
+    try {
+      assertCartBatchGrossMatchesMergedSplit({
+        lineGrossAmounts: pairs.map(({ entry }) => Number(entry.amount_paid)),
+        mergedSplit,
+      })
+    } catch (e) {
+      if (e instanceof CartBatchPaymentTotalMismatchError) {
+        console.error('[verifyBatchPaidEntries] payout total mismatch', e.sumLineGross, e.sumMergedAmounts)
+        return { valid: false, error: 'Batch payment instructions inconsistent with entries.' }
+      }
+      throw e
     }
 
     const rpcUrl = resolveServerSolanaRpcUrl()

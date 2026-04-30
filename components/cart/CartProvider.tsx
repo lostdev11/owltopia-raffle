@@ -24,6 +24,10 @@ import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWa
 import type { CartLine } from '@/lib/cart/types'
 import { CART_STORAGE_KEY } from '@/lib/cart/types'
 import { raffleCheckoutBlockedReason } from '@/lib/cart/validate-raffle-checkout'
+import {
+  CartBatchVerifyDialog,
+  type CartBatchReceiptState,
+} from '@/components/cart/CartBatchVerifyDialog'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 
@@ -134,6 +138,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false)
   const [checkoutBusy, setCheckoutBusy] = useState(false)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [batchReceipt, setBatchReceipt] = useState<CartBatchReceiptState | null>(null)
   const router = useRouter()
   const { connection } = useConnection()
   const { publicKey, connected } = useWallet()
@@ -219,6 +224,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     setCheckoutBusy(true)
     setCheckoutError(null)
+    setBatchReceipt(null)
 
     const initialSnapshot = [...linesRef.current]
 
@@ -364,9 +370,29 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const verifyRes = await fetchVerifyBatchWithRetries(entryIds, signature)
+        const receiptLines = loaded.map(({ line }) => ({
+          raffleId: line.raffleId,
+          title: line.snapshot.title,
+          slug: line.snapshot.slug,
+          quantity: line.quantity,
+          image_url: line.snapshot.image_url,
+          image_fallback_url: line.snapshot.image_fallback_url,
+        }))
+        setBatchReceipt({ lines: receiptLines, phase: 'verifying' })
+
+        let verifyRes: Response
+        try {
+          verifyRes = await fetchVerifyBatchWithRetries(entryIds, signature)
+        } catch {
+          setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
+          setCheckoutError('Network error confirming tickets. Your cart was restored.')
+          setLines(initialSnapshot)
+          router.refresh()
+          return
+        }
 
         if (verifyRes.status === 202) {
+          setBatchReceipt(prev => (prev ? { ...prev, phase: 'pending_async' } : null))
           requestAnimationFrame(() => fireGreenConfetti())
           setLines([])
           router.refresh()
@@ -374,6 +400,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         if (!verifyRes.ok) {
+          setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
           if (verifyRes.status === 429) {
             setCheckoutError(
               'Too many verification requests hit the server. Wait one minute, refresh the page — your payment may already be confirming and tickets can appear shortly.'
@@ -388,6 +415,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return
         }
 
+        setBatchReceipt(prev => (prev ? { ...prev, phase: 'success' } : null))
         requestAnimationFrame(() => fireGreenConfetti())
         setLines([])
         router.refresh()
@@ -463,7 +491,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
     ]
   )
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>
+  return (
+    <>
+      <CartBatchVerifyDialog
+        open={batchReceipt !== null}
+        receipt={batchReceipt}
+        onOpenChange={nextOpen => {
+          if (!nextOpen) setBatchReceipt(null)
+        }}
+      />
+      <CartContext.Provider value={value}>{children}</CartContext.Provider>
+    </>
+  )
 }
 
 export function useCart() {

@@ -41,6 +41,7 @@ import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wal
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle } from '@/lib/types'
 import {
   getEmptyEngagementPayload,
@@ -155,7 +156,7 @@ function canCreatorClaimFailedMinThresholdPrize(raffle: Raffle, wallet: string):
   const w = wallet.trim()
   if (!w) return false
   const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
-  if (!creator || creator !== w) return false
+  if (!creator || !walletsEqualSolana(creator, w)) return false
   if (raffle.status !== 'failed_refund_available' && raffle.status !== 'cancelled') return false
   if (raffle.winner_wallet?.trim() || (raffle.winner_selected_at && String(raffle.winner_selected_at).trim())) {
     return false

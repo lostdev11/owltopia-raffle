@@ -58,6 +58,12 @@ export async function POST(request: NextRequest) {
 
       const raffle = await getRaffleById(entry.raffle_id)
       if (!raffle) return NextResponse.json(ERROR_BODY, { status: 404 })
+
+      const qty = Number(entry.ticket_quantity)
+      if (!Number.isFinite(qty) || qty < 1 || Math.floor(qty) !== qty) {
+        return NextResponse.json(ERROR_BODY, { status: 400 })
+      }
+
       pairs.push({ entry, raffle })
     }
 

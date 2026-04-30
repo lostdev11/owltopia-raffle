@@ -709,6 +709,51 @@ export async function payoutCompressedFromEscrowToRecipient(
   }
 }
 
+/** Error from SPL payout when escrow has no Token / Token-2022 ATA for this mint (asset may be Core or compressed). */
+function isEscrowSplMissingNftError(error: string | undefined): boolean {
+  return typeof error === 'string' && error.includes('Escrow does not hold this NFT')
+}
+
+/**
+ * SPL Token / Token-2022 first; if escrow does not hold that mint as SPL, try MPL Core then compressed
+ * for each candidate id — matches {@link checkEscrowHoldsNft} legacy probing so payouts do not fail after a passing custody check.
+ */
+export async function payoutSplLegacyWithCoreCompressedFallback(
+  probe: { nft_mint_address: string; nft_token_id?: string | null },
+  recipientWallet: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const recipient = recipientWallet.trim()
+  const splResult = await payoutSplFromEscrowToRecipient(probe.nft_mint_address, recipient)
+  if (splResult.ok && splResult.signature) return splResult
+
+  if (!isEscrowSplMissingNftError(splResult.error)) {
+    return splResult
+  }
+
+  const coreCandidates = Array.from(
+    new Set(
+      [probe.nft_token_id, probe.nft_mint_address]
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    )
+  )
+
+  let lastError = splResult.error
+  for (const assetId of coreCandidates) {
+    const coreResult = await payoutMplCoreFromEscrowToRecipient(assetId, recipient)
+    if (coreResult.ok && coreResult.signature) return coreResult
+    if (coreResult.error) lastError = coreResult.error
+  }
+  for (const assetId of coreCandidates) {
+    const cnftResult = await payoutCompressedFromEscrowToRecipient(assetId, recipient)
+    if (cnftResult.ok && cnftResult.signature) return cnftResult
+    if (cnftResult.error) lastError = cnftResult.error
+  }
+
+  return { ok: false, error: lastError }
+}
+
 /**
  * Transfer an Mpl Core NFT prize from the platform escrow to the winner.
  * Mirrors SPL / Token-2022 flow but uses Mpl Core's transferV1 with the escrow keypair as signer.
@@ -897,8 +942,8 @@ export async function transferNftPrizeToWinner(raffleId: string): Promise<{
     }
   }
 
-  const transferResult = await payoutSplFromEscrowToRecipient(
-    raffle.nft_mint_address,
+  const transferResult = await payoutSplLegacyWithCoreCompressedFallback(
+    { nft_mint_address: raffle.nft_mint_address, nft_token_id: raffle.nft_token_id },
     raffle.winner_wallet
   )
   if (!transferResult.ok || !transferResult.signature) {

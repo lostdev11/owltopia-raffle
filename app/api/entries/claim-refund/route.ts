@@ -12,10 +12,18 @@ import { claimRefundEntryBody, parseOr400 } from '@/lib/validations'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { refundEntryFromFundsEscrow } from '@/lib/raffles/funds-escrow'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
 const ERROR_BODY = { success: false as const, error: 'server error' }
+
+function refundFailedResponse(message: string) {
+  return NextResponse.json(
+    { success: false as const, error: message.trim() || 'Refund could not be completed' },
+    { status: 400 }
+  )
+}
 
 /**
  * POST /api/entries/claim-refund
@@ -43,7 +51,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
     }
 
-    if (entry.wallet_address.trim() !== session.wallet.trim()) {
+    if (!walletsEqualSolana(entry.wallet_address, session.wallet)) {
       return NextResponse.json(ERROR_BODY, { status: 403 })
     }
 
@@ -82,7 +90,11 @@ export async function POST(request: NextRequest) {
       const result = await refundEntryFromFundsEscrow(raffle, entry)
       if (!result.ok || !result.signature) {
         await clearEntryRefundLock(entry.id)
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+        const msg =
+          !result.ok && typeof result.error === 'string' && result.error.trim()
+            ? result.error
+            : 'Refund could not be completed'
+        return refundFailedResponse(msg)
       }
 
       await markEntryRefunded(entry.id, result.signature)

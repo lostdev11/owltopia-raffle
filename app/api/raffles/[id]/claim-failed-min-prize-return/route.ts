@@ -15,6 +15,7 @@ import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { canCreatorClaimNftBackAfterCancel } from '@/lib/raffles/cancellation-fee-policy'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,7 +57,7 @@ export async function POST(
 
     const sessionWallet = session.wallet.trim()
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-    if (!creatorWallet || creatorWallet !== sessionWallet) {
+    if (!creatorWallet || !walletsEqualSolana(creatorWallet, sessionWallet)) {
       return NextResponse.json({ error: 'Only the raffle creator can claim this return' }, { status: 403 })
     }
 

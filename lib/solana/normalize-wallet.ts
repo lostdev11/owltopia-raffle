@@ -11,6 +11,14 @@ export function normalizeSolanaWalletAddress(raw: string): string | null {
   }
 }
 
+/** Compare two wallet strings as Solana pubkeys when valid; otherwise trim-only fallback. */
+export function walletsEqualSolana(a: string, b: string): boolean {
+  const na = normalizeSolanaWalletAddress(a)
+  const nb = normalizeSolanaWalletAddress(b)
+  if (na && nb) return na === nb
+  return a.trim() === b.trim()
+}
+
 /**
  * Canonical base58 when `raw` is a valid Solana address; otherwise trimmed original
  * (some prize identifiers are not standard pubkeys).

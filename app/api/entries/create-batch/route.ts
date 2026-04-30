@@ -13,6 +13,10 @@ import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
 import { isReferralAttributionEnabled } from '@/lib/referrals/config'
 import { mergeBatchPayoutLines } from '@/lib/entries/batch-payout-lines'
+import {
+  assertCartBatchGrossMatchesMergedSplit,
+  CartBatchPaymentTotalMismatchError,
+} from '@/lib/entries/batch-invariants'
 
 export const dynamic = 'force-dynamic'
 
@@ -170,6 +174,19 @@ export async function POST(request: NextRequest) {
       treasuryWallet,
       pairs: pairs.map(({ entry, raffle }) => ({ raffle, entry })),
     })
+
+    try {
+      assertCartBatchGrossMatchesMergedSplit({
+        lineGrossAmounts: pairs.map(({ entry }) => Number(entry.amount_paid)),
+        mergedSplit,
+      })
+    } catch (e) {
+      if (e instanceof CartBatchPaymentTotalMismatchError) {
+        console.error('[entries/create-batch] merged split vs line totals', e.sumLineGross, e.sumMergedAmounts)
+        return NextResponse.json(ERROR_BODY, { status: 500 })
+      }
+      throw e
+    }
 
     const paymentDetails = {
       currency: unifiedCurrency,

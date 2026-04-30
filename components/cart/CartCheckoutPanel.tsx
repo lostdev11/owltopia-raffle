@@ -62,6 +62,7 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
   const {
     lines,
     lineCount,
+    ticketCount,
     removeLine,
     setLineQuantity,
     clearCart,
@@ -94,13 +95,18 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                       imageUrl={line.snapshot.image_url}
                       imageFallbackUrl={line.snapshot.image_fallback_url}
                     />
-                    <Link
-                      href={`/raffles/${encodeURIComponent(line.snapshot.slug)}`}
-                      className="font-medium text-sm hover:underline min-w-0 break-words pt-0.5"
-                      onClick={() => onAfterRaffleLinkNavigate?.()}
-                    >
-                      {line.snapshot.title}
-                    </Link>
+                    <div className="min-w-0 flex-1 space-y-0.5 pt-0.5">
+                      <Link
+                        href={`/raffles/${encodeURIComponent(line.snapshot.slug)}`}
+                        className="font-medium text-sm hover:underline min-w-0 break-words block"
+                        onClick={() => onAfterRaffleLinkNavigate?.()}
+                      >
+                        {line.snapshot.title}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {line.quantity === 1 ? '1 ticket' : `${line.quantity} tickets`} for this raffle
+                      </p>
+                    </div>
                   </div>
                   <Button
                     variant="ghost"
@@ -145,12 +151,26 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
 
       <div className="border-t border-border pt-3 space-y-2 shrink-0">
         {lines.length > 0 ? (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Snapshot subtotal ({currencyLabel})</span>
-            <span className="font-semibold flex items-center gap-1">
-              {subtotalPreview.toLocaleString(undefined, { maximumFractionDigits: 12 })}{' '}
-              <CurrencyIcon currency={currencyLabel as 'SOL' | 'USDC' | 'OWL'} size={16} />
-            </span>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between gap-2 text-muted-foreground">
+              <span>
+                {lineCount === 1
+                  ? `${ticketCount === 1 ? '1 ticket' : `${ticketCount} tickets`} (1 raffle)`
+                  : `${ticketCount} tickets across ${lineCount} raffles`}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Snapshot subtotal ({currencyLabel})</span>
+              <span className="font-semibold flex items-center gap-1 shrink-0">
+                {subtotalPreview.toLocaleString(undefined, { maximumFractionDigits: 12 })}{' '}
+                <CurrencyIcon currency={currencyLabel as 'SOL' | 'USDC' | 'OWL'} size={16} />
+              </span>
+            </div>
+            {lineCount >= 2 ? (
+              <p className="text-xs text-muted-foreground leading-snug">
+                One approval sends a single batch transaction; each raffle still gets its own entry and ticket count.
+              </p>
+            ) : null}
           </div>
         ) : null}
         {checkoutError ? (
@@ -169,7 +189,9 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
               ? 'Checking out…'
               : !connected
                 ? 'Connect wallet to checkout'
-                : `Checkout (${lineCount})`}
+                : lineCount === 1
+                  ? `Checkout (${ticketCount === 1 ? '1 ticket' : `${ticketCount} tickets`})`
+                  : `Checkout (${lineCount} raffles · ${ticketCount} tickets)`}
           </Button>
           {lines.length > 0 ? (
             <Button

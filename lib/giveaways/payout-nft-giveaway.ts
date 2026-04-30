@@ -1,7 +1,7 @@
 import type { CommunityGiveaway, NftGiveaway } from '@/lib/types'
 import type { Raffle } from '@/lib/types'
 import {
-  payoutSplFromEscrowToRecipient,
+  payoutSplLegacyWithCoreCompressedFallback,
   payoutMplCoreFromEscrowToRecipient,
   payoutCompressedFromEscrowToRecipient,
 } from '@/lib/raffles/prize-escrow'
@@ -56,18 +56,10 @@ export async function payoutNftPrizeFromEscrowToRecipient(
     return payoutCompressedFromEscrowToRecipient(assetId, recipient)
   }
 
-  let result = await payoutSplFromEscrowToRecipient(probe.nft_mint_address, recipient)
-  if (
-    !result.ok &&
-    typeof result.error === 'string' &&
-    result.error.includes('Escrow does not hold this NFT')
-  ) {
-    const assetId = (probe.nft_token_id || probe.nft_mint_address || '').trim()
-    if (assetId) {
-      result = await payoutCompressedFromEscrowToRecipient(assetId, recipient)
-    }
-  }
-  return result
+  return payoutSplLegacyWithCoreCompressedFallback(
+    { nft_mint_address: probe.nft_mint_address, nft_token_id: probe.nft_token_id },
+    recipient
+  )
 }
 
 /**
