@@ -30,6 +30,7 @@ import {
 } from '@/components/cart/CartBatchVerifyDialog'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { parseVerifyBatchFailure, verifyBatchFailureUserMessage } from '@/lib/api/verify-batch-response'
 
 type CartContextValue = {
   lines: CartLine[]
@@ -116,7 +117,7 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Retries verification when the server RPC, rate limits, or indexer lag flaps.
- * 400 uses a generic body server-side; some failures are transient until RPC/meta catches up.
+ * Response JSON includes a stable `code` for user-facing copy (see verify-batch-response).
  */
 async function fetchVerifyBatchWithRetries(entryIds: string[], transactionSignature: string): Promise<Response> {
   const backoffMs = [0, 900, 2400, 5200]
@@ -165,6 +166,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const linesRef = useRef(lines)
   linesRef.current = lines
+
+  /** Prevents overlapping checkout (double tap / duplicate requests) while batch tx + verify run. */
+  const checkoutRunLockRef = useRef(false)
 
   const lineCount = lines.length
   const ticketCount = useMemo(() => lines.reduce((s, l) => s + l.quantity, 0), [lines])
@@ -230,6 +234,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
       return
     }
     if (linesRef.current.length === 0) return
+    if (checkoutRunLockRef.current) return
+    checkoutRunLockRef.current = true
 
     setCheckoutBusy(true)
     setCheckoutError(null)
@@ -410,15 +416,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
         if (!verifyRes.ok) {
           setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-          if (verifyRes.status === 429) {
-            setCheckoutError(
-              'Too many verification requests hit the server. Wait one minute, refresh the page — your payment may already be confirming and tickets can appear shortly.'
-            )
-          } else {
-            setCheckoutError(
-              'Payment sent, but ticket confirmation failed. Refresh in a moment — your seats often confirm on reload — or retry from your wallet activity signature if pending stays.'
-            )
-          }
+          const { status, code } = await parseVerifyBatchFailure(verifyRes)
+          setCheckoutError(verifyBatchFailureUserMessage(status, code))
           setLines(initialSnapshot)
           router.refresh()
           return
@@ -469,6 +468,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       router.refresh()
     } finally {
+      checkoutRunLockRef.current = false
       setCheckoutBusy(false)
     }
   }, [connected, publicKey, connection, sendTransaction, router])

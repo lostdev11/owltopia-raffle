@@ -14,10 +14,13 @@ import { entriesVerifyBatchBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { tryAcquireVerificationLock, releaseVerificationLocks } from '@/lib/verify-in-flight'
 import { verifyBatchPaidEntries } from '@/lib/verify-batch-transaction'
+import type { VerifyBatchErrorCode } from '@/lib/api/verify-batch-response'
 
 export const dynamic = 'force-dynamic'
 
-const ERROR_BODY = { success: false as const, error: 'server error' }
+function verifyBatchErr(code: VerifyBatchErrorCode, status: number, headers?: HeadersInit) {
+  return NextResponse.json({ success: false as const, code }, { status, headers })
+}
 
 /** One cart checkout hits verify-batch once; retries + dual tabs burned the old wallet limit quickly (429 ⇒ false "confirmation failed"). */
 const VERIFY_IP_LIMIT = 45
@@ -30,12 +33,12 @@ export async function POST(request: NextRequest) {
     const ip = getClientIp(request)
     const ipRl = rateLimit(`entries-verify-batch:ip:${ip}`, VERIFY_IP_LIMIT, VERIFY_WINDOW_MS)
     if (!ipRl.allowed) {
-      return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+      return verifyBatchErr('rate_limited', 429, { 'Retry-After': '60' })
     }
 
     const rawBody = await request.json().catch(() => ({}))
     const parsed = parseOr400(entriesVerifyBatchBody, rawBody)
-    if (!parsed.ok) return NextResponse.json(ERROR_BODY, { status: 400 })
+    if (!parsed.ok) return verifyBatchErr('invalid_request', 400)
     const { transactionSignature: transactionSignatureRaw, entryIds } = parsed.data
 
     const entryIdsSorted = [...new Set(entryIds)].sort()
@@ -45,23 +48,23 @@ export async function POST(request: NextRequest) {
 
     for (const id of entryIdsSorted) {
       const entry = await getEntryById(id)
-      if (!entry) return NextResponse.json(ERROR_BODY, { status: 404 })
+      if (!entry) return verifyBatchErr('entries_not_found', 404)
 
       const w = (entry.wallet_address || '').trim()
       if (!walletAnchor) walletAnchor = w
-      else if (w !== walletAnchor) return NextResponse.json(ERROR_BODY, { status: 400 })
+      else if (w !== walletAnchor) return verifyBatchErr('invalid_request', 400)
 
       const walletRl = rateLimit(`entries-verify-batch:wallet:${w}`, VERIFY_WALLET_LIMIT, VERIFY_WINDOW_MS)
       if (!walletRl.allowed) {
-        return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+        return verifyBatchErr('rate_limited', 429, { 'Retry-After': '60' })
       }
 
       const raffle = await getRaffleById(entry.raffle_id)
-      if (!raffle) return NextResponse.json(ERROR_BODY, { status: 404 })
+      if (!raffle) return verifyBatchErr('entries_not_found', 404)
 
       const qty = Number(entry.ticket_quantity)
       if (!Number.isFinite(qty) || qty < 1 || Math.floor(qty) !== qty) {
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+        return verifyBatchErr('invalid_request', 400)
       }
 
       pairs.push({ entry, raffle })
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
     for (const { entry } of pairsSorted) {
       if (!tryAcquireVerificationLock(entry.id)) {
         releaseVerificationLocks(locksHeld)
-        return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+        return verifyBatchErr('rate_limited', 429, { 'Retry-After': '60' })
       }
       locksHeld.push(entry.id)
     }
@@ -99,7 +102,10 @@ export async function POST(request: NextRequest) {
               saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
             )
           )
-          return NextResponse.json(ERROR_BODY, { status: 202 })
+          return NextResponse.json(
+            { success: true as const, pending: true as const, code: 'chain_indexing' as const },
+            { status: 202 }
+          )
         }
 
         // Mirror /api/entries/verify: keep entries pending but persist signature so retries,
@@ -109,8 +115,15 @@ export async function POST(request: NextRequest) {
             saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
           )
         )
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+        return verifyBatchErr('chain_verify_failed', 400)
       }
+
+      /** Persist sig before DB confirm so RPC/500/confirm_failed still leaves a trail for retries & admin. */
+      await Promise.all(
+        pairsSorted.map(({ entry }) =>
+          saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
+        )
+      )
 
       try {
         await confirmCartBatchWithTx(
@@ -125,7 +138,7 @@ export async function POST(request: NextRequest) {
           err instanceof InsufficientTicketsError ||
           err instanceof ConfirmEntryInvalidStateError
         ) {
-          return NextResponse.json(ERROR_BODY, { status: 400 })
+          return verifyBatchErr('confirm_failed', 400)
         }
         throw err
       }
@@ -141,6 +154,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (e) {
     console.error('[entries/verify-batch]', e)
-    return NextResponse.json(ERROR_BODY, { status: 500 })
+    return verifyBatchErr('server_error', 500)
   }
 }

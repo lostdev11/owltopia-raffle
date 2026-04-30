@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   createEntry,
   getPendingEntryIdsForWalletAndRaffle,
+  hasPendingWithSavedSignatureForWalletRaffle,
 } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId, upgradeRaffleToFundsEscrowIfEligible } from '@/lib/db/raffles'
 import { hasAnyInVerification } from '@/lib/verify-in-flight'
@@ -21,6 +22,12 @@ import {
 export const dynamic = 'force-dynamic'
 
 const ERROR_BODY = { success: false as const, error: 'server error' }
+
+const PAYMENT_IN_FLIGHT_BODY = {
+  success: false as const,
+  error:
+    'A payment is already confirming for one of these raffles. Wait a moment, refresh the page, then try again — or finish checkout before starting another.',
+}
 
 /** Creates one or more pending paid entries (same currency only) + merged SPL/SOL payouts for one transaction. */
 export async function POST(request: NextRequest) {
@@ -136,6 +143,12 @@ export async function POST(request: NextRequest) {
       const pendingIds = await getPendingEntryIdsForWalletAndRaffle(raffleIdStr, walletAddressStr)
       if (pendingIds.length > 0 && hasAnyInVerification(pendingIds)) {
         return NextResponse.json(ERROR_BODY, { status: 429, headers: { 'Retry-After': '60' } })
+      }
+      if (await hasPendingWithSavedSignatureForWalletRaffle(raffleIdStr, walletAddressStr)) {
+        console.warn('[entries/create-batch] blocked: pending row has tx sig (payment in flight)', {
+          raffleId: raffleIdStr,
+        })
+        return NextResponse.json(PAYMENT_IN_FLIGHT_BODY, { status: 409 })
       }
 
       /** Batch checkout never activates referral complimentary flows (would require separate tx-less confirm). */

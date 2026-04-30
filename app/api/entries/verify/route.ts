@@ -7,6 +7,7 @@ import {
   InsufficientTicketsError,
   ConfirmEntryInvalidStateError,
   TransactionSignatureAlreadyUsedError,
+  ComplimentaryQuotaExceededError,
   saveTransactionSignature,
 } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
@@ -186,6 +187,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
     if (error instanceof ConfirmEntryInvalidStateError) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+    if (error instanceof ComplimentaryQuotaExceededError) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
     console.error('Error verifying entry:', error)

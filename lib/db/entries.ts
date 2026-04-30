@@ -108,9 +108,26 @@ function mapRpcError(message: string): never {
   if (message.includes('invalid_token')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('token_expired')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('complimentary_quota_exceeded')) throw new ComplimentaryQuotaExceededError()
-  if (message.includes('entry_not_found')) throw new Error('Entry not found')
-  if (message.includes('raffle_not_found')) throw new Error('Raffle not found')
+  if (message.includes('entry_not_found')) throw new ConfirmEntryInvalidStateError(message)
+  if (message.includes('raffle_not_found')) throw new ConfirmEntryInvalidStateError(message)
   throw new Error(message)
+}
+
+function coerceRpcJsonRecord(data: unknown): Record<string, unknown> | null {
+  if (data !== null && typeof data === 'object' && !Array.isArray(data)) {
+    return data as Record<string, unknown>
+  }
+  if (typeof data === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(data)
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null
 }
 
 /**
@@ -140,12 +157,13 @@ export async function confirmEntryWithTx(
     mapRpcError(error.message)
   }
 
-  if (!data || typeof data !== 'object' || !('entry' in data) || data.success !== true) {
-    console.error('Unexpected confirm_entry_with_tx response:', data)
+  const row = coerceRpcJsonRecord(data)
+  if (!row || !('entry' in row) || row.success !== true) {
+    console.error('Unexpected confirm_entry_with_tx response:', typeof data, data)
     throw new Error('Invalid response from confirm_entry_with_tx')
   }
 
-  return { success: true, entry: data.entry as Entry }
+  return { success: true, entry: row.entry as Entry }
 }
 
 /** One Solana signature confirms every cart row — single DB txn (migration 090). */
@@ -171,9 +189,9 @@ export async function confirmCartBatchWithTx(
     mapRpcError(error.message)
   }
 
-  const parsed = data as { success?: boolean } | null
+  const parsed = coerceRpcJsonRecord(data)
   if (!parsed || parsed.success !== true) {
-    console.error('Unexpected confirm_cart_batch_with_tx response:', data)
+    console.error('Unexpected confirm_cart_batch_with_tx response:', typeof data, data)
     throw new Error('Invalid response from confirm_cart_batch_with_tx')
   }
 
@@ -354,22 +372,67 @@ export async function getPendingEntryIdsForWalletAndRaffle(
 }
 
 /**
- * Invalidate all pending entries for the same raffle + wallet (no keepEntryId).
- * Call before insert so only one pending entry can exist at a time (no race window).
+ * Pending rows that already have a saved Solana signature are mid-flight confirmations.
+ * Never reject those in invalidate — a second create-batch would orphan the payment vs entry IDs.
+ */
+export async function hasPendingWithSavedSignatureForWalletRaffle(
+  raffleId: string,
+  walletAddress: string
+): Promise<boolean> {
+  const rid = raffleId.trim()
+  const w = walletAddress.trim()
+  if (!rid || !w) return false
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('transaction_signature')
+    .eq('raffle_id', rid)
+    .eq('wallet_address', w)
+    .eq('status', 'pending')
+    .limit(25)
+
+  if (error || !data?.length) return false
+  return data.some(row => {
+    const s = row.transaction_signature
+    return typeof s === 'string' && s.trim().length >= 80
+  })
+}
+
+/**
+ * Invalidate unsigned pending entries for the same raffle + wallet.
+ * Skips rows with a stored signature (payment submitted / verifying).
  */
 export async function invalidateAllPendingEntriesForWallet(
   raffleId: string,
   walletAddress: string
 ): Promise<void> {
-  const { error } = await getSupabaseAdmin()
+  const rid = raffleId.trim()
+  const w = walletAddress.trim()
+  if (!rid || !w) return
+
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
     .from('entries')
-    .update({ status: 'rejected' })
-    .eq('raffle_id', raffleId)
-    .eq('wallet_address', walletAddress)
+    .select('id, transaction_signature')
+    .eq('raffle_id', rid)
+    .eq('wallet_address', w)
     .eq('status', 'pending')
 
-  if (error) {
-    console.error('Error invalidating previous pending entries:', error)
+  if (error || !data?.length) return
+
+  const toReject = data
+    .filter(row => {
+      const sig = row.transaction_signature
+      return typeof sig !== 'string' || sig.trim().length < 80
+    })
+    .map(row => row.id as string)
+
+  if (!toReject.length) return
+
+  const { error: upErr } = await admin.from('entries').update({ status: 'rejected' }).in('id', toReject)
+
+  if (upErr) {
+    console.error('Error invalidating previous pending entries:', upErr)
   }
 }
 
