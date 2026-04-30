@@ -234,8 +234,43 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleReturnFailedThresholdPrize = async () => {
+    setReturnReason('min_threshold_not_met')
+    setReturning(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/return-prize-to-creator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'min_threshold_not_met' }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text: data.transactionSignature
+            ? `NFT returned to creator. TX: ${data.transactionSignature}`
+            : 'NFT returned to creator successfully.',
+        })
+        setReturnDialogOpen(false)
+        router.refresh()
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to return NFT to creator' })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to return NFT to creator',
+      })
+    } finally {
+      setReturning(false)
+    }
+  }
+
   const cancellationRequested = !!raffle.cancellation_requested_at
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
+  const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
   const feeApplies = raffleRequiresCancellationFee(raffle)
   const canAcceptCancel = canCompleteCancellationForAdmin(raffle)
   const feeSol = getCancellationFeeSol()
@@ -1318,6 +1353,23 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             {/* Return NFT — show only when escrow return is actually possible */}
             {canReturnNft ? (
               <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+                {isFailedThreshold && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
+                      onClick={handleReturnFailedThresholdPrize}
+                      disabled={returning}
+                    >
+                      <ArrowLeftCircle className="h-4 w-4 mr-2 shrink-0" />
+                      Return NFT to creator (threshold failed)
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Uses reason <code className="text-xs">min_threshold_not_met</code>.
+                    </span>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
