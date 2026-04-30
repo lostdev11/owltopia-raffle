@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
           err.includes('Transaction not found') ||
           err.includes('still be confirming') ||
           err.includes('temporary issue') ||
-          err.includes('Verification error')
+          err.includes('Verification error') ||
+          err.includes('Transaction metadata not available')
 
         if (isTemporary) {
           await Promise.all(

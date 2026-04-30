@@ -114,7 +114,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-/** Retries verification when the server RPC or rate limiting flaps; SOL is usually already landed. */
+/**
+ * Retries verification when the server RPC, rate limits, or indexer lag flaps.
+ * 400 uses a generic body server-side; some failures are transient until RPC/meta catches up.
+ */
 async function fetchVerifyBatchWithRetries(entryIds: string[], transactionSignature: string): Promise<Response> {
   const backoffMs = [0, 900, 2400, 5200]
   let last!: Response
@@ -127,7 +130,13 @@ async function fetchVerifyBatchWithRetries(entryIds: string[], transactionSignat
       body: JSON.stringify({ entryIds, transactionSignature }),
     })
     if (last.ok || last.status === 202) return last
-    if (last.status === 429 || last.status >= 500) continue
+    const moreAttempts = i < backoffMs.length - 1
+    if (
+      moreAttempts &&
+      (last.status === 429 || last.status >= 500 || last.status === 400)
+    ) {
+      continue
+    }
     return last
   }
   return last

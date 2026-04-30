@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getEntriesByRaffleId, getRaffleById } from '@/lib/db/raffles'
 import {
+  confirmCartBatchWithTx,
   confirmEntryWithTx,
   ConfirmEntryInvalidStateError,
+  getPendingEntriesByTransactionSignature,
   InsufficientTicketsError,
+  TransactionSignatureAlreadyUsedError,
   TxAlreadyUsedError,
 } from '@/lib/db/entries'
+import { verifyBatchPaidEntries } from '@/lib/verify-batch-transaction'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import type { Entry } from '@/lib/types'
 
@@ -82,18 +86,100 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
   const raffle = await getRaffleById(raffleId)
   if (!raffle) return
 
+  const processedBatchSignatures = new Set<string>()
+
   for (const entry of pendingEntries) {
     if (!entry.transaction_signature) {
       // Entry has no transaction signature yet - skip (waiting for user to complete transaction)
       continue
     }
 
-    try {
-      const verificationResult = await verifyTransaction(
-        entry.transaction_signature,
-        entry,
-        raffle
+    const sig = entry.transaction_signature.trim()
+    if (!sig) continue
+
+    if (!processedBatchSignatures.has(sig)) {
+      const peers = await getPendingEntriesByTransactionSignature(sig)
+      const batchGroup = peers.filter(
+        e => e.wallet_address.trim() === entry.wallet_address.trim() && e.status === 'pending'
       )
+
+      if (batchGroup.length >= 2) {
+        batchGroup.sort((a, b) => {
+          const r = String(a.raffle_id).localeCompare(String(b.raffle_id))
+          return r !== 0 ? r : String(a.id).localeCompare(String(b.id))
+        })
+
+        const pairs: { entry: Entry; raffle: NonNullable<Awaited<ReturnType<typeof getRaffleById>>> }[] =
+          []
+        for (const e of batchGroup) {
+          const r = await getRaffleById(e.raffle_id)
+          if (!r) {
+            console.warn(`[entries GET] batch auto-verify: raffle ${e.raffle_id} missing for entry ${e.id}`)
+            continue
+          }
+          pairs.push({ entry: e, raffle: r })
+        }
+
+        if (pairs.length < 2) {
+          console.warn(
+            `[entries GET] cart batch has ${batchGroup.length} pending rows for sig ${sig.slice(0, 8)}… but only ${pairs.length} raffles loaded — skipping (do not use single-tx verify)`
+          )
+          continue
+        }
+
+        processedBatchSignatures.add(sig)
+        try {
+          const blockchain = await verifyBatchPaidEntries(sig, pairs)
+          if (!blockchain.valid) {
+            const err = blockchain.error || ''
+            const isTemporary =
+              err.includes('Transaction not found') ||
+              err.includes('still be confirming') ||
+              err.includes('temporary issue') ||
+              err.includes('Verification error') ||
+              err.includes('Transaction metadata not available')
+
+            if (isTemporary) {
+              console.log(`⏳ Cart batch auto-verify pending (temporary): ${err.slice(0, 220)}`)
+            } else {
+              console.warn(
+                `⚠️ Cart batch auto-verify on-chain check failed (kept pending): ${err.slice(0, 280)}`
+              )
+            }
+            continue
+          }
+
+          try {
+            await confirmCartBatchWithTx(
+              pairs[0]!.entry.wallet_address.trim(),
+              sig,
+              pairs.map(p => p.entry.id)
+            )
+            console.log(`✅ Auto-verified cart batch (${pairs.length} entries) for tx ${sig.slice(0, 12)}…`)
+          } catch (e) {
+            if (e instanceof ConfirmEntryInvalidStateError) {
+              console.log(`Cart batch confirm skipped (invalid state): ${e.message}`)
+            } else if (e instanceof InsufficientTicketsError) {
+              console.warn(`Cart batch auto-verify: insufficient tickets`, e.message)
+            } else if (
+              e instanceof TxAlreadyUsedError ||
+              e instanceof TransactionSignatureAlreadyUsedError
+            ) {
+              console.warn(`Cart batch auto-verify: tx already used`)
+            } else {
+              console.error(`Cart batch auto-verify: confirm_cart_batch_with_tx failed`, e)
+            }
+          }
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : String(error)
+          console.error(`⚠️ Cart batch auto-verify error (${sig.slice(0, 8)}…):`, msg)
+        }
+        continue
+      }
+    }
+
+    try {
+      const verificationResult = await verifyTransaction(sig, entry, raffle)
 
       if (verificationResult.valid) {
         try {
@@ -101,7 +187,7 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
             entry.id,
             entry.raffle_id,
             entry.wallet_address,
-            entry.transaction_signature!,
+            sig,
             Number(entry.amount_paid),
             entry.ticket_quantity
           )
@@ -140,8 +226,9 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
           `⚠️ Verification failed for entry ${entry.id} (kept as pending, not rejected): ${verificationResult.error}`
         )
       }
-    } catch (error: any) {
-      console.error(`⚠️ Error auto-verifying entry ${entry.id}:`, error.message)
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error)
+      console.error(`⚠️ Error auto-verifying entry ${entry.id}:`, msg)
       // Don't update status on error, let it retry next time
       // This handles network errors, RPC issues, etc.
     }

@@ -308,6 +308,30 @@ export async function getEntryByTransactionSignature(transactionSignature: strin
 }
 
 /**
+ * All pending rows sharing a Solana signature (multi-raffle cart batch checkout).
+ */
+export async function getPendingEntriesByTransactionSignature(
+  transactionSignature: string
+): Promise<Entry[]> {
+  const sig = transactionSignature.trim()
+  if (!sig) return []
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('*')
+    .eq('transaction_signature', sig)
+    .eq('status', 'pending')
+    .order('raffle_id', { ascending: true })
+    .order('id', { ascending: true })
+
+  if (error) {
+    console.error('getPendingEntriesByTransactionSignature:', error.message)
+    return []
+  }
+  return (data || []) as Entry[]
+}
+
+/**
  * Get IDs of pending entries for a raffle + wallet.
  * Used to avoid invalidating an entry that is currently being verified.
  */

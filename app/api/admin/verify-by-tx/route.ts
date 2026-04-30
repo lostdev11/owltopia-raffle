@@ -9,6 +9,9 @@ import { getAssociatedTokenAddress } from '@solana/spl-token'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 import { normalizeDepositTxSignatureInput } from '@/lib/raffles/verify-prize-deposit-client'
+import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
+import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -51,9 +54,16 @@ export async function POST(request: NextRequest) {
     if (!entry) {
       wasRestored = true // This entry is being restored
       console.log(`Entry not found by transaction signature. Attempting to restore from transaction: ${transactionSignature}`)
-      
-      // Get transaction details from Solana
-      const txResult = await getTransactionDetails(transactionSignature)
+
+      let raffleForTxHints: Raffle | null = null
+      const slugHint = typeof body?.raffleSlug === 'string' ? body.raffleSlug.trim() : ''
+      if (slugHint) {
+        raffleForTxHints = await getRaffleBySlug(slugHint)
+      }
+
+      const txResult = await getTransactionDetails(transactionSignature, {
+        raffle: raffleForTxHints,
+      })
       if (!txResult.ok) {
         const isNotFound = txResult.reason === 'NOT_FOUND'
         const isParseFailed = txResult.reason === 'PARSE_FAILED'
@@ -68,11 +78,11 @@ export async function POST(request: NextRequest) {
             message: isNotFound
               ? 'No entry exists with this transaction signature, and the transaction could not be found on Solana. It may still be confirming—try again in a minute, or check the signature on Solscan.'
               : isParseFailed
-                ? 'The transaction was found but could not be read as a SOL or USDC payment to the configured raffle recipient.'
+                ? 'The transaction was found but could not be read as a SOL or token payment to the treasury, funds escrow, or raffle recipient accounts in this transaction.'
                 : txResult.detail || 'Recipient wallet may not be configured.',
             suggestion: isNotFound
               ? 'Confirm the TX signature is correct (copy from Solscan). If the TX is new, wait a minute and retry.'
-              : 'Ensure the transaction is a SOL, USDC, or OWL transfer to the raffle wallet. You can also try verifying by wallet + raffle slug instead.',
+              : 'Cart checkouts and escrow raffles pay the platform funds escrow or split to creators — not always the treasury pubkey alone. Ensure FUNDS_ESCROW_SECRET_KEY is configured server-side so escrow matches on-chain. Try verifying by wallet + raffle slug. For multi-raffle carts, confirm all lines together via verify-batch or refresh entry lists.',
           },
           { status: 404 }
         )
@@ -426,11 +436,23 @@ type TxDetailsResult =
   | { ok: true; data: { walletAddress: string; amount: number; currency: 'SOL' | 'USDC' | 'OWL' } }
   | { ok: false; reason: 'NOT_FOUND' | 'PARSE_FAILED' | 'CONFIG'; detail?: string }
 
+function collectFundsEscrowAddresses(hints?: { raffle?: Raffle | null }): string[] {
+  const out: string[] = []
+  const envEscrow = getFundsEscrowPublicKey()?.trim()
+  if (envEscrow) out.push(envEscrow)
+  const snap = hints?.raffle?.funds_escrow_address_snapshot?.trim()
+  if (snap && !out.includes(snap)) out.push(snap)
+  return out
+}
+
 /**
  * Fetch transaction details from Solana blockchain
  * Returns wallet address, amount, and currency, or a reason for failure
  */
-async function getTransactionDetails(transactionSignature: string): Promise<TxDetailsResult> {
+async function getTransactionDetails(
+  transactionSignature: string,
+  hints?: { raffle?: Raffle | null }
+): Promise<TxDetailsResult> {
   try {
     const rpcUrl = resolveServerSolanaRpcUrl()
     const connection = new Connection(rpcUrl, 'confirmed')
@@ -468,49 +490,93 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
     if (transaction.meta?.err || !transaction.meta) {
       return { ok: false, reason: 'PARSE_FAILED', detail: 'Transaction failed on chain or has no balance data' }
     }
-    
-    const message = transaction.transaction.message
-    const accountKeys = 'staticAccountKeys' in message
-      ? (message as any).staticAccountKeys
-      : (message as any).accountKeys
-    
-    // Try SOL first
-    const recipientIndex = accountKeys.findIndex(
-      (key: PublicKey) => key.equals(recipientPubkey)
-    )
-    
-    if (recipientIndex !== -1) {
-      const preBalance = transaction.meta.preBalances[recipientIndex]
-      const postBalance = transaction.meta.postBalances[recipientIndex]
-      const balanceIncrease = (postBalance - preBalance) / LAMPORTS_PER_SOL
-      
-      if (balanceIncrease > 0) {
-        // Find sender (first signer)
-        const senderPubkey = accountKeys[0] // First account is usually the fee payer/sender
-        return {
-          ok: true,
-          data: {
-            walletAddress: senderPubkey.toString(),
-            amount: balanceIncrease,
-            currency: 'SOL'
+
+    const accountKeysFull = getFullAccountKeysForTransaction({
+      transaction: transaction.transaction,
+      meta: transaction.meta,
+    })
+    if (accountKeysFull.length === 0) {
+      return { ok: false, reason: 'PARSE_FAILED', detail: 'Could not resolve transaction account keys (incl. lookup tables)' }
+    }
+
+    const feePayerStr = accountKeysFull[0]!.toBase58()
+
+    const solIncreaseAt = (pubkey: PublicKey): number => {
+      const idx = accountKeysFull.findIndex(k => k.equals(pubkey))
+      if (idx === -1) return 0
+      const preBalance = transaction.meta!.preBalances[idx]
+      const postBalance = transaction.meta!.postBalances[idx]
+      return (postBalance - preBalance) / LAMPORTS_PER_SOL
+    }
+
+    const raffleHint = hints?.raffle
+
+    // Creator + treasury split (non–funds-escrow): gross is both legs — not treasury alone
+    if (raffleHint && !raffleUsesFundsEscrow(raffleHint)) {
+      const cw = (raffleHint.creator_wallet || raffleHint.created_by || '').trim()
+      if (cw) {
+        try {
+          const cPk = new PublicKey(cw)
+          const cInc = solIncreaseAt(cPk)
+          const tInc = solIncreaseAt(recipientPubkey)
+          const gross = cInc + tInc
+          if (gross > 1e-9 && (cInc > 0 || tInc > 0)) {
+            return {
+              ok: true,
+              data: {
+                walletAddress: feePayerStr,
+                amount: gross,
+                currency: 'SOL',
+              },
+            }
           }
+        } catch {
+          /* skip invalid creator wallet */
         }
       }
     }
-    
-    // Try USDC
-    const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
-    const recipientTokenAddress = await getAssociatedTokenAddress(
-      USDC_MINT,
-      recipientPubkey
-    )
-    
+
+    // SOL → treasury full gross (legacy “pay treasury only”)
+    const treasurySolInc = solIncreaseAt(recipientPubkey)
+    if (treasurySolInc > 0) {
+      return {
+        ok: true,
+        data: {
+          walletAddress: feePayerStr,
+          amount: treasurySolInc,
+          currency: 'SOL',
+        },
+      }
+    }
+
+    // SOL → funds escrow (env + optional raffle snapshot — checkout uses snapshot first)
+    for (const escrowAddr of collectFundsEscrowAddresses(hints)) {
+      try {
+        const escrowPk = new PublicKey(escrowAddr.trim())
+        const escrowSolInc = solIncreaseAt(escrowPk)
+        if (escrowSolInc > 0) {
+          return {
+            ok: true,
+            data: {
+              walletAddress: feePayerStr,
+              amount: escrowSolInc,
+              currency: 'SOL',
+            },
+          }
+        }
+      } catch {
+        /* invalid pubkey */
+      }
+    }
+
     const preTokenBalances = transaction.meta.preTokenBalances || []
     const postTokenBalances = transaction.meta.postTokenBalances || []
-    
-    const recipientTokenIndex = accountKeys.findIndex(
-      (key: PublicKey) => key.equals(recipientTokenAddress)
-    )
+
+    // Try USDC
+    const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+    const recipientTokenAddress = await getAssociatedTokenAddress(USDC_MINT, recipientPubkey)
+
+    const recipientTokenIndex = accountKeysFull.findIndex(k => k.equals(recipientTokenAddress))
     
     if (recipientTokenIndex !== -1) {
       const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
@@ -521,33 +587,57 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
         const increase = amount - preAmount
         
         if (increase > 0) {
-          // Find sender
-          const senderPubkey = accountKeys[0]
           return {
             ok: true,
             data: {
-              walletAddress: senderPubkey.toString(),
+              walletAddress: feePayerStr,
               amount: increase,
-              currency: 'USDC'
-            }
+              currency: 'USDC',
+            },
           }
         }
       }
     }
-    
+
+    for (const escrowAddr of collectFundsEscrowAddresses(hints)) {
+      try {
+        const escrowPk = new PublicKey(escrowAddr.trim())
+        const escrowUsdcAta = await getAssociatedTokenAddress(USDC_MINT, escrowPk)
+        const escrowUsdcIdx = accountKeysFull.findIndex(k => k.equals(escrowUsdcAta))
+        if (escrowUsdcIdx !== -1) {
+          const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === escrowUsdcIdx)
+          if (matchingPostBalance) {
+            const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+            const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === escrowUsdcIdx)
+            const preAmount = matchingPreBalance
+              ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0')
+              : 0
+            const increase = amount - preAmount
+            if (increase > 0) {
+              return {
+                ok: true,
+                data: {
+                  walletAddress: feePayerStr,
+                  amount: increase,
+                  currency: 'USDC',
+                },
+              }
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     // Try OWL
     const { getTokenInfo } = await import('@/lib/tokens')
     const owlTokenInfo = getTokenInfo('OWL')
     if (owlTokenInfo.mintAddress) {
       const OWL_MINT = new PublicKey(owlTokenInfo.mintAddress)
-      const recipientOwlTokenAddress = await getAssociatedTokenAddress(
-        OWL_MINT,
-        recipientPubkey
-      )
-      
-      const recipientOwlTokenIndex = accountKeys.findIndex(
-        (key: PublicKey) => key.equals(recipientOwlTokenAddress)
-      )
+      const recipientOwlTokenAddress = await getAssociatedTokenAddress(OWL_MINT, recipientPubkey)
+
+      const recipientOwlTokenIndex = accountKeysFull.findIndex(k => k.equals(recipientOwlTokenAddress))
       
       if (recipientOwlTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientOwlTokenIndex)
@@ -558,22 +648,56 @@ async function getTransactionDetails(transactionSignature: string): Promise<TxDe
           const increase = amount - preAmount
           
           if (increase > 0) {
-            // Find sender
-            const senderPubkey = accountKeys[0]
             return {
               ok: true,
               data: {
-                walletAddress: senderPubkey.toString(),
+                walletAddress: feePayerStr,
                 amount: increase,
-                currency: 'OWL'
-              }
+                currency: 'OWL',
+              },
             }
           }
         }
       }
+
+      for (const escrowAddr of collectFundsEscrowAddresses(hints)) {
+        try {
+          const escrowPk = new PublicKey(escrowAddr.trim())
+          const escrowOwlAta = await getAssociatedTokenAddress(OWL_MINT, escrowPk)
+          const escrowOwlIdx = accountKeysFull.findIndex(k => k.equals(escrowOwlAta))
+          if (escrowOwlIdx !== -1) {
+            const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === escrowOwlIdx)
+            if (matchingPostBalance) {
+              const amount = parseFloat(matchingPostBalance.uiTokenAmount?.uiAmountString || '0')
+              const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === escrowOwlIdx)
+              const preAmount = matchingPreBalance
+                ? parseFloat(matchingPreBalance.uiTokenAmount?.uiAmountString || '0')
+                : 0
+              const increase = amount - preAmount
+              if (increase > 0) {
+                return {
+                  ok: true,
+                  data: {
+                    walletAddress: feePayerStr,
+                    amount: increase,
+                    currency: 'OWL',
+                  },
+                }
+              }
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     }
-    
-    return { ok: false, reason: 'PARSE_FAILED', detail: 'No SOL, USDC, or OWL payment to raffle wallet found in transaction' }
+
+    return {
+      ok: false,
+      reason: 'PARSE_FAILED',
+      detail:
+        'No SOL, USDC, or OWL increase found on treasury, funds escrow, or corresponding token accounts (check RPC tx version / ALT resolution).',
+    }
   } catch (error) {
     // Don't log full error object which might contain wallet addresses
     console.error('Error fetching transaction details:', error instanceof Error ? error.message : 'Unknown error')
