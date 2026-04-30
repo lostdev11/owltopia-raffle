@@ -348,10 +348,6 @@ export function RaffleCard({
     ? `Partner: ${partnerDisplayName} — 2% platform fee on ticket sales`
     : 'Partner community — 2% platform fee on ticket sales'
   const partnerBadgeAria = partnerDisplayName ? `Partner: ${partnerDisplayName}` : 'Partner community'
-  const winnerMetaLine =
-    !isActive && !isFuture && raffle.winner_wallet
-      ? `Winner: ${winnerDisplayName ?? `${raffle.winner_wallet.slice(0, 6)}...${raffle.winner_wallet.slice(-4)}`}`
-      : undefined
 
   // Fetch display name for the raffle winner so we can show it instead of a bare wallet address
   useEffect(() => {
@@ -1246,20 +1242,6 @@ export function RaffleCard({
                   )}
                 </span>
               </Link>
-            )}
-            {!isActive && !isFuture && raffle.winner_wallet && (
-              <div className="relative z-10 px-1.5 pb-1.5 pt-1 sm:px-2 sm:pb-2">
-                <RafflePromoPngButton
-                  title={raffle.title}
-                  slug={raffle.slug}
-                  ticketPrice={raffle.ticket_price}
-                  currency={raffle.currency}
-                  endTime={raffle.end_time}
-                  imageUrl={listThumbDead ? null : listThumbSrc}
-                  buttonLabel="Download winner PNG"
-                  metaLine={winnerMetaLine}
-                />
-              </div>
             )}
             </div>
             </div>

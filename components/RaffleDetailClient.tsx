@@ -121,6 +121,7 @@ import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
+import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
 import {
   RaffleOverThresholdPngButton,
   buildOverThresholdFlexMetaLines,
@@ -2895,6 +2896,16 @@ export function RaffleDetailClient({
             buttonLabel="PNG for X"
             fullWidth={false}
           />
+          {hasEnded && raffle.winner_wallet && (
+            <RaffleWinnerPngButton
+              title={raffle.title}
+              slug={raffle.slug}
+              imageUrl={heroImageDead ? null : heroImageSrc}
+              winnerWallet={raffle.winner_wallet}
+              buttonLabel="Winner PNG"
+              fullWidth={false}
+            />
+          )}
           {isActive && profitInfoForSocialFlex.isProfitable && (
             <RaffleOverThresholdPngButton
               title={raffle.title}
