@@ -70,6 +70,15 @@ interface LiveRaffleXTemplate {
   intentUrl: string
 }
 
+interface PendingCancellationRow {
+  id: string
+  slug: string
+  title: string
+  status: string | null
+  cancellation_requested_at: string | null
+  cancellation_fee_paid_at: string | null
+}
+
 function isoToLocalDatetimeValue(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -127,6 +136,8 @@ export default function AdminDashboardPage() {
     }>
   >([])
   const [loadingPendingManualRefunds, setLoadingPendingManualRefunds] = useState(false)
+  const [pendingCancellationRaffles, setPendingCancellationRaffles] = useState<PendingCancellationRow[]>([])
+  const [loadingPendingCancellations, setLoadingPendingCancellations] = useState(false)
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
@@ -398,6 +409,61 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (isAdmin && sessionReady) {
       fetchPendingManualRefunds()
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+
+  const fetchPendingCancellations = async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) return
+    setLoadingPendingCancellations(true)
+    try {
+      const response = await fetch('/api/raffles', {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      if (!response.ok) {
+        setPendingCancellationRaffles([])
+        return
+      }
+      const data = await response.json().catch(() => [])
+      const rows = Array.isArray(data) ? data : []
+      const next = rows
+        .filter((row) => {
+          if (!row || typeof row !== 'object') return false
+          const status = String((row as { status?: unknown }).status ?? '').toLowerCase()
+          const requestedAt = (row as { cancellation_requested_at?: unknown }).cancellation_requested_at
+          return !!requestedAt && status !== 'cancelled'
+        })
+        .map((row) => {
+          const item = row as Record<string, unknown>
+          return {
+            id: String(item.id ?? ''),
+            slug: String(item.slug ?? ''),
+            title: String(item.title ?? 'Untitled raffle'),
+            status: item.status == null ? null : String(item.status),
+            cancellation_requested_at:
+              item.cancellation_requested_at == null ? null : String(item.cancellation_requested_at),
+            cancellation_fee_paid_at:
+              item.cancellation_fee_paid_at == null ? null : String(item.cancellation_fee_paid_at),
+          } satisfies PendingCancellationRow
+        })
+        .filter((row) => row.id && row.slug)
+        .sort((a, b) => {
+          const aTs = a.cancellation_requested_at ? new Date(a.cancellation_requested_at).getTime() : 0
+          const bTs = b.cancellation_requested_at ? new Date(b.cancellation_requested_at).getTime() : 0
+          return bTs - aTs
+        })
+      setPendingCancellationRaffles(next)
+    } catch (error) {
+      console.error('Error fetching pending cancellations:', error)
+      setPendingCancellationRaffles([])
+    } finally {
+      setLoadingPendingCancellations(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin && sessionReady) {
+      void fetchPendingCancellations()
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
@@ -1219,6 +1285,97 @@ export default function AdminDashboardPage() {
             </div>
           </OwlVisionDisclosure>
         )}
+
+        <OwlVisionDisclosure
+          className="mb-8"
+          variant="default"
+          title={
+            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <BarChart3 className="h-5 w-5 shrink-0" />
+              Requested cancellations
+              <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                {loadingPendingCancellations ? '...' : pendingCancellationRaffles.length}
+              </span>
+            </span>
+          }
+        >
+          <CardDescription className="mb-4">
+            Track creator cancellation requests and jump directly to the raffle queue in Manage Raffles.
+          </CardDescription>
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button asChild className="min-h-11 touch-manipulation">
+                <Link href="/admin/raffles#pending-cancellation">Open cancellation queue</Link>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 touch-manipulation"
+                disabled={loadingPendingCancellations}
+                onClick={() => void fetchPendingCancellations()}
+              >
+                {loadingPendingCancellations ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Refreshing...
+                  </>
+                ) : (
+                  'Refresh'
+                )}
+              </Button>
+            </div>
+            {loadingPendingCancellations ? (
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading cancellation requests...
+              </p>
+            ) : pendingCancellationRaffles.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending cancellation requests right now.</p>
+            ) : (
+              <div className="rounded-md border overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead className="bg-muted/50">
+                    <tr className="text-left">
+                      <th className="px-3 py-2 font-medium">Raffle</th>
+                      <th className="px-3 py-2 font-medium">Requested</th>
+                      <th className="px-3 py-2 font-medium">Fee</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingCancellationRaffles.slice(0, 8).map((row) => (
+                      <tr key={row.id} className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="font-medium">{row.title}</div>
+                          <div className="text-xs text-muted-foreground">/{row.slug}</div>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {row.cancellation_requested_at
+                            ? new Date(row.cancellation_requested_at).toLocaleString()
+                            : '-'}
+                        </td>
+                        <td className="px-3 py-2">
+                          {row.cancellation_fee_paid_at ? (
+                            <span className="text-emerald-600 dark:text-emerald-400">Paid</span>
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400">Pending</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.status || '-'}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Button asChild size="sm" variant="outline" className="touch-manipulation min-h-[44px]">
+                            <Link href={`/admin/raffles/${row.id}`}>Review</Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </OwlVisionDisclosure>
 
         {/* Dev tasks — backlog from Discord / support for platform fixes */}
         <OwlVisionDisclosure

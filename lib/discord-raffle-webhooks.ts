@@ -5,7 +5,8 @@
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN (optional; when a pool giveaway is opened for entries; falls back to LIVE_RAFFLES URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  * Partner communities: per-tenant `raffle_webhook_url_*` (see `discord_giveaway_partner_tenants`) when
- * a raffle is stamped with `discord_partner_tenant_id` (partner program creator + linked tenant).
+ * a raffle is stamped with `discord_partner_tenant_id`. If that tenant exists and is entitled (active sub),
+ * platform DISCORD_WEBHOOK_* raffle feeds are skipped so only the partner server’s webhooks receive create/draw pings.
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
@@ -16,6 +17,24 @@ import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
+
+async function loadEntitledDiscordPartnerTenant(
+  rafflePartnerTenantId: string | null | undefined
+): Promise<Awaited<ReturnType<typeof getDiscordGiveawayPartnerById>>> {
+  const tid =
+    typeof rafflePartnerTenantId === 'string' && rafflePartnerTenantId.trim()
+      ? rafflePartnerTenantId.trim()
+      : null
+  if (!tid) return null
+  try {
+    const t = await getDiscordGiveawayPartnerById(tid)
+    if (!t || !isPartnerTenantEntitled(t)) return null
+    return t
+  } catch (e) {
+    console.error('[discord-raffle-webhooks] partner tenant load:', e)
+    return null
+  }
+}
 
 function webhookUrlCreated(): string | undefined {
   const specific = process.env.DISCORD_WEBHOOK_RAFFLE_CREATED?.trim()
@@ -230,11 +249,13 @@ async function postDiscordWebhook(
 /** Logs errors, never throws. Await when calling from API/cron so serverless does not exit before Discord receives the request. */
 export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   const mainUrl = webhookUrlCreated()
-  const partnerTid =
-    typeof raffle.discord_partner_tenant_id === 'string' && raffle.discord_partner_tenant_id.trim()
-      ? raffle.discord_partner_tenant_id.trim()
-      : null
-  if (!mainUrl && !partnerTid) return
+  const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
+  const skipPlatformDiscord = entitledPartner != null
+  const postToPlatformFeed = !!(mainUrl && !skipPlatformDiscord)
+  const partnerCreatedWebhook = entitledPartner?.raffle_webhook_url_created?.trim() || null
+  const postToPartnerDiscord = !!(partnerCreatedWebhook && partnerCreatedWebhook.length > 0)
+
+  if (!postToPlatformFeed && !postToPartnerDiscord) return
 
   const endTs = discordTimestampUnix(raffle.end_time)
   const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
@@ -310,21 +331,13 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
     timestamp: new Date().toISOString(),
   }
 
-  if (mainUrl) {
+  if (postToPlatformFeed && mainUrl) {
     await postDiscordWebhook(mainUrl, embed, extras)
   }
 
-  if (!partnerTid) return
-  let tenant: Awaited<ReturnType<typeof getDiscordGiveawayPartnerById>> = null
-  try {
-    tenant = await getDiscordGiveawayPartnerById(partnerTid)
-  } catch (e) {
-    console.error('[notifyRaffleCreated] partner tenant load:', e)
+  if (postToPartnerDiscord && partnerCreatedWebhook) {
+    await postDiscordWebhook(partnerCreatedWebhook, embed, extras)
   }
-  if (!tenant || !isPartnerTenantEntitled(tenant)) return
-  const w = tenant.raffle_webhook_url_created?.trim()
-  if (!w) return
-  await postDiscordWebhook(w, embed, extras)
 }
 
 /** Logs errors, never throws. Await from selectWinner (or any serverless handler) so the outgoing webhook finishes before the invocation freezes. */
@@ -335,11 +348,13 @@ export async function notifyRaffleWinnerDrawn(
   winnerDiscordUserId?: string | null
 ): Promise<void> {
   const mainUrl = webhookUrlWinner()
-  const partnerTid =
-    typeof raffle.discord_partner_tenant_id === 'string' && raffle.discord_partner_tenant_id.trim()
-      ? raffle.discord_partner_tenant_id.trim()
-      : null
-  if (!mainUrl && !partnerTid) return
+  const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
+  const skipPlatformDiscord = entitledPartner != null
+  const postToPlatformFeed = !!(mainUrl && !skipPlatformDiscord)
+  const partnerWinnerWebhook = entitledPartner?.raffle_webhook_url_winner?.trim() || null
+  const postToPartnerDiscord = !!(partnerWinnerWebhook && partnerWinnerWebhook.length > 0)
+
+  if (!postToPlatformFeed && !postToPartnerDiscord) return
 
   const statusNote =
     statusAfterDraw === 'successful_pending_claims'
@@ -384,20 +399,11 @@ export async function notifyRaffleWinnerDrawn(
     timestamp: new Date().toISOString(),
   }
 
-  if (mainUrl) {
+  if (postToPlatformFeed && mainUrl) {
     await postDiscordWebhook(mainUrl, mainEmbed, extras)
   }
 
-  if (!partnerTid) return
-  let tenant: Awaited<ReturnType<typeof getDiscordGiveawayPartnerById>> = null
-  try {
-    tenant = await getDiscordGiveawayPartnerById(partnerTid)
-  } catch (e) {
-    console.error('[notifyRaffleWinnerDrawn] partner tenant load:', e)
-  }
-  if (!tenant || !isPartnerTenantEntitled(tenant)) return
-  const w = tenant.raffle_webhook_url_winner?.trim()
-  if (!w) return
+  if (!postToPartnerDiscord || !partnerWinnerWebhook) return
 
   const partnerEmbed: DiscordEmbed = {
     ...mainEmbed,
@@ -406,7 +412,7 @@ export async function notifyRaffleWinnerDrawn(
       { name: 'Claim on Owltopia', value: dashboardLine, inline: false },
     ],
   }
-  await postDiscordWebhook(w, partnerEmbed, extras)
+  await postDiscordWebhook(partnerWinnerWebhook, partnerEmbed, extras)
 }
 
 /**

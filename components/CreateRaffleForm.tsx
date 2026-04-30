@@ -1579,8 +1579,10 @@ export function CreateRaffleForm() {
                   <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">/owltopia-partner webhook-raffle-created</code>{' '}
                   and{' '}
                   <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">webhook-raffle-winner</code>{' '}
-                  — other partners’ servers do not receive them. Owltopia may still mirror to platform Discord feeds when
-                  those are configured. @mentions use Discord accounts linked to wallets (creator/winner) on the site.
+                  — other partners’ servers do not receive them. While your partner subscription is active, Owltopia’s
+                  platform Discord raffle feeds do not duplicate these posts (only your webhooks fire — set both so you do
+                  not miss creates or draws). If the tenant lapses or is suspended, announcements can fall back to
+                  platform feeds again. @mentions use Discord linked to wallets (creator/winner) on the site.
                 </p>
               ) : null}
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">

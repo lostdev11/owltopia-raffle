@@ -74,7 +74,7 @@ export function AdminRafflesPageClient({
         </p>
       </div>
 
-      <div className="mb-8 sm:mb-12">
+      <div id="pending-cancellation" className="mb-8 sm:mb-12 scroll-mt-24">
         <h2 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Pending cancellation</h2>
         <p className="text-sm text-muted-foreground mb-4 sm:mb-6">
           Creators who requested cancellation — open each raffle in Owl Vision to accept or review. Post-start

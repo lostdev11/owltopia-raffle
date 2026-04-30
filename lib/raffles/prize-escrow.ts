@@ -18,7 +18,7 @@
  * SPL Token–program prizes: winner payout and return-to-creator try Metaplex Token Metadata
  * transferV1 first (same as creator deposit in-app), then fall back to raw SPL transfer.
  */
-import { Keypair, PublicKey, Transaction } from '@solana/web3.js'
+import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -405,7 +405,13 @@ export async function payoutSplFromEscrowToRecipient(
       skipPreflight: false,
       preflightCommitment: 'confirmed',
     })
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`)
+    }
 
     return { ok: true, signature: sig }
   } catch (err) {
@@ -520,12 +526,81 @@ export async function payoutFungibleSplFromEscrowToRecipient(
       skipPreflight: false,
       preflightCommitment: 'confirmed',
     })
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`)
+    }
 
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: humanizeSplPrizeTransferError(message) }
+  }
+}
+
+/**
+ * Native SOL: send `lamports` from prize escrow wallet to recipient.
+ * Used as a fallback for SOL partner prizes that were deposited as native SOL (not wSOL token transfer).
+ */
+export async function payoutNativeSolFromEscrowToRecipient(
+  recipientWallet: string,
+  lamports: bigint
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  if (lamports <= 0n) {
+    return { ok: false, error: 'Payout amount must be positive.' }
+  }
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+
+  const connection = getSolanaConnection()
+  const recipientPubkey = new PublicKey(recipientWallet)
+  if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { ok: false, error: 'Prize amount is too large for native SOL transfer encoding.' }
+  }
+  const escrowBalance = await connection.getBalance(keypair.publicKey, 'confirmed')
+  const needed = lamports + 5000n // keep enough for a simple transfer fee
+  if (BigInt(escrowBalance) < needed) {
+    return {
+      ok: false,
+      error:
+        'Escrow SOL balance is below the prize amount (plus transfer fee). If you just transferred, wait for confirmation and retry.',
+    }
+  }
+
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: recipientPubkey,
+      lamports: Number(lamports),
+    })
+  )
+
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+    tx.recentBlockhash = blockhash
+    tx.feePayer = keypair.publicKey
+    tx.sign(keypair)
+
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`)
+    }
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: message }
   }
 }
 
@@ -897,11 +972,19 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
     }
   }
 
-  const transferResult = await payoutFungibleSplFromEscrowToRecipient(
+  let transferResult = await payoutFungibleSplFromEscrowToRecipient(
     partner.mint,
     raffle.winner_wallet.trim(),
     raw
   )
+  if (
+    !transferResult.ok &&
+    partner.currencyCode === 'SOL' &&
+    typeof transferResult.error === 'string' &&
+    transferResult.error.includes('Escrow does not hold this token')
+  ) {
+    transferResult = await payoutNativeSolFromEscrowToRecipient(raffle.winner_wallet.trim(), raw)
+  }
   if (!transferResult.ok || !transferResult.signature) {
     if (!transferResult.ok) {
       console.error(`Partner SPL prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
@@ -1185,7 +1268,13 @@ async function transferSplPrizeToCreatorFromEscrow(
       skipPreflight: true,
       preflightCommitment: 'confirmed',
     })
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed')
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`)
+    }
 
     await persistPrizeReturnToCreator(raffleId, reason, sig)
     return { ok: true, signature: sig }
