@@ -46,6 +46,9 @@ export function verifyBatchFailureUserMessage(status: number, code?: VerifyBatch
   if (code === 'invalid_request') {
     return 'Checkout data was not accepted. Refresh the page and try again.'
   }
+  if (status === 503 && code === 'server_error') {
+    return 'Confirmation could not reach the database (upgrade or permissions). Wait a minute, refresh, and retry — your payment usually still applies once the site is updated.'
+  }
   if (status >= 500 || code === 'server_error') {
     return 'Confirmation is delayed on our side. Wait a minute and refresh — your payment usually still counts — then check your entries.'
   }

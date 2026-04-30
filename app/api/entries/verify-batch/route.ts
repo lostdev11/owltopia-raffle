@@ -140,7 +140,21 @@ export async function POST(request: NextRequest) {
         ) {
           return verifyBatchErr('confirm_failed', 400)
         }
-        throw err
+        const msg = err instanceof Error ? err.message : String(err)
+        /** Missing migration 091, stale PostgREST schema, or RPC rename → avoid opaque 500 loops. */
+        const infraRpc =
+          /permission denied|does not exist|schema cache|Could not find the function|PGRST202|42883|42501|Invalid response from confirm_cart_batch_with_tx/i.test(
+            msg
+          )
+        console.error(
+          `[entries/verify-batch] confirmCartBatchWithTx ${infraRpc ? 'infra' : 'unexpected'}:`,
+          msg.slice(0, 600),
+          err
+        )
+        if (infraRpc) {
+          return verifyBatchErr('server_error', 503)
+        }
+        return verifyBatchErr('confirm_failed', 400)
       }
 
       return NextResponse.json({
