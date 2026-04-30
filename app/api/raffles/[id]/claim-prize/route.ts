@@ -13,6 +13,7 @@ import {
   transferPartnerSplPrizeToWinner,
 } from '@/lib/raffles/prize-escrow'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,8 +53,9 @@ export async function POST(
       )
     }
 
-    const winnerWallet = raffle.winner_wallet.trim()
-    const sessionWallet = session.wallet.trim()
+    const winnerWallet =
+      normalizeSolanaWalletAddress(raffle.winner_wallet) ?? raffle.winner_wallet.trim()
+    const sessionWallet = normalizeSolanaWalletAddress(session.wallet) ?? session.wallet.trim()
     if (winnerWallet !== sessionWallet) {
       return NextResponse.json(
         { error: 'Only the selected winner can claim this prize' },

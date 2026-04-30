@@ -132,6 +132,7 @@ import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -2698,8 +2699,10 @@ export function RaffleDetailClient({
 
   // Check if raffle has ended
   const hasEnded = !isActive && !isFuture
-  const winnerWalletNorm = (raffle.winner_wallet ?? '').trim()
-  const walletNorm = walletAddress.trim()
+  const winnerWalletNorm =
+    normalizeSolanaWalletAddress(raffle.winner_wallet ?? '') ??
+    (raffle.winner_wallet ?? '').trim()
+  const walletNorm = normalizeSolanaWalletAddress(walletAddress) ?? walletAddress.trim()
   const isWinnerDetail = hasEnded && !!winnerWalletNorm && walletNorm === winnerWalletNorm
   const userHasEnteredDetail = userTickets > 0 && !isWinnerDetail
   const offerWindowEndsDate = offerWindowEndsAt ? new Date(offerWindowEndsAt) : null
