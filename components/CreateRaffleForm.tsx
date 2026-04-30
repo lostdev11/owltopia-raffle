@@ -143,6 +143,8 @@ export function CreateRaffleForm() {
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
   /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
+  /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
+  const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
 
   useEffect(() => {
@@ -190,21 +192,24 @@ export function CreateRaffleForm() {
   useEffect(() => {
     if (typeof window === 'undefined' || !connected) {
       setCanSetLinkOnlyVisibility(false)
+      setPartnerDiscordLinked(false)
       setHideFromPublicBrowse(false)
       return
     }
     let cancelled = false
     fetch('/api/raffles/visibility-options', { credentials: 'include' })
       .then((r) => (cancelled || !r.ok ? null : r.json()))
-      .then((d: { canSetLinkOnly?: boolean } | null) => {
+      .then((d: { canSetLinkOnly?: boolean; partnerDiscordLinked?: boolean } | null) => {
         if (cancelled || !d) return
         const ok = d.canSetLinkOnly === true
         setCanSetLinkOnlyVisibility(ok)
+        setPartnerDiscordLinked(d.partnerDiscordLinked === true)
         if (!ok) setHideFromPublicBrowse(false)
       })
       .catch(() => {
         if (!cancelled) {
           setCanSetLinkOnlyVisibility(false)
+          setPartnerDiscordLinked(false)
           setHideFromPublicBrowse(false)
         }
       })
@@ -1559,7 +1564,25 @@ export function CreateRaffleForm() {
           </div>
 
           {canSetLinkOnlyVisibility && (
-            <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5">
+            <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+              {partnerDiscordLinked ? (
+                <p className="text-sm sm:text-base font-medium text-foreground">
+                  Partner server raffle
+                </p>
+              ) : null}
+              {partnerDiscordLinked ? (
+                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                  Your creator wallet is linked to a partner Discord tenant. Raffle{' '}
+                  <strong className="font-medium text-foreground/85">created</strong> and{' '}
+                  <strong className="font-medium text-foreground/85">winner</strong> pings for your listings go to the
+                  incoming webhooks you set with{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">/owltopia-partner webhook-raffle-created</code>{' '}
+                  and{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">webhook-raffle-winner</code>{' '}
+                  — other partners’ servers do not receive them. Owltopia may still mirror to platform Discord feeds when
+                  those are configured. @mentions use Discord accounts linked to wallets (creator/winner) on the site.
+                </p>
+              ) : null}
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
                 <input
                   type="checkbox"
@@ -1569,7 +1592,9 @@ export function CreateRaffleForm() {
                   id="hide-from-public-browse"
                 />
                 <span className="min-w-0 text-sm sm:text-base leading-relaxed text-foreground/95">
-                  <span className="font-medium">Discord / direct link only</span>
+                  <span className="font-medium">
+                    {partnerDiscordLinked ? 'Hide from public raffles list' : 'Discord / direct link only'}
+                  </span>
                   {': '}
                   do not show this raffle on the public raffles list. People can still enter using the
                   page link (e.g. from your partner Discord or a shared link).
