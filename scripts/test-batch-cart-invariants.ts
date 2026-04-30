@@ -10,14 +10,14 @@ import {
 
 assertCartBatchGrossMatchesMergedSplit({
   lineGrossAmounts: [1.5, 2.5],
-  mergedSplit: [{ recipient: 'A', amount: 4 }],
+  mergedSplit: [{ amount: 4 }],
 })
 
 assert.throws(
   () =>
     assertCartBatchGrossMatchesMergedSplit({
       lineGrossAmounts: [1, 2],
-      mergedSplit: [{ recipient: 'A', amount: 2.99 }],
+      mergedSplit: [{ amount: 2.99 }],
     }),
   CartBatchPaymentTotalMismatchError
 )
@@ -26,7 +26,7 @@ assert.throws(
   () =>
     assertCartBatchGrossMatchesMergedSplit({
       lineGrossAmounts: [1, Number.NaN],
-      mergedSplit: [{ recipient: 'A', amount: 1 }],
+      mergedSplit: [{ amount: 1 }],
     }),
   CartBatchPaymentTotalMismatchError
 )
