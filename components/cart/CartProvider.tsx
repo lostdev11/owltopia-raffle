@@ -25,6 +25,7 @@ import type { CartLine } from '@/lib/cart/types'
 import { CART_STORAGE_KEY } from '@/lib/cart/types'
 import { raffleCheckoutBlockedReason } from '@/lib/cart/validate-raffle-checkout'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
+import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 
 type CartContextValue = {
   lines: CartLine[]
@@ -235,8 +236,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
         loaded.push({ line, fresh })
       }
 
-      /** Two or more raffles: server merges payouts so you sign once per cart. */
-      if (loaded.length >= 2) {
+      /**
+       * Paid batch path: merged payouts = one Solana signature (multi-raffle or multi-qty).
+       * Single raffle + qty 1 uses execute flow so the server may return referral complimentary checkout.
+       */
+      const complimentarySingleTicketEligible =
+        loaded.length === 1 && loaded[0]!.line.quantity === 1
+      const usePaidBatchCheckout = loaded.length >= 2 || !complimentarySingleTicketEligible
+
+      if (usePaidBatchCheckout) {
         let createResponse: Response
         try {
           createResponse = await fetch('/api/entries/create-batch', {
@@ -317,32 +325,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        let attempts = 0
-        let confirmed = false
-        while (attempts < 30 && !confirmed) {
-          try {
-            const status = await connection.getSignatureStatus(signature)
-            if (
-              status?.value?.confirmationStatus === 'confirmed' ||
-              status?.value?.confirmationStatus === 'finalized'
-            ) {
-              confirmed = true
-              break
-            }
-            if (status?.value?.err) {
-              setCheckoutError('On-chain transaction failed.')
-              setLines(initialSnapshot)
-              return
-            }
-          } catch {
-            /* poll */
+        try {
+          await confirmSignatureSuccessOnChain(connection, signature)
+        } catch (confirmErr: unknown) {
+          const wm = confirmErr instanceof Error ? confirmErr.message : String(confirmErr)
+          if (wm.toLowerCase().includes('transaction failed')) {
+            setCheckoutError('On-chain transaction failed.')
+          } else {
+            setCheckoutError(
+              'Transaction confirmation timed out. You can retry verify from your orders if payment went through.'
+            )
           }
-          await new Promise(r => setTimeout(r, 1000))
-          attempts++
-        }
-
-        if (!confirmed) {
-          setCheckoutError('Transaction confirmation timed out. You can retry verify from your orders if payment went through.')
           setLines(initialSnapshot)
           router.refresh()
           return

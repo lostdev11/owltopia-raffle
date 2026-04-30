@@ -1,5 +1,5 @@
 /**
- * Validates one on-chain payment against multiple pending raffle entries (cart checkout).
+ * Validates one on-chain payment against one or more pending raffle entries (cart checkout).
  */
 
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
@@ -168,8 +168,8 @@ export async function verifyBatchPaidEntries(
   options?: { allowExpired?: boolean }
 ): Promise<{ valid: boolean; error?: string }> {
   try {
-    if (pairs.length < 2) {
-      return { valid: false, error: 'Batch verify requires at least two entries.' }
+    if (pairs.length === 0) {
+      return { valid: false, error: 'No entries to verify.' }
     }
 
     const wallet0 = pairs[0]!.entry.wallet_address.trim()

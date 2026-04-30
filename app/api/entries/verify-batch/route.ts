@@ -93,6 +93,13 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(ERROR_BODY, { status: 202 })
         }
 
+        // Mirror /api/entries/verify: keep entries pending but persist signature so retries,
+        // background fetches, and admin tools can reconcile when verification flaps or fixes ship.
+        await Promise.all(
+          pairsSorted.map(({ entry }) =>
+            saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
+          )
+        )
         return NextResponse.json(ERROR_BODY, { status: 400 })
       }
 

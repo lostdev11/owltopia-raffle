@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic'
 
 const ERROR_BODY = { success: false as const, error: 'server error' }
 
-/** Creates multiple pending paid entries (same currency only) + merged SPL/SOL payouts for one transaction. */
+/** Creates one or more pending paid entries (same currency only) + merged SPL/SOL payouts for one transaction. */
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request)

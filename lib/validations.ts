@@ -18,7 +18,7 @@ export const entriesVerifyBody = z.object({
   transactionSignature: z.string().min(80).max(120),
 })
 
-/** Multi-raffle cart: creates several pending rows and returns merged payment splits (one Solana tx). */
+/** Paid cart checkout: one or more pending rows and merged payment splits (one Solana tx). */
 export const entriesCreateBatchBody = z.object({
   walletAddress: solanaAddress,
   items: z
@@ -28,13 +28,13 @@ export const entriesCreateBatchBody = z.object({
         ticketQuantity: z.coerce.number().int().min(1).max(MAX_TICKET_QUANTITY_PER_ENTRY),
       })
     )
-    .min(2)
+    .min(1)
     .max(20),
 })
 
 export const entriesVerifyBatchBody = z.object({
   transactionSignature: z.string().min(80).max(120),
-  entryIds: z.array(z.string().uuid()).min(2).max(20),
+  entryIds: z.array(z.string().uuid()).min(1).max(20),
 })
 
 export const entriesConfirmComplimentaryBody = z.object({

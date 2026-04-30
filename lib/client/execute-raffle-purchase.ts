@@ -22,6 +22,7 @@ import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isOwlEnabled } from '@/lib/tokens'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { clearReferralComplimentarySessionCache } from '@/lib/referrals/complimentary-session-client'
+import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 
 export type ExecuteRafflePurchaseResult =
   | { ok: true }
@@ -91,6 +92,13 @@ function classifyPurchaseError(err: unknown): {
       errorMessage = 'RPC server error. Please try again in a few moments.'
     } else if (errMsg.includes('Network') || errMsg.includes('timeout')) {
       errorMessage = 'Network error. Please check your connection and try again.'
+    } else if (
+      errMsg.includes('not confirmed on-chain in time') ||
+      errMsg.includes('signature was returned, but')
+    ) {
+      errorMessage =
+        'Transaction confirmation timed out. You can retry verify from your orders if payment went through.'
+      isUnconfirmedPayment = true
     } else if (errMsg === 'server error' || errMsg.includes('Failed to verify')) {
       errorMessage =
         "Your payment was sent, but we couldn't confirm it right away. Refresh the page in a moment — your ticket should appear. If it doesn't, try again or contact support with your transaction signature."
@@ -633,33 +641,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
     }
 
-    const maxAttempts = 30
-    let attempts = 0
-    let confirmed = false
-
-    while (attempts < maxAttempts && !confirmed) {
-      try {
-        const status = await connection.getSignatureStatus(signature)
-        if (
-          status?.value?.confirmationStatus === 'confirmed' ||
-          status?.value?.confirmationStatus === 'finalized'
-        ) {
-          confirmed = true
-          break
-        }
-        if (status?.value?.err) {
-          throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`)
-        }
-      } catch {
-        /* poll */
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      attempts++
-    }
-
-    if (!confirmed) {
-      throw new Error('Transaction confirmation timeout. Please check your wallet or transaction explorer.')
-    }
+    await confirmSignatureSuccessOnChain(connection, signature)
 
     afterPaymentTxConfirmed?.()
     if (celebrateOnPaymentConfirmed) {
