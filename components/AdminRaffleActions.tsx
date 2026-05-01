@@ -19,7 +19,7 @@ import {
 } from '@/lib/raffles/admin-hard-delete'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send } from 'lucide-react'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
@@ -66,6 +66,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
   const [imageFallbackInput, setImageFallbackInput] = useState(raffle.image_fallback_url ?? '')
   const [savingImageFallback, setSavingImageFallback] = useState(false)
+  const [entrantsCsvLoading, setEntrantsCsvLoading] = useState(false)
 
   useEffect(() => {
     setImageFallbackInput(raffle.image_fallback_url ?? '')
@@ -691,6 +692,48 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleDownloadEntrantsCsv = async () => {
+    setMessage(null)
+    setEntrantsCsvLoading(true)
+    try {
+      const headers: Record<string, string> = {}
+      if (publicKey) headers['X-Connected-Wallet'] = publicKey.toBase58()
+      const res = await fetch(`/api/me/raffles/${encodeURIComponent(raffle.id)}/entrants/export`, {
+        credentials: 'include',
+        headers,
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        setMessage({
+          type: 'error',
+          text:
+            typeof data?.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : `Export failed (${res.status}).`,
+        })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const cd = res.headers.get('Content-Disposition')
+      const m = cd?.match(/filename="([^"]+)"/)
+      a.download = m?.[1] ?? `entrants-${raffle.slug ?? raffle.id}.csv`
+      a.rel = 'noopener'
+      a.click()
+      URL.revokeObjectURL(url)
+      setMessage({ type: 'success', text: 'Downloaded entrant list (confirmed tickets, one row per wallet).' })
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Download failed',
+      })
+    } finally {
+      setEntrantsCsvLoading(false)
+    }
+  }
+
   return (
     <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4">
       <div className="max-w-2xl mx-auto space-y-6">
@@ -744,6 +787,34 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             <p className="text-sm">{message.text}</p>
           </div>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Entrant export</CardTitle>
+            <CardDescription>
+              Download confirmed, non-refunded ticket holders as CSV (one row per wallet, total tickets summed). Same file
+              as the partner host hub for allowlisted creators.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void handleDownloadEntrantsCsv()}
+              disabled={entrantsCsvLoading}
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+            >
+              {entrantsCsvLoading ? (
+                'Preparing…'
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2 shrink-0" />
+                  Download entrants CSV
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
 
         <AdminManualRefundRecorder
           raffleId={raffle.id}

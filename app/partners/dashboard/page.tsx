@@ -18,6 +18,7 @@ import {
   ChevronDown,
   AlertTriangle,
   Shield,
+  Download,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -145,6 +146,7 @@ export default function PartnerHostDashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [retried401, setRetried401] = useState(false)
+  const [exportingRaffleId, setExportingRaffleId] = useState<string | null>(null)
 
   const load = useCallback(async (silent: boolean) => {
     if (!publicKey) return
@@ -237,6 +239,7 @@ export default function PartnerHostDashboardPage() {
   const viewerIsSiteAdmin = data?.viewerIsSiteAdmin === true
   const canAccessPartnerHub = Boolean(isPartner || viewerIsSiteAdmin)
   const adminPreviewMode = viewerIsSiteAdmin && !isPartner
+  const canExportEntrantCsv = Boolean(isPartner || viewerIsSiteAdmin)
   const raffles = data?.myRaffles ?? EMPTY_RAFFLES
 
   const pipelineBuckets = useMemo(() => {
@@ -259,6 +262,38 @@ export default function PartnerHostDashboardPage() {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // ignore
+    }
+  }
+
+  const downloadEntrantsCsv = async (r: DashboardRaffle) => {
+    if (!publicKey) return
+    setExportingRaffleId(r.id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/me/raffles/${encodeURIComponent(r.id)}/entrants/export`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+      })
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string }
+        setError(typeof json.error === 'string' ? json.error : 'Could not download CSV')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const cd = res.headers.get('Content-Disposition')
+      const m = cd?.match(/filename="([^"]+)"/)
+      a.download = m?.[1] ?? `entrants-${r.slug}.csv`
+      a.rel = 'noopener'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed')
+    } finally {
+      setExportingRaffleId(null)
     }
   }
 
@@ -764,22 +799,47 @@ export default function PartnerHostDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Your hosted raffles</CardTitle>
-          <CardDescription>Same data as &quot;My raffles&quot; on the dashboard; links go to the public listing.</CardDescription>
+          <CardDescription>
+            Same data as &quot;My raffles&quot; on the dashboard; links go to the public listing.
+            {canExportEntrantCsv && (
+              <>
+                {' '}
+                Confirmed entrant wallets (CSV) — partner allowlist and site admins only.
+              </>
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {raffles.length === 0 ? (
             <p className="text-sm text-muted-foreground">No raffles created from this wallet yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {raffles.slice(0, 20).map((r) => (
-                <li key={r.id}>
+            <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              {raffles.map((r) => (
+                <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <Link
                     href={`/raffles/${r.slug}`}
-                    className="text-sm text-primary hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
+                    className="text-sm text-primary hover:underline touch-manipulation min-h-[44px] inline-flex items-center min-w-0"
                   >
-                    {r.title}
-                    <span className="ml-2 text-xs text-muted-foreground font-mono">({r.status})</span>
+                    <span className="truncate">{r.title}</span>
+                    <span className="ml-2 shrink-0 text-xs text-muted-foreground font-mono">({r.status})</span>
                   </Link>
+                  {canExportEntrantCsv && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-[44px] touch-manipulation shrink-0 w-full sm:w-auto"
+                      disabled={exportingRaffleId === r.id}
+                      onClick={() => void downloadEntrantsCsv(r)}
+                    >
+                      {exportingRaffleId === r.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+                      ) : (
+                        <Download className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                      <span className="ml-2">Entrants CSV</span>
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
