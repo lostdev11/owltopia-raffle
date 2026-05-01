@@ -51,6 +51,10 @@ import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
 import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
+import {
+  PURCHASE_COMPLETED_EVENT,
+  type PurchaseCompletedDetail,
+} from '@/lib/cart/purchase-complete-events'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -408,6 +412,20 @@ export function RafflesPageClient({
       cancelled = true
     }
   }, [connected, wallet, viewerIsAdmin])
+
+  // Cart checkout: clear client bucket override + refresh server props so the grid stays in sync.
+  useEffect(() => {
+    const onPurchase = (e: Event) => {
+      const d = (e as CustomEvent<PurchaseCompletedDetail>).detail
+      if (!d?.wallet || !connected || d.wallet !== wallet) return
+      setClientBuckets(null)
+      setClientFetchError(null)
+      setClientFetchStarted(false)
+      router.refresh()
+    }
+    window.addEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+    return () => window.removeEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+  }, [connected, wallet, router])
 
   const [tab, setTab] = useState<RafflesPageTab>(() => tabFromSearchParams(searchParams))
   const [giveawaysList, setGiveawaysList] = useState<CommunityGiveawayBrowseItem[] | null>(null)

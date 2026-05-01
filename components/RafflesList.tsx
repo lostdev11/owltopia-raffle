@@ -10,6 +10,11 @@ import { getRaffleProfitInfo, normalizeRaffleTicketCurrency } from '@/lib/raffle
 import { Flame } from 'lucide-react'
 import Link from 'next/link'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
+import {
+  PURCHASE_COMPLETED_EVENT,
+  type PurchaseCompletedDetail,
+} from '@/lib/cart/purchase-complete-events'
+import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
@@ -367,6 +372,35 @@ export function RafflesList({
       pendingRequestsRef.current.clear()
     }
   }, [fetchEntriesForActiveRaffles, rafflesWithEntries])
+
+  // After merged-cart checkout, refresh counts immediately on the grid (same tab).
+  useEffect(() => {
+    const onPurchase = (e: Event) => {
+      const d = (e as CustomEvent<PurchaseCompletedDetail>).detail
+      if (!d?.raffleIds?.length) return
+      const idSet = new Set(d.raffleIds)
+      const targets = rafflesRef.current.filter(({ raffle }) => idSet.has(raffle.id))
+      if (targets.length === 0) return
+      void (async () => {
+        const fetched = await fetchEntriesByRaffleIdsClient(targets.map((t) => t.raffle.id))
+        if (fetched.size === 0) return
+        setFilteredRaffles((current) => {
+          const updatedMap = new Map(current.map((r) => [r.raffle.id, r]))
+          for (const { raffle } of targets) {
+            const entries = fetched.get(raffle.id)
+            if (!entries) continue
+            const profitInfo = getRaffleProfitInfo(raffle, entries)
+            updatedMap.set(raffle.id, { raffle, entries, profitInfo })
+          }
+          const updated = Array.from(updatedMap.values())
+          rafflesRef.current = updated
+          return updated
+        })
+      })()
+    }
+    window.addEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+    return () => window.removeEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+  }, [])
 
   // Callback to remove a raffle from the list (client-side immediate update)
   const handleRaffleDeleted = (raffleId: string) => {

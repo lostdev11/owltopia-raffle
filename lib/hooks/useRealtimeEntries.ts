@@ -5,6 +5,10 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Entry } from '@/lib/types'
 import { RealtimeChannel } from '@supabase/supabase-js'
 import { RAFFLE_DETAIL_ENTRIES_REALTIME_SAFETY_POLL_MS } from '@/lib/dev-budget'
+import {
+  PURCHASE_COMPLETED_EVENT,
+  type PurchaseCompletedDetail,
+} from '@/lib/cart/purchase-complete-events'
 
 interface UseRealtimeEntriesOptions {
   raffleId: string
@@ -87,6 +91,19 @@ export function useRealtimeEntries({
     }
     return null
   }, [raffleId, onUpdate])
+
+  // Merged cart: same payment updates many raffles — refetch this page as soon as checkout finishes
+  // (realtime can lag; router.refresh() does not update this hook’s client state by itself).
+  useEffect(() => {
+    if (!enabled || !raffleId) return
+    const onPurchase = (e: Event) => {
+      const d = (e as CustomEvent<PurchaseCompletedDetail>).detail
+      if (!d?.raffleIds?.length || !d.raffleIds.includes(raffleId)) return
+      fetchEntries()
+    }
+    window.addEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+    return () => window.removeEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+  }, [enabled, raffleId, fetchEntries])
 
   // Set up realtime subscription
   useEffect(() => {

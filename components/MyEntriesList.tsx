@@ -1,12 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import type { EntryWithRaffle } from '@/lib/db/entries'
 import { format } from 'date-fns'
 import { ExternalLink, Ticket, Calendar } from 'lucide-react'
+import {
+  PURCHASE_COMPLETED_EVENT,
+  type PurchaseCompletedDetail,
+} from '@/lib/cart/purchase-complete-events'
 
 const SOLANA_EXPLORER_TX = 'https://explorer.solana.com/tx'
 
@@ -19,7 +23,7 @@ export function MyEntriesList({ walletAddress }: MyEntriesListProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!walletAddress) {
       setItems([])
       setLoading(false)
@@ -41,6 +45,20 @@ export function MyEntriesList({ walletAddress }: MyEntriesListProps) {
       })
       .finally(() => setLoading(false))
   }, [walletAddress])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    const onPurchase = (e: Event) => {
+      const d = (e as CustomEvent<PurchaseCompletedDetail>).detail
+      if (!d?.wallet || d.wallet !== walletAddress) return
+      load()
+    }
+    window.addEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+    return () => window.removeEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+  }, [walletAddress, load])
 
   if (loading) {
     return (

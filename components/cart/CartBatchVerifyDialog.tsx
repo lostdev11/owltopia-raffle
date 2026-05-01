@@ -85,6 +85,7 @@ const SUCCESS_HOLD_MS = 2200
 export function CartBatchVerifyDialog({ open, receipt, onOpenChange }: CartBatchVerifyDialogProps) {
   const lines = receipt?.lines ?? []
   const phase = receipt?.phase ?? 'verifying'
+  const totalTickets = lines.reduce((s, l) => s + Math.max(0, Math.floor(l.quantity)), 0)
   const [revealedCount, setRevealedCount] = useState(0)
 
   useEffect(() => {
@@ -113,7 +114,7 @@ export function CartBatchVerifyDialog({ open, receipt, onOpenChange }: CartBatch
     phase === 'verifying'
       ? 'Confirming your tickets'
       : phase === 'success'
-        ? 'Tickets confirmed'
+        ? 'Tickets purchased successfully'
         : phase === 'pending_async'
           ? 'Almost there'
           : 'Could not confirm yet'
@@ -122,9 +123,11 @@ export function CartBatchVerifyDialog({ open, receipt, onOpenChange }: CartBatch
     phase === 'verifying'
       ? 'Your payment went through. Verifying each raffle on our servers…'
       : phase === 'success'
-        ? 'Each raffle below has been recorded with your ticket count.'
+        ? totalTickets > 0
+          ? `${totalTickets === 1 ? '1 ticket is' : `${totalTickets} tickets are`} confirmed across ${lines.length === 1 ? 'this raffle' : `these ${lines.length} raffles`}. Counts on each raffle page update below.`
+          : 'Your purchase is confirmed. Counts on each raffle page will update.'
         : phase === 'pending_async'
-          ? 'Your payment is on-chain. Confirmation can take a little longer — refresh in a moment if counts do not update.'
+          ? 'Your payment is on-chain. Confirmation can take a little longer — counts update automatically when ready.'
           : 'Your cart was restored. Check the message on the cart or refresh the page. If payment went through, tickets may still appear shortly.'
 
   return (
@@ -138,6 +141,14 @@ export function CartBatchVerifyDialog({ open, receipt, onOpenChange }: CartBatch
         <DialogHeader className="p-4 sm:p-5 pb-2 shrink-0 border-b border-border text-left space-y-1.5">
           <DialogTitle className="text-lg">{title}</DialogTitle>
           <DialogDescription className="text-sm leading-snug">{description}</DialogDescription>
+          {phase === 'success' && totalTickets > 0 ? (
+            <p
+              className="rounded-md border border-green-500/35 bg-green-500/10 px-3 py-2 text-sm font-medium text-green-700 dark:text-green-400"
+              role="status"
+            >
+              You&apos;re in — your ticket totals on each raffle now include this purchase.
+            </p>
+          ) : null}
         </DialogHeader>
 
         <ul

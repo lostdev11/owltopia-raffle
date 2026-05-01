@@ -8,6 +8,11 @@ import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { PARTNER_LOGOS } from '@/lib/partner-logos'
+import {
+  PURCHASE_COMPLETED_EVENT,
+  type PurchaseCompletedDetail,
+} from '@/lib/cart/purchase-complete-events'
+import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
 
 type Item = { raffle: Raffle; entries: Entry[] }
 
@@ -114,6 +119,37 @@ export function PartnerRafflesCarousel({
       clearInterval(interval)
     }
   }, [itemsKey, items.length])
+
+  useEffect(() => {
+    const onPurchase = (e: Event) => {
+      const d = (e as CustomEvent<PurchaseCompletedDetail>).detail
+      if (!d?.raffleIds?.length) return
+      const idSet = new Set(d.raffleIds)
+      const carouselIds = itemsRef.current.filter(({ raffle }) => idSet.has(raffle.id)).map((x) => x.raffle.id)
+      if (carouselIds.length === 0) return
+      void (async () => {
+        const fetched = await fetchEntriesByRaffleIdsClient(carouselIds)
+        if (fetched.size === 0) return
+        setDisplayItems((prev) => {
+          const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
+          const mergedProps = mergeCarouselProps(prev, itemsRef.current)
+          const mergedById = new Map(mergedProps.map((x) => [x.raffle.id, x]))
+          for (const id of carouselIds) {
+            const entries = fetched.get(id)
+            const row = mergedById.get(id)
+            if (entries && row) mergedById.set(id, { raffle: row.raffle, entries })
+          }
+          return itemsRef.current.map(({ raffle }) => {
+            const updated = mergedById.get(raffle.id)
+            if (updated) return updated
+            return { raffle, entries: prevById.get(raffle.id)?.entries ?? [] }
+          })
+        })
+      })()
+    }
+    window.addEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+    return () => window.removeEventListener(PURCHASE_COMPLETED_EVENT, onPurchase)
+  }, [])
 
   useEffect(() => {
     return () => {

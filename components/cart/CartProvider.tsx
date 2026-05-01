@@ -31,6 +31,7 @@ import {
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { parseVerifyBatchFailure, verifyBatchFailureUserMessage } from '@/lib/api/verify-batch-response'
+import { dispatchPurchaseCompleted } from '@/lib/cart/purchase-complete-events'
 
 type CartContextValue = {
   lines: CartLine[]
@@ -410,6 +411,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
           setBatchReceipt(prev => (prev ? { ...prev, phase: 'pending_async' } : null))
           requestAnimationFrame(() => fireGreenConfetti())
           setLines([])
+          dispatchPurchaseCompleted({
+            wallet: publicKey.toBase58(),
+            raffleIds: receiptLines.map(l => l.raffleId),
+          })
           router.refresh()
           return
         }
@@ -426,6 +431,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setBatchReceipt(prev => (prev ? { ...prev, phase: 'success' } : null))
         requestAnimationFrame(() => fireGreenConfetti())
         setLines([])
+        dispatchPurchaseCompleted({
+          wallet: publicKey.toBase58(),
+          raffleIds: receiptLines.map(l => l.raffleId),
+        })
         router.refresh()
         return
       }
@@ -466,6 +475,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setLines([...remaining])
       }
 
+      dispatchPurchaseCompleted({
+        wallet: publicKey.toBase58(),
+        raffleIds: initialSnapshot.map(l => l.raffleId),
+      })
       router.refresh()
     } finally {
       checkoutRunLockRef.current = false
