@@ -17,6 +17,7 @@ import {
   getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import type { Raffle } from '@/lib/types'
@@ -73,22 +74,12 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
               'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
           }
         }
-        // Threshold not met: rerun once for the raffle's original configured duration.
-        const originalEndTime = raffle.original_end_time || raffle.end_time
-        const startTimeMs = new Date(raffle.start_time).getTime()
-        const originalEndMs = new Date(originalEndTime).getTime()
-        const baseDurationMs = originalEndMs - startTimeMs
-        const durationMs = baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
+        // Threshold not met: second selling round — extend once by the original raffle duration.
+        const patch = buildMinThresholdMissExtensionPatch(raffle)
+        const durationMs =
+          new Date(patch.end_time).getTime() - new Date(raffle.end_time).getTime()
 
-        const currentEndMs = new Date(raffle.end_time).getTime()
-        const newEndTime = new Date(currentEndMs + durationMs)
-
-        await updateRaffle(raffle.id, {
-          original_end_time: originalEndTime,
-          end_time: newEndTime.toISOString(),
-          status: 'live',
-          time_extension_count: (raffle.time_extension_count ?? 0) + 1,
-        })
+        await updateRaffle(raffle.id, patch)
 
         return {
           raffleId: raffle.id,

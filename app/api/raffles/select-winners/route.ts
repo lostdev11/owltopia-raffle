@@ -11,6 +11,7 @@ import {
 } from '@/lib/db/raffles'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -93,22 +94,8 @@ export async function POST(request: NextRequest) {
               )
             }
 
-            const originalEndTime = raffle.original_end_time || raffle.end_time
-            const startTimeMs = new Date(raffle.start_time).getTime()
-            const originalEndMs = new Date(originalEndTime).getTime()
-            const baseDurationMs = originalEndMs - startTimeMs
-            const durationMs =
-              baseDurationMs > 0 ? baseDurationMs : 7 * 24 * 60 * 60 * 1000
-
-            const currentEndMs = new Date(raffle.end_time).getTime()
-            const newEndTime = new Date(currentEndMs + durationMs)
-
-            await updateRaffle(raffle.id, {
-              original_end_time: originalEndTime,
-              end_time: newEndTime.toISOString(),
-              status: 'live',
-              time_extension_count: (raffle.time_extension_count ?? 0) + 1,
-            })
+            const patch = buildMinThresholdMissExtensionPatch(raffle)
+            await updateRaffle(raffle.id, patch)
 
             return NextResponse.json(
               {
@@ -119,7 +106,7 @@ export async function POST(request: NextRequest) {
                   .filter((e) => e.status === 'confirmed' && !e.refunded_at)
                   .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
                 extended: true,
-                newEndTime: newEndTime.toISOString(),
+                newEndTime: patch.end_time,
               },
               { status: 400 }
             )

@@ -1689,19 +1689,16 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
-  // Check if winner can be selected (min tickets met AND 7 days passed) unless override is forced
+  // Draw eligibility: {@link canSelectWinner} (ticket threshold / ≥1 ticket when no min). No separate 7-day gate.
   if (!forceOverride && !canSelectWinner(raffle, entries)) {
-    const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
-    const sevenDaysPassed = hasSevenDaysPassedSinceOriginalEnd(raffle)
-    
-    if (!meetsMinTickets) {
+    if (!isRaffleEligibleToDraw(raffle, entries)) {
       console.warn(`Raffle ${raffleId} does not meet minimum ticket requirements`)
+    } else {
+      console.warn(
+        `Raffle ${raffleId} selectWinner blocked: no confirmed tickets or eligibility mismatch`
+      )
     }
-    if (!sevenDaysPassed) {
-      console.warn(`Raffle ${raffleId} has not passed 7 days since original end time`)
-    }
-    
-    // Raffle ended, min not met — no status update; caller may extend and set status to 'live'
+    // Threshold not met at end — callers extend once ({@link buildMinThresholdMissExtensionPatch}) or finalize refunds.
     return null
   }
 
@@ -1828,18 +1825,14 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 }
 
 /**
- * Get all raffles that have ended but don't have a winner selected yet
- * Includes raffles where:
- * - end_time has passed, OR
- * - original_end_time exists and 7 days have passed since it (for extended raffles that meet minimum)
+ * Get all raffles that have ended but don't have a winner selected yet.
+ * Treats a raffle as ended only when `end_time <= now` (including after a min-threshold extension).
  */
 export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const now = new Date()
   const columns = await getRaffleColumns()
   
-  // Fetch raffles without winners (live / ready_to_draw / legacy pending_min_not_met), then filter in JavaScript
-  // This ensures we catch all cases including extended raffles where 7 days have passed
-  // since original_end_time even if end_time is still in the future
+  // Fetch raffles without winners (live / ready_to_draw / legacy pending_min_not_met), then filter in JS
   const { data, error } = await getSupabaseForRead()
     .from('raffles')
     .select(columns)
@@ -1927,19 +1920,6 @@ export function isRaffleEligibleToDraw(raffle: Raffle, entries: Entry[]): boolea
   }
   const ticketsSold = calculateTicketsSold(entries)
   return ticketsSold >= min
-}
-
-/**
- * Check if 7 days have passed since the original end time
- * If original_end_time is null, use end_time as the reference point
- */
-export function hasSevenDaysPassedSinceOriginalEnd(raffle: Raffle): boolean {
-  const now = new Date()
-  // Use original_end_time if set, otherwise use end_time (for raffles that haven't been extended)
-  const referenceTime = raffle.original_end_time ? new Date(raffle.original_end_time) : new Date(raffle.end_time)
-  const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000
-  const timeSinceReference = now.getTime() - referenceTime.getTime()
-  return timeSinceReference >= sevenDaysInMs
 }
 
 /**
