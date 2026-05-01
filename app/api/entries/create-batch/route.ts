@@ -19,6 +19,7 @@ import {
   assertCartBatchGrossMatchesMergedSplit,
   CartBatchPaymentTotalMismatchError,
 } from '@/lib/entries/batch-invariants'
+import { bulkCheckoutRestrictedToAdmins } from '@/lib/cart/bulk-checkout-admin-only'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,14 +53,18 @@ export async function POST(request: NextRequest) {
     if (!parsed.ok) return NextResponse.json(ERROR_BODY, { status: 400 })
     const { walletAddress: walletAddressStr, items } = parsed.data
 
-    if (!(await isAdmin(walletAddressStr.trim()))) {
-      return NextResponse.json(
-        {
-          success: false as const,
-          error: 'Cart batch checkout is temporarily limited to admins while we finish testing.',
-        },
-        { status: 403 }
-      )
+    if (bulkCheckoutRestrictedToAdmins()) {
+      if (!(await isAdmin(walletAddressStr.trim()))) {
+        return NextResponse.json(
+          {
+            success: false as const,
+            code: 'admin_only' as const,
+            error:
+              'Multi-raffle cart checkout is paused for maintenance. Pay one raffle at a time, or try again later.',
+          },
+          { status: 403 }
+        )
+      }
     }
 
     const raffleIdsOrdered = items.map(it => it.raffleId)
