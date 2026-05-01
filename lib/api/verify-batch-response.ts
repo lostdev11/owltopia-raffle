@@ -8,7 +8,6 @@ export type VerifyBatchErrorCode =
   | 'chain_verify_failed'
   | 'confirm_failed'
   | 'server_error'
-  | 'admin_only'
 
 export type VerifyBatchPendingBody = {
   success: true
@@ -25,7 +24,6 @@ function readVerifyBatchCode(body: unknown): VerifyBatchErrorCode | undefined {
   if (c === 'chain_verify_failed') return 'chain_verify_failed'
   if (c === 'confirm_failed') return 'confirm_failed'
   if (c === 'server_error') return 'server_error'
-  if (c === 'admin_only') return 'admin_only'
   return undefined
 }
 
@@ -47,9 +45,6 @@ export function verifyBatchFailureUserMessage(status: number, code?: VerifyBatch
   }
   if (code === 'invalid_request') {
     return 'Checkout data was not accepted. Refresh the page and try again.'
-  }
-  if (code === 'admin_only' || status === 403) {
-    return 'This confirmation path is temporarily limited to admins. If you already paid, refresh or contact support with your transaction signature.'
   }
   if (status === 503 && code === 'server_error') {
     return 'Confirmation could not reach the database (upgrade or permissions). Wait a minute, refresh, and retry — your payment usually still applies once the site is updated.'
