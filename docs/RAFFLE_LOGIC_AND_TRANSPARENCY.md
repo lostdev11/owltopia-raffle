@@ -24,6 +24,19 @@ So: **payments = on-chain; draw logic = off-chain.**
 
 ---
 
+## 3a. Minimum ticket threshold not met (two selling rounds, then refunds + prize return)
+
+If a raffle has a **minimum tickets** (or NFT floor–derived) threshold and it is **not** met when the first `end_time` passes:
+
+1. The app may **extend the sale deadline once** (same length as the original raffle window, or 7 days as a fallback), so there is a **second chance** to sell enough tickets.
+2. If the threshold is still **not** met when that extended deadline passes, the raffle is set to **`failed_refund_available`**:  
+   - **Buyers** can claim **refunds** for their tickets (per the app’s refund / funds-escrow flows).  
+   - **NFT (or partner SPL) prizes** that were held in escrow are **returned to the creator** when possible (automatically, or via the creator “claim prize back” action if the on-chain return needs a retry).
+
+Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffles/min-threshold-terminal.ts` (terminal state + prize return attempt), `app/api/raffles/[id]/claim-failed-min-prize-return` (creator claim if needed).
+
+---
+
 ## 3. How is the winner determined? (draw logic)
 
 - **Where it runs:** Backend (Next.js API + Supabase).  

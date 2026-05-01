@@ -3,15 +3,20 @@ import { transferNftPrizeToCreator, transferPartnerSplPrizeToCreator } from '@/l
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 /**
- * After min_tickets was not met at end and the raffle has used its allowed deadline extension:
- * set status for ticket refunds, then attempt to return an escrowed NFT to the creator.
- * Refund claims work even if the on-chain return fails (admin can retry return).
+ * Terminal min-threshold failure (the “2nd round” deadline, after the one automatic extension):
+ *
+ * 1. If the draw threshold is still not met when the extended `end_time` passes, the raffle is closed.
+ * 2. Status → `failed_refund_available` so ticket buyers can claim refunds (see claim-refund / funds escrow).
+ * 3. For an escrowed NFT or partner SPL prize, we try to return it to the creator on-chain; if that fails,
+ *    the creator can use `POST /api/raffles/[id]/claim-failed-min-prize-return` (same as dashboard “claim prize back”).
+ *
+ * Refunds do not depend on the NFT return succeeding.
  */
 export async function finalizeMinThresholdTerminalFailure(raffleId: string): Promise<{
   nftReturnOk?: boolean
   nftReturnError?: string
 }> {
-  await updateRaffle(raffleId, { status: 'failed_refund_available' })
+  await updateRaffle(raffleId, { status: 'failed_refund_available', is_active: false })
 
   const raffle = await getRaffleById(raffleId)
   if (!raffle) return {}
