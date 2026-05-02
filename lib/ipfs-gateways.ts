@@ -10,6 +10,25 @@ export const IPFS_HTTPS_GATEWAY_PREFIXES = [
 
 const IPFS_PATH_MARKER = '/ipfs/'
 
+/**
+ * Cloudflare shut down `cloudflare-ipfs.com`; metadata still references it.
+ * Rewrite to a live gateway so our proxy and `<img>` fallbacks can fetch the CID.
+ */
+export function rewriteDeadIpfsGatewayHttpsUrl(urlStr: string): string {
+  const raw = urlStr.trim()
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return raw
+    const h = u.hostname.toLowerCase()
+    if (h === 'cloudflare-ipfs.com' || h === 'www.cloudflare-ipfs.com') {
+      return `https://ipfs.io${u.pathname}${u.search}${u.hash}`
+    }
+  } catch {
+    /* ignore */
+  }
+  return raw
+}
+
 export function ipfsUriToHttpsGatewayUrl(uri: string): string | null {
   const t = uri.trim()
   if (!/^ipfs:\/\//i.test(t)) return null

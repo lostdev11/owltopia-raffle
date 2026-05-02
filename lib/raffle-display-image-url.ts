@@ -1,4 +1,4 @@
-import { ipfsUriToHttpsGatewayUrl } from '@/lib/ipfs-gateways'
+import { ipfsUriToHttpsGatewayUrl, rewriteDeadIpfsGatewayHttpsUrl } from '@/lib/ipfs-gateways'
 import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-uri'
 
 /**
@@ -24,7 +24,7 @@ export function isDirectRaffleImageHost(hostname: string): boolean {
  */
 export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): string | null {
   if (!imageUrl?.trim()) return null
-  const url = imageUrl.trim()
+  let url = rewriteDeadIpfsGatewayHttpsUrl(imageUrl.trim())
 
   // Create flow used to persist `/api/proxy-image?url=...`; server fetch often 404s on Firebase/GCS.
   if (url.startsWith('/api/proxy-image')) {
@@ -32,7 +32,9 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
       const parsed = new URL(url, 'https://placeholder.local')
       const inner = parsed.searchParams.get('url')
       if (inner) {
-        const decoded = fullyDecodeURIComponentSafe(inner)
+        const rawDecoded = fullyDecodeURIComponentSafe(inner)
+        const decoded = rewriteDeadIpfsGatewayHttpsUrl(rawDecoded)
+        const innerChanged = decoded !== rawDecoded
         try {
           const u = new URL(decoded)
           if (
@@ -43,6 +45,9 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
           }
         } catch {
           /* keep proxy */
+        }
+        if (innerChanged) {
+          return `/api/proxy-image?url=${encodeURIComponent(decoded)}`
         }
       }
     } catch {
@@ -92,7 +97,7 @@ export function getRaffleImageFallbackRawUrl(
       const parsed = new URL(display, 'https://placeholder.local')
       const raw = parsed.searchParams.get('url')
       if (!raw) return null
-      const decoded = fullyDecodeURIComponentSafe(raw)
+      const decoded = rewriteDeadIpfsGatewayHttpsUrl(fullyDecodeURIComponentSafe(raw))
       const arHttps = arweaveUriToHttps(decoded)
       if (arHttps) return arHttps
       const ipfsHttps = ipfsUriToHttpsGatewayUrl(decoded)

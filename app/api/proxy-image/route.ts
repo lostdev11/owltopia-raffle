@@ -3,6 +3,7 @@ import {
   ipfsUriToHttpsGatewayUrl,
   IPFS_HTTPS_GATEWAY_PREFIXES,
   ipfsGatewayCandidateUrls,
+  rewriteDeadIpfsGatewayHttpsUrl,
 } from '@/lib/ipfs-gateways'
 import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-uri'
 
@@ -51,6 +52,7 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/png',
   'image/gif',
   'image/webp',
+  'image/avif',
   'image/svg+xml',
 ])
 
@@ -58,6 +60,11 @@ const ALLOWED_IMAGE_TYPES = new Set([
 function sniffImageContentType(buffer: ArrayBuffer): string | null {
   const u8 = new Uint8Array(buffer)
   if (u8.length < 12) return null
+  // ISO BMFF AVIF (often served as application/octet-stream)
+  if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+    const brand = String.fromCharCode(u8[8] ?? 0, u8[9] ?? 0, u8[10] ?? 0, u8[11] ?? 0).toLowerCase()
+    if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
   if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'image/jpeg'
   if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'image/png'
   if (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38) return 'image/gif'
@@ -140,15 +147,16 @@ const ARWEAVE_GATEWAYS = [
 function toHttpsImageUrl(url: string): string {
   const trimmed = url.trim()
   const ar = arweaveUriToHttps(trimmed)
-  if (ar) return ar
+  if (ar) return rewriteDeadIpfsGatewayHttpsUrl(ar)
   if (trimmed.startsWith('ipfs://')) {
-    return ipfsUriToHttpsGatewayUrl(trimmed) ?? trimmed
+    const converted = ipfsUriToHttpsGatewayUrl(trimmed) ?? trimmed
+    return rewriteDeadIpfsGatewayHttpsUrl(converted)
   }
   if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
-    return trimmed
+    return rewriteDeadIpfsGatewayHttpsUrl(trimmed)
   }
   if (/^[a-zA-Z0-9]+$/.test(trimmed) && trimmed.length >= 32) {
-    return `${IPFS_HTTPS_GATEWAY_PREFIXES[0]}${trimmed}`
+    return rewriteDeadIpfsGatewayHttpsUrl(`${IPFS_HTTPS_GATEWAY_PREFIXES[0]}${trimmed}`)
   }
   return trimmed
 }

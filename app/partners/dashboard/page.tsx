@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   Users,
   LayoutDashboard,
-  ExternalLink,
   Radio,
   Copy,
   Check,
@@ -16,6 +15,7 @@ import {
   Circle,
   Coins,
   ChevronDown,
+  ChevronRight,
   AlertTriangle,
   Shield,
   Download,
@@ -27,6 +27,12 @@ import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
 const MOBILE_401_RETRY_DELAY_MS = 500
+
+/** Shared layout + card chrome for a consistent partner hub look */
+const PAGE_SHELL =
+  'container max-w-3xl mx-auto px-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))]'
+const CARD_SURFACE = 'rounded-2xl border border-border/60 bg-card shadow-sm'
+const STAT_CARD = `${CARD_SURFACE} flex h-full flex-col`
 
 type DashboardRaffle = {
   id: string
@@ -299,21 +305,32 @@ export default function PartnerHostDashboardPage() {
 
   if (!connected || !publicKey) {
     return (
-      <div className="container max-w-lg mx-auto py-10 sm:py-12 px-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] mb-4">
-          <Link href="/raffles?tab=partner-raffles" className="inline-flex items-center gap-2">
-            <ArrowLeft className="h-4 w-4" />
+      <div
+        className={`min-h-[min(100dvh,880px)] bg-gradient-to-b from-violet-500/[0.06] via-background to-background ${PAGE_SHELL} pt-10 sm:pt-14`}
+      >
+        <Button asChild variant="ghost" size="sm" className="touch-manipulation -ml-2 min-h-[44px] mb-6 h-auto px-2">
+          <Link href="/raffles?tab=partner-raffles" className="inline-flex items-center gap-2 text-muted-foreground">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
             Partner raffles
           </Link>
         </Button>
-        <h1 className="text-2xl font-bold mb-2">Partner host hub</h1>
-        <p className="text-muted-foreground text-sm mb-6">
-          Connect the wallet that is allowlisted in the {PLATFORM_NAME} partner program to see your public listing scope,
-          Discord link id, and shortcuts. Site admins can also open this page with any connected wallet to preview the hub
-          and their own creator stats. Claims and settlement stay on the main user dashboard.
-        </p>
-        <div className="touch-manipulation min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full sm:[&_button]:w-auto">
-          <WalletConnectButton />
+        <div className={`${CARD_SURFACE} overflow-hidden`}>
+          <div className="border-b border-border/50 bg-muted/30 px-5 py-5 sm:px-8 sm:py-8">
+            <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
+              <Users className="h-6 w-6 shrink-0" aria-hidden />
+              <span className="text-xs font-semibold uppercase tracking-wider">Partner program</span>
+            </div>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Host hub</h1>
+            <p className="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground">
+              Connect the wallet on your {PLATFORM_NAME} partner allowlist to see listing scope, Discord tenant id, and
+              shortcuts. Claims stay on your main dashboard.
+            </p>
+          </div>
+          <div className="px-5 py-6 sm:px-8">
+            <div className="touch-manipulation min-h-[44px] [&_button]:min-h-[44px] [&_button]:w-full sm:[&_button]:w-auto">
+              <WalletConnectButton />
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -321,65 +338,89 @@ export default function PartnerHostDashboardPage() {
 
   if (loading && !data) {
     return (
-      <div className="container max-w-2xl mx-auto py-16 flex justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-label="Loading" />
+      <div className={`flex min-h-[50vh] items-center justify-center ${PAGE_SHELL} pt-16`}>
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-9 w-9 animate-spin" aria-label="Loading" />
+          <p className="text-sm">Loading partner hub…</p>
+        </div>
       </div>
     )
   }
 
   if (needsSignIn) {
     return (
-      <div className="container max-w-lg mx-auto py-10 px-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <p className="text-muted-foreground mb-4">Sign the message in your wallet to use the partner hub (same as the main dashboard).</p>
-        <Button type="button" onClick={() => void load(false)} className="min-h-[44px] touch-manipulation w-full sm:w-auto">
-          Retry
-        </Button>
-        <div className="mt-4">
-          <Button asChild variant="outline" className="min-h-[44px] w-full sm:w-auto touch-manipulation">
-            <Link href="/dashboard">Open full dashboard</Link>
-          </Button>
-        </div>
+      <div className={`min-h-[min(100dvh,720px)] bg-gradient-to-b from-violet-500/[0.06] via-background to-background ${PAGE_SHELL} pt-10`}>
+        <Card className={CARD_SURFACE}>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-xl">Sign in required</CardTitle>
+            <CardDescription className="text-base leading-relaxed">
+              Sign the message in your wallet to use the partner hub (same as the main dashboard).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <Button type="button" onClick={() => void load(false)} className="min-h-[44px] touch-manipulation w-full sm:w-auto">
+              Retry
+            </Button>
+            <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <Link href="/dashboard">Open full dashboard</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="container max-w-lg mx-auto py-10 px-4">
-        <p className="text-destructive text-sm mb-4">{error}</p>
-        <Button type="button" onClick={() => void load(false)} className="min-h-[44px]">
-          Try again
-        </Button>
+      <div className={`${PAGE_SHELL} pt-10`}>
+        <Card className={`${CARD_SURFACE} border-destructive/30`}>
+          <CardHeader>
+            <CardTitle className="text-xl">Something went wrong</CardTitle>
+            <CardDescription className="text-destructive">{error}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button type="button" onClick={() => void load(false)} className="min-h-[44px] touch-manipulation">
+              Try again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
   if (data && !canAccessPartnerHub) {
     return (
-      <div className="container max-w-2xl mx-auto py-8 px-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] mb-4">
-          <Link href="/raffles" className="inline-flex items-center gap-2">
-            <ArrowLeft className="h-4 w-4" />
+      <div className={`min-h-[min(100dvh,880px)] bg-gradient-to-b from-violet-500/[0.06] via-background to-background ${PAGE_SHELL} pt-8 sm:pt-10`}>
+        <Button asChild variant="ghost" size="sm" className="touch-manipulation -ml-2 mb-6 min-h-[44px] h-auto px-2">
+          <Link href="/raffles" className="inline-flex items-center gap-2 text-muted-foreground">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
             Raffles
           </Link>
         </Button>
-        <h1 className="text-2xl font-bold mb-2">Partner host hub</h1>
-        <p className="text-muted-foreground text-sm mb-6">
-          Connected <span className="font-mono text-xs">{wallet}</span> is not on the partner program allowlist yet, or
-          the row is inactive.
-        </p>
-        <Card>
-          <CardHeader>
-            <CardTitle>Apply to the program</CardTitle>
-            <CardDescription>We review project fit, fee tier, and any Discord or prize setup.</CardDescription>
+        <Card className={CARD_SURFACE}>
+          <CardHeader className="space-y-2 border-b border-border/50 pb-6">
+            <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
+              <Users className="h-5 w-5 shrink-0" aria-hidden />
+              <span className="text-xs font-semibold uppercase tracking-wider">Partner hub</span>
+            </div>
+            <CardTitle className="text-2xl font-bold tracking-tight">Not on the allowlist yet</CardTitle>
+            <CardDescription className="text-sm leading-relaxed">
+              <span className="font-mono text-xs text-foreground/80">{wallet}</span>
+              <span className="mt-2 block text-muted-foreground">
+                This wallet is not on the partner program allowlist, or the row is inactive.
+              </span>
+            </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row gap-3">
-            <Button asChild className="min-h-[44px] touch-manipulation w-full sm:w-auto">
-              <Link href="/partner-program">Partner program</Link>
-            </Button>
-            <Button asChild variant="outline" className="min-h-[44px] touch-manipulation w-full sm:w-auto">
-              <Link href="/dashboard">Main dashboard</Link>
-            </Button>
+          <CardContent className="pt-6">
+            <p className="mb-4 text-sm font-medium text-foreground">Next steps</p>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button asChild className="min-h-[44px] touch-manipulation w-full sm:w-auto">
+                <Link href="/partner-program">Partner program</Link>
+              </Button>
+              <Button asChild variant="outline" className="min-h-[44px] touch-manipulation w-full sm:w-auto">
+                <Link href="/dashboard">Main dashboard</Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -390,8 +431,11 @@ export default function PartnerHostDashboardPage() {
 
   if (!data) {
     return (
-      <div className="container max-w-2xl mx-auto py-16 flex justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-label="Loading" />
+      <div className={`flex min-h-[50vh] items-center justify-center ${PAGE_SHELL} pt-16`}>
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-9 w-9 animate-spin" aria-label="Loading" />
+          <p className="text-sm">Loading partner hub…</p>
+        </div>
       </div>
     )
   }
@@ -402,438 +446,466 @@ export default function PartnerHostDashboardPage() {
   const escrowGross = data.claimTrackerLiveFundsEscrowSales.grossByCurrency
 
   return (
-    <div className="container max-w-4xl mx-auto py-8 px-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Users className="h-7 w-7 text-violet-400 shrink-0" aria-hidden />
-            Partner host hub
-          </h1>
-          <p className="text-sm text-muted-foreground font-mono mt-1 break-all">{wallet}</p>
-          {adminPreviewMode && (
-            <p className="mt-3 text-sm rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-muted-foreground">
-              <span className="font-medium text-foreground">Admin preview</span> — this hub is unlocked for site admins.
-              Figures below follow the wallet you have connected ({PLATFORM_NAME} session), which is not on the partner
-              allowlist for a 2% tier.
-            </p>
-          )}
+    <div className={`min-h-[min(100dvh,1200px)] bg-gradient-to-b from-violet-500/[0.07] via-background to-background ${PAGE_SHELL} pt-6 sm:pt-10`}>
+      <header className={`${CARD_SURFACE} mb-8 overflow-hidden`}>
+        <div className="border-b border-border/50 bg-gradient-to-br from-muted/40 via-card to-violet-500/[0.04] px-5 py-6 sm:px-8">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
+                <Users className="h-6 w-6 shrink-0" aria-hidden />
+                <span className="text-xs font-semibold uppercase tracking-wider">Partner program</span>
+              </div>
+              <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Host hub</h1>
+              <p className="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground">
+                {adminPreviewMode ? (
+                  <>
+                    Same layout partners see. Figures match your signed-in wallet. Compare with the public{' '}
+                    <Link href="/raffles?tab=partner-raffles" className="font-medium text-primary underline-offset-2 hover:underline">
+                      partner raffles
+                    </Link>{' '}
+                    tab. Claims stay on your main dashboard and admin tools.
+                  </>
+                ) : (
+                  <>
+                    Main feed listings are separate from the public{' '}
+                    <Link href="/raffles?tab=partner-raffles" className="font-medium text-primary underline-offset-2 hover:underline">
+                      partner raffles
+                    </Link>{' '}
+                    section. Set Discord webhooks in your server; money flows and claims live on your main dashboard.
+                  </>
+                )}
+              </p>
+              {adminPreviewMode && (
+                <p className="mt-4 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">Admin preview</span> — unlocked for site admins. Session
+                  wallet is not on the partner allowlist for the 2% tier ({PLATFORM_NAME}).
+                </p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[44px] shrink-0 touch-manipulation sm:self-start"
+              onClick={() => void load(false)}
+              disabled={loading}
+              aria-busy={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  <span className="sr-only">Refreshing</span>
+                </>
+              ) : (
+                'Refresh'
+              )}
+            </Button>
+          </div>
+          <div className="mt-5 rounded-xl border border-border/50 bg-background/80 px-3 py-2.5 font-mono text-xs leading-relaxed text-muted-foreground break-all">
+            {wallet}
+          </div>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-[44px] touch-manipulation shrink-0 w-full sm:w-auto"
-          onClick={() => void load(false)}
-          disabled={loading}
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
-        </Button>
-      </div>
+      </header>
 
-      {adminPreviewMode ? (
-        <p className="text-sm text-muted-foreground mb-6">
-          Same layout community partners see. Tenant id and economics below match your signed-in admin wallet. Compare
-          with the public{' '}
-          <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-2 hover:underline">
-            partner raffles
-          </Link>{' '}
-          tab. Money movement and claims stay on your main dashboard and admin tools.
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground mb-6">
-          Your raffles in the <span className="font-medium text-foreground/90">Main</span> feed are separate from the
-          public{' '}
-          <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-2 hover:underline">
-            partner raffles
-          </Link>{' '}
-          section. Set your Discord webhooks in your server; full money flows and claims stay in the main dashboard.
+      {error && (
+        <p className="mb-6 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
+          {error}
         </p>
       )}
 
       {data.creatorRefundRaffles.length > 0 && (
-        <Card className="mb-6 border-amber-500/40 bg-amber-500/5">
-          <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card className={`${CARD_SURFACE} mb-6 border-amber-500/35 bg-amber-500/[0.06]`}>
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
             <div className="flex gap-3 min-w-0">
-              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden />
+              </div>
               <div className="min-w-0">
                 <p className="font-medium text-foreground">
                   Refund action needed on {data.creatorRefundRaffles.length} raffle
                   {data.creatorRefundRaffles.length === 1 ? '' : 's'}
                 </p>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Hosted tab on the full dashboard handles buyer refunds and legacy flows.
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Use the Hosting tab on your full dashboard for buyer refunds.
                 </p>
               </div>
             </div>
-            <Button asChild className="min-h-[44px] touch-manipulation shrink-0 w-full sm:w-auto">
-              <Link href="/dashboard?tab=hosting">Open dashboard — Hosting</Link>
+            <Button asChild className="min-h-[44px] w-full shrink-0 touch-manipulation sm:w-auto">
+              <Link href="/dashboard?tab=hosting">Open Hosting</Link>
             </Button>
           </CardContent>
         </Card>
       )}
 
-      <Card className="mb-6 rounded-xl border-border/60 bg-card/90 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Partner setup checklist</CardTitle>
-          <CardDescription>Quick view of program links; detail lives on the cards below.</CardDescription>
+      <Card className={`${CARD_SURFACE} mb-6`}>
+        <CardHeader className="border-b border-border/50 pb-4">
+          <CardTitle className="text-lg">Setup checklist</CardTitle>
+          <CardDescription>Status at a glance; details are in the sections below.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <ul className="space-y-3">
-            <li className="flex gap-3 min-w-0">
+        <CardContent className="px-0 pb-0 pt-0">
+          <ul className="divide-y divide-border/60">
+            <li className="flex gap-3 px-5 py-4 sm:px-6">
               {adminPreviewMode ? (
-                <Circle className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
+                <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
               ) : (
-                <CheckCircle2
-                  className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400 mt-0.5"
-                  aria-hidden
-                />
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600 dark:text-green-400" aria-hidden />
               )}
-              <span className="text-sm">
+              <span className="min-w-0 text-sm leading-relaxed">
                 <span className="font-medium text-foreground">
                   {adminPreviewMode ? (
-                    <>Creator fee tier ({feePercentLabel(feeTier.feeBps)}) — admin preview.</>
+                    <>Creator fee tier ({feePercentLabel(feeTier.feeBps)}) — preview</>
                   ) : (
-                    <>Partner fee tier ({feePercentLabel(feeTier.feeBps)}).</>
+                    <>Partner fee tier ({feePercentLabel(feeTier.feeBps)})</>
                   )}
                 </span>{' '}
                 <span className="text-muted-foreground">
                   {adminPreviewMode
                     ? 'Allowlisted partners use 2%. Economics below are for this wallet only.'
-                    : 'Applies to new raffles you host; see economics below for payouts.'}
+                    : 'Applies to new raffles you host; see economics below.'}
                 </span>
               </span>
             </li>
-            <li className="flex gap-3 min-w-0">
+            <li className="flex gap-3 px-5 py-4 sm:px-6">
               {tenantId ? (
-                <CheckCircle2
-                  className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400 mt-0.5"
-                  aria-hidden
-                />
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600 dark:text-green-400" aria-hidden />
               ) : (
-                <Circle className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
+                <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
               )}
-              <span className="text-sm">
-                <span className="font-medium text-foreground">Discord partner tenant linked.</span>{' '}
+              <span className="min-w-0 text-sm leading-relaxed">
+                <span className="font-medium text-foreground">Discord tenant</span>{' '}
                 <span className="text-muted-foreground">
                   {tenantId ? 'Webhook id is configured for this wallet.' : 'Link a tenant id for Owl Vision Discord events.'}
                 </span>
               </span>
             </li>
-            <li className="flex gap-3 min-w-0">
-              {raffles.length === 0 ? (
-                <>
-                  <Circle className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
-                  <span className="text-sm text-muted-foreground">
-                    Main feed visibility: create a raffle to choose public main listing vs direct-link only (
-                    <code className="text-xs font-mono bg-muted/50 rounded px-1">list on platform</code>
+            <li className="flex gap-3 px-5 py-4 sm:px-6">
+              <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 text-sm leading-relaxed">
+                {raffles.length === 0 ? (
+                  <span className="text-muted-foreground">
+                    Main feed: create a raffle to choose public listing vs direct-link only (
+                    <code className="rounded bg-muted/60 px-1 font-mono text-xs">list on platform</code>
                     ).
                   </span>
-                </>
-              ) : (
-                <>
-                  <Circle className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
-                  <span className="text-sm">
-                    <span className="font-medium text-foreground">Main vs direct-only.</span>{' '}
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">Visibility</span>{' '}
                     <span className="text-muted-foreground">
-                      {mainFeedListedCount} of {raffles.length} hosted raffle{raffles.length === 1 ? '' : 's'} use the{' '}
-                      public main <span className="text-foreground/90">/raffles</span> feed
+                      {mainFeedListedCount} of {raffles.length} raffle{raffles.length === 1 ? '' : 's'} on the main{' '}
+                      <span className="text-foreground/90">/raffles</span> feed
                       {discordOnlyCount > 0
-                        ? `; ${discordOnlyCount} ${discordOnlyCount === 1 ? 'is' : 'are'} direct-link / Discord-style only`
+                        ? `; ${discordOnlyCount} direct-link / Discord-only`
                         : ''}
                       .
                     </span>
-                  </span>
-                </>
-              )}
+                  </>
+                )}
+              </span>
             </li>
           </ul>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 mb-6">
-        <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Fee tier
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-2xl font-bold tracking-tight">
-              {feePercentLabel(feeTier.feeBps)} <span className="text-base font-semibold text-muted-foreground">fee</span>
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {adminPreviewMode
-                ? "This wallet's creator rate. Partner allowlist tier is typically 2%."
-                : 'Partner program rate on ticket revenue.'}
-            </p>
-            <details className="group text-xs text-muted-foreground">
-              <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground touch-manipulation min-h-[44px] sm:min-h-0 [&::-webkit-details-marker]:hidden">
-                <ChevronDown
-                  className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180"
-                  aria-hidden
-                />
-                How fees apply
-              </summary>
-              <p className="mt-2 leading-relaxed pl-1 pb-2">
-                New raffles use funds escrow; platform fee and your net share settle when you claim after the draw. Older
-                raffles may use split-at-purchase. Use the Hosting tab on your main dashboard for live escrow and claims.
+      <section aria-labelledby="economics-heading" className="mb-6">
+        <h2 id="economics-heading" className="sr-only">
+          Economics
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Card className={STAT_CARD}>
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Fee tier
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col space-y-2 pb-5">
+              <p className="text-2xl font-bold tracking-tight">
+                {feePercentLabel(feeTier.feeBps)}{' '}
+                <span className="text-base font-semibold text-muted-foreground">fee</span>
               </p>
-            </details>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Creator revenue
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex items-start gap-2">
-              <Coins className="h-5 w-5 shrink-0 text-muted-foreground mt-1" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="text-2xl font-bold tabular-nums tracking-tight break-words">
-                  {creatorRevenue > 0
-                    ? currencyMapToJoinedLine(data.creatorRevenueByCurrency)
-                    : '—'}
+              <p className="text-sm text-muted-foreground">
+                {adminPreviewMode
+                  ? "This wallet's creator rate. Partner allowlist tier is typically 2%."
+                  : 'Partner program rate on ticket revenue.'}
+              </p>
+              <details className="group mt-auto text-xs text-muted-foreground">
+                <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground touch-manipulation min-h-[44px] sm:min-h-0 [&::-webkit-details-marker]:hidden">
+                  <ChevronDown
+                    className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                  How fees apply
+                </summary>
+                <p className="mt-2 pb-1 leading-relaxed">
+                  New raffles use funds escrow; platform fee and your net share settle when you claim after the draw.
+                  Older raffles may use split-at-purchase. Use the Hosting tab on your main dashboard for live escrow and
+                  claims.
                 </p>
-              </div>
-            </div>
-            {creatorRevenue > 0 ? (
-              <>
-                <p className="text-sm text-muted-foreground">After platform fee (settled plus live estimate).</p>
-                {Object.keys(data.creatorLiveEarningsByCurrency).length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Live:{' '}
-                    <span className="tabular-nums font-medium text-foreground/90">
-                      {currencyMapToJoinedLine(data.creatorLiveEarningsByCurrency)}
-                    </span>
+              </details>
+            </CardContent>
+          </Card>
+
+          <Card className={STAT_CARD}>
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Creator revenue
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col space-y-2 pb-5">
+              <div className="flex items-start gap-2">
+                <Coins className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-2xl font-bold tabular-nums tracking-tight break-words">
+                    {creatorRevenue > 0 ? currencyMapToJoinedLine(data.creatorRevenueByCurrency) : '—'}
                   </p>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">No earnings from hosted raffles yet.</p>
-            )}
-          </CardContent>
-        </Card>
+                </div>
+              </div>
+              {creatorRevenue > 0 ? (
+                <>
+                  <p className="text-sm text-muted-foreground">After platform fee (settled plus live estimate).</p>
+                  {Object.keys(data.creatorLiveEarningsByCurrency).length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Live:{' '}
+                      <span className="font-medium tabular-nums text-foreground/90">
+                        {currencyMapToJoinedLine(data.creatorLiveEarningsByCurrency)}
+                      </span>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No earnings from hosted raffles yet.</p>
+              )}
+            </CardContent>
+          </Card>
 
-        <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Gross ticket sales
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-2xl font-bold tabular-nums tracking-tight break-words">
-              {Object.keys(data.creatorAllTimeGrossByCurrency).length > 0
-                ? currencyMapToJoinedLine(data.creatorAllTimeGrossByCurrency)
-                : '—'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Confirmed ticket volume across your hosted raffles (before platform fee).
-            </p>
-          </CardContent>
-        </Card>
+          <Card className={STAT_CARD}>
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Gross ticket sales
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col pb-5">
+              <p className="text-2xl font-bold tabular-nums tracking-tight break-words">
+                {Object.keys(data.creatorAllTimeGrossByCurrency).length > 0
+                  ? currencyMapToJoinedLine(data.creatorAllTimeGrossByCurrency)
+                  : '—'}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Confirmed ticket volume (before platform fee).
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Live escrow (tracked)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {Object.keys(escrowGross).length > 0 ? (
-              <>
-                <p className="text-sm tabular-nums font-medium break-words">
-                  Gross{' '}
-                  <span className="text-muted-foreground font-normal">·</span> fee{' '}
-                  <span className="text-muted-foreground font-normal">·</span> your net (by currency)
-                </p>
-                <ul className="text-xs text-muted-foreground space-y-2">
-                  {Object.keys(escrowGross).map((cur) => {
-                    const g = escrowGross[cur] ?? 0
-                    const f = data.claimTrackerLiveFundsEscrowSales.feeByCurrency[cur] ?? 0
-                    const n = data.claimTrackerLiveFundsEscrowSales.netByCurrency[cur] ?? 0
-                    return (
-                      <li key={cur} className="tabular-nums leading-relaxed">
-                        <span className="font-medium text-foreground/90">{cur}</span>{' '}
-                        {formatCurrencyAmount(cur, g)} gross · {formatCurrencyAmount(cur, f)} fee ·{' '}
-                        <span className="text-foreground/90">{formatCurrencyAmount(cur, n)}</span> net
-                      </li>
-                    )
-                  })}
-                </ul>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">No live escrow sales tracked under this wallet right now.</p>
-            )}
-            <p className="text-xs text-muted-foreground pt-1">
-              Claim from the Hosting section on{' '}
-              <Link
-                href="/dashboard?tab=hosting"
-                className="text-primary underline-offset-2 hover:underline touch-manipulation"
-              >
-                your dashboard
-              </Link>
-              .
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          <Card className={STAT_CARD}>
+            <CardHeader className="pb-2 pt-5">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Live escrow
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col space-y-2 pb-5">
+              {Object.keys(escrowGross).length > 0 ? (
+                <>
+                  <p className="text-sm font-medium tabular-nums">
+                    Gross <span className="font-normal text-muted-foreground">·</span> fee{' '}
+                    <span className="font-normal text-muted-foreground">·</span> net
+                  </p>
+                  <ul className="space-y-2 text-xs text-muted-foreground">
+                    {Object.keys(escrowGross).map((cur) => {
+                      const g = escrowGross[cur] ?? 0
+                      const f = data.claimTrackerLiveFundsEscrowSales.feeByCurrency[cur] ?? 0
+                      const n = data.claimTrackerLiveFundsEscrowSales.netByCurrency[cur] ?? 0
+                      return (
+                        <li key={cur} className="leading-relaxed tabular-nums">
+                          <span className="font-medium text-foreground/90">{cur}</span>{' '}
+                          {formatCurrencyAmount(cur, g)} gross · {formatCurrencyAmount(cur, f)} fee ·{' '}
+                          <span className="text-foreground/90">{formatCurrencyAmount(cur, n)}</span> net
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No live escrow tracked for this wallet right now.</p>
+              )}
+              <p className="mt-auto pt-2 text-xs text-muted-foreground">
+                Claim from{' '}
+                <Link
+                  href="/dashboard?tab=hosting"
+                  className="font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
+                >
+                  Hosting
+                </Link>
+                .
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
-      <Card className="mb-8 rounded-xl border-border/60 bg-card/90 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg flex items-center gap-2">
-            Pipeline overview
-          </CardTitle>
-          <CardDescription>Counts include every raffle created from this wallet (all visibility modes).</CardDescription>
+      <Card className={`${CARD_SURFACE} mb-8`}>
+        <CardHeader className="border-b border-border/50 pb-4">
+          <CardTitle className="text-lg">Pipeline</CardTitle>
+          <CardDescription>All raffles from this wallet, every visibility mode.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-3 tabular-nums">
-            Total hosted raffle{raffles.length === 1 ? '' : 's'}: {raffles.length}
+        <CardContent className="pt-5">
+          <p className="mb-4 text-sm tabular-nums text-muted-foreground">
+            Total: <span className="font-semibold text-foreground">{raffles.length}</span> hosted raffle
+            {raffles.length === 1 ? '' : 's'}
           </p>
           {raffles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No raffles yet — create one from Create or your usual flow.</p>
+            <p className="text-sm text-muted-foreground">No raffles yet — create one from the usual flow.</p>
           ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 text-sm">
+            <div className="flex flex-wrap gap-2">
               {[
-                { key: 'active' as const, label: 'Active / drawing / pending claims', hint: pipelineBuckets.active },
+                { key: 'active' as const, label: 'Active / drawing / claims', hint: pipelineBuckets.active },
                 { key: 'completed' as const, label: 'Completed', hint: pipelineBuckets.completed },
-                { key: 'attention' as const, label: 'Needs attention (mins, refunds, cancelled)', hint: pipelineBuckets.attention },
+                { key: 'attention' as const, label: 'Needs attention', hint: pipelineBuckets.attention },
                 { key: 'draft' as const, label: 'Draft', hint: pipelineBuckets.draft },
                 { key: 'other' as const, label: 'Other', hint: pipelineBuckets.other },
               ]
                 .filter((row) => row.hint > 0)
                 .map((row) => (
-                  <li key={row.key} className="rounded-md border border-border/60 px-3 py-2 flex justify-between gap-2 tabular-nums">
-                    <span className="text-muted-foreground min-w-0">{row.label}</span>
-                    <span className="font-semibold shrink-0">{row.hint}</span>
-                  </li>
+                  <div
+                    key={row.key}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-border/60 bg-muted/25 px-3 py-1.5 text-sm touch-manipulation"
+                  >
+                    <span className="max-w-[11rem] truncate text-muted-foreground sm:max-w-none">{row.label}</span>
+                    <span className="font-semibold tabular-nums text-foreground">{row.hint}</span>
+                  </div>
                 ))}
-            </ul>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 mb-8">
-        {adminPreviewMode && (
-          <Link href="/admin" className="block">
-            <Card className="transition-colors hover:border-primary/30 touch-manipulation min-h-[44px]">
-              <CardContent className="p-4 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Shield className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="font-medium truncate">Site admin dashboard</span>
-                </div>
-                <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </CardContent>
-            </Card>
-          </Link>
-        )}
-        <Link href="/raffles?tab=partner-raffles" className="block">
-          <Card className="transition-colors hover:border-primary/30 touch-manipulation min-h-[44px]">
-            <CardContent className="p-4 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3 min-w-0">
-                <Radio className="h-5 w-5 shrink-0 text-muted-foreground" />
-                <span className="font-medium truncate">View partner raffles (public)</span>
-              </div>
-              <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href="/dashboard" className="block">
-          <Card className="transition-colors hover:border-primary/30 touch-manipulation min-h-[44px]">
-            <CardContent className="p-4 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3 min-w-0">
-                <LayoutDashboard className="h-5 w-5 shrink-0 text-muted-foreground" />
-                <span className="font-medium truncate">Full user dashboard (claims, entries, raffles)</span>
-              </div>
-              <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        </Link>
-      </div>
+      <nav aria-label="Shortcuts" className="mb-8">
+        <ul className="grid gap-2">
+          {adminPreviewMode && (
+            <li>
+              <Link
+                href="/admin"
+                className={`${CARD_SURFACE} flex min-h-[52px] touch-manipulation items-center justify-between gap-3 p-4 transition-colors hover:border-primary/35 hover:bg-muted/20`}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/60">
+                    <Shield className="h-5 w-5 text-muted-foreground" aria-hidden />
+                  </span>
+                  <span className="font-medium">Site admin dashboard</span>
+                </span>
+                <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              </Link>
+            </li>
+          )}
+          <li>
+            <Link
+              href="/raffles?tab=partner-raffles"
+              className={`${CARD_SURFACE} flex min-h-[52px] touch-manipulation items-center justify-between gap-3 p-4 transition-colors hover:border-primary/35 hover:bg-muted/20`}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/60">
+                  <Radio className="h-5 w-5 text-muted-foreground" aria-hidden />
+                </span>
+                <span className="font-medium">Partner raffles (public)</span>
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/dashboard"
+              className={`${CARD_SURFACE} flex min-h-[52px] touch-manipulation items-center justify-between gap-3 p-4 transition-colors hover:border-primary/35 hover:bg-muted/20`}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/60">
+                  <LayoutDashboard className="h-5 w-5 text-muted-foreground" aria-hidden />
+                </span>
+                <span className="min-w-0 font-medium leading-snug">Full dashboard</span>
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            </Link>
+          </li>
+        </ul>
+      </nav>
 
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle className="text-lg">Discord partner tenant</CardTitle>
+      <Card className={`${CARD_SURFACE} mb-8`}>
+        <CardHeader className="border-b border-border/50 pb-4">
+          <CardTitle className="text-lg">Discord tenant</CardTitle>
           <CardDescription>
-            If Owl Vision links this id to your allowlist row, new ticket raffles you host can use your server webhooks
-            (created + winner; claims on the user dashboard). Copy for your org or Supabase.
+            When linked to your allowlist row, ticket raffles can use your server webhooks. Copy for your org if needed.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           {tenantId ? (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <code className="text-xs break-all font-mono bg-muted/50 rounded p-2 flex-1 min-w-0">{tenantId}</code>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <code className="min-h-[44px] flex-1 rounded-xl border border-border/50 bg-muted/40 px-3 py-2.5 font-mono text-xs leading-relaxed break-all">
+                {tenantId}
+              </code>
               <Button
                 type="button"
                 variant="outline"
-                className="min-h-[44px] touch-manipulation shrink-0 w-full sm:w-auto"
+                className="min-h-[44px] shrink-0 touch-manipulation sm:w-auto"
                 onClick={() => void copyTenant(tenantId)}
               >
-                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                <span className="ml-2">Copy</span>
+                {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+                <span className="ml-2">{copied ? 'Copied' : 'Copy'}</span>
               </Button>
             </div>
           ) : adminPreviewMode ? (
-            <p className="text-sm text-muted-foreground">
-              No Discord tenant linked for this wallet row. Manage allowlisted creators in{' '}
-              <Link href="/admin/partner-creators" className="text-primary underline-offset-2 hover:underline">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              No tenant on this wallet row. Manage allowlisted creators in{' '}
+              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
               </Link>
               .
             </p>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Not linked yet. Ask the team to set a tenant on your row in{' '}
-              <Link href="/admin/partner-creators" className="text-primary underline-offset-2 hover:underline">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Not linked yet. Ask the team to set a tenant in{' '}
+              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
-              </Link>
-              (full admin) or use Discord{' '}
-              <code className="text-xs font-mono">/owltopia-partner</code> after subscription.
+              </Link>{' '}
+              or use Discord <code className="rounded bg-muted/60 px-1 font-mono text-xs">/owltopia-partner</code> after
+              subscription.
             </p>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className={CARD_SURFACE}>
+        <CardHeader className="border-b border-border/50 pb-4">
           <CardTitle className="text-lg">Your hosted raffles</CardTitle>
           <CardDescription>
-            Same data as &quot;My raffles&quot; on the dashboard; links go to the public listing.
-            {canExportEntrantCsv && (
-              <>
-                {' '}
-                Confirmed entrant wallets (CSV) — partner allowlist and site admins only.
-              </>
-            )}
+            Public listing links. Same list as &quot;My raffles&quot; on your dashboard.
+            {canExportEntrantCsv && <> CSV export: confirmed entrant wallets (partners and site admins).</>}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           {raffles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No raffles created from this wallet yet.</p>
+            <p className="text-sm text-muted-foreground">No raffles from this wallet yet.</p>
           ) : (
-            <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            <ul className="max-h-96 divide-y divide-border/60 overflow-y-auto rounded-xl border border-border/50">
               {raffles.map((r) => (
-                <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <li
+                  key={r.id}
+                  className="flex flex-col gap-3 bg-card/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
                   <Link
                     href={`/raffles/${r.slug}`}
-                    className="text-sm text-primary hover:underline touch-manipulation min-h-[44px] inline-flex items-center min-w-0"
+                    className="inline-flex min-h-[44px] min-w-0 flex-1 items-center gap-2 text-sm font-medium text-primary touch-manipulation underline-offset-4 hover:underline"
                   >
                     <span className="truncate">{r.title}</span>
-                    <span className="ml-2 shrink-0 text-xs text-muted-foreground font-mono">({r.status})</span>
+                    <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">({r.status})</span>
                   </Link>
                   {canExportEntrantCsv && (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="min-h-[44px] touch-manipulation shrink-0 w-full sm:w-auto"
+                      className="min-h-[44px] w-full shrink-0 touch-manipulation sm:w-auto"
                       disabled={exportingRaffleId === r.id}
                       onClick={() => void downloadEntrantsCsv(r)}
                     >
                       {exportingRaffleId === r.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
                       ) : (
                         <Download className="h-4 w-4 shrink-0" aria-hidden />
                       )}

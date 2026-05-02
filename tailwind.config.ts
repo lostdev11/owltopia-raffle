@@ -176,6 +176,63 @@ const config: Config = {
           '0%': { transform: 'translateX(0)' },
           '100%': { transform: 'translateX(-50%)' },
         },
+        'gen2-live-blink': {
+          '0%, 100%': { opacity: '1', filter: 'brightness(1.15)' },
+          '50%': { opacity: '0.88', filter: 'brightness(1.45)' },
+        },
+        'gen2-presale-badge-glow': {
+          '0%, 100%': {
+            boxShadow:
+              '0 0 14px rgba(0, 255, 156, 0.28), 0 0 2px rgba(0, 255, 156, 0.45), inset 0 0 12px rgba(0, 229, 139, 0.06)',
+          },
+          '50%': {
+            boxShadow:
+              '0 0 28px rgba(0, 255, 156, 0.42), 0 0 6px rgba(0, 255, 156, 0.55), inset 0 0 16px rgba(0, 229, 139, 0.1)',
+          },
+        },
+        'gen2-border-pulse': {
+          '0%, 100%': {
+            boxShadow:
+              '0 0 0 1px rgba(0, 229, 139, 0.35), 0 0 24px rgba(0, 255, 156, 0.12), inset 0 0 20px rgba(0, 229, 139, 0.04)',
+          },
+          '50%': {
+            boxShadow:
+              '0 0 0 1px rgba(0, 255, 156, 0.55), 0 0 36px rgba(0, 255, 156, 0.22), inset 0 0 24px rgba(0, 229, 139, 0.08)',
+          },
+        },
+        'gen2-shimmer': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
+        },
+        'gen2-radar': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' },
+        },
+        'gen2-floaty': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-6px)' },
+        },
+        /* Gen2 presale: shifting gradient on border ring */
+        'gen2-border-flow': {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
+        /* Outer halo blink around framed panels */
+        'gen2-border-glow-ring': {
+          '0%, 100%': {
+            boxShadow:
+              '0 0 18px rgba(0, 255, 156, 0.22), 0 0 42px rgba(0, 229, 139, 0.08), 0 0 2px rgba(0, 255, 156, 0.35)',
+          },
+          '50%': {
+            boxShadow:
+              '0 0 28px rgba(0, 255, 156, 0.48), 0 0 64px rgba(0, 255, 156, 0.14), 0 0 3px rgba(255, 215, 105, 0.45)',
+          },
+        },
+        /* Corner LED blink */
+        'gen2-corner-led': {
+          '0%, 100%': { opacity: '0.35', filter: 'drop-shadow(0 0 4px rgba(0,255,156,0.5))' },
+          '50%': { opacity: '1', filter: 'drop-shadow(0 0 10px rgba(0,255,156,1))' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -194,6 +251,15 @@ const config: Config = {
         'button-glow-pulse': 'button-glow-pulse 2s ease-in-out infinite',
         'raffle-scroll-in': 'raffle-scroll-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards',
         'maintenance-marquee': 'maintenance-marquee 42s linear infinite',
+        'gen2-live-blink': 'gen2-live-blink 1.6s ease-in-out infinite',
+        'gen2-presale-badge-glow': 'gen2-presale-badge-glow 2.4s ease-in-out infinite',
+        'gen2-border-pulse': 'gen2-border-pulse 2.4s ease-in-out infinite',
+        'gen2-shimmer': 'gen2-shimmer 2.2s ease-in-out infinite',
+        'gen2-radar': 'gen2-radar 22s linear infinite',
+        'gen2-floaty': 'gen2-floaty 5s ease-in-out infinite',
+        'gen2-border-flow': 'gen2-border-flow 5.5s ease-in-out infinite',
+        'gen2-border-glow-ring': 'gen2-border-glow-ring 2.8s ease-in-out infinite',
+        'gen2-corner-led': 'gen2-corner-led 1.9s ease-in-out infinite',
       },
     },
   },
