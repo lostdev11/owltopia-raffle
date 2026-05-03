@@ -18,7 +18,7 @@
  * SPL Token–program prizes: winner payout and return-to-creator try Metaplex Token Metadata
  * transferV1 first (same as creator deposit in-app), then fall back to raw SPL transfer.
  */
-import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -155,11 +155,16 @@ async function getEscrowTokenProgramForMint(
  * Get the escrow's token account address for a given mint (SPL Token or Token-2022).
  * Used for explorer links and any flow that needs to reference the escrow token account.
  * Returns null if escrow is not configured or does not hold this NFT.
+ *
+ * Pass `connection` (e.g. {@link getSolanaConnection}) right after a deposit so verification
+ * does not lag behind a separate `SOLANA_RPC_READ_URL` replica.
  */
-export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<PublicKey | null> {
+export async function getEscrowTokenAccountForMint(
+  mint: PublicKey,
+  connection: Connection = getSolanaReadConnection()
+): Promise<PublicKey | null> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return null
-  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(

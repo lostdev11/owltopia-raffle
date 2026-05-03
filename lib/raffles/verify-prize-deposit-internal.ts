@@ -269,12 +269,20 @@ export async function verifyPrizeDepositInternal(
         const connection = getSolanaConnection()
         const mintFromTx = await getMintFromDepositTx(connection, depositTx, escrowAddress)
         if (mintFromTx) {
-          // Validate mint is in escrow
-          const ata = await getEscrowTokenAccountForMint(new PublicKey(mintFromTx))
+          const mintPkFromTx = new PublicKey(mintFromTx)
+          let ata: PublicKey | null = null
+          for (let attempt = 0; attempt < 6; attempt++) {
+            ata = await getEscrowTokenAccountForMint(mintPkFromTx, connection)
+            if (ata) break
+            await new Promise((r) => setTimeout(r, 400))
+          }
+          if (!ata) {
+            ata = await getEscrowTokenAccountForMint(mintPkFromTx)
+          }
           const inCoreEscrow = ata ? true : await isMplCoreAssetInEscrow(mintFromTx).catch(() => false)
           if (ata || inCoreEscrow) {
             if (ata) {
-              const frozen = await assertEscrowSplPrizeNotFrozen(new PublicKey(mintFromTx))
+              const frozen = await assertEscrowSplPrizeNotFrozen(mintPkFromTx)
               if (frozen.blocked) {
                 return {
                   ok: false,
@@ -303,7 +311,13 @@ export async function verifyPrizeDepositInternal(
               prizeDepositTx: depositTx,
             }
           }
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: `Your deposit transaction appears to credit mint ${mintFromTx}, but prize escrow custody is not visible yet (RPC lag or indexing). Wait a few seconds and tap Verify again.`,
+          }
         }
+        // mintFromTx null: deposit may be compressed NFT or non-SPL layout — fall through to ATA / Core / held checks.
       }
     }
 
@@ -312,7 +326,16 @@ export async function verifyPrizeDepositInternal(
     if (preferredMint) {
       try {
         const mintPk = new PublicKey(preferredMint)
-        const ataForPreferred = await getEscrowTokenAccountForMint(mintPk)
+        const primaryConn = getSolanaConnection()
+        let ataForPreferred: PublicKey | null = null
+        for (let attempt = 0; attempt < 4; attempt++) {
+          ataForPreferred = await getEscrowTokenAccountForMint(mintPk, primaryConn)
+          if (ataForPreferred) break
+          await new Promise((r) => setTimeout(r, 300))
+        }
+        if (!ataForPreferred) {
+          ataForPreferred = await getEscrowTokenAccountForMint(mintPk)
+        }
         if (ataForPreferred) {
           const frozen = await assertEscrowSplPrizeNotFrozen(mintPk)
           if (frozen.blocked) {
@@ -526,10 +549,14 @@ export async function verifyPrizeDepositInternal(
           // ignore; fall back to SPL error below
         }
 
+        const expect = preferredMint || '(not set)'
+        const error = depositTx
+          ? `Escrow holds multiple NFTs and we could not confirm your deposit transaction attributed prize mint ${expect}. Wait and tap Verify again, or check the deposit transaction on-chain.`
+          : `The prize wallet already holds multiple NFTs from other raffles. Mint ${expect} is not in escrow yet — open this raffle and complete the deposit, then tap Verify. (If you meant a different NFT, fix the prize mint or contact support — we cannot guess which on-chain NFT is yours until it matches this mint or you register the deposit tx.)`
         return {
           ok: false,
           httpStatus: 400,
-          error: `Escrow has multiple NFTs. This raffle expects mint ${preferredMint || '(not set)'}; none of the NFTs in escrow match. Set the raffle prize to the correct mint or leave only one NFT in escrow.`,
+          error,
         }
       }
     }

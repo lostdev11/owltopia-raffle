@@ -69,6 +69,10 @@ import {
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import {
+  normalizeRaffleTicketCurrency,
+  previewCreateRaffleThreshold,
+} from '@/lib/raffle-profit'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -287,6 +291,39 @@ export function CreateRaffleForm() {
     if (!Number.isFinite(n) || n < 1) return null
     return n
   }, [partnerMinTickets])
+
+  const partnerPrizeAmountParsed = useMemo(() => {
+    const n = parseFloat(partnerPrizeAmount.trim())
+    if (!Number.isFinite(n) || n <= 0) return null
+    return n
+  }, [partnerPrizeAmount])
+
+  const ticketPriceParsedForPreview = useMemo(() => {
+    const p = parseNftTicketPrice(ticketPrice)
+    return p.ok ? p.value : null
+  }, [ticketPrice])
+
+  const thresholdPreview = useMemo(() => {
+    return previewCreateRaffleThreshold({
+      prizeMode,
+      ticketCurrency: raffleCurrency,
+      ticketPrice: ticketPriceParsedForPreview,
+      floorPriceInput: floorPrice,
+      partnerMinTickets: prizeMode === 'token' ? partnerMinTicketsParsed : null,
+      partnerPrizeAmount: prizeMode === 'token' ? partnerPrizeAmountParsed : null,
+      partnerPrizeCurrency: tokenPrizeCurrency,
+    })
+  }, [
+    prizeMode,
+    raffleCurrency,
+    ticketPriceParsedForPreview,
+    floorPrice,
+    partnerMinTicketsParsed,
+    partnerPrizeAmountParsed,
+    tokenPrizeCurrency,
+  ])
+
+  const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
 
   const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
 
@@ -925,6 +962,27 @@ export function CreateRaffleForm() {
               })
               return
             }
+            if (regData.verified === false) {
+              const pr =
+                typeof regData.pendingReason === 'string' ? regData.pendingReason.trim() : ''
+              if (pr) {
+                setEscrowProgress({
+                  open: true,
+                  title: 'Verification pending',
+                  description: pr,
+                  phase: 'result',
+                  persistUntilDismiss: true,
+                  primaryAction: {
+                    label: 'Open raffle',
+                    onClick: () => {
+                      setEscrowProgress(CREATE_ESCROW_IDLE)
+                      router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    },
+                  },
+                })
+                return
+              }
+            }
             router.push(`/raffles/${raffle.slug}`)
           } catch (transferErr) {
             logEscrowDepositError(
@@ -1136,6 +1194,27 @@ export function CreateRaffleForm() {
                   },
                 })
                 return
+              }
+              if (regData.verified === false) {
+                const pr =
+                  typeof regData.pendingReason === 'string' ? regData.pendingReason.trim() : ''
+                if (pr) {
+                  setEscrowProgress({
+                    open: true,
+                    title: 'Verification pending',
+                    description: pr,
+                    phase: 'result',
+                    persistUntilDismiss: true,
+                    primaryAction: {
+                      label: 'Open raffle',
+                      onClick: () => {
+                        setEscrowProgress(CREATE_ESCROW_IDLE)
+                        router.push(`/raffles/${raffle.slug}?deposit=1`)
+                      },
+                    },
+                  })
+                  return
+                }
               }
               router.push(`/raffles/${raffle.slug}`)
             } catch (transferErr) {
@@ -1519,6 +1598,26 @@ export function CreateRaffleForm() {
                 />
               </div>
             </div>
+            {thresholdPreview != null && (
+              <div
+                className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4"
+                role="status"
+                aria-live="polite"
+              >
+                <p className="text-xs text-muted-foreground">{thresholdPreviewLabel}</p>
+                <p className="text-sm font-semibold tabular-nums">
+                  {thresholdPreview.value.toFixed(
+                    normalizeRaffleTicketCurrency(thresholdPreview.currency) === 'USDC' ? 2 : 4
+                  )}{' '}
+                  {normalizeRaffleTicketCurrency(thresholdPreview.currency)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {prizeMode === 'nft'
+                    ? 'Ticket revenue past this bar counts as surplus on the raffle page (same rule after you publish).'
+                    : 'Matches the threshold shown on the live raffle once ticket sales start.'}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">

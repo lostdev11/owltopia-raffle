@@ -2,6 +2,7 @@ import type { Raffle, Entry } from '@/lib/types'
 import {
   getEffectiveDrawThresholdTickets,
   lenientParseNftFloorAmount,
+  parseNftFloorPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
 export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
@@ -123,6 +124,61 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
   }
 
   return null
+}
+
+/** Draft fields from the create-raffle form — used only for {@link previewCreateRaffleThreshold}. */
+export type CreateRaffleThresholdDraft = {
+  prizeMode: 'nft' | 'token'
+  ticketCurrency: string
+  /** Parsed positive ticket price, or null if invalid / empty. */
+  ticketPrice: number | null
+  floorPriceInput: string
+  partnerMinTickets: number | null
+  partnerPrizeAmount: number | null
+  partnerPrizeCurrency: string
+}
+
+/**
+ * Same bar as {@link getRaffleThreshold} after save, computed from live form values (no DB row).
+ */
+export function previewCreateRaffleThreshold(draft: CreateRaffleThresholdDraft): {
+  value: number
+  currency: RaffleCurrency
+} | null {
+  const cur = normalizeRaffleTicketCurrency(draft.ticketCurrency)
+  const tp = draft.ticketPrice
+  if (tp == null || !Number.isFinite(tp) || tp <= 0) return null
+
+  if (draft.prizeMode === 'nft') {
+    const floorParsed = parseNftFloorPrice(draft.floorPriceInput)
+    if (!floorParsed.ok) return null
+    const synthetic = {
+      prize_type: 'nft',
+      currency: cur,
+      ticket_price: tp,
+      floor_price: floorParsed.string,
+      min_tickets: null,
+      prize_amount: null,
+      prize_currency: null,
+    } as Raffle
+    return getRaffleThreshold(synthetic)
+  }
+
+  const amt = draft.partnerPrizeAmount
+  const prizeAmt =
+    amt != null && Number.isFinite(amt) && amt > 0 ? amt : null
+  const prizeCur = (draft.partnerPrizeCurrency || '').trim().toUpperCase() || null
+  const floorTrim = draft.floorPriceInput.trim()
+  const synthetic = {
+    prize_type: 'crypto',
+    currency: cur,
+    ticket_price: tp,
+    floor_price: floorTrim || null,
+    min_tickets: draft.partnerMinTickets,
+    prize_amount: prizeAmt,
+    prize_currency: prizeCur,
+  } as Raffle
+  return getRaffleThreshold(synthetic)
 }
 
 /**
