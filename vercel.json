@@ -5,6 +5,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/verify-pending-escrow-deposits",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/owl-wallet-snapshots",
       "schedule": "0 5 * * 0"
     }

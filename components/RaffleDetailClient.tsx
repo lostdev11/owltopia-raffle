@@ -584,6 +584,29 @@ export function RaffleDetailClient({
     }
   }, [raffle.prize_deposited_at])
 
+  // Pending deposit: tx registered server-side but verify still catching up (cron + immediate verify).
+  useEffect(() => {
+    const pending =
+      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) &&
+      !raffle.prize_deposited_at &&
+      !!(raffle.prize_deposit_tx || '').trim()
+    if (!pending) return
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      router.refresh()
+      if (ticks >= 120) clearInterval(iv)
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [
+    raffle.id,
+    raffle.prize_type,
+    raffle.prize_currency,
+    raffle.prize_deposited_at,
+    raffle.prize_deposit_tx,
+    router,
+  ])
+
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
 
@@ -1273,55 +1296,74 @@ export function RaffleDetailClient({
       }
     }
 
-    const runVerifyWithOptionalSignIn = async (depositTx?: string | null): Promise<boolean> => {
-      const attemptOpts = {
-        onAttempt: (current: number, max: number) => {
-          setDepositEscrowProgressStep('verify')
-          setDepositVerifyAttemptLabel({ current, max })
-        },
-      }
-      try {
-        let result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
-        if (!result.ok && result.status === 401) {
-          setDepositEscrowProgressStep('sign_in')
-          const signedIn = await signInForSession()
-          if (!signedIn) return false
-          setDepositEscrowProgressStep('verify')
-          result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
-        }
-        if (!result.ok) {
-          setDepositEscrowError(result.error)
-          setDepositEscrowFrozenDiagnostics(result.frozenEscrowDiagnostics ?? null)
-          return false
-        }
-        return true
-      } catch (e) {
-        setDepositEscrowError(e instanceof Error ? e.message : 'Verification failed')
-        return false
-      }
-    }
-
     const finalizeAfterTransfer = async (depositTx?: string): Promise<boolean> => {
       if (depositTx?.trim()) {
         setDepositLastTxSignature(depositTx.trim())
       }
       setDepositEscrowProgressStep('verify')
-      const verified = await runVerifyWithOptionalSignIn(depositTx)
-      logEscrowDepositVerify(
-        depositLogCtx,
-        verified,
-        verified ? undefined : 'Server verify did not confirm escrow yet (see UI message)'
-      )
-      if (verified) {
-        setDepositEscrowSuccess(true)
-        setDepositEscrowError(null)
-        setDepositEscrowFrozenDiagnostics(null)
-        setShowManualEscrowFallback(false)
-        router.refresh()
-      } else {
+      try {
+        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+        })
+        let data = (await res.json().catch(() => ({}))) as {
+          verified?: boolean
+          pendingReason?: string
+          error?: string
+          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+        }
+        if (!res.ok && res.status === 401) {
+          setDepositEscrowProgressStep('sign_in')
+          const signedIn = await signInForSession()
+          if (!signedIn) return false
+          setDepositEscrowProgressStep('verify')
+          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+          })
+          data = (await res.json().catch(() => ({}))) as typeof data
+        }
+        if (!res.ok) {
+          const msg =
+            typeof data.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : 'Could not save deposit'
+          setDepositEscrowError(msg)
+          setDepositEscrowFrozenDiagnostics(null)
+          logEscrowDepositVerify(depositLogCtx, false, msg)
+          return false
+        }
+        if (data.verified) {
+          setDepositEscrowSuccess(true)
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+          setShowManualEscrowFallback(false)
+          router.refresh()
+          logEscrowDepositVerify(depositLogCtx, true)
+          return true
+        }
         setDepositEscrowSuccess(false)
+        if (data.pendingReason && isEscrowSplPrizeFrozenVerifyError(data.pendingReason)) {
+          setDepositEscrowError(data.pendingReason)
+          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
+        } else {
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+        }
+        router.refresh()
+        logEscrowDepositVerify(depositLogCtx, false, data.pendingReason)
+        return false
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not register deposit'
+        setDepositEscrowError(msg)
+        setDepositEscrowFrozenDiagnostics(null)
+        logEscrowDepositVerify(depositLogCtx, false, msg)
+        return false
       }
-      return verified
     }
 
     /** Same UX for every path: show “confirming on-chain”, wait for RPC, then server verify. */
@@ -1726,13 +1768,73 @@ export function RaffleDetailClient({
         }
       }
 
+      const manualNorm = normalizeDepositTxSignatureInput(manualTx)
+      if (manualNorm) {
+        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ deposit_tx: manualNorm }),
+        })
+        let data = (await res.json().catch(() => ({}))) as {
+          verified?: boolean
+          pendingReason?: string
+          error?: string
+          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+        }
+        if (!res.ok && res.status === 401) {
+          setDepositEscrowProgressStep('sign_in')
+          const signedIn = await signInForSession()
+          if (!signedIn) return
+          setDepositEscrowProgressStep('verify')
+          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ deposit_tx: manualNorm }),
+          })
+          data = (await res.json().catch(() => ({}))) as typeof data
+        }
+        if (!res.ok) {
+          const msg =
+            typeof data.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : 'Could not save deposit'
+          setDepositEscrowError(msg)
+          setDepositEscrowFrozenDiagnostics(null)
+          setShowManualEscrowFallback(true)
+          return
+        }
+        if (data.verified) {
+          setDepositEscrowSuccess(true)
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+          setDepositLastTxSignature(manualNorm)
+          setManualDepositTx('')
+          router.refresh()
+          return
+        }
+        const pr = typeof data.pendingReason === 'string' ? data.pendingReason : ''
+        if (pr && isEscrowSplPrizeFrozenVerifyError(pr)) {
+          setDepositEscrowError(pr)
+          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
+          setShowManualEscrowFallback(true)
+          return
+        }
+        setDepositEscrowError(null)
+        setDepositEscrowFrozenDiagnostics(null)
+        setManualDepositTx('')
+        router.refresh()
+        return
+      }
+
       const attemptOpts = {
         onAttempt: (current: number, max: number) => {
           setDepositVerifyAttemptLabel({ current, max })
         },
       }
       let result = await verifyPrizeDepositWithRetries(raffle.id, {
-        depositTx: manualTx || undefined,
+        depositTx: depositLastTxSignature || undefined,
         ...attemptOpts,
       })
       if (!result.ok && result.status === 401) {
@@ -1741,7 +1843,7 @@ export function RaffleDetailClient({
         if (!signedIn) return
         setDepositEscrowProgressStep('verify')
         result = await verifyPrizeDepositWithRetries(raffle.id, {
-          depositTx: manualTx || undefined,
+          depositTx: depositLastTxSignature || undefined,
           ...attemptOpts,
         })
       }
@@ -1754,9 +1856,6 @@ export function RaffleDetailClient({
       setDepositEscrowSuccess(true)
       setDepositEscrowError(null)
       setDepositEscrowFrozenDiagnostics(null)
-      if (manualTx) {
-        setDepositLastTxSignature(manualTx)
-      }
       setManualDepositTx('')
       router.refresh()
     } catch (e) {
@@ -2612,23 +2711,37 @@ export function RaffleDetailClient({
                     <>
                       <strong>Flow:</strong> Transfer your{' '}
                       <strong>{String(raffle.prize_currency || '').trim().toUpperCase() || 'Token'} prize</strong> to escrow
-                      (your wallet will ask you to sign one SPL transaction). After it confirms, we{' '}
-                      <strong>automatically verify</strong> the deposit and activate the raffle. Use <strong>Verify deposit</strong>{' '}
-                      if you sent the prize manually — you must paste the transaction signature (deposit_tx). Tickets are still
-                      paid in {raffle.currency}.
+                      (your wallet will ask you to sign one SPL transaction). After it confirms, we save the deposit and{' '}
+                      <strong>activate the raffle automatically</strong> (including server retries). Paste the transaction
+                      signature below only if you sent manually or the page does not go live. Tickets are still paid in{' '}
+                      {raffle.currency}.
                     </>
                   ) : (
                     <>
                       <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
-                      transaction succeeds, we <strong>automatically verify</strong> that the prize is in escrow and activate
-                      the raffle—watch the progress popup. Use <strong>Verify deposit</strong> only if you sent the NFT
-                      manually or the automatic step timed out. <strong>No listing fee</strong> — only network fees. The
-                      prize stays locked until a winner claims it.
+                      transaction succeeds, we save your deposit and <strong>activate the raffle automatically</strong> on our
+                      servers (with retries — no need to tap Verify on success). Use <strong>Verify deposit</strong> only if you
+                      sent the NFT manually or this card does not clear after a few minutes. <strong>No listing fee</strong> —
+                      only network fees. The prize stays locked until a winner claims it.
                     </>
                   )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
+                {(raffle.prize_deposit_tx || '').trim() && !raffle.prize_deposited_at && (
+                  <div
+                    className="rounded-md border border-sky-500/45 bg-sky-500/[0.12] p-3 text-sm text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <p className="font-medium text-foreground mb-1">Confirming your prize deposit</p>
+                    <p>
+                      Your transfer signature is saved. Our servers confirm escrow in the background — this page
+                      refreshes every few seconds until tickets open. On mobile RPC this can take a minute or two;
+                      you do not need to tap Verify unless something stays stuck.
+                    </p>
+                  </div>
+                )}
                 {!connected && (
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Connect your wallet to transfer the{' '}

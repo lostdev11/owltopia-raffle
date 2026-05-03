@@ -705,6 +705,17 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       )
     }
+    // UI allows accents added after migration 037; without 093 (extend_theme_accent_more) INSERT fails this CHECK.
+    if (/raffles_theme_accent_check/i.test(raw) || /theme_accent.*check constraint/i.test(raw)) {
+      return NextResponse.json(
+        {
+          error:
+            'This accent color needs a quick database update on the server. Try Prime, Midnight, or Dawn for now, or ask an admin to apply migration 093_extend_theme_accent_more.sql.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: safeErrorMessage(err), step },
       { status: 502 }

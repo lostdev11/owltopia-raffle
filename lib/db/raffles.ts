@@ -1889,6 +1889,26 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
 }
 
 /**
+ * Raffles that registered an escrow deposit tx but server verification has not set `prize_deposited_at` yet.
+ * Used by cron to activate listings after RPC/indexing catches up.
+ */
+export async function listRaffleIdsPendingEscrowDepositVerification(limit: number): Promise<string[]> {
+  const cap = Math.min(Math.max(1, limit), 80)
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select('id')
+    .is('prize_deposited_at', null)
+    .not('prize_deposit_tx', 'is', null)
+    .limit(cap)
+
+  if (error) {
+    console.error('listRaffleIdsPendingEscrowDepositVerification:', error)
+    return []
+  }
+  return (data ?? []).map((r: { id?: string }) => r.id).filter((id): id is string => typeof id === 'string')
+}
+
+/**
  * Calculate total tickets sold for a raffle from confirmed entries
  */
 export function calculateTicketsSold(entries: Entry[]): number {
