@@ -102,6 +102,10 @@ export const councilVoteBody = z.object({
   vote_choice: z.enum(['yes', 'no', 'abstain']),
 })
 
+export const raffleSentimentBody = z.object({
+  sentiment: z.enum(['up', 'down']),
+})
+
 /** Status is always `draft` at create — only admins may publish (set active). `slug` optional (server derives from title). */
 export const councilProposalCreateBody = z.object({
   title: z.string().min(1).max(300),

@@ -854,6 +854,34 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             )}
           </p>
         </div>
+
+        <Card className="border-violet-500/30 bg-violet-500/[0.04]">
+          <CardHeader className="pb-2">
+            <CardTitle>Public raffles list</CardTitle>
+            <CardDescription>
+              Turn this on so the raffle appears on the main{' '}
+              <code className="text-xs bg-muted px-1 rounded">/raffles</code> browse page. When off, NFT prizes stay
+              link-only (this page URL still works).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex items-start justify-between gap-3">
+              <Label htmlFor="admin-list-on-platform" className="text-sm font-medium leading-relaxed cursor-pointer">
+                Show on public browse
+              </Label>
+              <Switch
+                id="admin-list-on-platform"
+                checked={listOnPlatform}
+                onCheckedChange={(v) => void persistListOnPlatform(v)}
+                disabled={listPlatformSaving}
+                className="shrink-0 touch-manipulation"
+                aria-label="Show on public raffles browse list"
+              />
+            </div>
+            {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
+          </CardContent>
+        </Card>
+
         {isNftRaffle && (
           <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">
             <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
@@ -884,33 +912,6 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             <p className="text-sm">{message.text}</p>
           </div>
         )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Public raffles list</CardTitle>
-            <CardDescription>
-              Controls whether this raffle appears as a card on the main{' '}
-              <code className="text-xs bg-muted px-1 rounded">/raffles</code> feed. NFT prizes with this off stay
-              link-only; the raffle page URL still works.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-start justify-between gap-3">
-              <Label htmlFor="admin-list-on-platform" className="text-sm font-medium leading-relaxed cursor-pointer">
-                Show on public browse
-              </Label>
-              <Switch
-                id="admin-list-on-platform"
-                checked={listOnPlatform}
-                onCheckedChange={(v) => void persistListOnPlatform(v)}
-                disabled={listPlatformSaving}
-                className="shrink-0 touch-manipulation"
-                aria-label="Show on public raffles browse list"
-              />
-            </div>
-            {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
-          </CardContent>
-        </Card>
 
         <Card>
           <CardHeader>

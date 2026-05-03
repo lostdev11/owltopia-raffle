@@ -1159,41 +1159,37 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              {isAdmin && (
-                <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <Label htmlFor="edit-list-on-platform" className="text-base">
-                        Show on public raffles list
-                      </Label>
-                      <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                        When off, NFT prizes stay off the main <code className="text-xs bg-muted/80 px-1 rounded">/raffles</code>{' '}
-                        grid (Discord / link-only); the raffle page URL still works. Turn on to show the card on the
-                        browse feed again.
+              <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <Label htmlFor="edit-list-on-platform" className="text-base">
+                      Show on public raffles list
+                    </Label>
+                    <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                      When off, NFT prizes stay off the main <code className="text-xs bg-muted/80 px-1 rounded">/raffles</code>{' '}
+                      grid (Discord / link-only); the raffle page URL still works. Turn on to show the card on the
+                      browse feed again. Uses your admin sign-in session (wallet does not need to match).
+                    </p>
+                    {partnerDiscordLinked && (
+                      <p className="text-xs text-muted-foreground pt-0.5">
+                        Partner label: “Hide from public raffles list” — same setting.
                       </p>
-                      {partnerDiscordLinked && (
-                        <p className="text-xs text-muted-foreground pt-0.5">
-                          Partner label: “Hide from public raffles list” — same setting.
-                        </p>
-                      )}
-                      {listPlatformError && (
-                        <p className="text-sm text-destructive pt-1">{listPlatformError}</p>
-                      )}
-                    </div>
-                    <Switch
-                      id="edit-list-on-platform"
-                      checked={listOnPlatform}
-                      onCheckedChange={(v) => void persistListOnPlatform(v)}
-                      disabled={listPlatformSaving}
-                      className="shrink-0 mt-1 touch-manipulation"
-                      aria-label="Show on public raffles list"
-                    />
+                    )}
+                    {listPlatformError && (
+                      <p className="text-sm text-destructive pt-1">{listPlatformError}</p>
+                    )}
                   </div>
-                  {listPlatformSaving && (
-                    <p className="text-xs text-muted-foreground">Saving…</p>
-                  )}
+                  <Switch
+                    id="edit-list-on-platform"
+                    checked={listOnPlatform}
+                    onCheckedChange={(v) => void persistListOnPlatform(v)}
+                    disabled={listPlatformSaving}
+                    className="shrink-0 mt-1 touch-manipulation"
+                    aria-label="Show on public raffles list"
+                  />
                 </div>
-              )}
+                {listPlatformSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="title">Title *</Label>
                 <Input id="title" name="title" defaultValue={raffle.title} required />

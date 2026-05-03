@@ -19,6 +19,7 @@ import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '@/lib/types'
+import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
@@ -120,6 +122,7 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import { RaffleSentimentBar } from '@/components/RaffleSentimentBar'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
 import {
@@ -162,12 +165,18 @@ interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
   owlVisionScore: OwlVisionScore
+  sessionWallet: string | null
+  sentimentTotals: RaffleSentimentTotals
+  initialSentiment: RaffleSentimentChoice | null
 }
 
 export function RaffleDetailClient({
   raffle,
   entries: initialEntries,
   owlVisionScore,
+  sessionWallet,
+  sentimentTotals,
+  initialSentiment,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -254,6 +263,11 @@ export function RaffleDetailClient({
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() =>
     typeof window !== 'undefined' && walletAddress ? getCachedAdminRole(walletAddress) : null
   )
+  /** True when SIWS session cookie is an admin wallet (no adapter connect required). */
+  const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+  const [browseListedOnFeed, setBrowseListedOnFeed] = useState(() => raffle.list_on_platform !== false)
+  const [browseListSaving, setBrowseListSaving] = useState(false)
+  const [browseListError, setBrowseListError] = useState<string | null>(null)
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   type HeroImgPhase =
@@ -498,6 +512,58 @@ export function RaffleDetailClient({
       })
     return () => { cancelled = true }
   }, [connected, publicKey])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/check?session=1', { credentials: 'include' })
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        setAdminSessionActive(data?.isAdmin === true)
+      })
+      .catch(() => {
+        if (!cancelled) setAdminSessionActive(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setBrowseListedOnFeed(raffle.list_on_platform !== false)
+    setBrowseListError(null)
+  }, [raffle.id, raffle.list_on_platform])
+
+  const persistBrowseListSetting = useCallback(
+    async (next: boolean) => {
+      setBrowseListSaving(true)
+      setBrowseListError(null)
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ list_on_platform: next }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(
+            typeof data?.error === 'string'
+              ? data.error
+              : 'Could not update. Sign in on Admin with an admin wallet (SIWS), then try again.'
+          )
+        }
+        setBrowseListedOnFeed(next)
+        router.refresh()
+      } catch (e) {
+        setBrowseListedOnFeed(!next)
+        setBrowseListError(e instanceof Error ? e.message : 'Update failed')
+      } finally {
+        setBrowseListSaving(false)
+      }
+    },
+    [raffle.id, router]
+  )
 
   useEffect(() => {
     if (!creatorWallet) {
@@ -2205,12 +2271,14 @@ export function RaffleDetailClient({
     preloadConfetti()
     fireGreenConfetti()
   }, [isWinnerDetail, showWinner, raffle.id, raffle.winner_wallet])
+  const adminCapable = (isAdmin === true) || adminSessionActive === true
+
   // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
   const showNftTransferButton = 
     hasEnded && 
     raffle.winner_wallet && 
     raffle.prize_type === 'nft' && 
-    isAdmin && 
+    adminCapable && 
     !raffle.nft_transfer_transaction
 
   const claimableEscrowPrize =
@@ -2227,7 +2295,7 @@ export function RaffleDetailClient({
 
   // Show "Return prize to creator" when: admin, NFT raffle, prize in escrow, not yet sent to winner, not already returned
   const showReturnPrizeButton =
-    isAdmin &&
+    adminCapable &&
     raffle.prize_type === 'nft' &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
@@ -3283,6 +3351,42 @@ export function RaffleDetailClient({
             </div>
           </CardHeader>
 
+          <RaffleSentimentBar
+            raffleId={raffle.id}
+            sessionWallet={sessionWallet}
+            initialTotals={sentimentTotals}
+            initialMine={initialSentiment}
+          />
+
+          {adminCapable && (
+            <div className={`${classes.headerPadding} pt-0 pb-3 border-b border-border/60`}>
+              <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="text-sm font-medium text-foreground">Show on public /raffles list</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    When off, link-only NFT raffles are hidden from the browse grid. Uses your admin sign-in session.
+                  </p>
+                  {browseListError && (
+                    <p className="text-xs text-destructive pt-1">{browseListError}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {browseListSaving && (
+                    <span className="text-xs text-muted-foreground">Saving…</span>
+                  )}
+                  <Switch
+                    id="raffle-detail-browse-listed"
+                    checked={browseListedOnFeed}
+                    onCheckedChange={(v) => void persistBrowseListSetting(v)}
+                    disabled={browseListSaving}
+                    className="touch-manipulation"
+                    aria-label="Show this raffle on the public browse list"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {hasHeroImageSection && (
             <>
               {!heroImageDead && !heroImageMintLoading && (
@@ -3981,7 +4085,7 @@ export function RaffleDetailClient({
                   <span className="sm:hidden">Return Prize</span>
                 </Button>
               )}
-              {isAdmin && (
+              {adminCapable && (
                 <Button
                   variant="outline"
                   size="default"

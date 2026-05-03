@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminRole } from '@/lib/db/admins'
+import { getSessionFromRequest } from '@/lib/auth-server'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 
 // Force dynamic rendering since we use searchParams
@@ -20,6 +21,22 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams
+
+    /** Admin SIWS session only (no connected wallet required). Used for raffle-detail + admin UI parity. */
+    if (searchParams.get('session') === '1') {
+      const session = getSessionFromRequest(request)
+      const walletAddress = session?.wallet?.trim() ?? ''
+      if (!walletAddress || !SOLANA_ADDRESS_REGEX.test(walletAddress)) {
+        return NextResponse.json({ isAdmin: false })
+      }
+      const role = await getAdminRole(walletAddress)
+      const isAdmin = role !== null
+      return NextResponse.json({
+        isAdmin,
+        role: isAdmin ? role : undefined,
+      })
+    }
+
     const raw = searchParams.get('wallet')
     const walletAddress = raw?.trim() ?? ''
 
