@@ -1185,7 +1185,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     onCheckedChange={(v) => void persistListOnPlatform(v)}
                     disabled={listPlatformSaving}
                     className="shrink-0 mt-1 touch-manipulation"
-                    aria-label="Show on public raffles list"
+                    ariaLabel="Show on public raffles list"
                   />
                 </div>
                 {listPlatformSaving && <p className="text-xs text-muted-foreground">Saving…</p>}

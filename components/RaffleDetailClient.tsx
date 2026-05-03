@@ -3385,7 +3385,7 @@ export function RaffleDetailClient({
                     onCheckedChange={(v) => void persistBrowseListSetting(v)}
                     disabled={browseListSaving}
                     className="touch-manipulation"
-                    aria-label="Show this raffle on the public browse list"
+                    ariaLabel="Show this raffle on the public browse list"
                   />
                 </div>
               </div>

@@ -875,7 +875,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 onCheckedChange={(v) => void persistListOnPlatform(v)}
                 disabled={listPlatformSaving}
                 className="shrink-0 touch-manipulation"
-                aria-label="Show on public raffles browse list"
+                ariaLabel="Show on public raffles browse list"
               />
             </div>
             {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
