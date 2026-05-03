@@ -11,7 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import {
+  getThemeAccentBorderStyle,
+  getThemeAccentClasses,
+  THEME_ACCENT_SELECT_OPTIONS,
+} from '@/lib/theme-accent'
 import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import {
@@ -1167,7 +1171,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         cap, and currency in other states, use the deeper controls on the admin actions page.
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="currency_nft_live">Currency *</Label>
                         {raffle.currency === 'OWL' && (
@@ -1185,18 +1189,33 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                           <option value="USDC">USDC</option>
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="ticket_price_nft_live">Ticket price *</Label>
-                        <Input
-                          id="ticket_price_nft_live"
-                          name="ticket_price_nft_live"
-                          type="number"
-                          step="any"
-                          className="min-h-[44px] touch-manipulation"
-                          value={nftDraftTicket}
-                          onChange={(e) => setNftDraftTicket(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">Suggested: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="ticket_price_nft_live">Ticket price *</Label>
+                          <Input
+                            id="ticket_price_nft_live"
+                            name="ticket_price_nft_live"
+                            type="number"
+                            step="any"
+                            className="min-h-[44px] touch-manipulation"
+                            value={nftDraftTicket}
+                            onChange={(e) => setNftDraftTicket(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Suggested: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="floor_price_nft_live">Floor price (prize value) *</Label>
+                          <Input
+                            id="floor_price_nft_live"
+                            name="floor_price_nft_live"
+                            type="text"
+                            inputMode="decimal"
+                            value={nftDraftFloor}
+                            onChange={(e) => setNftDraftFloor(e.target.value)}
+                            placeholder="e.g. 0.25 (in raffle currency)"
+                            className="min-h-[44px] touch-manipulation"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1221,19 +1240,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       {nftComputedMin != null
                         ? `${nftComputedMin} tickets`
                         : 'Enter valid floor and ticket price.'}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="floor_price_nft_live">Floor price (prize value) *</Label>
-                      <Input
-                        id="floor_price_nft_live"
-                        name="floor_price_nft_live"
-                        type="text"
-                        inputMode="decimal"
-                        value={nftDraftFloor}
-                        onChange={(e) => setNftDraftFloor(e.target.value)}
-                        placeholder="e.g. 0.25 (in raffle currency)"
-                        className="min-h-[44px] touch-manipulation"
-                      />
                     </div>
                     <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1">
                       <input
@@ -1284,7 +1290,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     Set floor price and ticket price. Draw goal is computed as round(floor ÷ ticket price) — not editable
                     on its own. We suggest starting with ticket = floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}.
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
                       {raffle.currency === 'OWL' && (
@@ -1303,21 +1309,40 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         <option value="USDC">USDC</option>
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="ticket_price">Ticket price *</Label>
-                      <Input
-                        id="ticket_price"
-                        name="ticket_price"
-                        type="number"
-                        step="any"
-                        required
-                        className="min-h-[44px] touch-manipulation"
-                        value={nftDraftTicket}
-                        onChange={(e) => setNftDraftTicket(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Suggested default: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}
-                      </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="ticket_price">Ticket price *</Label>
+                        <Input
+                          id="ticket_price"
+                          name="ticket_price"
+                          type="number"
+                          step="any"
+                          required
+                          className="min-h-[44px] touch-manipulation"
+                          value={nftDraftTicket}
+                          onChange={(e) => setNftDraftTicket(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Suggested default: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                        <Input
+                          id="floor_price"
+                          name="floor_price"
+                          type="text"
+                          inputMode="decimal"
+                          value={nftDraftFloor}
+                          onChange={(e) => setNftDraftFloor(e.target.value)}
+                          placeholder="e.g., 0.25 (in raffle currency)"
+                          className="min-h-[44px] touch-manipulation"
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Revenue threshold for rev share; ticket price is derived from this value.
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1341,36 +1366,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       ? `${nftComputedMin} tickets`
                       : 'Enter valid floor and ticket price.'}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="rank">Rank (optional)</Label>
-                      <Input
-                        id="rank"
-                        name="rank"
-                        type="text"
-                        defaultValue={raffle.rank || ''}
-                        placeholder="e.g., #123 or 123"
-                        className="min-h-[44px] touch-manipulation"
-                      />
-                      <p className="text-xs text-muted-foreground">Optional rank metadata (text or integer)</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="floor_price">Floor price (prize value) *</Label>
-                      <Input
-                        id="floor_price"
-                        name="floor_price"
-                        type="text"
-                        inputMode="decimal"
-                        value={nftDraftFloor}
-                        onChange={(e) => setNftDraftFloor(e.target.value)}
-                        placeholder="e.g., 0.25 (in raffle currency)"
-                        className="min-h-[44px] touch-manipulation"
-                        required
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Revenue threshold for rev share; ticket price is derived from this value.
-                      </p>
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rank">Rank (optional)</Label>
+                    <Input
+                      id="rank"
+                      name="rank"
+                      type="text"
+                      defaultValue={raffle.rank || ''}
+                      placeholder="e.g., #123 or 123"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">Optional rank metadata (text or integer)</p>
                   </div>
                 </>
               ) : (
@@ -1511,12 +1517,11 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   required
                 >
-                  <option value="prime">Prime Time (Electric Green)</option>
-                  <option value="midnight">Midnight Drop (Cool Teal)</option>
-                  <option value="dawn">Dawn Run (Soft Lime)</option>
-                  <option value="ember">Ember (Warm Orange)</option>
-                  <option value="violet">Violet (Purple)</option>
-                  <option value="coral">Coral (Rose)</option>
+                  {THEME_ACCENT_SELECT_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
 

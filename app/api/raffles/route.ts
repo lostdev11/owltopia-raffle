@@ -17,6 +17,7 @@ import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, ThemeAccent } from '@/lib/types'
+import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { isNonRetryableDbErrorMessage } from '@/lib/db-retry'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -55,11 +56,9 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
 
-const THEME_ACCENTS: readonly ThemeAccent[] = ['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']
-
 function coerceThemeAccent(raw: unknown): ThemeAccent {
   const s = typeof raw === 'string' ? raw.trim() : ''
-  return (THEME_ACCENTS as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
+  return (THEME_ACCENT_VALUES as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
 }
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */

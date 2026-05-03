@@ -1,5 +1,24 @@
 import type { ThemeAccent } from './types'
+import { THEME_ACCENT_VALUES } from './types'
 import { cn } from '@/lib/utils'
+
+const THEME_ACCENT_LABELS = {
+  prime: 'Prime Time (Electric Green)',
+  midnight: 'Midnight Drop (Cool Teal)',
+  dawn: 'Dawn Run (Soft Lime)',
+  ember: 'Ember (Warm Orange)',
+  violet: 'Violet (Purple)',
+  coral: 'Coral (Rose)',
+  gold: 'Gold (Amber)',
+  sky: 'Sky (Bright Blue)',
+  mint: 'Mint (Teal)',
+  indigo: 'Indigo (Soft Violet-Blue)',
+  fuchsia: 'Fuchsia (Neon Pink)',
+} satisfies Record<ThemeAccent, string>
+
+/** Labels for create/edit raffle theme dropdowns (order follows `THEME_ACCENT_VALUES`). */
+export const THEME_ACCENT_SELECT_OPTIONS: readonly { value: ThemeAccent; label: string }[] =
+  THEME_ACCENT_VALUES.map((value) => ({ value, label: THEME_ACCENT_LABELS[value] }))
 
 /**
  * Get theme accent color for text/background
@@ -18,6 +37,16 @@ export function getThemeAccentColor(theme: ThemeAccent): string {
       return '#a855f7'
     case 'coral':
       return '#f43f5e'
+    case 'gold':
+      return '#fbbf24'
+    case 'sky':
+      return '#38bdf8'
+    case 'mint':
+      return '#2dd4bf'
+    case 'indigo':
+      return '#818cf8'
+    case 'fuchsia':
+      return '#e879f9'
     default:
       return '#00ff88'
   }
@@ -38,6 +67,16 @@ export function getThemeAccentRgbChannels(theme: ThemeAccent): string {
       return '168 85 247'
     case 'coral':
       return '244 63 94'
+    case 'gold':
+      return '251 191 36'
+    case 'sky':
+      return '56 189 248'
+    case 'mint':
+      return '45 212 191'
+    case 'indigo':
+      return '129 140 248'
+    case 'fuchsia':
+      return '232 121 249'
     default:
       return '0 255 136'
   }

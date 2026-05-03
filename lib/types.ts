@@ -1,4 +1,19 @@
-export type ThemeAccent = 'prime' | 'midnight' | 'dawn' | 'ember' | 'violet' | 'coral'
+/** Allowed raffle card / detail accent colors (stored as `theme_accent`). */
+export const THEME_ACCENT_VALUES = [
+  'prime',
+  'midnight',
+  'dawn',
+  'ember',
+  'violet',
+  'coral',
+  'gold',
+  'sky',
+  'mint',
+  'indigo',
+  'fuchsia',
+] as const
+
+export type ThemeAccent = (typeof THEME_ACCENT_VALUES)[number]
 
 export type EntryStatus = 'pending' | 'confirmed' | 'rejected'
 

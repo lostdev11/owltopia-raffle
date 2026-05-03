@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -45,7 +44,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
 import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import {
+  getThemeAccentBorderStyle,
+  getThemeAccentClasses,
+  THEME_ACCENT_SELECT_OPTIONS,
+} from '@/lib/theme-accent'
 import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
@@ -87,9 +90,9 @@ function formatCreateRaffleApiError(status: number, apiMessage: string): string 
     lower === 'service error'
   ) {
     if (status === 503) {
-      return 'We could not save the raffle just now (service unavailable). Check My raffles above in case it still saved, or try again in a minute.'
+      return 'We could not save the raffle just now (service unavailable). Check My raffles below in case it still saved, or try again in a minute.'
     }
-    return 'We could not save the raffle just now. Check My raffles above in case it still saved, then try again.'
+    return 'We could not save the raffle just now. Check My raffles below in case it still saved, then try again.'
   }
   return m || `Something went wrong (HTTP ${status}). Try again in a moment.`
 }
@@ -1089,23 +1092,8 @@ export function CreateRaffleForm() {
       <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
       <CardHeader>
         <CardTitle>Raffle Details</CardTitle>
-        <CardDescription>
-          Pick your prize NFT and details, tap create — we save your raffle, then your wallet opens so you can sign
-          one transaction to send the NFT to escrow. After that, the raffle can go live (or on your start date).
-        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <p>
-            <strong>Platform fee (deducted from every ticket sale):</strong> 2% for verified{' '}
-            <Link href="/partner-program" className="text-primary underline-offset-4 hover:underline touch-manipulation">
-              partner program
-            </Link>{' '}
-            creators, 3% for Owltopia (Owl NFT) holders, 6% for other non-holders. The fee is taken from each ticket
-            payment at purchase time.
-          </p>
-        </div>
-
         <form
           onSubmit={handleSubmit}
           noValidate
@@ -1131,14 +1119,7 @@ export function CreateRaffleForm() {
           </div>
 
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-            <div className="space-y-1.5">
-              <Label className="text-base">Prize type</Label>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Ticket sales use SOL or USDC. What you give away is separate: an <strong>NFT</strong> from
-                your wallet, or an <strong>allowlisted partner</strong> token (escrowed the same way as
-                NFTs). <strong>OWL</strong> as a partner prize token is off for now.
-              </p>
-            </div>
+            <Label className="text-base">Prize type</Label>
             <div
               className="grid grid-cols-1 gap-2 sm:grid-cols-2"
               role="group"
@@ -1207,15 +1188,6 @@ export function CreateRaffleForm() {
               <Label>
                 {tokenPrizeCurrency} prize amount *
               </Label>
-              <p className="text-xs text-muted-foreground">
-                {tokenPrizeCurrency === 'SOL'
-                  ? 'Mainnet wrapped SOL (wSOL) in your wallet — you sign one SPL transfer of this amount to the platform escrow after the raffle is saved.'
-                  : tokenPrizeCurrency === 'USDC'
-                    ? 'Mainnet USDC only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
-                    : tokenPrizeCurrency === 'TRQ'
-                      ? 'Mainnet TRQ only. You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.'
-                      : `Mainnet ${tokenPrizeCurrency} (SPL, allowlisted mint). You will sign one transaction to send exactly this amount to the platform escrow after the raffle is saved.`}
-              </p>
               <Input
                 id="partner_prize_amount"
                 name="partner_prize_amount"
@@ -1241,10 +1213,6 @@ export function CreateRaffleForm() {
                   value={partnerMinTickets}
                   onChange={(e) => setPartnerMinTickets(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">
-                  The raffle can draw once this many confirmed tickets are sold (same rule as NFT raffles, but you set the
-                  number explicitly).
-                </p>
               </div>
             </div>
           )}
@@ -1253,9 +1221,6 @@ export function CreateRaffleForm() {
               {prizeMode === 'nft' ? (
                 <>
               <Label>NFT prize (from your wallet)</Label>
-              <p className="text-xs text-muted-foreground">
-                Load your wallet to see NFTs you can use as the raffle prize. The raffle image is taken from the NFT you select.
-              </p>
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
@@ -1353,19 +1318,9 @@ export function CreateRaffleForm() {
                 </>
               )}
               {selectedNft && (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Selected: {selectedNft.name ?? selectedNft.mint}
-                  </p>
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
-                    <p className="font-medium text-foreground">What happens when you tap Create</p>
-                    <p className="text-muted-foreground mt-0.5">
-                      <strong>1.</strong> Your raffle is saved first, then your wallet asks you to sign (same as before).{' '}
-                      <strong>2.</strong> That signature sends the NFT to escrow — network fee + rent for the escrow account are included in that one transaction. No listing fee; platform only earns from ticket sales.{' '}
-                      <strong>3.</strong> Once escrow is verified, your raffle can go live on the schedule you set. Winner claims the NFT from escrow when the raffle ends.
-                    </p>
-                  </div>
-                </>
+                <p className="text-sm text-muted-foreground">
+                  Selected: {selectedNft.name ?? selectedNft.mint}
+                </p>
               )}
                 </>
               ) : (
@@ -1375,26 +1330,7 @@ export function CreateRaffleForm() {
               )}
             </div>
 
-          <div className="rounded-md border border-muted-foreground/25 bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Fair listing</p>
-            <p className="mt-1">
-              {prizeMode === 'token' ? (
-                <>
-                  Floor price is the advertised prize value in your <strong>ticket currency</strong> (SOL or USDC) and
-                  drives the revenue bar. The token you pick here is only the on-chain prize in escrow. Set ticket price and draw goal yourself;
-                  misleading listings may be removed.
-                </>
-              ) : (
-                <>
-                  Floor price is the advertised prize value and revenue threshold. Set ticket price yourself; we suggest
-                  floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} as a starting point. Draw goal (min tickets) is computed as
-                  round(floor ÷ ticket price) — you cannot set it separately. Misleading listings may be removed.
-                </>
-              )}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="currency">Currency *</Label>
               <select
@@ -1408,34 +1344,45 @@ export function CreateRaffleForm() {
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
               </select>
-              <p className="text-xs text-muted-foreground">
-                Choose the currency buyers pay in. Floor price must be in this same currency.
-              </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ticket_price">Ticket price *</Label>
-              <Input
-                id="ticket_price"
-                name="ticket_price"
-                type="number"
-                step="any"
-                required
-                className="text-base sm:text-sm touch-manipulation min-h-[44px]"
-                value={ticketPrice ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setTicketPrice(v)
-                  if (lastAutofillTicketRef.current !== null && v !== lastAutofillTicketRef.current) {
-                    lastAutofillTicketRef.current = null
-                  }
-                }}
-                aria-describedby="ticket_price_help"
-              />
-              <p id="ticket_price_help" className="text-xs text-muted-foreground">
-                Filled as floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT} when ticket is empty; changing floor
-                re-fills only while the ticket still matches the last auto-filled value (manual prices are
-                not overwritten).
-              </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="ticket_price">Ticket price *</Label>
+                <Input
+                  id="ticket_price"
+                  name="ticket_price"
+                  type="number"
+                  step="any"
+                  required
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={ticketPrice ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setTicketPrice(v)
+                    if (lastAutofillTicketRef.current !== null && v !== lastAutofillTicketRef.current) {
+                      lastAutofillTicketRef.current = null
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                <Input
+                  id="floor_price"
+                  name="floor_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={floorPrice ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setFloorPrice(v)
+                    applyFloorToTicketAutofill(v)
+                  }}
+                  placeholder="e.g., 0.25 or 5.5 (same as currency above)"
+                  required
+                />
+              </div>
             </div>
           </div>
 
@@ -1449,76 +1396,17 @@ export function CreateRaffleForm() {
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
-            <p className="text-xs text-muted-foreground">
-              Optional cap on total tickets. If set, must be at least your draw goal (
-              {prizeMode === 'token' ? (partnerMinTicketsParsed ?? '—') : (derivedDrawGoal ?? '—')}).
-            </p>
           </div>
 
-          <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Draw goal:</span>{' '}
-            {prizeMode === 'token' ? (
-              <>
-                {partnerMinTicketsParsed != null
-                  ? `${partnerMinTicketsParsed} tickets (you set this above)`
-                  : 'Enter draw goal (min tickets) for token prize raffles.'}{' '}
-              </>
-            ) : (
-              <>
-                {derivedDrawGoal != null
-                  ? `${derivedDrawGoal} tickets (round(floor ÷ ticket price))`
-                  : 'Enter floor and ticket price to see draw goal.'}{' '}
-              </>
-            )}
-            The raffle can draw once this many confirmed tickets are sold.
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="rank">Rank (optional)</Label>
-              <Input
-                id="rank"
-                name="rank"
-                type="text"
-                placeholder="e.g., #123 or 123"
-              />
-              <p className="text-xs text-muted-foreground">
-                Optional rank metadata (text or integer)
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="floor_price">Floor price (prize value) *</Label>
-              <Input
-                id="floor_price"
-                name="floor_price"
-                type="text"
-                inputMode="decimal"
-                className="text-base sm:text-sm touch-manipulation min-h-[44px]"
-                value={floorPrice ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setFloorPrice(v)
-                  applyFloorToTicketAutofill(v)
-                }}
-                placeholder="e.g., 0.25 or 5.5 (same as currency above)"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                {prizeMode === 'token' ? (
-                  <>
-                    Enter the <strong>advertised prize value</strong> in your ticket currency (same as the currency
-                    you chose above) — e.g. from a price chart or the amount you are committing. This sets the revenue
-                    threshold for rev share.
-                  </>
-                ) : (
-                  <>
-                    Enter a <strong>fair value</strong> in <strong className="font-medium text-foreground">{raffleCurrency}</strong>{' '}
-                    (check Magic Eden or Tensor for collection floor, then type it here). This sets the revenue threshold
-                    for rev share.
-                  </>
-                )}
-              </p>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="rank">Rank (optional)</Label>
+            <Input
+              id="rank"
+              name="rank"
+              type="text"
+              placeholder="e.g., #123 or 123"
+              className="min-h-[44px] touch-manipulation"
+            />
           </div>
 
           <div className="space-y-2">
@@ -1539,9 +1427,6 @@ export function CreateRaffleForm() {
               </option>
               <option value="completed">Completed</option>
             </select>
-            <p className="text-xs text-muted-foreground">
-              Starts as draft until your wallet approves sending the prize to escrow; then the raffle can go live once verified.
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -1554,37 +1439,16 @@ export function CreateRaffleForm() {
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               required
             >
-              <option value="prime">Prime Time (Electric Green)</option>
-              <option value="midnight">Midnight Drop (Cool Teal)</option>
-              <option value="dawn">Dawn Run (Soft Lime)</option>
-              <option value="ember">Ember (Warm Orange)</option>
-              <option value="violet">Violet (Purple)</option>
-              <option value="coral">Coral (Rose)</option>
+              {THEME_ACCENT_SELECT_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </div>
 
           {canSetLinkOnlyVisibility && (
             <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
-              {partnerDiscordLinked ? (
-                <p className="text-sm sm:text-base font-medium text-foreground">
-                  Partner server raffle
-                </p>
-              ) : null}
-              {partnerDiscordLinked ? (
-                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                  Your creator wallet is linked to a partner Discord tenant. Raffle{' '}
-                  <strong className="font-medium text-foreground/85">created</strong> and{' '}
-                  <strong className="font-medium text-foreground/85">winner</strong> pings for your listings go to the
-                  incoming webhooks you set with{' '}
-                  <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">/owltopia-partner webhook-raffle-created</code>{' '}
-                  and{' '}
-                  <code className="rounded bg-muted px-1 py-0.5 text-[0.8rem]">webhook-raffle-winner</code>{' '}
-                  — other partners’ servers do not receive them. While your partner subscription is active, Owltopia’s
-                  platform Discord raffle feeds do not duplicate these posts (only your webhooks fire — set both so you do
-                  not miss creates or draws). If the tenant lapses or is suspended, announcements can fall back to
-                  platform feeds again. @mentions use Discord linked to wallets (creator/winner) on the site.
-                </p>
-              ) : null}
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
                 <input
                   type="checkbox"
@@ -1689,9 +1553,6 @@ export function CreateRaffleForm() {
                   Max
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Raffles have a maximum duration of 7 days.
-              </p>
             </div>
           </div>
 

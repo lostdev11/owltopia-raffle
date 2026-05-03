@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 
 const solanaAddress = z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/)
@@ -78,7 +79,7 @@ export const rafflesPostBody = z.object({
   prize_currency: z.string().optional(),
   nft_mint_address: z.string().optional().nullable(),
   nft_token_id: z.string().optional().nullable(),
-  theme_accent: z.enum(['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']).optional(),
+  theme_accent: z.enum(THEME_ACCENT_VALUES).optional(),
 })
 
 export const authVerifyBody = z.object({
