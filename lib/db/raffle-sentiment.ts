@@ -1,9 +1,16 @@
 /**
  * Raffle thumbs up / down — Supabase-backed; writes use service role from API routes.
+ * One row per (raffleId, wallet): UNIQUE + upsert so switching up/down replaces the prior vote (no double-count).
  */
 
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+
+function canonicalWalletAddress(wallet: string): string {
+  const n = normalizeSolanaWalletAddress(wallet)
+  return n ?? wallet.trim()
+}
 
 export type RaffleSentimentChoice = 'up' | 'down'
 
@@ -40,7 +47,7 @@ export async function getRaffleSentimentForWallet(
   raffleId: string,
   wallet: string
 ): Promise<RaffleSentimentChoice | null> {
-  const w = wallet.trim()
+  const w = canonicalWalletAddress(wallet)
   if (!raffleId || !w) return null
 
   const { data, error } = await db()
@@ -60,12 +67,16 @@ export async function upsertRaffleSentiment(params: {
   wallet: string
   sentiment: RaffleSentimentChoice
 }): Promise<{ ok: true } | { ok: false; message: string }> {
+  const walletAddress = canonicalWalletAddress(params.wallet)
+  if (!walletAddress) {
+    return { ok: false, message: 'Invalid wallet address.' }
+  }
   try {
     const admin = getSupabaseAdmin()
     const { error } = await admin.from('raffle_sentiment').upsert(
       {
         raffle_id: params.raffleId,
-        wallet_address: params.wallet.trim(),
+        wallet_address: walletAddress,
         sentiment: params.sentiment,
       },
       { onConflict: 'raffle_id,wallet_address' }

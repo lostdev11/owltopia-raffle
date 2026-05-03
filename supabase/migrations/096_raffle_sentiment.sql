@@ -1,4 +1,5 @@
 -- Per-wallet thumbs up/down on raffles (anonymous tallies; writes via Next.js API + service role).
+-- Exactly one row per (raffle_id, wallet_address); POST upserts so users can switch between up and down.
 
 CREATE TABLE IF NOT EXISTS public.raffle_sentiment (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -21,4 +22,7 @@ CREATE TRIGGER update_raffle_sentiment_updated_at
 
 ALTER TABLE public.raffle_sentiment ENABLE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE public.raffle_sentiment IS 'Thumbs up/down per wallet per raffle; aggregates and upserts via Next.js API + service role only.';
+COMMENT ON TABLE public.raffle_sentiment IS 'One ballot per wallet per raffle (unique raffle_id + wallet_address). Sentiment updates replace the prior choice (switch up/down). Reads/writes via Next.js + service role.';
+
+COMMENT ON CONSTRAINT raffle_sentiment_raffle_wallet_unique ON public.raffle_sentiment IS
+  'Enforces a single reaction row per wallet per raffle; API upserts to change vote.';
