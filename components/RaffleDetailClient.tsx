@@ -130,6 +130,7 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
@@ -1573,7 +1574,7 @@ export function RaffleDetailClient({
           setShowManualEscrowFallback(false)
         } else {
           setDepositEscrowError(
-            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
+            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
           )
           setShowManualEscrowFallback(true)
         }
@@ -1582,7 +1583,7 @@ export function RaffleDetailClient({
       if ('delegated' in holder && holder.delegated) {
         logEscrowDepositAbort(depositLogCtx, 'nft_delegated_or_staked')
         setDepositEscrowError(
-          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then tap Verify deposit.'
+          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then paste the transfer signature below and tap Submit signature.'
         )
         setShowManualEscrowFallback(true)
         return
@@ -1707,7 +1708,7 @@ export function RaffleDetailClient({
       !normalizeDepositTxSignatureInput(depositTxFromUi)
     ) {
       setDepositEscrowError(
-        'Paste the Solana transaction signature (or a Solscan /tx/… link) for the transfer that sent the prize to escrow, then tap Verify deposit. If you used Transfer to escrow here, tap Verify again — we also try your last on-chain transfer from this page.'
+        'Paste the Solana transaction signature (or a Solscan /tx/… link) for the transfer that sent the prize to escrow, then tap Submit signature. If you already used Transfer to escrow here, wait for this page to refresh. If it stays stuck, open a ticket in our Discord.'
       )
       setShowManualEscrowFallback(true)
       return
@@ -2712,17 +2713,29 @@ export function RaffleDetailClient({
                       <strong>Flow:</strong> Transfer your{' '}
                       <strong>{String(raffle.prize_currency || '').trim().toUpperCase() || 'Token'} prize</strong> to escrow
                       (your wallet will ask you to sign one SPL transaction). After it confirms, we save the deposit and{' '}
-                      <strong>activate the raffle automatically</strong> (including server retries). Paste the transaction
-                      signature below only if you sent manually or the page does not go live. Tickets are still paid in{' '}
+                      <strong>activate the raffle automatically</strong> (including server retries). If you sent manually,
+                      paste the transaction signature below and tap <strong>Submit signature</strong>. Tickets are still paid in{' '}
                       {raffle.currency}.
                     </>
                   ) : (
                     <>
                       <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
                       transaction succeeds, we save your deposit and <strong>activate the raffle automatically</strong> on our
-                      servers (with retries — no need to tap Verify on success). Use <strong>Verify deposit</strong> only if you
-                      sent the NFT manually or this card does not clear after a few minutes. <strong>No listing fee</strong> —
-                      only network fees. The prize stays locked until a winner claims it.
+                      servers (with retries). If you sent the NFT manually, paste the tx below and tap <strong>Submit signature</strong>.
+                      If something stays stuck, wait for this page to refresh, then{' '}
+                      <a
+                        href={COMMUNITY_DISCORD_INVITE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary font-medium underline touch-manipulation min-h-[44px] inline-flex items-center gap-1 py-0.5"
+                        onTouchStart={handleMobileLinkTouchStart}
+                        onTouchMove={handleMobileLinkTouchMove}
+                        onTouchEnd={handleMobileLinkTouchEnd}
+                      >
+                        open a ticket in Discord
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                      </a>
+                      . <strong>No listing fee</strong> — only network fees. The prize stays locked until a winner claims it.
                     </>
                   )}
                 </CardDescription>
@@ -2737,8 +2750,20 @@ export function RaffleDetailClient({
                     <p className="font-medium text-foreground mb-1">Confirming your prize deposit</p>
                     <p>
                       Your transfer signature is saved. Our servers confirm escrow in the background — this page
-                      refreshes every few seconds until tickets open. On mobile RPC this can take a minute or two;
-                      you do not need to tap Verify unless something stays stuck.
+                      refreshes every few seconds until tickets open. On mobile RPC this can take a minute or two. If it
+                      never clears,{' '}
+                      <a
+                        href={COMMUNITY_DISCORD_INVITE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary font-medium underline touch-manipulation"
+                        onTouchStart={handleMobileLinkTouchStart}
+                        onTouchMove={handleMobileLinkTouchMove}
+                        onTouchEnd={handleMobileLinkTouchEnd}
+                      >
+                        open a ticket in Discord
+                      </a>
+                      .
                     </p>
                   </div>
                 )}
@@ -2775,34 +2800,39 @@ export function RaffleDetailClient({
                             ? `Transfer ${String(raffle.prize_currency || '').trim().toUpperCase() || 'token'} to escrow`
                             : 'Transfer NFT to escrow'}
                       </Button>
-                      <Button
-                        variant="outline"
-                        onClick={handleVerifyPrizeDeposit}
-                        disabled={depositVerifyLoading}
-                        title={
-                          isPartnerSplPrizeRaffle(raffle)
-                            ? 'Requires deposit transaction signature in the field below for token prizes'
-                            : 'Checks on-chain that the NFT is in platform escrow, then activates the raffle'
-                        }
-                      >
-                        {depositVerifyLoading
-                          ? depositVerifyAttemptLabel.current > 0
-                            ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
-                            : 'Verifying…'
-                          : 'Verify deposit'}
-                      </Button>
+                      {isAdmin === true ? (
+                        <Button
+                          variant="outline"
+                          onClick={handleVerifyPrizeDeposit}
+                          disabled={depositVerifyLoading}
+                          title={
+                            isPartnerSplPrizeRaffle(raffle)
+                              ? 'Requires deposit transaction signature in the field below for token prizes'
+                              : 'Checks on-chain that the NFT is in platform escrow, then activates the raffle'
+                          }
+                        >
+                          {depositVerifyLoading
+                            ? depositVerifyAttemptLabel.current > 0
+                              ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
+                              : 'Verifying…'
+                            : 'Verify deposit'}
+                        </Button>
+                      ) : null}
                     </div>
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                       <p className="text-xs text-muted-foreground">
                         {isPartnerSplPrizeRaffle(raffle) ? (
                           <>
-                            If you send the prize token manually, paste the transaction signature below and tap Verify deposit.
-                            The verify step checks that your tx credits the escrow token account for at least the declared prize
-                            amount.
+                            If you send the prize token manually, paste the transaction signature below and tap{' '}
+                            <strong>Submit signature</strong>. That checks that your tx credits the escrow token account for at
+                            least the declared prize amount.
                           </>
                         ) : (
                           <>
-                            If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit. Phantom and similar wallets sometimes show &quot;No balance changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change; if you trust this site, confirming is still normal.
+                            If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT
+                            manually to escrow in your wallet app, then paste the transfer signature below and tap{' '}
+                            <strong>Submit signature</strong>. Phantom and similar wallets sometimes show &quot;No balance
+                            changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change.
                           </>
                         )}
                       </p>
@@ -2847,15 +2877,21 @@ export function RaffleDetailClient({
                           {depositVerifyLoading ? 'Submitting…' : 'Submit signature'}
                         </Button>
                         <p className="text-xs text-muted-foreground">
-                          If auto-verify fails after manual transfer, paste the transfer signature and tap Verify deposit again.
+                          If automatic confirmation stalls after a manual transfer, paste the signature again and tap Submit
+                          signature.
                         </p>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {isPartnerSplPrizeRaffle(raffle)
-                        ? 'Verify deposit checks on-chain that the prize tokens reached escrow, then opens the raffle for entries.'
-                        : 'Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.'}
-                    </p>
+                    {isAdmin === true ? (
+                      <p className="text-xs text-muted-foreground">
+                        Admin: <strong>Verify deposit</strong> retries server confirmation without pasting a new signature (odd
+                        RPC cases).
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        We confirm on-chain that the prize reached escrow before ticket purchases count.
+                      </p>
+                    )}
                     {depositLastTxSignature &&
                       !(depositEscrowSuccess && !depositEscrowError) && (
                         <div className="rounded-lg border border-sky-500/45 bg-sky-500/[0.12] p-4 space-y-2">
@@ -2866,8 +2902,8 @@ export function RaffleDetailClient({
                           </p>
                           <p className="text-xs text-sky-950/85 dark:text-sky-50/85 leading-relaxed">
                             {depositEscrowLoading
-                              ? 'Your wallet already signed. We are confirming custody with the server; if this stalls, wait a few seconds and tap Verify deposit.'
-                              : `Your ${isPartnerSplPrizeRaffle(raffle) ? 'prize tokens reached' : 'NFT reached'} escrow in that transaction. If this card still shows, tap Verify deposit — RPC can lag briefly.`}
+                              ? 'Your wallet already signed. We are confirming custody with the server — this page will refresh when ready.'
+                              : `Your ${isPartnerSplPrizeRaffle(raffle) ? 'prize tokens reached' : 'NFT reached'} escrow in that transaction. If this card still shows, wait for a refresh or paste the tx above and tap Submit signature.`}
                           </p>
                           <a
                             href={solscanTransactionUrl(depositLastTxSignature)}
@@ -3041,11 +3077,12 @@ export function RaffleDetailClient({
                           <>
                             send the <strong>prize tokens</strong> to the escrow address above (or confirm you already
                             did), paste the transfer&apos;s <strong>transaction signature</strong> (raw base58 or a Solscan
-                            /tx/ link) in the field, then tap <strong>Verify deposit</strong>.
+                            /tx/ link) in the field, then tap <strong>Submit signature</strong>.
                           </>
                         ) : (
                           <>
-                            send the NFT to the escrow address above, then tap <strong>Verify deposit</strong>.
+                            send the NFT to the escrow address above, then paste the tx signature and tap{' '}
+                            <strong>Submit signature</strong>.
                           </>
                         )}
                       </p>
