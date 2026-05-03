@@ -1,10 +1,31 @@
 const path = require('path')
 
+/**
+ * Bubblegum / DAS need an indexer RPC in the browser. Many deployments set HELIUS_API_KEY for server
+ * routes only; without NEXT_PUBLIC_HELIUS_RPC_URL, cNFT → escrow fails on mainnet when the wallet
+ * uses a vanilla read RPC. Synthesize the same Helius URL for the client when the explicit public var
+ * is unset (cluster follows NEXT_PUBLIC_SOLANA_RPC_URL or dev override).
+ */
+function synthesizedPublicHeliusRpcUrl() {
+  const existing = process.env.NEXT_PUBLIC_HELIUS_RPC_URL?.trim()
+  if (existing) return existing
+  const key = process.env.HELIUS_API_KEY?.trim()
+  if (!key) return ''
+  const clusterHint =
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+    process.env.NEXT_PUBLIC_DEV_SOLANA_RPC_URL?.trim() ||
+    ''
+  const isDevnet = /devnet/i.test(clusterHint)
+  const base = isDevnet ? 'https://devnet.helius-rpc.com' : 'https://mainnet.helius-rpc.com'
+  return `${base}/?api-key=${encodeURIComponent(key)}`
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Expose Vercel deploy type at build time so preview URLs can run in the browser without burning prod Helius credits.
   env: {
     NEXT_PUBLIC_VERCEL_DEPLOY_ENV: process.env.VERCEL_ENV ?? '',
+    NEXT_PUBLIC_HELIUS_RPC_URL: synthesizedPublicHeliusRpcUrl(),
   },
   // Strip console.log / console.debug / console.info from production bundles; keep warn + error for ops.
   compiler: {

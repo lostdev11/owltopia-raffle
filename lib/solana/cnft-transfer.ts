@@ -7,6 +7,7 @@ import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-ad
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
+import { resolveMetaplexClientRpcUrl } from '@/lib/solana-rpc-url'
 
 interface TransferCompressedNftToEscrowArgs {
   connection: Connection
@@ -28,9 +29,9 @@ export async function transferCompressedNftToEscrow({
     throw new Error('Wallet not ready for compressed NFT transfer')
   }
 
-  const endpoint =
-    // rpcEndpoint is available on recent web3.js; fall back to internal field if needed.
-    (connection as any).rpcEndpoint || (connection as any)._rpcEndpoint
+  // DAS + proof APIs require an indexer RPC (e.g. Helius). The wallet Connection may use a
+  // read-only public RPC without DAS (see NEXT_PUBLIC_WALLET_READ_RPC_URL).
+  const endpoint = resolveMetaplexClientRpcUrl(connection)
 
   // Build Umi with wallet signer + DAS + Bubblegum plugins.
    

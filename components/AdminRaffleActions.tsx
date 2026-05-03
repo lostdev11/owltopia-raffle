@@ -19,6 +19,7 @@ import {
 } from '@/lib/raffles/admin-hard-delete'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
@@ -71,9 +72,54 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [savingImageFallback, setSavingImageFallback] = useState(false)
   const [entrantsCsvLoading, setEntrantsCsvLoading] = useState(false)
 
+  const [listOnPlatform, setListOnPlatform] = useState(() => raffle.list_on_platform !== false)
+  const [listPlatformSaving, setListPlatformSaving] = useState(false)
+
   useEffect(() => {
     setImageFallbackInput(raffle.image_fallback_url ?? '')
   }, [raffle.id, raffle.image_fallback_url])
+
+  useEffect(() => {
+    setListOnPlatform(raffle.list_on_platform !== false)
+  }, [raffle.id, raffle.list_on_platform])
+
+  const persistListOnPlatform = async (next: boolean) => {
+    setListPlatformSaving(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ list_on_platform: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Could not update listing visibility',
+        })
+        setListOnPlatform(!next)
+        return
+      }
+      setListOnPlatform(next)
+      setMessage({
+        type: 'success',
+        text: next
+          ? 'This raffle will appear on the public /raffles browse list.'
+          : 'Hidden from the public browse list; direct link still works.',
+      })
+      router.refresh()
+    } catch (e) {
+      setListOnPlatform(!next)
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Could not update listing visibility',
+      })
+    } finally {
+      setListPlatformSaving(false)
+    }
+  }
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
@@ -838,6 +884,33 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             <p className="text-sm">{message.text}</p>
           </div>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Public raffles list</CardTitle>
+            <CardDescription>
+              Controls whether this raffle appears as a card on the main{' '}
+              <code className="text-xs bg-muted px-1 rounded">/raffles</code> feed. NFT prizes with this off stay
+              link-only; the raffle page URL still works.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-start justify-between gap-3">
+              <Label htmlFor="admin-list-on-platform" className="text-sm font-medium leading-relaxed cursor-pointer">
+                Show on public browse
+              </Label>
+              <Switch
+                id="admin-list-on-platform"
+                checked={listOnPlatform}
+                onCheckedChange={(v) => void persistListOnPlatform(v)}
+                disabled={listPlatformSaving}
+                className="shrink-0 touch-manipulation"
+                aria-label="Show on public raffles browse list"
+              />
+            </div>
+            {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

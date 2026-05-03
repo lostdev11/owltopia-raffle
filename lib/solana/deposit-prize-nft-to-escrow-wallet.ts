@@ -77,7 +77,10 @@ export async function depositPrizeNftToEscrowFromWallet(
   })
 
   let resolvedHolder: NftHolderInWallet | null = null
-  if (selectedNft?.tokenAccount) {
+  if (
+    selectedNft?.tokenAccount &&
+    selectedNft.tokenAccount !== selectedNft.mint
+  ) {
     try {
       const selectedTokenAccount = new PublicKey(selectedNft.tokenAccount)
       const selectedInfo = await connection.getParsedAccountInfo(selectedTokenAccount, 'processed')

@@ -119,6 +119,56 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     setNftLiveEconomicsConfirm(false)
   }, [raffle.id])
 
+  const [listOnPlatform, setListOnPlatform] = useState(() => raffle.list_on_platform !== false)
+  const [listPlatformSaving, setListPlatformSaving] = useState(false)
+  const [listPlatformError, setListPlatformError] = useState<string | null>(null)
+  const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
+
+  useEffect(() => {
+    setListOnPlatform(raffle.list_on_platform !== false)
+    setListPlatformError(null)
+  }, [raffle.id, raffle.list_on_platform])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let cancelled = false
+    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+      .then((r) => (cancelled || !r.ok ? null : r.json()))
+      .then((d: { partnerDiscordLinked?: boolean } | null) => {
+        if (cancelled || !d) return
+        setPartnerDiscordLinked(d.partnerDiscordLinked === true)
+      })
+      .catch(() => {
+        if (!cancelled) setPartnerDiscordLinked(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const persistListOnPlatform = async (next: boolean) => {
+    setListPlatformSaving(true)
+    setListPlatformError(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ list_on_platform: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not update listing visibility')
+      }
+      setListOnPlatform(next)
+      router.refresh()
+    } catch (e) {
+      setListPlatformError(e instanceof Error ? e.message : 'Could not update listing visibility')
+    } finally {
+      setListPlatformSaving(false)
+    }
+  }
+
   const nftComputedMin = useMemo(() => {
     const forDraftOrAdminNft =
       isDraftNft || (isNonDraftNft && canOverrideNftEconomics)
@@ -1109,6 +1159,41 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
+              {isAdmin && (
+                <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="edit-list-on-platform" className="text-base">
+                        Show on public raffles list
+                      </Label>
+                      <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                        When off, NFT prizes stay off the main <code className="text-xs bg-muted/80 px-1 rounded">/raffles</code>{' '}
+                        grid (Discord / link-only); the raffle page URL still works. Turn on to show the card on the
+                        browse feed again.
+                      </p>
+                      {partnerDiscordLinked && (
+                        <p className="text-xs text-muted-foreground pt-0.5">
+                          Partner label: “Hide from public raffles list” — same setting.
+                        </p>
+                      )}
+                      {listPlatformError && (
+                        <p className="text-sm text-destructive pt-1">{listPlatformError}</p>
+                      )}
+                    </div>
+                    <Switch
+                      id="edit-list-on-platform"
+                      checked={listOnPlatform}
+                      onCheckedChange={(v) => void persistListOnPlatform(v)}
+                      disabled={listPlatformSaving}
+                      className="shrink-0 mt-1 touch-manipulation"
+                      aria-label="Show on public raffles list"
+                    />
+                  </div>
+                  {listPlatformSaving && (
+                    <p className="text-xs text-muted-foreground">Saving…</p>
+                  )}
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="title">Title *</Label>
                 <Input id="title" name="title" defaultValue={raffle.title} required />

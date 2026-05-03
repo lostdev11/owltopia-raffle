@@ -5,6 +5,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey } from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
 import { fetchAsset, transferV1 } from '@metaplex-foundation/mpl-core'
+import { resolveMetaplexClientRpcUrl } from '@/lib/solana-rpc-url'
 
 interface TransferMplCoreToEscrowArgs {
   connection: Connection
@@ -27,9 +28,7 @@ export async function transferMplCoreToEscrow({
     throw new Error('Wallet not ready for Mpl Core transfer')
   }
 
-  const endpoint =
-    // rpcEndpoint is available on recent web3.js; fall back to internal field if needed.
-    (connection as any).rpcEndpoint || (connection as any)._rpcEndpoint
+  const endpoint = resolveMetaplexClientRpcUrl(connection)
 
   // createUmi has multiple overloads; use any to avoid version-specific type errors.
    

@@ -111,6 +111,26 @@ export async function PATCH(
       return NextResponse.json(raffle)
     }
 
+    const listPatchKeys = Object.keys(body).filter(
+      (k) => k !== 'wallet_address' && (body as Record<string, unknown>)[k] !== undefined
+    )
+    const isListOnPlatformOnlyPatch =
+      listPatchKeys.length === 1 &&
+      (listPatchKeys[0] === 'list_on_platform' || listPatchKeys[0] === 'listOnPlatform')
+
+    if (isListOnPlatformOnlyPatch) {
+      const raw =
+        (body as Record<string, unknown>).list_on_platform !== undefined
+          ? (body as Record<string, unknown>).list_on_platform
+          : (body as Record<string, unknown>).listOnPlatform
+      const list_on_platform = !(raw === false || raw === 'false')
+      const raffle = await updateRaffle(raffleId, { list_on_platform })
+      if (!raffle) {
+        return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
+      }
+      return NextResponse.json(raffle)
+    }
+
     /**
      * Full admin: void an erroneous winner selection (DB only). Only when the NFT was never sent to the
      * winner and creator has not claimed funds escrow proceeds. Requires a new future end_time and live/ready_to_draw.

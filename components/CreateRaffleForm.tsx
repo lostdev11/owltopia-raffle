@@ -670,7 +670,12 @@ export function CreateRaffleForm() {
 
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
             let resolvedHolder: NftHolderInWallet | null = null
-            if (selectedNft?.tokenAccount) {
+            // Helius DAS sets tokenAccount === mint (asset id). That is not an SPL token account; skip
+            // or we can mis-resolve and never try compressed.
+            if (
+              selectedNft?.tokenAccount &&
+              selectedNft.tokenAccount !== selectedNft.mint
+            ) {
               try {
                 const selectedTokenAccount = new PublicKey(selectedNft.tokenAccount)
                 const selectedInfo = await connection.getParsedAccountInfo(selectedTokenAccount, 'processed')
