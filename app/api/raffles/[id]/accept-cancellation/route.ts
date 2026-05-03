@@ -82,16 +82,25 @@ export async function POST(
       is_active: false,
     })
 
-    /** NFT or partner SPL prize in escrow — return to creator automatically (same as manual return-prize-to-creator). */
+    /** NFT or partner SPL prize in escrow — return to creator automatically (same as return-prize-to-creator). */
     let prizeReturnAttempted = false
     let prizeReturnOk: boolean | undefined
     let prizeReturnSignature: string | undefined
     let prizeReturnError: string | undefined
 
-    const escrowReturnEligible =
+    const escrowReturnKind =
       raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)
+    const depositVerified = !!raffle.prize_deposited_at
+    const noWinnerTransfer = !(raffle.nft_transfer_transaction ?? '').trim()
+    const notYetReturned = !raffle.prize_returned_at
 
-    if (escrowReturnEligible) {
+    const shouldTryPrizeReturn =
+      escrowReturnKind &&
+      depositVerified &&
+      noWinnerTransfer &&
+      notYetReturned
+
+    if (shouldTryPrizeReturn) {
       prizeReturnAttempted = true
       const returnResult = isPartnerSplPrizeRaffle(raffle)
         ? await transferPartnerSplPrizeToCreator(id, 'cancelled')
@@ -115,7 +124,10 @@ export async function POST(
     if (prizeReturnAttempted && prizeReturnOk && prizeReturnSignature) {
       message += ` Prize returned to creator from escrow (TX: ${prizeReturnSignature}).`
     } else if (prizeReturnAttempted && prizeReturnError) {
-      message += ` Automatic prize return did not complete: ${prizeReturnError}. Use “Return prize to creator” in Owl Vision if the prize is still in escrow.`
+      message += ` Automatic prize return did not complete: ${prizeReturnError}. Use “Return prize to creator” or “Record manual prize return” in admin if needed.`
+    } else if (escrowReturnKind && !depositVerified) {
+      message +=
+        ' No verified escrow deposit was on file — automatic prize return was skipped (nothing to send from escrow).'
     }
 
     return NextResponse.json({

@@ -56,6 +56,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [returning, setReturning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [returnReason, setReturnReason] = useState<string>('cancelled')
+  const [manualReturnTx, setManualReturnTx] = useState('')
+  const [manualReturnReason, setManualReturnReason] = useState<string>('cancelled')
+  const [recordingManualReturn, setRecordingManualReturn] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [acceptCancelDialogOpen, setAcceptCancelDialogOpen] = useState(false)
   const [acceptingCancel, setAcceptingCancel] = useState(false)
@@ -203,6 +206,54 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
     !prizeReturnRecorded
+
+  const handleRecordManualPrizeReturn = async () => {
+    const sig = manualReturnTx.trim()
+    if (sig.length < 80) {
+      setMessage({
+        type: 'error',
+        text: 'Paste the full Solana transaction signature from the transfer back to the creator.',
+      })
+      return
+    }
+    setRecordingManualReturn(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/record-prize-return-to-creator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionSignature: sig,
+          reason: manualReturnReason,
+        }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text:
+            typeof data.transactionSignature === 'string'
+              ? `Recorded prize return. TX: ${data.transactionSignature}`
+              : (data.message as string) || 'Recorded manual prize return.',
+        })
+        setManualReturnTx('')
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to record prize return',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to record prize return',
+      })
+    } finally {
+      setRecordingManualReturn(false)
+    }
+  }
 
   const handleReturnNft = async () => {
     // No wallet signature needed — server signs with escrow keypair; only admin session required
@@ -1126,9 +1177,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           <CardHeader>
             <CardTitle>Admin actions</CardTitle>
             <CardDescription>
-              Return an escrowed prize (NFT or partner SPL) to the creator&apos;s wallet, then delete
-              the raffle if needed. Return the prize first so the creator gets it back before
-              deleting.
+              Return an escrowed prize (NFT or partner SPL) from the platform escrow to the creator&apos;s wallet,
+              or record a signature if you sent it manually. Accepting a creator cancellation also triggers an
+              automatic return when there is a verified deposit. Return or record before deleting the raffle.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1173,6 +1224,15 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       <DialogTitle>Accept cancellation</DialogTitle>
                       <DialogDescription>
                         This will mark the raffle as cancelled.
+                        {isEscrowPrizeRaffle && raffle.prize_deposited_at ? (
+                          <>
+                            {' '}
+                            For this escrow prize listing, the platform will attempt to send the NFT or partner
+                            token back to the creator&apos;s wallet immediately after cancellation (same path as
+                            &quot;Return prize to creator&quot;). If that fails, use manual return or{' '}
+                            <strong className="text-foreground">Record manual prize return</strong> below.
+                          </>
+                        ) : null}
                         {canAcceptCancel ? (
                           feeApplies ? (
                             <> The creator already paid the {feeSol} SOL post-start fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
@@ -1498,6 +1558,53 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            ) : null}
+
+            {canReturnEscrowedPrize ? (
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Record manual prize return</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    If you already sent the NFT or partner prize back to the creator from another wallet
+                    (treasury, multisig, thaw authority), paste the Solana transaction signature here so the
+                    raffle state matches on-chain custody.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manual-prize-return-reason">Reason (audit)</Label>
+                  <select
+                    id="manual-prize-return-reason"
+                    value={manualReturnReason}
+                    onChange={(e) => setManualReturnReason(e.target.value)}
+                    className="flex h-11 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm touch-manipulation"
+                  >
+                    {PRIZE_RETURN_REASONS.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manual-prize-return-tx">Transaction signature</Label>
+                  <Input
+                    id="manual-prize-return-tx"
+                    placeholder="Paste Solana signature"
+                    value={manualReturnTx}
+                    onChange={(e) => setManualReturnTx(e.target.value)}
+                    className="font-mono text-xs sm:text-sm touch-manipulation min-h-[44px]"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                  disabled={recordingManualReturn || !manualReturnTx.trim()}
+                  onClick={handleRecordManualPrizeReturn}
+                >
+                  {recordingManualReturn ? 'Recording…' : 'Record manual prize return'}
+                </Button>
+              </div>
             ) : null}
 
             <div className="pt-2">

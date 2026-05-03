@@ -1076,6 +1076,72 @@ async function persistPrizeReturnToCreator(
 }
 
 /**
+ * Full admin: record an on-chain prize return that was sent manually (e.g. from treasury or another wallet)
+ * when automated escrow signing is unavailable. Same DB fields as {@link transferNftPrizeToCreator}.
+ */
+export async function recordManualPrizeReturnToCreator(
+  raffleId: string,
+  reason: PrizeReturnReason,
+  signature: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const sig = signature.trim()
+  if (sig.length < 80 || sig.length > 120) {
+    return { ok: false, error: 'Transaction signature must look like a Solana signature (length).' }
+  }
+
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+
+  const escrowPrizeKind =
+    raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)
+  if (!escrowPrizeKind) {
+    return {
+      ok: false,
+      error: 'This raffle does not use an NFT or partner SPL escrow prize.',
+    }
+  }
+  if (!raffle.prize_deposited_at) {
+    return {
+      ok: false,
+      error: 'No verified prize deposit on this raffle; nothing to reconcile.',
+    }
+  }
+  if ((raffle.nft_transfer_transaction ?? '').trim()) {
+    return {
+      ok: false,
+      error: 'Prize was already sent to a winner; cannot record return to creator.',
+    }
+  }
+
+  const existingTx = (raffle.prize_return_tx ?? '').trim()
+  if (raffle.prize_returned_at && existingTx) {
+    if (existingTx === sig) {
+      return { ok: true, signature: existingTx }
+    }
+    return {
+      ok: false,
+      error: `Prize return already recorded with a different transaction (${existingTx.slice(0, 12)}…).`,
+    }
+  }
+
+  // Rare: timestamp set without tx — fill in signature / reason.
+  if (raffle.prize_returned_at && !existingTx) {
+    await updateRaffle(raffleId, {
+      prize_return_tx: sig,
+      prize_return_reason: reason,
+      nft_claim_locked_at: null,
+      nft_claim_locked_wallet: null,
+    })
+    return { ok: true, signature: sig }
+  }
+
+  await persistPrizeReturnToCreator(raffleId, reason, sig)
+  return { ok: true, signature: sig }
+}
+
+/**
  * How the prize is held in escrow for return routing (matches checkEscrowHoldsNft probe order for legacy rows).
  */
 async function detectPrizeReturnKind(

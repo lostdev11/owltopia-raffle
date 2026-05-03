@@ -1269,7 +1269,7 @@ export function RaffleCard({
                   Tickets purchased successfully!
                 </div>
               )}
-              {isAdmin && cartAddedHint && (
+              {cartAddedHint && (
                 <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/40 text-blue-200 text-xs flex items-center gap-2">
                   <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
                   Added to cart — open cart in the header to checkout multiple raffles.
@@ -1284,22 +1284,20 @@ export function RaffleCard({
                 >
                   Cancel
                 </Button>
-                {isAdmin ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleAddToCart}
-                    disabled={
-                      (availableTickets !== null && availableTickets <= 0) ||
-                      !connected ||
-                      isProcessing
-                    }
-                    className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm gap-1.5"
-                  >
-                    <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
-                    Cart
-                  </Button>
-                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleAddToCart}
+                  disabled={
+                    (availableTickets !== null && availableTickets <= 0) ||
+                    !connected ||
+                    isProcessing
+                  }
+                  className="flex-1 touch-manipulation min-h-[44px] text-base sm:text-sm gap-1.5"
+                >
+                  <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+                  Cart
+                </Button>
                 <Button
                   onClick={handlePurchase}
                   disabled={availableTickets !== null && availableTickets <= 0 || !connected || isProcessing}

@@ -1,52 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Loader2, ShoppingCart } from 'lucide-react'
+import { ArrowLeft, ShoppingCart } from 'lucide-react'
 import { CartCheckoutPanel } from '@/components/cart/CartCheckoutPanel'
 import { CartBrowseRaffles } from '@/components/cart/CartBrowseRaffles'
 import { useCart } from '@/components/cart/CartProvider'
-import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
-import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 export function CartPageClient() {
-  const { publicKey, connected } = useWallet()
-  const visibilityTick = useVisibilityTick()
-  const wallet = publicKey?.toBase58() ?? ''
-  const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(() =>
-    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
-  )
-
-  useEffect(() => {
-    if (!connected || !publicKey) {
-      setViewerIsAdmin(false)
-      return
-    }
-    const addr = publicKey.toBase58()
-    const cached = getCachedAdmin(addr)
-    if (cached !== null) {
-      setViewerIsAdmin(cached)
-      return
-    }
-    let cancelled = false
-    fetch(`/api/admin/check?wallet=${addr}`)
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
-      .then((data) => {
-        if (cancelled) return
-        const admin = data?.isAdmin === true
-        const role: AdminRole | null = admin && data?.role === 'full' ? 'full' : null
-        setCachedAdmin(addr, admin, role)
-        setViewerIsAdmin(admin)
-      })
-      .catch(() => {
-        if (!cancelled) setViewerIsAdmin(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [connected, publicKey, visibilityTick])
-
+  const { connected } = useWallet()
   const { lines, ticketCount } = useCart()
   const currencyLabel = lines[0]?.snapshot.currency ?? ''
   const intro =
@@ -70,36 +32,7 @@ export function CartPageClient() {
             Cart
           </h1>
           <p className="mt-3 text-sm text-muted-foreground">
-            Connect your wallet to open the cart. This checkout flow is temporarily limited to admins while we finish testing.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  if (viewerIsAdmin === null) {
-    return (
-      <div className="container mx-auto px-3 sm:px-4 py-16 flex flex-col items-center gap-3 text-muted-foreground">
-        <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
-        <p className="text-sm">Checking access…</p>
-      </div>
-    )
-  }
-
-  if (!viewerIsAdmin) {
-    return (
-      <div className="container mx-auto px-3 sm:px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-w-6xl">
-        <Link
-          href="/raffles"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground min-h-[44px] py-2 touch-manipulation"
-        >
-          <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-          All raffles
-        </Link>
-        <div className="mt-8 rounded-xl border border-border bg-card/50 p-6 max-w-lg">
-          <h1 className="text-xl font-semibold">Cart unavailable</h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            The multi-raffle cart is temporarily visible only to site admins while we verify batch checkout. You can still enter each raffle from its page with Buy tickets.
+            Connect your wallet to add tickets and check out. You can buy tickets on multiple raffles in one payment when they use the same currency.
           </p>
         </div>
       </div>

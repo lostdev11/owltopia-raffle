@@ -2748,13 +2748,13 @@ export function RaffleDetailClient({
                         <div className="rounded-lg border border-sky-500/45 bg-sky-500/[0.12] p-4 space-y-2">
                           <p className="text-sm font-semibold text-sky-950 dark:text-sky-100">
                             {depositEscrowLoading
-                              ? 'Transaction submitted — checking escrow…'
-                              : 'On-chain transaction (proof)'}
+                              ? 'Deposit submitted — confirming escrow…'
+                              : 'Deposit to escrow succeeded on-chain'}
                           </p>
                           <p className="text-xs text-sky-950/85 dark:text-sky-50/85 leading-relaxed">
                             {depositEscrowLoading
-                              ? 'Your wallet already signed. Open Solscan to confirm the transfer on-chain while we finish the server check.'
-                              : 'Use Solscan to see that the transfer executed. If our app still shows a warning, wait a few seconds for RPC to catch up, then tap Verify deposit again.'}
+                              ? 'Your wallet already signed. We are confirming custody with the server; if this stalls, wait a few seconds and tap Verify deposit.'
+                              : `Your ${isPartnerSplPrizeRaffle(raffle) ? 'prize tokens reached' : 'NFT reached'} escrow in that transaction. If this card still shows, tap Verify deposit — RPC can lag briefly.`}
                           </p>
                           <a
                             href={solscanTransactionUrl(depositLastTxSignature)}
@@ -2819,11 +2819,11 @@ export function RaffleDetailClient({
                       />
                       <div className="space-y-2 min-w-0">
                         <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                          Escrow confirmed — raffle updating
+                          Deposit successful — prize is in escrow
                         </p>
                         <p className="text-sm text-emerald-900/90 dark:text-emerald-50/90 leading-relaxed">
-                          The prize is verified in escrow. This page should refresh momentarily; if it does not, reload
-                          once. Your wallet UI can lag behind the chain — that does not mean the NFT is still yours.
+                          We verified custody on-chain. This page should refresh shortly; reload once if it does not. Your
+                          wallet UI may lag behind the chain — that does not mean the prize is still in your wallet.
                         </p>
                         {depositLastTxSignature && (
                           <a
@@ -4152,7 +4152,7 @@ export function RaffleDetailClient({
                 </p>
               </div>
             )}
-            {Boolean(isAdmin) && cartAddedHint && (
+            {cartAddedHint && (
               <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/40 text-blue-200 text-sm flex items-start gap-2">
                 <ShoppingCart className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
                 <span>Added to cart. Open the cart in the header to pay for multiple raffles in one session.</span>
@@ -4169,20 +4169,18 @@ export function RaffleDetailClient({
             >
               Cancel
             </Button>
-            {Boolean(isAdmin) ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleAddToCart}
-                disabled={
-                  (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
-                }
-                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
-              >
-                <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
-                Add to cart
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleAddToCart}
+              disabled={
+                (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
+              }
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
+            >
+              <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+              Add to cart
+            </Button>
             <Button
               onClick={handlePurchase}
               disabled={
