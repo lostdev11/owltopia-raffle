@@ -135,6 +135,12 @@ export function Gen2PresalePageClient() {
                   <ChevronRight className="ml-1 h-5 w-5" />
                 </Link>
                 <Link
+                  href="#gen2-about"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#1F6F54] px-6 font-semibold text-[#A9CBB9] touch-manipulation hover:border-[#00E58B]/40 hover:text-[#EAFBF4]"
+                >
+                  About Gen2
+                </Link>
+                <Link
                   href="#gen2-how"
                   className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#1F6F54] px-6 font-semibold text-[#A9CBB9] touch-manipulation hover:border-[#00E58B]/40 hover:text-[#EAFBF4]"
                 >
@@ -183,6 +189,79 @@ export function Gen2PresalePageClient() {
           )}
           <Gen2ElectricBorder>
             <Gen2ProgressCard stats={stats} loading={statsLoading} className="border-0 shadow-none ring-0" />
+          </Gen2ElectricBorder>
+        </section>
+
+        {/* About Gen2 — supply, mint schedule, tier pricing, utilities */}
+        <section id="gen2-about" className="mt-14 scroll-mt-28 animate-page-enter">
+          <h2 className="font-display text-3xl text-[#EAFBF4]">About Gen2</h2>
+          <Gen2ElectricBorder className="mt-6">
+            <div className="rounded-2xl border border-[#00E58B]/25 bg-[#151D24]/95 p-6 shadow-[inset_0_0_40px_rgba(0,229,139,0.06)] md:p-8">
+              <dl className="grid gap-5 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Supply</dt>
+                  <dd className="mt-1 font-mono text-xl font-bold tabular-nums text-[#EAFBF4]">2,000</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Mint</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">June 27, 2026</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Presale</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#00FF9C]">
+                    20 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Whitelist</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">
+                    30 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Public</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">
+                    40 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+              </dl>
+
+              <div
+                className="my-8 h-px w-full bg-gradient-to-r from-transparent via-[#1F6F54]/80 to-transparent"
+                role="separator"
+                aria-hidden
+              />
+
+              <h3 className="font-display text-xl text-[#EAFBF4]">Gen2 utilities</h3>
+              <ul className="mt-4 space-y-3 text-sm leading-relaxed text-[#A9CBB9] sm:text-base">
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>100% secondary sales revenue share</span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>
+                    20% launchpad revenue share (designed to let projects create and run their own mints)
+                  </span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>20% staking platform revenue share (infrastructure for projects on Solana)</span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>50% game revenue share</span>
+                </li>
+              </ul>
+            </div>
           </Gen2ElectricBorder>
         </section>
 
