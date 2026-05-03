@@ -2272,6 +2272,10 @@ export function RaffleDetailClient({
     fireGreenConfetti()
   }, [isWinnerDetail, showWinner, raffle.id, raffle.winner_wallet])
   const adminCapable = (isAdmin === true) || adminSessionActive === true
+  /** Browse-list toggle: do not use session alone while a non-admin wallet is connected (avoids showing admin UI to creators on a browser with an admin SIWS cookie). */
+  const showPublicBrowseListAdminControl =
+    (connected && publicKey && isAdmin === true) ||
+    (!connected && adminSessionActive === true)
 
   // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
   const showNftTransferButton = 
@@ -3358,13 +3362,14 @@ export function RaffleDetailClient({
             initialMine={initialSentiment}
           />
 
-          {adminCapable && (
+          {showPublicBrowseListAdminControl && (
             <div className={`${classes.headerPadding} pt-0 pb-3 border-b border-border/60`}>
               <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                   <p className="text-sm font-medium text-foreground">Show on public /raffles list</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    When off, link-only NFT raffles are hidden from the browse grid. Uses your admin sign-in session.
+                    When off, link-only NFT raffles are hidden from the browse grid. Admins only — connect an admin
+                    wallet, or disconnect to use admin sign-in alone.
                   </p>
                   {browseListError && (
                     <p className="text-xs text-destructive pt-1">{browseListError}</p>
