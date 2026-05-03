@@ -26,7 +26,8 @@ export function getSolanaRpcUrl(): string {
 }
 
 export function isDevnetMintEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_GEN2_USE_DEVNET_MINT === 'true'
+  const raw = process.env.NEXT_PUBLIC_GEN2_USE_DEVNET_MINT?.trim().toLowerCase()
+  return raw === 'true' || raw === '1'
 }
 
 function envMainnetCm(): string {

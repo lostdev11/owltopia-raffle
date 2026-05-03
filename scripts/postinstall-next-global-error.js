@@ -2,7 +2,10 @@
 /**
  * Postinstall: apply Next.js patches to avoid "Cannot read properties of null (reading 'useContext')".
  * 1. Skip prerendering /_global-error (node_modules/next/dist/build/index.js).
- * 2. Disable segment explorer on server (node_modules/next/dist/server/app-render/entry-base.js) so GET / and other routes don't 500 in dev.
+ *
+ * Do not patch entry-base.js / SegmentViewNode: disabling it leaves a ()=>null stub in dev and strips the
+ * entire layout tree (blank page + NEXT_MISSING_ROOT_TAGS). Replacing it with ad-hoc passthrough components
+ * can also break RSC streaming. Use stock Next devtools SegmentViewNode.
  * Safe to run multiple times (idempotent).
  */
 const fs = require('fs');
@@ -15,16 +18,6 @@ const nextBuildPath = path.join(
   'dist',
   'build',
   'index.js'
-);
-
-const entryBasePath = path.join(
-  process.cwd(),
-  'node_modules',
-  'next',
-  'dist',
-  'server',
-  'app-render',
-  'entry-base.js'
 );
 
 const FIX1 = {
@@ -63,28 +56,5 @@ if (!content.includes('UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY) return;')) {
   }
   if (changed) {
     fs.writeFileSync(nextBuildPath, content);
-  }
-}
-
-// Patch 2: Disable segment explorer on server (avoids 500 in dev from useContext null)
-const SEGMENT_EXPLORER_LOAD = `if (process.env.NODE_ENV === 'development') {
-    const mod = require('../../next-devtools/userspace/app/segment-explorer-node');
-    SegmentViewNode = mod.SegmentViewNode;
-    SegmentViewStateNode = mod.SegmentViewStateNode;
-}`;
-const SEGMENT_EXPLORER_DISABLED = `// Disabled: segment explorer runs during SSR where useContext(SegmentStateContext) is null → 500
-// if (process.env.NODE_ENV === 'development') {
-//     const mod = require('../../next-devtools/userspace/app/segment-explorer-node');
-//     SegmentViewNode = mod.SegmentViewNode;
-//     SegmentViewStateNode = mod.SegmentViewStateNode;
-// }`;
-
-if (fs.existsSync(entryBasePath)) {
-  let entryContent = fs.readFileSync(entryBasePath, 'utf8');
-  if (!entryContent.includes('// Disabled: segment explorer')) {
-    if (entryContent.includes(SEGMENT_EXPLORER_LOAD)) {
-      entryContent = entryContent.replace(SEGMENT_EXPLORER_LOAD, SEGMENT_EXPLORER_DISABLED);
-      fs.writeFileSync(entryBasePath, entryContent);
-    }
   }
 }
