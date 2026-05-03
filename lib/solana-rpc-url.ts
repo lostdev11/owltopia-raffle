@@ -8,7 +8,7 @@
  * - **Vercel Production:** uses `NEXT_PUBLIC_SOLANA_RPC_URL` / `SOLANA_RPC_URL` only.
  */
 
-function sanitizeRpcUrl(rpcUrl: string): string {
+export function sanitizeRpcUrl(rpcUrl: string): string {
   let u = rpcUrl.trim()
   if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
     if (!u.includes('://')) u = `https://${u}`
