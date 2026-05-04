@@ -22,6 +22,7 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import { isOwlEnabled } from '@/lib/tokens'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -444,8 +445,8 @@ export async function PATCH(
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
     const isNft = existingRaffle.prize_type === 'nft'
 
-    // Ticket currency: SOL or USDC only
-    const validCurrencies = ['USDC', 'SOL']
+    // Ticket currency: SOL, USDC; OWL when mint is configured
+    const validCurrencies: string[] = isOwlEnabled() ? ['USDC', 'SOL', 'OWL'] : ['USDC', 'SOL']
     const requestedCurrency =
       typeof body.currency === 'string' && body.currency.trim()
         ? body.currency.trim().toUpperCase()

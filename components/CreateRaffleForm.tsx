@@ -73,6 +73,7 @@ import {
   normalizeRaffleTicketCurrency,
   previewCreateRaffleThreshold,
 } from '@/lib/raffle-profit'
+import { isOwlEnabled } from '@/lib/tokens'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -1562,6 +1563,7 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
+                {isOwlEnabled() && <option value="OWL">OWL</option>}
               </select>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

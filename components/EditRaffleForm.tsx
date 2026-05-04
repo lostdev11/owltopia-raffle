@@ -35,6 +35,17 @@ import {
   ADMIN_HARD_DELETE_REASON_MAX_CHARS,
   ADMIN_HARD_DELETE_REASON_MIN_CHARS,
 } from '@/lib/raffles/admin-hard-delete'
+import { isOwlEnabled } from '@/lib/tokens'
+
+function editFormTicketCurrencyDefault(
+  raffleCurrency: string | null | undefined,
+  owlUi: boolean
+): 'SOL' | 'USDC' | 'OWL' {
+  const u = String(raffleCurrency ?? '').trim().toUpperCase()
+  if (u === 'USDC') return 'USDC'
+  if (u === 'OWL' && owlUi) return 'OWL'
+  return 'SOL'
+}
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -1255,19 +1266,21 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="currency_nft_live">Currency *</Label>
-                        {raffle.currency === 'OWL' && (
+                        {raffle.currency === 'OWL' && !isOwlEnabled() && (
                           <p className="text-xs text-amber-600 dark:text-amber-500">
-                            This listing used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                            OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                            selling tickets.
                           </p>
                         )}
                         <select
                           id="currency_nft_live"
                           name="currency"
-                          defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                          defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                           className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         >
                           <option value="SOL">SOL</option>
                           <option value="USDC">USDC</option>
+                          {isOwlEnabled() && <option value="OWL">OWL</option>}
                         </select>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1374,20 +1387,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
-                      {raffle.currency === 'OWL' && (
+                      {raffle.currency === 'OWL' && !isOwlEnabled() && (
                         <p className="text-xs text-amber-600 dark:text-amber-500">
-                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                          OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                          selling tickets.
                         </p>
                       )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                        defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
+                        {isOwlEnabled() && <option value="OWL">OWL</option>}
                       </select>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1477,20 +1492,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
-                      {raffle.currency === 'OWL' && (
+                      {raffle.currency === 'OWL' && !isOwlEnabled() && (
                         <p className="text-xs text-amber-600 dark:text-amber-500">
-                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                          OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                          selling tickets.
                         </p>
                       )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                        defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
+                        {isOwlEnabled() && <option value="OWL">OWL</option>}
                       </select>
                     </div>
                   </div>

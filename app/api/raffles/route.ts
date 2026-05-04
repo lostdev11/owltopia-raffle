@@ -253,8 +253,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ticket currency: SOL or USDC only
-    const validCurrencies = ['USDC', 'SOL']
+    // Ticket currency: SOL, USDC; OWL when mint is configured
+    const validCurrencies: string[] = isOwlEnabled() ? ['USDC', 'SOL', 'OWL'] : ['USDC', 'SOL']
     const requestedCurrency =
       typeof body.currency === 'string' && body.currency.trim()
         ? body.currency.trim().toUpperCase()
