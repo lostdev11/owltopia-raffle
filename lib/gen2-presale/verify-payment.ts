@@ -112,6 +112,55 @@ export type ChainAlignedPayment =
     }
   | { ok: false; reason: 'failed' | 'wrong_destinations' | 'split_mismatch' | 'bad_quantity' | 'unreasonable_unit' }
 
+/**
+ * Read buyer → founder SOL transfers and verify the configured split, without assuming spot count.
+ * Used to infer how many spots were paid for from the total lamports.
+ */
+export type ParseFounderPaymentTotalResult =
+  | { ok: true; total: bigint; founderALamports: bigint; founderBLamports: bigint }
+  | { ok: false; reason: 'failed' | 'wrong_destinations' | 'split_mismatch' }
+
+export function parseGen2PresaleFounderPaymentTotals(params: {
+  parsed: ParsedTransactionWithMeta
+  buyerWallet: string
+  founderA: string
+  founderB: string
+  pctA: number
+  pctB: number
+}): ParseFounderPaymentTotalResult {
+  const { parsed, buyerWallet, founderA, founderB, pctA, pctB } = params
+  if (parsed.meta?.err) {
+    return { ok: false, reason: 'failed' }
+  }
+  const buyerNorm = normalizeSolanaWalletAddress(buyerWallet)
+  const fa = normalizeSolanaWalletAddress(founderA)
+  const fb = normalizeSolanaWalletAddress(founderB)
+  if (!buyerNorm || !fa || !fb) {
+    return { ok: false, reason: 'wrong_destinations' }
+  }
+
+  const map = collectTransfersFromBuyer(parsed, buyerNorm)
+  const gotA = map.get(fa) ?? 0n
+  const gotB = map.get(fb) ?? 0n
+  const total = gotA + gotB
+  if (total <= 0n) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+
+  const pA = BigInt(pctA)
+  const pB = BigInt(pctB)
+  if (pA + pB !== 100n) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+  const expectA = (total * pA) / 100n
+  const expectB = total - expectA
+  if (gotA !== expectA || gotB !== expectB) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+
+  return { ok: true, total, founderALamports: gotA, founderBLamports: gotB }
+}
+
 export function verifyGen2PresalePaymentChainAligned(params: {
   parsed: ParsedTransactionWithMeta
   buyerWallet: string

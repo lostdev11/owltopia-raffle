@@ -1,4 +1,4 @@
-import { Connection, type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
+import { Connection, LAMPORTS_PER_SOL, type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
 
 import {
   getGen2PresalePublicOffer,
@@ -6,12 +6,16 @@ import {
   type Gen2PresaleEnvConfig,
 } from '@/lib/gen2-presale/config'
 import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
-import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
+import {
+  GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE,
+  GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+} from '@/lib/gen2-presale/max-per-purchase'
 import { computePurchaseLamports, type Gen2PriceBreakdown } from '@/lib/gen2-presale/pricing'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
 import {
   feePayerMatchesBuyer,
   fetchParsedTransactionConfirmed,
+  parseGen2PresaleFounderPaymentTotals,
   verifyGen2PresalePaymentChainAligned,
   verifyGen2PresalePayments,
 } from '@/lib/gen2-presale/verify-payment'
@@ -20,6 +24,34 @@ import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/ty
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+
+/** Matches {@link verifyGen2PresalePaymentChainAligned} per-spot SOL bounds (unreasonable_unit). */
+const CHAIN_INFERENCE_MIN_UNIT_LAMPORTS = BigInt(Math.ceil(0.0005 * LAMPORTS_PER_SOL))
+const CHAIN_INFERENCE_MAX_UNIT_LAMPORTS = BigInt(Math.floor(100 * LAMPORTS_PER_SOL))
+
+/**
+ * Integer spot counts compatible with `total` lamports to founders under chain-aligned rules.
+ * Results are clamped to {@link GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE}.
+ */
+export function computeGen2PresaleQuantityBoundsFromTotal(
+  total: bigint
+): { minQ: number; maxQ: number } | null {
+  if (total <= 0n || CHAIN_INFERENCE_MIN_UNIT_LAMPORTS <= 0n) return null
+
+  let maxQ = total / CHAIN_INFERENCE_MIN_UNIT_LAMPORTS
+  if (maxQ < 1n) return null
+
+  let minQ = (total + CHAIN_INFERENCE_MAX_UNIT_LAMPORTS - 1n) / CHAIN_INFERENCE_MAX_UNIT_LAMPORTS
+  if (minQ < 1n) minQ = 1n
+
+  if (maxQ > BigInt(GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE)) {
+    maxQ = BigInt(GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE)
+  }
+
+  if (minQ > maxQ) return null
+
+  return { minQ: Number(minQ), maxQ: Number(maxQ) }
+}
 
 export type Gen2ConfirmOkInserted = {
   ok: true
@@ -107,7 +139,8 @@ export function getVerifiedBreakdownForQuantity(
 }
 
 /**
- * Resolve spot count from a parsed payment tx (max..1), same algorithm as backfill quantity search.
+ * Resolve spot count from a parsed payment tx by scanning quantities compatible with total lamports
+ * paid to founders (same rules as chain backfill).
  */
 export async function resolveGen2PresaleQuantityFromParsedTx(params: {
   buyerWallet: string
@@ -145,8 +178,35 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
     }
   }
 
-  const max = GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE
-  for (let q = max; q >= 1; q--) {
+  const split = parseGen2PresaleFounderPaymentTotals({
+    parsed: params.parsedTx,
+    buyerWallet: buyerNorm,
+    founderA: cfg.founderA.toBase58(),
+    founderB: cfg.founderB.toBase58(),
+    pctA: cfg.founderAPercent,
+    pctB: cfg.founderBPercent,
+  })
+  if (!split.ok) {
+    return {
+      ok: false,
+      code: 'payment_mismatch',
+      message:
+        split.reason === 'split_mismatch'
+          ? 'Founder payment split does not match expected presale routing'
+          : 'Could not read presale payment transfers',
+    }
+  }
+
+  const bounds = computeGen2PresaleQuantityBoundsFromTotal(split.total)
+  if (!bounds) {
+    return {
+      ok: false,
+      code: 'payment_mismatch',
+      message: 'Could not infer spot count from payment amount',
+    }
+  }
+
+  for (let q = bounds.maxQ; q >= bounds.minQ; q--) {
     const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, params.parsedTx, q)
     if (breakdown) {
       return { ok: true, buyerWallet: buyerNorm, quantity: q, breakdown }
@@ -156,7 +216,7 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
   return {
     ok: false,
     code: 'payment_mismatch',
-    message: 'Could not match transaction to any spot count (1–' + max + ')',
+    message: `Could not match transaction to any spot count (${bounds.minQ}–${bounds.maxQ} from paid amount)`,
   }
 }
 
@@ -170,6 +230,11 @@ export async function executeGen2PresaleConfirm(params: {
   solUsdPriceUsed?: number
   /** When provided, skips re-fetching the transaction (backfill / quantity search). */
   parsedTx?: ParsedTransactionWithMeta | null
+  /**
+   * Public confirm routes default to {@link GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE}.
+   * Chain backfill may record larger quantities inferred from lamports.
+   */
+  quantityCap?: number
 }): Promise<Gen2ConfirmResult> {
   const buyerNorm = normalizeSolanaWalletAddress(params.buyerWallet)
   if (!buyerNorm) {
@@ -177,16 +242,12 @@ export async function executeGen2PresaleConfirm(params: {
   }
 
   const qty = params.quantity
-  if (
-    !Number.isFinite(qty) ||
-    !Number.isInteger(qty) ||
-    qty < 1 ||
-    qty > GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE
-  ) {
+  const quantityCap = params.quantityCap ?? GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE
+  if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1 || qty > quantityCap) {
     return {
       ok: false,
       httpStatus: 400,
-      message: `quantity must be an integer from 1 to ${GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE}`,
+      message: `quantity must be an integer from 1 to ${quantityCap}`,
     }
   }
 
@@ -321,20 +382,24 @@ export async function executeGen2PresaleConfirm(params: {
 }
 
 /**
- * Try quantities max..1 until confirm succeeds (for chain backfill when qty unknown).
+ * Try candidate quantities (derived from total SOL to founders) until confirm succeeds.
  *
- * Must be descending: chain-aligned verification can satisfy q=1 using the *total* lamports as a
- * single "unit", which incorrectly matches multi-spot payments if we try q=1 first.
+ * Search is descending from the largest plausible q: chain-aligned verification can satisfy q=1
+ * using the *total* lamports as a single "unit", which would incorrectly match multi-spot payments
+ * if we tried q=1 first.
  */
 export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
   buyerWallet: string
   txSignature: string
+  /** Optional upper bound on inferred quantity (testing / safety). */
   maxQty?: number
   parsedTx?: ParsedTransactionWithMeta | null
+  /** Defaults to {@link GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE} for DB writes. */
+  quantityCap?: number
 }): Promise<(Gen2ConfirmResult & { quantityTried: number[] }) | (Gen2ConfirmFail & { quantityTried: number[] })> {
-  const max = Math.min(params.maxQty ?? GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE, GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE)
   const tried: number[] = []
   let lastFail: Gen2ConfirmFail | null = null
+  const quantityCap = params.quantityCap ?? GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE
 
   const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
   const parsedOnce =
@@ -372,7 +437,54 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
     }
   }
 
-  for (let q = max; q >= 1; q--) {
+  const split = parseGen2PresaleFounderPaymentTotals({
+    parsed: parsedOnce,
+    buyerWallet: buyerNormEarly,
+    founderA: cfg.founderA.toBase58(),
+    founderB: cfg.founderB.toBase58(),
+    pctA: cfg.founderAPercent,
+    pctB: cfg.founderBPercent,
+  })
+  if (!split.ok) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      code: 'payment_mismatch',
+      message:
+        split.reason === 'split_mismatch'
+          ? 'Founder payment split does not match expected presale routing'
+          : 'Could not read presale payment transfers',
+      quantityTried: [],
+    }
+  }
+
+  const boundsRaw = computeGen2PresaleQuantityBoundsFromTotal(split.total)
+  if (!boundsRaw) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      code: 'payment_mismatch',
+      message: 'Could not infer spot count from payment amount',
+      quantityTried: [],
+    }
+  }
+
+  let maxQ = Math.min(boundsRaw.maxQ, quantityCap)
+  if (params.maxQty != null) {
+    maxQ = Math.min(maxQ, params.maxQty)
+  }
+  const minQ = boundsRaw.minQ
+  if (minQ > maxQ) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      code: 'payment_mismatch',
+      message: 'Could not infer spot count from payment amount',
+      quantityTried: [],
+    }
+  }
+
+  for (let q = maxQ; q >= minQ; q--) {
     tried.push(q)
     const preview = getVerifiedBreakdownForQuantity(cfg, buyerNormEarly, parsedOnce, q)
     if (!preview) {
@@ -389,6 +501,7 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
       quantity: q,
       txSignature: params.txSignature,
       parsedTx: parsedOnce,
+      quantityCap,
     })
     if (r.ok) {
       return { ...r, quantityTried: tried }
@@ -410,7 +523,7 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
       ok: false,
       httpStatus: 400,
       code: 'payment_mismatch',
-      message: 'Could not match transaction to any spot count (1–' + max + ')',
+      message: `Could not match transaction to any spot count (${minQ}–${maxQ} from paid amount)`,
     }),
     quantityTried: tried,
   }
