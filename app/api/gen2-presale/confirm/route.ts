@@ -1,21 +1,9 @@
-import { Connection, PublicKey } from '@solana/web3.js'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { getGen2PresaleServerConfig } from '@/lib/gen2-presale/config'
-import { getBalanceByWallet } from '@/lib/gen2-presale/db'
-import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
-import { computePurchaseLamports } from '@/lib/gen2-presale/pricing'
-import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
-import {
-  feePayerMatchesBuyer,
-  fetchParsedTransactionConfirmed,
-  verifyGen2PresalePayments,
-} from '@/lib/gen2-presale/verify-payment'
-import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { executeGen2PresaleConfirm } from '@/lib/gen2-presale/confirm-core'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
-import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,93 +56,40 @@ export async function POST(request: NextRequest) {
       if (Number.isFinite(n) && n > 0) solUsdOverride = n
     }
 
-    let cfg
-    try {
-      cfg = await getGen2PresaleServerConfig(solUsdOverride != null ? { solUsdPrice: solUsdOverride } : undefined)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Server configuration error'
-      return NextResponse.json({ error: msg }, { status: 500 })
-    }
-
-    const breakdown = computePurchaseLamports(cfg, qty)
-    const buyerPk = new PublicKey(buyerNorm)
-
-    const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
-    const parsed = await fetchParsedTransactionConfirmed(connection, txSignature)
-    if (!parsed) {
-      return NextResponse.json(
-        { error: 'Transaction not found or not confirmed yet', code: 'tx_not_found' },
-        { status: 404 }
-      )
-    }
-
-    if (!feePayerMatchesBuyer(parsed, buyerPk)) {
-      return NextResponse.json({ error: 'Transaction fee payer does not match wallet', code: 'wrong_signer' }, { status: 400 })
-    }
-
-    const v = verifyGen2PresalePayments({
-      parsed,
+    const result = await executeGen2PresaleConfirm({
       buyerWallet: buyerNorm,
-      founderA: cfg.founderA.toBase58(),
-      founderB: cfg.founderB.toBase58(),
-      expectA: breakdown.founderALamports,
-      expectB: breakdown.founderBLamports,
+      quantity: qty,
+      txSignature,
+      solUsdPriceUsed: solUsdOverride,
     })
-    if (!v.ok) {
-      const code =
-        v.reason === 'failed'
-          ? 'tx_failed'
-          : v.reason === 'not_found'
-            ? 'tx_not_found'
-            : 'payment_mismatch'
-      const status = v.reason === 'failed' ? 400 : 400
+
+    if (!result.ok) {
       return NextResponse.json(
-        { error: 'Could not verify founder payments in this transaction', code },
-        { status }
+        { error: result.message, code: result.code },
+        { status: result.httpStatus }
       )
     }
 
-    const db = getSupabaseAdmin()
-    const { data: rpcResult, error: rpcError } = await db.rpc('confirm_gen2_presale_purchase', {
-      p_wallet: buyerNorm,
-      p_quantity: qty,
-      p_unit_price_usdc: cfg.priceUsdc,
-      p_sol_usd_price: cfg.solUsdPrice,
-      p_total_lamports: bigintToRpcParam(breakdown.totalLamports),
-      p_founder_a_lamports: bigintToRpcParam(breakdown.founderALamports),
-      p_founder_b_lamports: bigintToRpcParam(breakdown.founderBLamports),
-      p_tx_signature: txSignature,
-      p_presale_supply: cfg.presaleSupply,
-    })
-
-    if (rpcError) {
-      console.error('confirm_gen2_presale_purchase RPC:', rpcError.message)
-      return NextResponse.json({ error: 'Database error', code: 'db_error' }, { status: 500 })
+    if (!result.inserted && result.reason === 'duplicate_tx') {
+      return NextResponse.json(
+        {
+          error: 'This transaction was already recorded',
+          code: 'duplicate_tx',
+          txSignature: result.txSignature,
+          explorerUrl: result.explorerUrl,
+          balance: result.balance,
+          stats: result.stats,
+        },
+        { status: 409 }
+      )
     }
-
-    const result = rpcResult as { ok?: boolean; error?: string } | null
-    if (result?.ok === false) {
-      if (result.error === 'duplicate_tx') {
-        return NextResponse.json({ error: 'This transaction was already recorded', code: 'duplicate_tx' }, { status: 409 })
-      }
-      if (result.error === 'sold_out') {
-        return NextResponse.json({ error: 'Presale sold out', code: 'sold_out' }, { status: 409 })
-      }
-    }
-
-    const balance = await getBalanceByWallet(buyerNorm)
 
     return NextResponse.json({
       ok: true,
-      txSignature: txSignature,
-      explorerUrl: gen2PresaleExplorerTxUrl(txSignature),
-      balance: balance ?? {
-        wallet: buyerNorm,
-        purchased_mints: qty,
-        gifted_mints: 0,
-        used_mints: 0,
-        available_mints: qty,
-      },
+      txSignature: result.txSignature,
+      explorerUrl: result.explorerUrl,
+      balance: result.balance,
+      stats: result.stats,
     })
   } catch (error) {
     console.error('gen2-presale confirm:', error)

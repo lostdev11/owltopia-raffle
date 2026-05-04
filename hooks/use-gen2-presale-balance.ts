@@ -33,9 +33,15 @@ export function useGen2PresaleBalance(wallet: string | null) {
     }
   }, [wallet])
 
+  /** Set balance from POST /confirm response so UI updates immediately after recording. */
+  const applySnapshot = useCallback((next: Gen2PresaleBalance) => {
+    setBalance(next)
+    setError(null)
+  }, [])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  return { balance, error, loading, refresh }
+  return { balance, error, loading, refresh, applySnapshot }
 }

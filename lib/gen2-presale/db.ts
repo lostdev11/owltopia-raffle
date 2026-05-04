@@ -19,7 +19,7 @@ function allowDegradedGen2Read(): boolean {
   return process.env.NODE_ENV !== 'production'
 }
 
-export async function sumConfirmedPresaleSold(): Promise<number> {
+async function sumConfirmedPurchasesPaginated(): Promise<number> {
   const db = getSupabaseAdmin()
   const page = 1000
   let from = 0
@@ -29,6 +29,7 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
       .from('gen2_presale_purchases')
       .select('quantity')
       .eq('status', 'confirmed')
+      .order('id', { ascending: true })
       .range(from, from + page - 1)
     if (error) {
       if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
@@ -47,6 +48,63 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
     from += page
   }
   return sum
+}
+
+async function sumPurchasedMintsPaginated(): Promise<number> {
+  const db = getSupabaseAdmin()
+  const page = 1000
+  let from = 0
+  let sum = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('gen2_presale_balances')
+      .select('purchased_mints')
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) {
+      if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+        return 0
+      }
+      throw new Error(error.message)
+    }
+    const rows = data ?? []
+    for (const r of rows) {
+      sum += Number((r as { purchased_mints?: number }).purchased_mints ?? 0)
+    }
+    if (rows.length < page) break
+    from += page
+  }
+  return sum
+}
+
+/**
+ * Spots counted toward presale progress. Uses DB RPC aggregates when migration 097 is applied;
+ * otherwise paginated reads with stable ordering. Takes the max of purchase-row totals vs
+ * sum(purchased_mints) so progress stays correct if one side was backfilled or repaired.
+ */
+export async function sumConfirmedPresaleSold(): Promise<number> {
+  const db = getSupabaseAdmin()
+  try {
+    const [{ data: soldRows, error: e1 }, { data: mintSum, error: e2 }] = await Promise.all([
+      db.rpc('gen2_presale_sold_confirmed_quantity'),
+      db.rpc('gen2_presale_sum_purchased_mints'),
+    ])
+    if (!e1 && !e2 && soldRows != null && mintSum != null) {
+      const a = Number(soldRows)
+      const b = Number(mintSum)
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        return Math.max(a, b)
+      }
+    }
+  } catch {
+    // fall through to legacy
+  }
+
+  const [fromPurchases, fromBalances] = await Promise.all([
+    sumConfirmedPurchasesPaginated(),
+    sumPurchasedMintsPaginated(),
+  ])
+  return Math.max(fromPurchases, fromBalances)
 }
 
 export type Gen2BalanceRow = {

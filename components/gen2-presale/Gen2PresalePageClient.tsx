@@ -17,6 +17,7 @@ import { useGen2PresaleBalance } from '@/hooks/use-gen2-presale-balance'
 import { useGen2PresaleStats } from '@/hooks/use-gen2-presale-stats'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { getGen2PresaleBalanceIssues, getGen2PresaleStatsIssues } from '@/lib/gen2-presale/presale-sanity'
+import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
 
 function Gen2Countdown() {
@@ -54,8 +55,9 @@ function Gen2Countdown() {
 export function Gen2PresalePageClient() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? null
-  const { stats, loading: statsLoading, error: statsError, refresh: refreshStats } = useGen2PresaleStats()
-  const { balance, loading: balLoading, refresh: refreshBal } = useGen2PresaleBalance(wallet)
+  const { stats, loading: statsLoading, error: statsError, refresh: refreshStats, applyStatsPatch } =
+    useGen2PresaleStats(20_000)
+  const { balance, loading: balLoading, refresh: refreshBal, applySnapshot } = useGen2PresaleBalance(wallet)
 
   const presaleLive = stats?.presale_live === true
   const statsStatusLoading = statsLoading && stats == null
@@ -66,10 +68,36 @@ export function Gen2PresalePageClient() {
       return Number.isFinite(n) && n > 0 ? n : 20
     })()
 
-  const refreshAll = useCallback(() => {
+  const onPresalePurchaseSettled = useCallback(
+    (result?: {
+      balance?: Gen2PresaleBalance
+      stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
+    }) => {
+      if (result?.balance) applySnapshot(result.balance)
+      if (result?.stats) applyStatsPatch(result.stats)
+      void refreshStats()
+      void refreshBal()
+    },
+    [applySnapshot, applyStatsPatch, refreshStats, refreshBal]
+  )
+
+  const refreshPresaleData = useCallback(() => {
     void refreshStats()
     void refreshBal()
   }, [refreshStats, refreshBal])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshPresaleData()
+    }
+    const onPageShow = () => refreshPresaleData()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [refreshPresaleData])
 
   const presaleSanityIssues = useMemo(() => {
     const fromStats = stats ? getGen2PresaleStatsIssues(stats) : []
@@ -271,11 +299,19 @@ export function Gen2PresalePageClient() {
             stats={stats}
             statsLoading={statsLoading}
             presaleLive={presaleLive}
-            onPurchased={refreshAll}
+            onPurchased={onPresalePurchaseSettled}
             className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
           />
           <Gen2ElectricBorder>
-            <Gen2BalanceCard balance={balance} loading={balLoading} connected={connected} className="border-0 shadow-none ring-0" />
+            <Gen2BalanceCard
+              balance={balance}
+              loading={balLoading}
+              connected={connected}
+              onRefresh={refreshPresaleData}
+              walletAddress={wallet}
+              onRecorded={onPresalePurchaseSettled}
+              className="border-0 shadow-none ring-0"
+            />
           </Gen2ElectricBorder>
         </section>
 

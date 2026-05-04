@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Gift, Loader2, Search } from 'lucide-react'
+import { ArrowLeft, Gift, Loader2, RefreshCw, Search } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
@@ -59,6 +59,10 @@ export default function AdminGen2PresalePage() {
   const [error, setError] = useState<string | null>(null)
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [backfillLimit, setBackfillLimit] = useState(50)
+  const [backfillLoading, setBackfillLoading] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
+  const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -141,6 +145,34 @@ export default function AdminGen2PresalePage() {
       setError(e instanceof Error ? e.message : 'Update failed')
     } finally {
       setSettingsSaving(false)
+    }
+  }
+
+  const backfillFromChain = async () => {
+    setBackfillMsg(null)
+    setBackfillResult(null)
+    setBackfillLoading(true)
+    try {
+      const res = await fetch('/api/admin/gen2-presale/backfill-from-chain', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signatureLimit: Math.min(100, Math.max(1, Math.floor(backfillLimit) || 50)),
+        }),
+      })
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        throw new Error((j.error as string | undefined) || 'Backfill failed')
+      }
+      setBackfillResult(j)
+      const ins = (j as { summary?: { inserted?: number } }).summary?.inserted ?? 0
+      setBackfillMsg(`Backfill complete. Recorded ${ins} new purchase(s).`)
+      void load()
+    } catch (e) {
+      setBackfillMsg(e instanceof Error ? e.message : 'Backfill failed')
+    } finally {
+      setBackfillLoading(false)
     }
   }
 
@@ -277,6 +309,54 @@ export default function AdminGen2PresalePage() {
                 <span className="text-muted-foreground">Unit (USDC)</span>{' '}
                 <span className="font-mono font-semibold">{stats.unit_price_usdc}</span>
               </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Backfill from chain</CardTitle>
+              <CardDescription>
+                Scans recent transactions on <strong>founder A</strong> (from <code className="text-xs">FOUNDER_A_WALLET</code>
+                ) and records any presale payment that is on mainnet but missing from the database. Use this when buyers
+                paid in full but the site never finished &quot;Recording your spots&quot;. May take a minute; uses the
+                same verification as the public confirm API. Run again with a higher limit or after more sales as needed;
+                already-recorded signatures are skipped.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="bf-limit">Signatures to scan (max 100)</Label>
+                  <Input
+                    id="bf-limit"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={backfillLimit}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setBackfillLimit(Math.min(100, Math.max(1, Math.floor(n))))
+                    }}
+                    className="w-32"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={backfillLoading}
+                  onClick={() => void backfillFromChain()}
+                >
+                  {backfillLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Run backfill
+                </Button>
+              </div>
+              {backfillMsg && <p className="text-sm text-muted-foreground">{backfillMsg}</p>}
+              {backfillResult != null ? (
+                <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+                  {JSON.stringify(backfillResult, null, 2)}
+                </pre>
+              ) : null}
             </CardContent>
           </Card>
 

@@ -1,5 +1,6 @@
 import {
   Connection,
+  LAMPORTS_PER_SOL,
   ParsedInstruction,
   ParsedTransactionWithMeta,
   PartiallyDecodedInstruction,
@@ -92,15 +93,95 @@ export function verifyGen2PresalePayments(params: {
     return { ok: false, reason: 'wrong_amounts' }
   }
 
-  // Reject if buyer sent SOL to any pubkey other than the two founders (same tx)
-  for (const [dest, v] of map) {
-    if (v === 0n) continue
-    if (dest !== fa && dest !== fb) {
-      return { ok: false, reason: 'wrong_destinations' }
-    }
-  }
+  // Do not require the buyer to send SOL *only* to founders. Wallets often attach extra
+  // system transfers in the same signature (tips, rent, etc.) while founders still receive
+  // the exact presale lamports — those payments must still record.
 
   return { ok: true }
+}
+
+/** When live SOL/USD moved between build and confirm, re-verify using on-chain amounts + founder split. */
+export type ChainAlignedPayment =
+  | {
+      ok: true
+      totalLamports: bigint
+      founderALamports: bigint
+      founderBLamports: bigint
+      /** Implied USD/SOL from integer lamports per spot and configured USDC spot price */
+      impliedSolUsd: number
+    }
+  | { ok: false; reason: 'failed' | 'wrong_destinations' | 'split_mismatch' | 'bad_quantity' | 'unreasonable_unit' }
+
+export function verifyGen2PresalePaymentChainAligned(params: {
+  parsed: ParsedTransactionWithMeta
+  buyerWallet: string
+  founderA: string
+  founderB: string
+  pctA: number
+  pctB: number
+  priceUsdc: number
+  quantity: number
+}): ChainAlignedPayment {
+  const { parsed, buyerWallet, founderA, founderB, pctA, pctB, priceUsdc, quantity } = params
+  if (parsed.meta?.err) {
+    return { ok: false, reason: 'failed' }
+  }
+  const buyerNorm = normalizeSolanaWalletAddress(buyerWallet)
+  const fa = normalizeSolanaWalletAddress(founderA)
+  const fb = normalizeSolanaWalletAddress(founderB)
+  if (!buyerNorm || !fa || !fb) {
+    return { ok: false, reason: 'wrong_destinations' }
+  }
+
+  const map = collectTransfersFromBuyer(parsed, buyerNorm)
+
+  const gotA = map.get(fa) ?? 0n
+  const gotB = map.get(fb) ?? 0n
+  const total = gotA + gotB
+  if (total <= 0n) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+
+  const pA = BigInt(pctA)
+  const pB = BigInt(pctB)
+  if (pA + pB !== 100n) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+  const expectA = (total * pA) / 100n
+  const expectB = total - expectA
+  if (gotA !== expectA || gotB !== expectB) {
+    return { ok: false, reason: 'split_mismatch' }
+  }
+
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity < 1) {
+    return { ok: false, reason: 'bad_quantity' }
+  }
+  const q = BigInt(quantity)
+  if (total % q !== 0n) {
+    return { ok: false, reason: 'bad_quantity' }
+  }
+  const unit = total / q
+  const unitSol = Number(unit) / LAMPORTS_PER_SOL
+  if (!Number.isFinite(unitSol) || unitSol <= 0) {
+    return { ok: false, reason: 'unreasonable_unit' }
+  }
+  /** Reject only absurd totals (split + divisibility are the real checks). High SOL/USD yields small SOL per spot. */
+  if (unitSol < 0.0005 || unitSol > 100) {
+    return { ok: false, reason: 'unreasonable_unit' }
+  }
+
+  const impliedSolUsd = priceUsdc / unitSol
+  if (!Number.isFinite(impliedSolUsd) || impliedSolUsd <= 0) {
+    return { ok: false, reason: 'unreasonable_unit' }
+  }
+
+  return {
+    ok: true,
+    totalLamports: total,
+    founderALamports: gotA,
+    founderBLamports: gotB,
+    impliedSolUsd,
+  }
 }
 
 export async function fetchParsedTransactionConfirmed(
@@ -122,12 +203,41 @@ export async function fetchParsedTransactionConfirmed(
   return null
 }
 
-/** Fee payer should match buyer for simple UX verification. */
-export function feePayerMatchesBuyer(parsed: ParsedTransactionWithMeta, buyer: PublicKey): boolean {
+/**
+ * `getParsedTransaction` uses {@link ParsedMessage}: `accountKeys[0]` may be
+ * `{ pubkey, signer, writable }`, not a bare {@link PublicKey}. Legacy /
+ * versioned compiled messages use PublicKey at index 0.
+ */
+function accountKeyAtIndexToPublicKey(key: unknown): PublicKey | null {
+  if (key == null) return null
+  if (key instanceof PublicKey) return key
+  if (typeof key === 'object' && 'pubkey' in key) {
+    const pk = (key as { pubkey: PublicKey | string }).pubkey
+    if (pk instanceof PublicKey) return pk
+    if (typeof pk === 'string' && pk.trim()) {
+      try {
+        return new PublicKey(pk.trim())
+      } catch {
+        return null
+      }
+    }
+  }
+  if (typeof key === 'string' && key.trim()) {
+    try {
+      return new PublicKey(key.trim())
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/** Legacy message fee payer (signer index 0). */
+export function getFeePayerPublicKey(parsed: ParsedTransactionWithMeta): PublicKey | null {
   try {
     const msg = parsed.transaction.message as unknown as {
       getAccountKeys?: (opts: { accountKeysFromLookups?: unknown }) => { get: (i: number) => PublicKey | undefined }
-      accountKeys?: PublicKey[]
+      accountKeys?: unknown[]
       staticAccountKeys?: PublicKey[]
     }
     if (typeof msg.getAccountKeys === 'function') {
@@ -135,11 +245,17 @@ export function feePayerMatchesBuyer(parsed: ParsedTransactionWithMeta, buyer: P
         accountKeysFromLookups: parsed.meta?.loadedAddresses,
       })
       const feePayer = keys.get(0)
-      return !!feePayer && feePayer.equals(buyer)
+      return feePayer ?? null
     }
-    const first = msg.staticAccountKeys?.[0] ?? msg.accountKeys?.[0]
-    return !!first && first.equals(buyer)
+    const rawFirst = msg.staticAccountKeys?.[0] ?? msg.accountKeys?.[0]
+    return accountKeyAtIndexToPublicKey(rawFirst)
   } catch {
-    return false
+    return null
   }
+}
+
+/** Fee payer should match buyer for simple UX verification. */
+export function feePayerMatchesBuyer(parsed: ParsedTransactionWithMeta, buyer: PublicKey): boolean {
+  const fp = getFeePayerPublicKey(parsed)
+  return !!fp && fp.equals(buyer)
 }

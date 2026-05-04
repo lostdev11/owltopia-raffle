@@ -18,7 +18,7 @@ import { fireGreenConfetti } from '@/lib/confetti'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
 import { lamportsToSolDisplay } from '@/lib/gen2-presale/format-sol'
 import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
-import type { Gen2PresaleStats } from '@/lib/gen2-presale/types'
+import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -26,7 +26,10 @@ type Props = {
   statsLoading?: boolean
   /** False when admin has paused new purchases (`presale_live` on stats). */
   presaleLive: boolean
-  onPurchased: () => void
+  onPurchased: (result?: {
+    balance?: Gen2PresaleBalance
+    stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
+  }) => void
   className?: string
 }
 
@@ -178,6 +181,8 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
         code?: string
         explorerUrl?: string
         txSignature?: string
+        balance?: Gen2PresaleBalance
+        stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
       }
       if (!confirmRes.ok) {
         const failMsg =
@@ -208,7 +213,7 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
                 }
           )
           requestAnimationFrame(() => fireGreenConfetti())
-          onPurchased()
+          onPurchased({ balance: confirmJson.balance, stats: confirmJson.stats })
           router.refresh()
           setPhase('idle')
           return
@@ -250,7 +255,7 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
             }
       )
       requestAnimationFrame(() => fireGreenConfetti())
-      onPurchased()
+      onPurchased({ balance: confirmJson.balance, stats: confirmJson.stats })
       router.refresh()
       setPhase('idle')
     } catch (e) {
