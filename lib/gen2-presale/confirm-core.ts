@@ -1,9 +1,13 @@
 import { Connection, type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
 
-import { getGen2PresalePublicOffer, getGen2PresaleServerConfig } from '@/lib/gen2-presale/config'
+import {
+  getGen2PresalePublicOffer,
+  getGen2PresaleServerConfig,
+  type Gen2PresaleEnvConfig,
+} from '@/lib/gen2-presale/config'
 import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
 import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
-import { computePurchaseLamports } from '@/lib/gen2-presale/pricing'
+import { computePurchaseLamports, type Gen2PriceBreakdown } from '@/lib/gen2-presale/pricing'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
 import {
   feePayerMatchesBuyer,
@@ -49,6 +53,114 @@ export type Gen2ConfirmFail = {
 export type Gen2ConfirmResult = Gen2ConfirmOkInserted | Gen2ConfirmOkDuplicate | Gen2ConfirmFail
 
 /**
+ * Match on-chain founder transfers to a quantity using the same rules as confirm (incl. chain-aligned SOL drift).
+ */
+export function getVerifiedBreakdownForQuantity(
+  cfg: Gen2PresaleEnvConfig,
+  buyerNorm: string,
+  parsed: ParsedTransactionWithMeta,
+  qty: number
+): Gen2PriceBreakdown | null {
+  let breakdown = computePurchaseLamports(cfg, qty)
+  let v = verifyGen2PresalePayments({
+    parsed,
+    buyerWallet: buyerNorm,
+    founderA: cfg.founderA.toBase58(),
+    founderB: cfg.founderB.toBase58(),
+    expectA: breakdown.founderALamports,
+    expectB: breakdown.founderBLamports,
+  })
+
+  if (!v.ok && v.reason === 'wrong_amounts') {
+    const chain = verifyGen2PresalePaymentChainAligned({
+      parsed,
+      buyerWallet: buyerNorm,
+      founderA: cfg.founderA.toBase58(),
+      founderB: cfg.founderB.toBase58(),
+      pctA: cfg.founderAPercent,
+      pctB: cfg.founderBPercent,
+      priceUsdc: cfg.priceUsdc,
+      quantity: qty,
+    })
+    if (chain.ok) {
+      breakdown = {
+        unitPriceUsdc: cfg.priceUsdc,
+        solUsdPrice: chain.impliedSolUsd,
+        unitLamports: chain.totalLamports / BigInt(qty),
+        totalLamports: chain.totalLamports,
+        founderALamports: chain.founderALamports,
+        founderBLamports: chain.founderBLamports,
+      }
+      v = verifyGen2PresalePayments({
+        parsed,
+        buyerWallet: buyerNorm,
+        founderA: cfg.founderA.toBase58(),
+        founderB: cfg.founderB.toBase58(),
+        expectA: breakdown.founderALamports,
+        expectB: breakdown.founderBLamports,
+      })
+    }
+  }
+
+  if (!v.ok) return null
+  return breakdown
+}
+
+/**
+ * Resolve spot count from a parsed payment tx (max..1), same algorithm as backfill quantity search.
+ */
+export async function resolveGen2PresaleQuantityFromParsedTx(params: {
+  buyerWallet: string
+  parsedTx: ParsedTransactionWithMeta
+  solUsdPriceUsed?: number
+}): Promise<
+  | { ok: true; buyerWallet: string; quantity: number; breakdown: Gen2PriceBreakdown }
+  | { ok: false; code: string; message: string }
+> {
+  const buyerNorm = normalizeSolanaWalletAddress(params.buyerWallet)
+  if (!buyerNorm) {
+    return { ok: false, code: 'invalid_wallet', message: 'Invalid buyer wallet' }
+  }
+
+  let solUsdOverride: number | undefined
+  const raw = params.solUsdPriceUsed
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    solUsdOverride = raw
+  }
+
+  let cfg
+  try {
+    cfg = await getGen2PresaleServerConfig(solUsdOverride != null ? { solUsdPrice: solUsdOverride } : undefined)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Server configuration error'
+    return { ok: false, code: 'config', message: msg }
+  }
+
+  const buyerPk = new PublicKey(buyerNorm)
+  if (!feePayerMatchesBuyer(params.parsedTx, buyerPk)) {
+    return {
+      ok: false,
+      code: 'wrong_signer',
+      message: 'Transaction fee payer does not match wallet',
+    }
+  }
+
+  const max = GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE
+  for (let q = max; q >= 1; q--) {
+    const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, params.parsedTx, q)
+    if (breakdown) {
+      return { ok: true, buyerWallet: buyerNorm, quantity: q, breakdown }
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'payment_mismatch',
+    message: 'Could not match transaction to any spot count (1–' + max + ')',
+  }
+}
+
+/**
  * Shared implementation for recording a presale payment (public confirm route + admin backfill).
  */
 export async function executeGen2PresaleConfirm(params: {
@@ -92,7 +204,6 @@ export async function executeGen2PresaleConfirm(params: {
     return { ok: false, httpStatus: 500, message: msg }
   }
 
-  let breakdown = computePurchaseLamports(cfg, qty)
   const buyerPk = new PublicKey(buyerNorm)
 
   const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
@@ -112,57 +223,12 @@ export async function executeGen2PresaleConfirm(params: {
     }
   }
 
-  let v = verifyGen2PresalePayments({
-    parsed,
-    buyerWallet: buyerNorm,
-    founderA: cfg.founderA.toBase58(),
-    founderB: cfg.founderB.toBase58(),
-    expectA: breakdown.founderALamports,
-    expectB: breakdown.founderBLamports,
-  })
-
-  if (!v.ok && v.reason === 'wrong_amounts') {
-    const chain = verifyGen2PresalePaymentChainAligned({
-      parsed,
-      buyerWallet: buyerNorm,
-      founderA: cfg.founderA.toBase58(),
-      founderB: cfg.founderB.toBase58(),
-      pctA: cfg.founderAPercent,
-      pctB: cfg.founderBPercent,
-      priceUsdc: cfg.priceUsdc,
-      quantity: qty,
-    })
-    if (chain.ok) {
-      breakdown = {
-        unitPriceUsdc: cfg.priceUsdc,
-        solUsdPrice: chain.impliedSolUsd,
-        unitLamports: chain.totalLamports / BigInt(qty),
-        totalLamports: chain.totalLamports,
-        founderALamports: chain.founderALamports,
-        founderBLamports: chain.founderBLamports,
-      }
-      v = verifyGen2PresalePayments({
-        parsed,
-        buyerWallet: buyerNorm,
-        founderA: cfg.founderA.toBase58(),
-        founderB: cfg.founderB.toBase58(),
-        expectA: breakdown.founderALamports,
-        expectB: breakdown.founderBLamports,
-      })
-    }
-  }
-
-  if (!v.ok) {
-    const code =
-      v.reason === 'failed'
-        ? 'tx_failed'
-        : v.reason === 'not_found'
-          ? 'tx_not_found'
-          : 'payment_mismatch'
+  const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, parsed, qty)
+  if (!breakdown) {
     return {
       ok: false,
       httpStatus: 400,
-      code,
+      code: 'payment_mismatch',
       message: 'Could not verify founder payments in this transaction',
     }
   }
@@ -255,7 +321,10 @@ export async function executeGen2PresaleConfirm(params: {
 }
 
 /**
- * Try quantities 1..max until confirm succeeds (for chain backfill when qty unknown).
+ * Try quantities max..1 until confirm succeeds (for chain backfill when qty unknown).
+ *
+ * Must be descending: chain-aligned verification can satisfy q=1 using the *total* lamports as a
+ * single "unit", which incorrectly matches multi-spot payments if we try q=1 first.
  */
 export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
   buyerWallet: string
@@ -280,8 +349,41 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
     }
   }
 
-  for (let q = 1; q <= max; q++) {
+  let cfg
+  try {
+    cfg = await getGen2PresaleServerConfig()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Server configuration error'
+    return { ok: false, httpStatus: 500, message: msg, quantityTried: [] }
+  }
+
+  const buyerNormEarly = normalizeSolanaWalletAddress(params.buyerWallet)
+  if (!buyerNormEarly) {
+    return { ok: false, httpStatus: 400, message: 'Invalid buyer wallet', quantityTried: [] }
+  }
+  const buyerPkEarly = new PublicKey(buyerNormEarly)
+  if (!feePayerMatchesBuyer(parsedOnce, buyerPkEarly)) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      code: 'wrong_signer',
+      message: 'Transaction fee payer does not match wallet',
+      quantityTried: [],
+    }
+  }
+
+  for (let q = max; q >= 1; q--) {
     tried.push(q)
+    const preview = getVerifiedBreakdownForQuantity(cfg, buyerNormEarly, parsedOnce, q)
+    if (!preview) {
+      lastFail = {
+        ok: false,
+        httpStatus: 400,
+        code: 'payment_mismatch',
+        message: 'Could not verify founder payments in this transaction',
+      }
+      continue
+    }
     const r = await executeGen2PresaleConfirm({
       buyerWallet: params.buyerWallet,
       quantity: q,

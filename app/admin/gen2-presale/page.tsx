@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Gift, Loader2, RefreshCw, Search } from 'lucide-react'
+import { ArrowLeft, Gift, Loader2, RefreshCw, Search, Wrench } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
@@ -63,6 +63,10 @@ export default function AdminGen2PresalePage() {
   const [backfillLoading, setBackfillLoading] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
+  const [repairSig, setRepairSig] = useState('')
+  const [repairLoading, setRepairLoading] = useState(false)
+  const [repairMsg, setRepairMsg] = useState<string | null>(null)
+  const [repairResult, setRepairResult] = useState<Record<string, unknown> | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -173,6 +177,44 @@ export default function AdminGen2PresalePage() {
       setBackfillMsg(e instanceof Error ? e.message : 'Backfill failed')
     } finally {
       setBackfillLoading(false)
+    }
+  }
+
+  const repairPurchaseQuantity = async () => {
+    const sig = repairSig.trim()
+    setRepairMsg(null)
+    setRepairResult(null)
+    if (!sig) {
+      setRepairMsg('Paste a transaction signature first.')
+      return
+    }
+    setRepairLoading(true)
+    try {
+      const res = await fetch('/api/admin/gen2-presale/repair-purchase-quantity', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txSignature: sig }),
+      })
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        throw new Error((j.error as string | undefined) || 'Repair failed')
+      }
+      setRepairResult(j)
+      const unchanged = j.unchanged === true
+      const rpc = j.rpc as { previous_quantity?: number; quantity?: number; delta?: number } | undefined
+      setRepairMsg(
+        unchanged
+          ? 'Already correct — no database changes.'
+          : `Updated quantity ${rpc?.previous_quantity ?? '?'} → ${rpc?.quantity ?? j.resolved_quantity ?? '?'}` +
+              (rpc?.delta != null ? ` (Δ ${rpc.delta > 0 ? '+' : ''}${rpc.delta})` : '') +
+              '.'
+      )
+      void load()
+    } catch (e) {
+      setRepairMsg(e instanceof Error ? e.message : 'Repair failed')
+    } finally {
+      setRepairLoading(false)
     }
   }
 
@@ -316,11 +358,12 @@ export default function AdminGen2PresalePage() {
             <CardHeader>
               <CardTitle>Backfill from chain</CardTitle>
               <CardDescription>
-                Scans recent transactions on <strong>founder A</strong> (from <code className="text-xs">FOUNDER_A_WALLET</code>
-                ) and records any presale payment that is on mainnet but missing from the database. Use this when buyers
-                paid in full but the site never finished &quot;Recording your spots&quot;. May take a minute; uses the
-                same verification as the public confirm API. Run again with a higher limit or after more sales as needed;
-                already-recorded signatures are skipped.
+                Scans recent transactions on <strong>both founder wallets</strong> (from{' '}
+                <code className="text-xs">FOUNDER_A_WALLET</code> and <code className="text-xs">FOUNDER_B_WALLET</code>
+                ), merges the lists, and records any presale payment that is on mainnet but missing from the database.
+                Use this when buyers paid in full but the site never finished &quot;Recording your spots&quot;. May take
+                a minute; uses the same verification as the public confirm API. Run again with a higher limit or after more
+                sales as needed; already-recorded signatures are skipped.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -355,6 +398,55 @@ export default function AdminGen2PresalePage() {
               {backfillResult != null ? (
                 <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
                   {JSON.stringify(backfillResult, null, 2)}
+                </pre>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Repair purchase quantity</CardTitle>
+              <CardDescription>
+                If backfill recorded <strong>too few spots</strong> for a signature (known bug: quantity stopped at 1),
+                paste the payment <strong>transaction signature</strong> here. The server re-reads the tx from chain,
+                infers the correct spot count, updates the purchase row, and adds the difference to the buyer&apos;s{' '}
+                <code className="text-xs">purchased_mints</code>. Requires migration{' '}
+                <code className="text-xs">098_gen2_presale_repair_purchase_quantity.sql</code> on Supabase. Run once per
+                bad signature.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label htmlFor="repair-sig">Transaction signature</Label>
+                  <Input
+                    id="repair-sig"
+                    value={repairSig}
+                    onChange={(e) => setRepairSig(e.target.value)}
+                    placeholder="Base58 signature"
+                    className="min-h-11 font-mono text-xs"
+                    autoComplete="off"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={repairLoading}
+                  className="min-h-11 shrink-0 touch-manipulation"
+                  onClick={() => void repairPurchaseQuantity()}
+                >
+                  {repairLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wrench className="mr-2 h-4 w-4" />
+                  )}
+                  Repair from chain
+                </Button>
+              </div>
+              {repairMsg && <p className="text-sm text-muted-foreground">{repairMsg}</p>}
+              {repairResult != null ? (
+                <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+                  {JSON.stringify(repairResult, null, 2)}
                 </pre>
               ) : null}
             </CardContent>

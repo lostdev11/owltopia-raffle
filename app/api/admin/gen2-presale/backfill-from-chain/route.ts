@@ -1,4 +1,4 @@
-import { Connection } from '@solana/web3.js'
+import { Connection, type ConfirmedSignatureInfo } from '@solana/web3.js'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
@@ -18,6 +18,23 @@ export const maxDuration = 120
 const MAX_SIGNATURES = 100
 const DEFAULT_SIGNATURES = 50
 
+function mergeFounderSignatureLists(
+  a: ConfirmedSignatureInfo[],
+  b: ConfirmedSignatureInfo[],
+  limit: number
+): ConfirmedSignatureInfo[] {
+  const merged = new Map<string, ConfirmedSignatureInfo>()
+  for (const info of [...a, ...b]) {
+    const prev = merged.get(info.signature)
+    if (!prev || (info.blockTime ?? 0) > (prev.blockTime ?? 0)) {
+      merged.set(info.signature, info)
+    }
+  }
+  return [...merged.values()]
+    .sort((x, y) => (y.blockTime ?? 0) - (x.blockTime ?? 0))
+    .slice(0, limit)
+}
+
 /**
  * Scan recent transactions touching a founder wallet, attempt to record any Gen2 presale payment
  * that is on-chain but missing from `gen2_presale_purchases` (e.g. confirm never ran after signing).
@@ -32,7 +49,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Too many backfill requests — wait two minutes.' }, { status: 429 })
   }
 
-  let body: { signatureLimit?: number; founder?: 'a' | 'b' }
+  let body: { signatureLimit?: number; founder?: 'a' | 'b' | 'both' }
   try {
     body = (await request.json().catch(() => ({}))) as typeof body
   } catch {
@@ -52,9 +69,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 
-  const founderPk = body.founder === 'b' ? cfg.founderB : cfg.founderA
+  const founderScope: 'a' | 'b' | 'both' =
+    body.founder === 'a' || body.founder === 'b' ? body.founder : 'both'
+
   const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
-  const sigInfos = await connection.getSignaturesForAddress(founderPk, { limit: signatureLimit })
+  let sigInfos: ConfirmedSignatureInfo[]
+  if (founderScope === 'both') {
+    const [a, b] = await Promise.all([
+      connection.getSignaturesForAddress(cfg.founderA, { limit: signatureLimit }),
+      connection.getSignaturesForAddress(cfg.founderB, { limit: signatureLimit }),
+    ])
+    sigInfos = mergeFounderSignatureLists(a, b, signatureLimit)
+  } else {
+    const founderPk = founderScope === 'b' ? cfg.founderB : cfg.founderA
+    sigInfos = await connection.getSignaturesForAddress(founderPk, { limit: signatureLimit })
+  }
 
   const db = getSupabaseAdmin()
   const summary = {
@@ -134,7 +163,11 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    founder_wallet_scanned: founderPk.toBase58(),
+    founder_scope: founderScope,
+    founder_wallets_scanned:
+      founderScope === 'both'
+        ? [cfg.founderA.toBase58(), cfg.founderB.toBase58()]
+        : [(founderScope === 'b' ? cfg.founderB : cfg.founderA).toBase58()],
     signature_limit: signatureLimit,
     summary,
     inserted,
