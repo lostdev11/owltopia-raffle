@@ -56,7 +56,7 @@ export function Gen2BalanceCard({
       const res = await fetch('/api/gen2-presale/reconcile-from-chain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: w }),
+        body: JSON.stringify({ wallet: w, pageSize: 100, maxPages: 25 }),
       })
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean
@@ -81,8 +81,8 @@ export function Gen2BalanceCard({
       } else {
         setSyncMsg(
           tried > 0
-            ? `Checked ${tried} recent transaction(s); none needed recording (already saved or not presale payments).`
-            : 'No unrecorded transactions to check (recent activity may be older than the scan window — use Record payment with your tx signature).'
+            ? `Checked ${tried} transaction signature(s); none needed recording (already saved or not presale payments).`
+            : 'No unrecorded transactions to check in this scan window — try Record payment with your tx signature if you paid long ago.'
         )
       }
     } catch (e) {
@@ -163,7 +163,9 @@ export function Gen2BalanceCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-[#EAFBF4]">My Gen2 mint credits</h3>
-          <p className="mt-1 text-sm text-[#A9CBB9]">Presale spots and bonuses tracked for your wallet.</p>
+          <p className="mt-1 text-sm text-[#A9CBB9]">
+            The quantity you buy is what appears here as purchased spots (after payment confirms).
+          </p>
         </div>
         {onRefresh && (
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -250,8 +252,8 @@ export function Gen2BalanceCard({
             Paid on-chain but credits look wrong?
           </summary>
           <p className="mt-3 text-xs leading-relaxed text-[#A9CBB9]">
-            If your wallet paid founder wallets but this page never updated, paste the transaction signature and the
-            number of spots you bought. We will verify the payment and attach credits to this connected wallet.
+            If your spots are missing, try <strong className="font-semibold text-[#EAFBF4]">Sync from chain</strong> or paste
+            your transaction signature below.
           </p>
           <div className="mt-4 space-y-3">
             <label className="block text-xs font-medium text-[#A9CBB9]">

@@ -10,7 +10,11 @@ import {
   GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE,
   GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
 } from '@/lib/gen2-presale/max-per-purchase'
-import { computePurchaseLamports, type Gen2PriceBreakdown } from '@/lib/gen2-presale/pricing'
+import {
+  computePurchaseLamports,
+  lamportsPerSpot,
+  type Gen2PriceBreakdown,
+} from '@/lib/gen2-presale/pricing'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
 import {
   feePayerMatchesBuyer,
@@ -51,6 +55,44 @@ export function computeGen2PresaleQuantityBoundsFromTotal(
   if (minQ > maxQ) return null
 
   return { minQ: Number(minQ), maxQ: Number(maxQ) }
+}
+
+/**
+ * Valid spot counts for integer total lamports (must divide `total`), ordered by how close they are
+ * to the oracle-implied count {@link lamportsPerSpot} — avoids picking the wrong divisor when many
+ * integers divide `total` evenly (chain-aligned verification is ambiguous).
+ *
+ * Product rule: **credits scale with total lamports to founders** vs the configured USDC spot price
+ * (via SOL/USD)—same mental model as “~0.95 SOL total ≈ three spots at ~$20 each,” not per explorer line.
+ */
+export function enumerateGen2PresaleQuantityCandidates(
+  total: bigint,
+  cfg: Gen2PresaleEnvConfig,
+  minQ: number,
+  maxQ: number
+): number[] {
+  const unit = lamportsPerSpot(cfg)
+  if (unit <= 0n || minQ > maxQ) return []
+
+  const qApprox = (total + unit / 2n) / unit
+  let hint = Number(qApprox)
+  if (!Number.isFinite(hint)) hint = minQ
+  hint = Math.min(maxQ, Math.max(minQ, Math.round(hint)))
+
+  const divisors: number[] = []
+  for (let q = minQ; q <= maxQ; q++) {
+    const qb = BigInt(q)
+    if (total % qb === 0n) divisors.push(q)
+  }
+
+  divisors.sort((a, b) => {
+    const da = Math.abs(a - hint)
+    const db = Math.abs(b - hint)
+    if (da !== db) return da - db
+    return a - b
+  })
+
+  return divisors
 }
 
 export type Gen2ConfirmOkInserted = {
@@ -206,7 +248,13 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
     }
   }
 
-  for (let q = bounds.maxQ; q >= bounds.minQ; q--) {
+  const candidates = enumerateGen2PresaleQuantityCandidates(
+    split.total,
+    cfg,
+    bounds.minQ,
+    bounds.maxQ
+  )
+  for (const q of candidates) {
     const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, params.parsedTx, q)
     if (breakdown) {
       return { ok: true, buyerWallet: buyerNorm, quantity: q, breakdown }
@@ -384,9 +432,9 @@ export async function executeGen2PresaleConfirm(params: {
 /**
  * Try candidate quantities (derived from total SOL to founders) until confirm succeeds.
  *
- * Search is descending from the largest plausible q: chain-aligned verification can satisfy q=1
- * using the *total* lamports as a single "unit", which would incorrectly match multi-spot payments
- * if we tried q=1 first.
+ * Candidates are filtered to divisors of total lamports and ordered by closeness to the
+ * economically implied spot count (total / spot lamports from price oracle), so we do not pick an
+ * arbitrary large divisor when chain-aligned math accepts multiple q values.
  */
 export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
   buyerWallet: string
@@ -484,7 +532,8 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
     }
   }
 
-  for (let q = maxQ; q >= minQ; q--) {
+  const candidates = enumerateGen2PresaleQuantityCandidates(split.total, cfg, minQ, maxQ)
+  for (const q of candidates) {
     tried.push(q)
     const preview = getVerifiedBreakdownForQuantity(cfg, buyerNormEarly, parsedOnce, q)
     if (!preview) {

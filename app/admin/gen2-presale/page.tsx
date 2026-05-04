@@ -59,7 +59,8 @@ export default function AdminGen2PresalePage() {
   const [error, setError] = useState<string | null>(null)
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
-  const [backfillLimit, setBackfillLimit] = useState(50)
+  const [backfillPageSize, setBackfillPageSize] = useState(100)
+  const [backfillMaxPages, setBackfillMaxPages] = useState(25)
   const [backfillLoading, setBackfillLoading] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
@@ -162,7 +163,8 @@ export default function AdminGen2PresalePage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          signatureLimit: Math.min(100, Math.max(1, Math.floor(backfillLimit) || 50)),
+          pageSize: Math.min(1000, Math.max(1, Math.floor(backfillPageSize) || 100)),
+          maxPages: Math.min(80, Math.max(1, Math.floor(backfillMaxPages) || 25)),
         }),
       })
       const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
@@ -358,30 +360,45 @@ export default function AdminGen2PresalePage() {
             <CardHeader>
               <CardTitle>Backfill from chain</CardTitle>
               <CardDescription>
-                Scans recent transactions on <strong>both founder wallets</strong> (from{' '}
-                <code className="text-xs">FOUNDER_A_WALLET</code> and <code className="text-xs">FOUNDER_B_WALLET</code>
-                ), merges the lists, and records any presale payment that is on mainnet but missing from the database.
-                Use this when buyers paid in full but the site never finished &quot;Recording your spots&quot;. May take
-                a minute; uses the same verification as the public confirm API. Run again with a higher limit or after more
-                sales as needed; already-recorded signatures are skipped.
+                Paginates <strong>founder A</strong> (<code className="text-xs">FOUNDER_A_WALLET</code>) transaction
+                history — each presale pays both founders, so scanning one wallet reaches every presale signature. Older
+                payments were often missed when only the newest few dozen txs were merged across both wallets. Records any
+                payment missing from the database (same verification as confirm). Increase pages if sold count still lags
+                expected chain volume; already-recorded signatures are skipped.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="bf-limit">Signatures to scan (max 100)</Label>
+                  <Label htmlFor="bf-page">Page size (per RPC call, max 1000)</Label>
                   <Input
-                    id="bf-limit"
+                    id="bf-page"
                     type="number"
                     min={1}
-                    max={100}
-                    value={backfillLimit}
+                    max={1000}
+                    value={backfillPageSize}
                     onChange={(e) => {
                       const n = Number(e.target.value)
                       if (!Number.isFinite(n)) return
-                      setBackfillLimit(Math.min(100, Math.max(1, Math.floor(n))))
+                      setBackfillPageSize(Math.min(1000, Math.max(1, Math.floor(n))))
                     }}
-                    className="w-32"
+                    className="w-28 min-h-11"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bf-pages">Max pages</Label>
+                  <Input
+                    id="bf-pages"
+                    type="number"
+                    min={1}
+                    max={80}
+                    value={backfillMaxPages}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setBackfillMaxPages(Math.min(80, Math.max(1, Math.floor(n))))
+                    }}
+                    className="w-24 min-h-11"
                   />
                 </div>
                 <Button

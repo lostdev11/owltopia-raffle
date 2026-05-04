@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import {
-  GEN2_RECONCILE_MAX_SIG_LIMIT,
-  reconcileGen2PresaleWalletFromChain,
-} from '@/lib/gen2-presale/reconcile-wallet-from-chain'
+import { reconcileGen2PresaleWalletFromChain } from '@/lib/gen2-presale/reconcile-wallet-from-chain'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
 
 /**
  * POST /api/gen2-presale/reconcile-from-chain
- * Body: { wallet: string, signatureLimit?: number }
+ * Body: { wallet: string, signatureLimit?: number, pageSize?: number, maxPages?: number }
  *
  * Scans recent on-chain transactions for the wallet and records any Gen2 presale payments
  * that match server verification but were missing from the database (e.g. confirm never ran).
@@ -28,7 +25,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let body: { wallet?: string; signatureLimit?: number }
+    let body: { wallet?: string; signatureLimit?: number; pageSize?: number; maxPages?: number }
     try {
       body = (await request.json().catch(() => ({}))) as typeof body
     } catch {
@@ -40,15 +37,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or missing wallet' }, { status: 400 })
     }
 
-    let signatureLimit: number | undefined
-    if (body.signatureLimit != null) {
-      const n = Math.floor(Number(body.signatureLimit))
-      if (Number.isFinite(n) && n >= 1) {
-        signatureLimit = Math.min(GEN2_RECONCILE_MAX_SIG_LIMIT, n)
-      }
-    }
+    const signatureLimit =
+      body.signatureLimit != null && Number.isFinite(Number(body.signatureLimit))
+        ? Math.floor(Number(body.signatureLimit))
+        : undefined
+    const pageSize =
+      body.pageSize != null && Number.isFinite(Number(body.pageSize))
+        ? Math.floor(Number(body.pageSize))
+        : undefined
+    const maxPages =
+      body.maxPages != null && Number.isFinite(Number(body.maxPages))
+        ? Math.floor(Number(body.maxPages))
+        : undefined
 
-    const result = await reconcileGen2PresaleWalletFromChain({ wallet, signatureLimit })
+    const result = await reconcileGen2PresaleWalletFromChain({
+      wallet,
+      ...(signatureLimit != null ? { signatureLimit } : {}),
+      ...(pageSize != null ? { pageSize } : {}),
+      ...(maxPages != null ? { maxPages } : {}),
+    })
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }

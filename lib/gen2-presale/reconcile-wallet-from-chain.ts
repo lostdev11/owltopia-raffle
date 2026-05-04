@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { executeGen2PresaleConfirmWithQuantitySearch } from '@/lib/gen2-presale/confirm-core'
+import { fetchSignaturesForAddressPaginated } from '@/lib/gen2-presale/fetch-signatures-paginated'
 import { getGen2PresalePublicOffer } from '@/lib/gen2-presale/config'
 import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
@@ -8,15 +9,26 @@ import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
-/** Default number of recent signatures to scan per wallet (newest first). */
+/** Default page size for each RPC `getSignaturesForAddress` call (Solana max is 1000). */
+export const GEN2_RECONCILE_PAGE_SIZE_DEFAULT = 100
+/** Default number of pages (buyer wallet history may be long). */
+export const GEN2_RECONCILE_MAX_PAGES_DEFAULT = 20
+export const GEN2_RECONCILE_PAGE_SIZE_MAX = 1000
+export const GEN2_RECONCILE_MAX_PAGES_CAP = 60
+
+/** Legacy single-request scan limit when callers pass only {@link signatureLimit}. */
 export const GEN2_RECONCILE_DEFAULT_SIG_LIMIT = 30
-export const GEN2_RECONCILE_MAX_SIG_LIMIT = 80
+/** Upper bound for legacy single-request scans. */
+export const GEN2_RECONCILE_LEGACY_SIG_LIMIT_MAX = 1000
 
 export type ReconcileWalletFromChainSuccess = {
   ok: true
   wallet: string
-  signature_limit: number
-  /** Signatures returned by RPC for this wallet. */
+  signature_limit?: number
+  page_size: number
+  max_pages: number
+  pages_fetched: number
+  /** Signatures returned by RPC for this wallet (after pagination). */
   rpc_signatures: number
   skipped_already_recorded: number
   skipped_signature_failed_on_chain: number
@@ -31,27 +43,69 @@ export type ReconcileWalletFromChainSuccess = {
 export type ReconcileWalletFromChainFailure = { ok: false; error: string }
 
 /**
- * Walk recent on-chain transactions for a wallet, verify any that look like Gen2 presale
- * payments, and insert missing rows (same rules as POST /api/gen2-presale/confirm).
+ * Walk on-chain transactions for a wallet, verify any Gen2 presale payments, and insert missing rows.
+ *
+ * Prefer {@link pageSize} + {@link maxPages} for deep scans; legacy callers may pass only
+ * {@link signatureLimit} for a single-page fetch.
  */
 export async function reconcileGen2PresaleWalletFromChain(params: {
   wallet: string
+  /** Legacy: one RPC call with this limit (max {@link GEN2_RECONCILE_LEGACY_SIG_LIMIT_MAX}). */
   signatureLimit?: number
+  pageSize?: number
+  maxPages?: number
 }): Promise<ReconcileWalletFromChainSuccess | ReconcileWalletFromChainFailure> {
   const wallet = normalizeSolanaWalletAddress(params.wallet)
   if (!wallet) {
     return { ok: false, error: 'Invalid wallet' }
   }
 
-  const signatureLimit = Math.min(
-    GEN2_RECONCILE_MAX_SIG_LIMIT,
-    Math.max(1, Math.floor(params.signatureLimit ?? GEN2_RECONCILE_DEFAULT_SIG_LIMIT))
-  )
+  /** Single RPC page — only when explicitly passing legacy `signatureLimit` alone. */
+  const legacyOnly =
+    params.signatureLimit != null && params.pageSize == null && params.maxPages == null
+
+  let pageSize: number
+  let maxPages: number
+  let legacySignatureLimit: number | undefined
+
+  if (legacyOnly) {
+    legacySignatureLimit = Math.min(
+      GEN2_RECONCILE_LEGACY_SIG_LIMIT_MAX,
+      Math.max(1, Math.floor(params.signatureLimit as number))
+    )
+    pageSize = legacySignatureLimit
+    maxPages = 1
+  } else {
+    pageSize = Math.min(
+      GEN2_RECONCILE_PAGE_SIZE_MAX,
+      Math.max(1, Math.floor(params.pageSize ?? GEN2_RECONCILE_PAGE_SIZE_DEFAULT))
+    )
+    maxPages = Math.min(
+      GEN2_RECONCILE_MAX_PAGES_CAP,
+      Math.max(1, Math.floor(params.maxPages ?? GEN2_RECONCILE_MAX_PAGES_DEFAULT))
+    )
+  }
 
   const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
   let sigInfos: Awaited<ReturnType<Connection['getSignaturesForAddress']>>
+  let pagesFetched: number
+
   try {
-    sigInfos = await connection.getSignaturesForAddress(new PublicKey(wallet), { limit: signatureLimit })
+    if (legacyOnly) {
+      sigInfos = await connection.getSignaturesForAddress(new PublicKey(wallet), {
+        limit: legacySignatureLimit!,
+      })
+      pagesFetched = 1
+    } else {
+      const res = await fetchSignaturesForAddressPaginated(
+        connection,
+        new PublicKey(wallet),
+        pageSize,
+        maxPages
+      )
+      sigInfos = res.signatures
+      pagesFetched = res.pagesFetched
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'RPC failed listing signatures'
     return { ok: false, error: msg }
@@ -114,7 +168,10 @@ export async function reconcileGen2PresaleWalletFromChain(params: {
   return {
     ok: true,
     wallet,
-    signature_limit: signatureLimit,
+    ...(legacySignatureLimit != null ? { signature_limit: legacySignatureLimit } : {}),
+    page_size: pageSize,
+    max_pages: maxPages,
+    pages_fetched: pagesFetched,
     rpc_signatures: sigInfos.length,
     skipped_already_recorded,
     skipped_signature_failed_on_chain,
