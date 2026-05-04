@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -2165,6 +2165,21 @@ export default function AdminDashboardPage() {
                 </CardTitle>
                 <CardDescription>
                   Manage announcements on the landing page, raffles page, and Announcements tab. Mark as new to show a notification icon for users.
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
+
+          <Card className="hover:border-primary transition-colors cursor-pointer">
+            <Link href="/admin/gen2-presale">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5" />
+                  Gen2 presale
+                </CardTitle>
+                <CardDescription>
+                  Toggle whether purchases are live, view sold spots and recent purchases, gift mint credits, and look up
+                  balances. Public page: /gen2-presale
                 </CardDescription>
               </CardHeader>
             </Link>
