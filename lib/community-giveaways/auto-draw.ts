@@ -24,6 +24,15 @@ export type CommunityGiveawayAutoDrawResult = {
   skippedReason?: string
 }
 
+/** True when this giveaway may still need an automatic draw (past ends_at, still open). */
+export function shouldAttemptCommunityGiveawayAutoDraw(g: CommunityGiveaway): boolean {
+  if (g.status !== 'open' || g.winner_wallet) return false
+  if (!g.prize_deposited_at || !g.ends_at) return false
+  const endsMs = new Date(g.ends_at).getTime()
+  if (Number.isNaN(endsMs) || Date.now() <= endsMs) return false
+  return true
+}
+
 /**
  * Auto-draw when entry period is over (same gate as joining: prize deposited, ends_at set and passed).
  * Admin manual draw can still run before the deadline; this path only runs for past-deadline giveaways.
@@ -60,7 +69,9 @@ export async function tryAutoDrawCommunityGiveaway(giveawayId: string): Promise<
 
   const updated = await getCommunityGiveawayById(giveawayId)
   if (updated) {
-    await notifyDiscordCommunityGiveawayWinner(updated, winner)
+    void notifyDiscordCommunityGiveawayWinner(updated, winner).catch((e) =>
+      console.error('[community-giveaway auto-draw] Discord notify failed:', e)
+    )
   }
 
   return { giveawayId, title, drawn: true, winnerWallet: winner }

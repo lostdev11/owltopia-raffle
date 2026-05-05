@@ -3,7 +3,10 @@ import {
   COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
   COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
 } from '@/lib/config/community-giveaways'
-import { tryAutoDrawCommunityGiveaway } from '@/lib/community-giveaways/auto-draw'
+import {
+  shouldAttemptCommunityGiveawayAutoDraw,
+  tryAutoDrawCommunityGiveaway,
+} from '@/lib/community-giveaways/auto-draw'
 import { countEntriesByGiveawayId, getCommunityGiveawayById } from '@/lib/db/community-giveaways'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -31,10 +34,13 @@ export async function GET(
       return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
     }
 
-    await tryAutoDrawCommunityGiveaway(id)
-    g = await getCommunityGiveawayById(id)
-    if (!g || g.status === 'draft') {
-      return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
+    // Only run auto-draw when the entry window has ended (avoids extra DB work + Discord on every view).
+    if (shouldAttemptCommunityGiveawayAutoDraw(g)) {
+      await tryAutoDrawCommunityGiveaway(id)
+      const refreshed = await getCommunityGiveawayById(id)
+      if (refreshed && refreshed.status !== 'draft') {
+        g = refreshed
+      }
     }
 
     const entryCount = await countEntriesByGiveawayId(id)

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { countEntriesByGiveawayId, listPublicCommunityGiveaways } from '@/lib/db/community-giveaways'
+import { countEntriesByGiveawayIds, listPublicCommunityGiveaways } from '@/lib/db/community-giveaways'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -39,22 +39,21 @@ function sortForBrowse(a: PublicCommunityGiveawayListItem, b: PublicCommunityGiv
 export async function GET() {
   try {
     const rows = await listPublicCommunityGiveaways(80)
-    const items: PublicCommunityGiveawayListItem[] = await Promise.all(
-      rows.map(async (g) => ({
-        id: g.id,
-        title: g.title,
-        description: g.description,
-        access_gate: g.access_gate,
-        status: g.status,
-        starts_at: g.starts_at,
-        ends_at: g.ends_at,
-        nft_mint_address: g.nft_mint_address,
-        entryCount: await countEntriesByGiveawayId(g.id),
-        prizeDeposited: Boolean(g.prize_deposited_at),
-        winnerDrawn: Boolean(g.winner_wallet),
-        claimed: Boolean(g.claimed_at),
-      }))
-    )
+    const counts = await countEntriesByGiveawayIds(rows.map((g) => g.id))
+    const items: PublicCommunityGiveawayListItem[] = rows.map((g) => ({
+      id: g.id,
+      title: g.title,
+      description: g.description,
+      access_gate: g.access_gate,
+      status: g.status,
+      starts_at: g.starts_at,
+      ends_at: g.ends_at,
+      nft_mint_address: g.nft_mint_address,
+      entryCount: counts.get(g.id) ?? 0,
+      prizeDeposited: Boolean(g.prize_deposited_at),
+      winnerDrawn: Boolean(g.winner_wallet),
+      claimed: Boolean(g.claimed_at),
+    }))
     items.sort(sortForBrowse)
     return NextResponse.json(
       { giveaways: items },
