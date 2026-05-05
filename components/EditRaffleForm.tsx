@@ -1280,7 +1280,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         >
                           <option value="SOL">SOL</option>
                           <option value="USDC">USDC</option>
-                          {isOwlEnabled() && <option value="OWL">OWL</option>}
+                          {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                         </select>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1402,7 +1402,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
-                        {isOwlEnabled() && <option value="OWL">OWL</option>}
+                        {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                       </select>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1507,7 +1507,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
-                        {isOwlEnabled() && <option value="OWL">OWL</option>}
+                        {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                       </select>
                     </div>
                   </div>

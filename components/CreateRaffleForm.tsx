@@ -180,6 +180,21 @@ export function CreateRaffleForm() {
   }, [prizeMode])
 
   useEffect(() => {
+    if (raffleCurrency !== 'OWL') return
+    if (!isOwlEnabled() || viewerIsAdmin === false) {
+      setRaffleCurrency('SOL')
+    }
+  }, [raffleCurrency, viewerIsAdmin])
+
+  useEffect(() => {
+    if (tokenPrizeCurrency !== 'OWL') return
+    if (!PARTNER_OWL_PRIZE_UI_ENABLED || viewerIsAdmin !== true) {
+      const fallback = allowedPartnerPrizeList[0]?.currencyCode
+      if (fallback) setTokenPrizeCurrency(fallback)
+    }
+  }, [tokenPrizeCurrency, viewerIsAdmin, allowedPartnerPrizeList])
+
+  useEffect(() => {
     if (!connected || !publicKey) {
       setViewerIsAdmin(null)
       return
@@ -1374,7 +1389,6 @@ export function CreateRaffleForm() {
                   value={tokenPrizeCurrency}
                   onChange={(e) => {
                     const v = e.target.value
-                    if (v === 'OWL') return
                     if (v && isPartnerPrizeCurrency(v)) {
                       setPrizeMode('token')
                       setTokenPrizeCurrency(v)
@@ -1391,9 +1405,7 @@ export function CreateRaffleForm() {
                       </option>
                     )
                   })}
-                  <option value="OWL" disabled={!PARTNER_OWL_PRIZE_UI_ENABLED}>
-                    OWL
-                  </option>
+                  {PARTNER_OWL_PRIZE_UI_ENABLED && viewerIsAdmin === true ? <option value="OWL">OWL</option> : null}
                 </select>
               </div>
             )}
@@ -1563,7 +1575,9 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
-                {isOwlEnabled() && <option value="OWL">OWL</option>}
+                {isOwlEnabled() && viewerIsAdmin === true ? (
+                  <option value="OWL">OWL</option>
+                ) : null}
               </select>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -302,6 +302,26 @@ export async function POST(request: NextRequest) {
 
     const adminRole = await getAdminRole(walletAddress)
 
+    const effectiveTicketCurrency = requestedCurrency || 'SOL'
+    if (effectiveTicketCurrency === 'OWL' && adminRole === null) {
+      return NextResponse.json(
+        {
+          error:
+            'OWL ticket currency is only available to platform admins. Choose SOL or USDC for public raffles.',
+        },
+        { status: 403 }
+      )
+    }
+    if (partnerCurrencyRaw === 'OWL' && adminRole === null) {
+      return NextResponse.json(
+        {
+          error:
+            'OWL partner-token prizes are only available to platform admins. Choose a different partner token.',
+        },
+        { status: 403 }
+      )
+    }
+
     let discordPartnerTenantId: string | null = null
     try {
       discordPartnerTenantId = await withTimeout(
