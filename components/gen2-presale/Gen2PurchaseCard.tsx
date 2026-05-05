@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Transaction } from '@solana/web3.js'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
@@ -17,13 +17,20 @@ import { Input } from '@/components/ui/input'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
 import { lamportsToSolDisplay } from '@/lib/gen2-presale/format-sol'
-import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
+import {
+  GEN2_PRESALE_MAX_CREDITS_PER_WALLET,
+  GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+  gen2PresaleCreditsRemainingForWallet,
+} from '@/lib/gen2-presale/max-per-purchase'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
 
 type Props = {
   stats: Gen2PresaleStats | null
   statsLoading?: boolean
+  /** Wallet balance row — used to enforce the per-wallet credit cap in the quantity UI. */
+  balance?: Gen2PresaleBalance | null
+  balanceLoading?: boolean
   /** False when admin has paused new purchases (`presale_live` on stats). */
   presaleLive: boolean
   onPurchased: (result?: {
@@ -35,7 +42,15 @@ type Props = {
 
 type Phase = 'idle' | 'building' | 'signing' | 'confirming' | 'recording'
 
-export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased, className }: Props) {
+export function Gen2PurchaseCard({
+  stats,
+  statsLoading,
+  balance = null,
+  balanceLoading = false,
+  presaleLive,
+  onPurchased,
+  className,
+}: Props) {
   const router = useRouter()
   const { connection } = useConnection()
   const { publicKey, sendTransaction, connected } = useWallet()
@@ -45,7 +60,24 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
   const [purchaseReceipt, setPurchaseReceipt] = useState<Gen2PresalePurchaseReceiptState | null>(null)
 
   const remaining = stats?.remaining ?? 657
-  const maxQty = Math.min(GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE, Math.max(0, remaining))
+  const walletRemaining = useMemo(() => {
+    if (balanceLoading && balance == null) return GEN2_PRESALE_MAX_CREDITS_PER_WALLET
+    return gen2PresaleCreditsRemainingForWallet(balance)
+  }, [balance, balanceLoading])
+
+  const maxQty = Math.min(
+    GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+    Math.max(0, remaining),
+    walletRemaining
+  )
+
+  useEffect(() => {
+    setQty((q) => {
+      if (maxQty < 1) return q
+      return Math.min(maxQty, Math.max(1, q))
+    })
+  }, [maxQty])
+
   const unitLamports = stats?.unit_lamports ?? null
 
   /** Match hero fallback when stats has not loaded `unit_price_usdc` yet. */
@@ -121,6 +153,9 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
           throw new Error(createJson.error || 'Presale is not live.')
         }
         if (createRes.status === 409) {
+          if (createJson.code === 'wallet_cap') {
+            throw new Error(createJson.error || 'Wallet presale credit limit reached.')
+          }
           throw new Error(createJson.error || 'Sold out or not enough spots left.')
         }
         throw new Error(createJson.error || 'Could not build transaction (check server env / RPC).')
@@ -301,7 +336,10 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
           <p className="mt-1 text-sm text-[#A9CBB9]">
             <span className="font-semibold text-[#EAFBF4]">${unitPriceUsdc} USDC</span> per spot,{' '}
             <span className="text-[#00FF9C]">charged in SOL</span> using a live SOL/USD quote (refreshed about every
-            minute). Split automatically between founder wallets in one transaction.
+            minute). Split automatically between founder wallets in one transaction.{' '}
+            <span className="text-[#A9CBB9]/90">
+              Max {GEN2_PRESALE_MAX_CREDITS_PER_WALLET} presale credits per wallet (purchases + any gifted credits).
+            </span>
           </p>
         </div>
       </div>
@@ -391,6 +429,12 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
               <dt className="text-[#A9CBB9]">Spots left</dt>
               <dd className="font-bold tabular-nums text-[#FFD769]">{statsLoading ? '…' : remaining}</dd>
             </div>
+            {!balanceLoading && walletRemaining < GEN2_PRESALE_MAX_CREDITS_PER_WALLET && (
+              <div className="flex justify-between gap-4 border-t border-[#1F6F54]/40 pt-3">
+                <dt className="text-[#A9CBB9]">Your wallet cap left</dt>
+                <dd className="font-bold tabular-nums text-[#EAFBF4]">{walletRemaining}</dd>
+              </div>
+            )}
           </dl>
 
           <Button

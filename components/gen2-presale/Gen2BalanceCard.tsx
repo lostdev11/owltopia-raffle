@@ -1,11 +1,14 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Loader2, RefreshCw, ScanLine } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
+import {
+  GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+  gen2PresaleCreditsRemainingForWallet,
+} from '@/lib/gen2-presale/max-per-purchase'
 import { cn } from '@/lib/utils'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 
@@ -45,6 +48,11 @@ export function Gen2BalanceCard({
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncErr, setSyncErr] = useState<string | null>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+
+  const recordQtyMax = useMemo(
+    () => Math.min(GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE, gen2PresaleCreditsRemainingForWallet(balance)),
+    [balance]
+  )
 
   const syncFromChain = useCallback(async () => {
     const w = walletAddress?.trim()
@@ -103,12 +111,12 @@ export function Gen2BalanceCard({
       return
     }
     const q = Math.floor(Number(recordQty))
-    if (
-      !Number.isFinite(q) ||
-      q < 1 ||
-      q > GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE
-    ) {
-      setRecordErr(`Quantity must be between 1 and ${GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE}.`)
+    if (!Number.isFinite(q) || q < 1 || q > recordQtyMax) {
+      setRecordErr(
+        recordQtyMax < 1
+          ? 'This wallet already has the maximum Gen2 presale credits.'
+          : `Quantity must be between 1 and ${recordQtyMax}.`
+      )
       return
     }
     setRecordBusy(true)
@@ -124,14 +132,16 @@ export function Gen2BalanceCard({
         balance?: Gen2PresaleBalance
         stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
       }
-      if (!res.ok && res.status !== 409) {
+      if (!res.ok) {
+        if (res.status === 409 && j.code === 'duplicate_tx') {
+          setRecordOk('That transaction was already on file — credits refreshed.')
+          setRecordSig('')
+          onRecorded?.({ balance: j.balance, stats: j.stats })
+          return
+        }
         throw new Error(j.error || 'Could not record payment')
       }
-      setRecordOk(
-        res.status === 409
-          ? 'That transaction was already on file — credits refreshed.'
-          : 'Payment recorded — your credits should match this wallet.'
-      )
+      setRecordOk('Payment recorded — your credits should match this wallet.')
       setRecordSig('')
       onRecorded?.({ balance: j.balance, stats: j.stats })
     } catch (e) {
@@ -139,7 +149,7 @@ export function Gen2BalanceCard({
     } finally {
       setRecordBusy(false)
     }
-  }, [walletAddress, recordSig, recordQty, onRecorded])
+  }, [walletAddress, recordSig, recordQty, recordQtyMax, onRecorded])
   if (!connected) {
     return (
       <div
@@ -274,15 +284,20 @@ export function Gen2BalanceCard({
               <Input
                 type="number"
                 min={1}
-                max={GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE}
+                max={Math.max(1, recordQtyMax)}
                 value={recordQty}
                 onChange={(e) => setRecordQty(Number(e.target.value))}
                 className="mt-1 min-h-[44px] w-28 border-[#1F6F54] bg-[#10161C] text-center font-bold text-[#EAFBF4]"
               />
             </label>
+            {recordQtyMax < 1 && (
+              <p className="text-xs text-amber-200/90" role="status">
+                Wallet is at the 20 credit cap — recording additional purchases is blocked.
+              </p>
+            )}
             <Button
               type="button"
-              disabled={recordBusy}
+              disabled={recordBusy || recordQtyMax < 1}
               onClick={() => void recordCompletedPayment()}
               className="min-h-[44px] w-full touch-manipulation bg-[#00E58B]/25 font-semibold text-[#EAFBF4] hover:bg-[#00E58B]/40"
             >

@@ -7,8 +7,10 @@ import {
 } from '@/lib/gen2-presale/config'
 import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
 import {
+  GEN2_PRESALE_MAX_CREDITS_PER_WALLET,
   GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE,
   GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+  gen2PresaleTotalCreditsOnWallet,
 } from '@/lib/gen2-presale/max-per-purchase'
 import {
   computePurchaseLamports,
@@ -358,6 +360,16 @@ export async function executeGen2PresaleConfirm(params: {
     }
   }
 
+  const creditsBefore = gen2PresaleTotalCreditsOnWallet(await getBalanceByWallet(buyerNorm))
+  if (creditsBefore + qty > GEN2_PRESALE_MAX_CREDITS_PER_WALLET) {
+    return {
+      ok: false,
+      httpStatus: 409,
+      code: 'wallet_cap',
+      message: `Each wallet can hold at most ${GEN2_PRESALE_MAX_CREDITS_PER_WALLET} presale credits (current total ${creditsBefore}).`,
+    }
+  }
+
   let solUsdOverride: number | undefined
   const raw = params.solUsdPriceUsed
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
@@ -449,6 +461,14 @@ export async function executeGen2PresaleConfirm(params: {
           percent_sold: percentDup,
         },
         explorerUrl: gen2PresaleExplorerTxUrl(params.txSignature),
+      }
+    }
+    if (result.error === 'wallet_cap') {
+      return {
+        ok: false,
+        httpStatus: 409,
+        code: 'wallet_cap',
+        message: `Each wallet can hold at most ${GEN2_PRESALE_MAX_CREDITS_PER_WALLET} presale credits.`,
       }
     }
     if (result.error === 'sold_out') {
@@ -615,7 +635,7 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
     if (r.code === 'db_error' || r.httpStatus >= 500) {
       return { ...r, quantityTried: tried }
     }
-    if (r.code === 'sold_out') {
+    if (r.code === 'sold_out' || r.code === 'wallet_cap') {
       return { ...r, quantityTried: tried }
     }
     lastFail = r

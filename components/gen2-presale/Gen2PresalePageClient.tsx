@@ -227,11 +227,35 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
             <Gen2ProgressCard stats={stats} loading={statsLoading} className="border-0 shadow-none ring-0" />
           </Gen2ElectricBorder>
 
+          {/* Purchase + balance — above participant list */}
+          <div className="mt-10 grid gap-8 lg:grid-cols-2">
+            <Gen2PurchaseCard
+              stats={stats}
+              statsLoading={statsLoading}
+              balance={balance}
+              balanceLoading={balLoading}
+              presaleLive={presaleLive}
+              onPurchased={onPresalePurchaseSettled}
+              className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
+            />
+            <Gen2ElectricBorder>
+              <Gen2BalanceCard
+                balance={balance}
+                loading={balLoading}
+                connected={connected}
+                onRefresh={refreshPresaleData}
+                walletAddress={wallet}
+                onRecorded={onPresalePurchaseSettled}
+                className="border-0 shadow-none ring-0"
+              />
+            </Gen2ElectricBorder>
+          </div>
+
           <div id="gen2-participants" className="scroll-mt-28">
             <Gen2ParticipantsCard
               highlightWallet={wallet}
               listRefreshKey={participantsListKey}
-              className="mt-8"
+              className="mt-10"
             />
           </div>
         </section>
@@ -306,28 +330,6 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
                 </li>
               </ul>
             </div>
-          </Gen2ElectricBorder>
-        </section>
-
-        {/* Purchase + balance */}
-        <section className="mt-14 grid gap-8 lg:grid-cols-2">
-          <Gen2PurchaseCard
-            stats={stats}
-            statsLoading={statsLoading}
-            presaleLive={presaleLive}
-            onPurchased={onPresalePurchaseSettled}
-            className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
-          />
-          <Gen2ElectricBorder>
-            <Gen2BalanceCard
-              balance={balance}
-              loading={balLoading}
-              connected={connected}
-              onRefresh={refreshPresaleData}
-              walletAddress={wallet}
-              onRecorded={onPresalePurchaseSettled}
-              className="border-0 shadow-none ring-0"
-            />
           </Gen2ElectricBorder>
         </section>
 
