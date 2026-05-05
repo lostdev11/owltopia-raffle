@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
-  COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
-} from '@/lib/config/community-giveaways'
-import {
-  shouldAttemptCommunityGiveawayAutoDraw,
-  tryAutoDrawCommunityGiveaway,
-} from '@/lib/community-giveaways/auto-draw'
-import { countEntriesByGiveawayId, getCommunityGiveawayById } from '@/lib/db/community-giveaways'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { loadCommunityGiveawayPageBundle } from '@/lib/community-giveaways/page-data'
 import { safeErrorMessage } from '@/lib/safe-error'
-import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,59 +19,12 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }
 
-    let g = await getCommunityGiveawayById(id)
-    if (!g || g.status === 'draft') {
+    const bundle = await loadCommunityGiveawayPageBundle(id)
+    if (!bundle) {
       return NextResponse.json({ error: 'Giveaway not found' }, { status: 404 })
     }
 
-    // Only run auto-draw when the entry window has ended (avoids extra DB work + Discord on every view).
-    if (shouldAttemptCommunityGiveawayAutoDraw(g)) {
-      await tryAutoDrawCommunityGiveaway(id)
-      const refreshed = await getCommunityGiveawayById(id)
-      if (refreshed && refreshed.status !== 'draft') {
-        g = refreshed
-      }
-    }
-
-    const entryCount = await countEntriesByGiveawayId(id)
-    const startMs = new Date(g.starts_at).getTime()
-    const owlBoostWindowOpen =
-      isOwlEnabled() &&
-      g.status === 'open' &&
-      Boolean(g.prize_deposited_at) &&
-      !Number.isNaN(startMs) &&
-      Date.now() < startMs
-
-    const treasuryWallet = getRaffleTreasuryWalletAddress() ?? ''
-    const owlInfo = getTokenInfo('OWL')
-    const owlPayment =
-      owlBoostWindowOpen && treasuryWallet && owlInfo.mintAddress
-        ? {
-            treasuryWallet,
-            mint: owlInfo.mintAddress,
-            decimals: owlInfo.decimals,
-            uiAmount: COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
-          }
-        : null
-
-    return NextResponse.json({
-      id: g.id,
-      title: g.title,
-      nft_mint_address: g.nft_mint_address,
-      description: g.description,
-      access_gate: g.access_gate,
-      status: g.status,
-      starts_at: g.starts_at,
-      ends_at: g.ends_at,
-      entryCount,
-      prizeDeposited: Boolean(g.prize_deposited_at),
-      winnerDrawn: Boolean(g.winner_wallet),
-      claimed: Boolean(g.claimed_at),
-      owlBoostWindowOpen,
-      owlBoostUiAmount: COMMUNITY_GIVEAWAY_OWL_PER_EXTRA_ENTRY,
-      maxDrawWeight: COMMUNITY_GIVEAWAY_MAX_DRAW_WEIGHT,
-      owlPayment,
-    })
+    return NextResponse.json(bundle.publicInfo)
   } catch (error) {
     console.error('[public/community-giveaways]', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })
