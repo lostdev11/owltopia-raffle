@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Gift, Loader2, RefreshCw, Search, Wrench } from 'lucide-react'
+import { ArrowLeft, Gift, Loader2, RefreshCw, RotateCcw, Search, Wrench } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
@@ -55,9 +55,14 @@ export default function AdminGen2PresalePage() {
   const [searchWallet, setSearchWallet] = useState('')
   const [balance, setBalance] = useState<Balance | null>(null)
   const [giftQty, setGiftQty] = useState(1)
+  const [refundQty, setRefundQty] = useState(1)
+  const [refundPurchaseSig, setRefundPurchaseSig] = useState('')
+  const [refundTxSig, setRefundTxSig] = useState('')
+  const [refundReason, setRefundReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
+  const [refundMsg, setRefundMsg] = useState<string | null>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [backfillPageSize, setBackfillPageSize] = useState(100)
   const [backfillMaxPages, setBackfillMaxPages] = useState(8)
@@ -258,6 +263,54 @@ export default function AdminGen2PresalePage() {
       void load()
     } catch (e) {
       setGiftMsg(e instanceof Error ? e.message : 'Gift failed')
+    }
+  }
+
+  const refund = async () => {
+    setRefundMsg(null)
+    const w = searchWallet.trim()
+    if (!w) {
+      setRefundMsg('Enter a wallet address first.')
+      return
+    }
+    const purchaseSig = refundPurchaseSig.trim()
+    if (!purchaseSig && (!Number.isFinite(refundQty) || refundQty < 1)) {
+      setRefundMsg('Set quantity >= 1 or provide purchase transaction signature.')
+      return
+    }
+    try {
+      const res = await fetch('/api/admin/gen2-presale/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          wallet: w,
+          quantity: refundQty,
+          purchaseTxSignature: purchaseSig || null,
+          refundTxSignature: refundTxSig.trim() || null,
+          reason: refundReason.trim() || null,
+        }),
+      })
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string
+        detail?: { error?: string; max_refundable?: number; refunded_quantity?: number }
+        balance?: Balance
+        result?: { refunded_quantity?: number }
+      }
+      if (!res.ok) {
+        const detailError = j.detail?.error
+        if (detailError === 'refund_exceeds_refundable_purchased_mints') {
+          throw new Error(`Refund too high. Max refundable now: ${j.detail?.max_refundable ?? 0}.`)
+        }
+        throw new Error(j.error || detailError || 'Refund failed')
+      }
+      const refundedQty = j.result?.refunded_quantity ?? j.detail?.refunded_quantity ?? refundQty
+      setBalance(j.balance ?? null)
+      setRefundMsg(`Refund applied. Deducted ${refundedQty} purchased credit(s).`)
+      if (purchaseSig) setRefundPurchaseSig('')
+      void load()
+    } catch (e) {
+      setRefundMsg(e instanceof Error ? e.message : 'Refund failed')
     }
   }
 
@@ -561,6 +614,68 @@ export default function AdminGen2PresalePage() {
                 </Button>
               </div>
               {giftMsg && <p className="text-sm text-muted-foreground">{giftMsg}</p>}
+
+              <div className="border-t pt-4">
+                <p className="mb-2 text-sm font-medium">Refund purchased credits</p>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  After sending funds back, deduct credits from this wallet. Provide the original purchase signature to
+                  auto-use that purchase quantity and mark it refunded.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="refund-purchase-sig">Original purchase tx signature (optional)</Label>
+                    <Input
+                      id="refund-purchase-sig"
+                      value={refundPurchaseSig}
+                      onChange={(e) => setRefundPurchaseSig(e.target.value)}
+                      placeholder="Base58 signature (recommended)"
+                      className="min-h-11 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="refund-qty">Refund quantity</Label>
+                    <Input
+                      id="refund-qty"
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={refundQty}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isFinite(n)) return
+                        setRefundQty(Math.min(500, Math.max(1, Math.floor(n))))
+                      }}
+                      className="w-28 min-h-11"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="refund-tx-sig">Your refund tx signature (optional)</Label>
+                    <Input
+                      id="refund-tx-sig"
+                      value={refundTxSig}
+                      onChange={(e) => setRefundTxSig(e.target.value)}
+                      placeholder="Tx you sent back to buyer"
+                      className="min-h-11 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="refund-reason">Reason (optional)</Label>
+                    <Input
+                      id="refund-reason"
+                      value={refundReason}
+                      onChange={(e) => setRefundReason(e.target.value)}
+                      placeholder="duplicate charge / customer support note"
+                      className="min-h-11"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Button type="button" variant="destructive" className="min-h-11" onClick={() => void refund()}>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Apply refund deduction
+                  </Button>
+                </div>
+                {refundMsg && <p className="mt-2 text-sm text-muted-foreground">{refundMsg}</p>}
+              </div>
             </CardContent>
           </Card>
 
