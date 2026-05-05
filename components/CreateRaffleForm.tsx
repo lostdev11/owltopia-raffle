@@ -189,10 +189,10 @@ export function CreateRaffleForm() {
   useEffect(() => {
     if (tokenPrizeCurrency !== 'OWL') return
     if (!PARTNER_OWL_PRIZE_UI_ENABLED || viewerIsAdmin !== true) {
-      const fallback = allowedPartnerPrizeList[0]?.currencyCode
+      const fallback = listPartnerPrizeTokens()[0]?.currencyCode
       if (fallback) setTokenPrizeCurrency(fallback)
     }
-  }, [tokenPrizeCurrency, viewerIsAdmin, allowedPartnerPrizeList])
+  }, [tokenPrizeCurrency, viewerIsAdmin])
 
   useEffect(() => {
     if (!connected || !publicKey) {
