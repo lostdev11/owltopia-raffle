@@ -18,6 +18,7 @@ import {
   assertCartBatchGrossMatchesMergedSplit,
   CartBatchPaymentTotalMismatchError,
 } from '@/lib/entries/batch-invariants'
+import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,8 +48,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
+    if (
+      body &&
+      typeof body === 'object' &&
+      Array.isArray((body as { items?: unknown }).items) &&
+      (body as { items: unknown[] }).items.length > CART_BATCH_MAX_RAFFLES_PER_TX
+    ) {
+      return NextResponse.json(
+        {
+          success: false as const,
+          error: `Cart checkout supports up to ${CART_BATCH_MAX_RAFFLES_PER_TX} raffles per transaction.`,
+        },
+        { status: 400 }
+      )
+    }
+
     const parsed = parseOr400(entriesCreateBatchBody, body)
-    if (!parsed.ok) return NextResponse.json(ERROR_BODY, { status: 400 })
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false as const, error: parsed.error || 'Invalid request' }, { status: 400 })
+    }
     const { walletAddress: walletAddressStr, items } = parsed.data
 
     const raffleIdsOrdered = items.map(it => it.raffleId)

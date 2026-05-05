@@ -69,6 +69,7 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
     checkout,
     checkoutBusy,
     checkoutError,
+    checkoutBatchProgress,
   } = useCart()
   const { connected } = useWallet()
 
@@ -178,6 +179,11 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
             {checkoutError}
           </p>
         ) : null}
+        {checkoutBusy && checkoutBatchProgress && checkoutBatchProgress.total > 1 ? (
+          <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+            Processing batch {checkoutBatchProgress.current}/{checkoutBatchProgress.total}...
+          </p>
+        ) : null}
         <div className="flex flex-col gap-2 pt-1">
           <Button
             type="button"
@@ -186,7 +192,9 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
             onClick={() => checkout()}
           >
             {checkoutBusy
-              ? 'Checking out…'
+              ? checkoutBatchProgress && checkoutBatchProgress.total > 1
+                ? `Checking out (batch ${checkoutBatchProgress.current}/${checkoutBatchProgress.total})...`
+                : 'Checking out...'
               : !connected
                 ? 'Connect wallet to checkout'
                 : lineCount === 1

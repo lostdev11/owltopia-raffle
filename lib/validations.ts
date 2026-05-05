@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
+import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
 
 const solanaAddress = z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/)
 
@@ -30,12 +31,12 @@ export const entriesCreateBatchBody = z.object({
       })
     )
     .min(1)
-    .max(20),
+    .max(CART_BATCH_MAX_RAFFLES_PER_TX),
 })
 
 export const entriesVerifyBatchBody = z.object({
   transactionSignature: z.string().min(80).max(120),
-  entryIds: z.array(z.string().uuid()).min(1).max(20),
+  entryIds: z.array(z.string().uuid()).min(1).max(CART_BATCH_MAX_RAFFLES_PER_TX),
 })
 
 export const entriesConfirmComplimentaryBody = z.object({

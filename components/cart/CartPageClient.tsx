@@ -6,6 +6,7 @@ import { ArrowLeft, ShoppingCart } from 'lucide-react'
 import { CartCheckoutPanel } from '@/components/cart/CartCheckoutPanel'
 import { CartBrowseRaffles } from '@/components/cart/CartBrowseRaffles'
 import { useCart } from '@/components/cart/CartProvider'
+import { CART_BATCH_MAX_RAFFLES_PER_TX, CART_CHECKOUT_MAX_RAFFLES } from '@/lib/cart/constants'
 
 export function CartPageClient() {
   const { connected } = useWallet()
@@ -13,8 +14,8 @@ export function CartPageClient() {
   const currencyLabel = lines[0]?.snapshot.currency ?? ''
   const intro =
     lines.length >= 2
-      ? `One wallet approval pays for all ${lines.length} raffles in one batch transaction. Each line keeps its own ticket count — raffle pages and sold totals update per raffle. On slow mobile data or Wi‑Fi, wait for confirmation before leaving.`
-      : 'Add multiple live raffles, then check out. Two or more raffles in the same currency use a single on-chain payment when available.'
+      ? `One checkout can process up to ${CART_CHECKOUT_MAX_RAFFLES} raffles. Payments run in safe chunks of up to ${CART_BATCH_MAX_RAFFLES_PER_TX} raffles per on-chain transaction, while each line keeps its own ticket count. On slow mobile data or Wi-Fi, wait for confirmation before leaving.`
+      : `Add multiple live raffles, then check out. One checkout can process up to ${CART_CHECKOUT_MAX_RAFFLES} raffles in same-currency chunks when needed.`
 
   if (!connected) {
     return (
