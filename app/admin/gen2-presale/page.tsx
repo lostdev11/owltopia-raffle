@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, Gift, Loader2, RefreshCw, RotateCcw, Search, Wrench } from 'lucide-react'
@@ -45,6 +45,14 @@ type PurchaseRow = {
   total_lamports: string | number
 }
 
+type WalletPurchaseGroup = {
+  wallet: string
+  totalQuantity: number
+  purchaseCount: number
+  latestCreatedAt: string
+  purchases: PurchaseRow[]
+}
+
 export default function AdminGen2PresalePage() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
@@ -56,7 +64,6 @@ export default function AdminGen2PresalePage() {
   const [balance, setBalance] = useState<Balance | null>(null)
   const [giftQty, setGiftQty] = useState(1)
   const [refundQty, setRefundQty] = useState(1)
-  const [refundPurchaseSig, setRefundPurchaseSig] = useState('')
   const [refundTxSig, setRefundTxSig] = useState('')
   const [refundReason, setRefundReason] = useState('')
   const [loading, setLoading] = useState(true)
@@ -73,6 +80,27 @@ export default function AdminGen2PresalePage() {
   const [repairLoading, setRepairLoading] = useState(false)
   const [repairMsg, setRepairMsg] = useState<string | null>(null)
   const [repairResult, setRepairResult] = useState<Record<string, unknown> | null>(null)
+
+  const groupedPurchases = useMemo<WalletPurchaseGroup[]>(() => {
+    const groups = new Map<string, WalletPurchaseGroup>()
+    for (const purchase of purchases) {
+      const existing = groups.get(purchase.wallet)
+      if (existing) {
+        existing.purchases.push(purchase)
+        existing.purchaseCount += 1
+        existing.totalQuantity += purchase.quantity
+      } else {
+        groups.set(purchase.wallet, {
+          wallet: purchase.wallet,
+          totalQuantity: purchase.quantity,
+          purchaseCount: 1,
+          latestCreatedAt: purchase.created_at,
+          purchases: [purchase],
+        })
+      }
+    }
+    return Array.from(groups.values())
+  }, [purchases])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -273,9 +301,8 @@ export default function AdminGen2PresalePage() {
       setRefundMsg('Enter a wallet address first.')
       return
     }
-    const purchaseSig = refundPurchaseSig.trim()
-    if (!purchaseSig && (!Number.isFinite(refundQty) || refundQty < 1)) {
-      setRefundMsg('Set quantity >= 1 or provide purchase transaction signature.')
+    if (!Number.isFinite(refundQty) || refundQty < 1) {
+      setRefundMsg('Set refund quantity to at least 1.')
       return
     }
     try {
@@ -286,7 +313,7 @@ export default function AdminGen2PresalePage() {
         body: JSON.stringify({
           wallet: w,
           quantity: refundQty,
-          purchaseTxSignature: purchaseSig || null,
+          purchaseTxSignature: null,
           refundTxSignature: refundTxSig.trim() || null,
           reason: refundReason.trim() || null,
         }),
@@ -307,7 +334,6 @@ export default function AdminGen2PresalePage() {
       const refundedQty = j.result?.refunded_quantity ?? j.detail?.refunded_quantity ?? refundQty
       setBalance(j.balance ?? null)
       setRefundMsg(`Refund applied. Deducted ${refundedQty} purchased credit(s).`)
-      if (purchaseSig) setRefundPurchaseSig('')
       void load()
     } catch (e) {
       setRefundMsg(e instanceof Error ? e.message : 'Refund failed')
@@ -618,20 +644,10 @@ export default function AdminGen2PresalePage() {
               <div className="border-t pt-4">
                 <p className="mb-2 text-sm font-medium">Refund purchased credits</p>
                 <p className="mb-3 text-xs text-muted-foreground">
-                  After sending funds back, deduct credits from this wallet. Provide the original purchase signature to
-                  auto-use that purchase quantity and mark it refunded.
+                  After sending funds back, deduct credits from this wallet. Paste the buyer wallet (or tap a grouped
+                  wallet below), set quantity, then apply refund.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2 sm:col-span-2">
-                    <Label htmlFor="refund-purchase-sig">Original purchase tx signature (optional)</Label>
-                    <Input
-                      id="refund-purchase-sig"
-                      value={refundPurchaseSig}
-                      onChange={(e) => setRefundPurchaseSig(e.target.value)}
-                      placeholder="Base58 signature (recommended)"
-                      className="min-h-11 font-mono text-xs"
-                    />
-                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="refund-qty">Refund quantity</Label>
                     <Input
@@ -682,43 +698,76 @@ export default function AdminGen2PresalePage() {
           <Card>
             <CardHeader>
               <CardTitle>Recent purchases</CardTitle>
-              <CardDescription>Latest confirmed presale transactions.</CardDescription>
+              <CardDescription>
+                Latest confirmed presale transactions grouped by wallet for quicker multi-purchase review.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="py-2 pr-4">When</th>
-                    <th className="py-2 pr-4">Wallet</th>
-                    <th className="py-2 pr-4">Qty</th>
-                    <th className="py-2">Tx</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchases.map((p) => (
-                    <tr key={p.id} className="border-b border-border/50">
-                      <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
-                        {new Date(p.created_at).toLocaleString()}
-                      </td>
-                      <td className="max-w-[140px] truncate py-2 pr-4 font-mono text-xs" title={p.wallet}>
-                        {p.wallet}
-                      </td>
-                      <td className="py-2 pr-4">{p.quantity}</td>
-                      <td className="max-w-[120px] truncate py-2 font-mono text-xs">
-                        <a
-                          className="text-primary underline"
-                          href={`https://solscan.io/tx/${p.tx_signature}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {p.tx_signature.slice(0, 8)}…
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {purchases.length === 0 && <p className="py-4 text-muted-foreground">No purchases yet.</p>}
+            <CardContent className="space-y-4">
+              {groupedPurchases.map((group) => (
+                <div key={group.wallet} className="rounded-lg border bg-muted/30 p-3 sm:p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs text-muted-foreground">{group.wallet}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Last purchase {new Date(group.latestCreatedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 text-xs">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs touch-manipulation"
+                        onClick={() => {
+                          setSearchWallet(group.wallet)
+                          setBalance(null)
+                        }}
+                      >
+                        Use wallet for refund
+                      </Button>
+                      <span className="rounded-md border bg-background px-2 py-1">
+                        Txns: <strong>{group.purchaseCount}</strong>
+                      </span>
+                      <span className="rounded-md border bg-background px-2 py-1">
+                        Qty: <strong>{group.totalQuantity}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left">
+                          <th className="py-2 pr-4">When</th>
+                          <th className="py-2 pr-4">Qty</th>
+                          <th className="py-2">Tx</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.purchases.map((p) => (
+                          <tr key={p.id} className="border-b border-border/50">
+                            <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
+                              {new Date(p.created_at).toLocaleString()}
+                            </td>
+                            <td className="py-2 pr-4">{p.quantity}</td>
+                            <td className="max-w-[140px] truncate py-2 font-mono text-xs">
+                              <a
+                                className="text-primary underline"
+                                href={`https://solscan.io/tx/${p.tx_signature}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {p.tx_signature.slice(0, 8)}…
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+              {groupedPurchases.length === 0 && <p className="py-4 text-muted-foreground">No purchases yet.</p>}
             </CardContent>
           </Card>
         </div>
