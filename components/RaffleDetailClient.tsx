@@ -775,7 +775,9 @@ export function RaffleDetailClient({
 
   /** Buyer self-claim from funds escrow (same rules as dashboard). */
   const buyerRefundableEntries = useMemo(() => {
-    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    const canBuyerClaimFromEscrow =
+      raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met'
+    if (!connected || !publicKey || !canBuyerClaimFromEscrow) return []
     if (!raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter(
@@ -784,7 +786,9 @@ export function RaffleDetailClient({
   }, [connected, publicKey, raffle, entries])
 
   const buyerLegacyRefundEntries = useMemo(() => {
-    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    const canBuyerClaimLegacy =
+      raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met'
+    if (!connected || !publicKey || !canBuyerClaimLegacy) return []
     if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
