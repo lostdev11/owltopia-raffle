@@ -33,7 +33,7 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs uppercase tracking-wider text-[#FFD769]/90">Only remaining</p>
+            <p className="text-xs uppercase tracking-wider text-[#FFD769]/90">Only live</p>
             <p className="text-xl font-bold tabular-nums text-[#00FF9C]">{loading ? '—' : remaining}</p>
           </div>
         </div>

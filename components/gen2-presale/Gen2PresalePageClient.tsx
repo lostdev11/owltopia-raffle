@@ -40,7 +40,7 @@ function Gen2Countdown() {
     const m = Math.floor(diff / 60000) % 60
     const h = Math.floor(diff / 3600000) % 24
     const d = Math.floor(diff / 86400000)
-    if (diff <= 0) return 'Mint window: live soon'
+    if (diff <= 0) return 'Live'
     return `${d}d ${h}h ${m}m ${s}s`
   }, [valid, targetMs, now])
 
