@@ -47,9 +47,9 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center rounded-lg border border-[#00FF9C]/30 bg-[#10161C]/90 px-3 py-1.5 text-sm font-bold tabular-nums text-[#00FF9C]">
-            ${loading ? '—' : stats?.unit_price_usdc ?? 20} USDC / spot
+            {loading ? '—' : `$${stats?.unit_price_usdc ?? 20}`} dollars in SOL / spot
           </span>
-          <span className="text-sm text-[#A9CBB9]">Paid in SOL at checkout.</span>
+          <span className="text-sm text-[#A9CBB9]">USD value; you pay in SOL.</span>
         </div>
         <p className="text-sm leading-relaxed text-[#A9CBB9]">
           Secure your Gen2 allocation before WL and public.{' '}

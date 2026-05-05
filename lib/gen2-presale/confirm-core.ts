@@ -95,6 +95,57 @@ export function enumerateGen2PresaleQuantityCandidates(
   return divisors
 }
 
+/**
+ * When several spot counts verify for the same founder payment total, chain-aligned rules accept
+ * any divisor of total lamports within bounds — so multiple `q` can pass
+ * {@link getVerifiedBreakdownForQuantity}. Picking the first candidate by hint-distance can
+ * under-report spots when the rounded hint is between two valid divisors.
+ *
+ * Choose the quantity whose implied per-spot SOL/USD (and unit lamports) best matches the server
+ * oracle {@link Gen2PresaleEnvConfig.solUsdPrice} / {@link lamportsPerSpot}.
+ */
+export function pickBestGen2PresaleQuantityFromCandidates(
+  candidates: number[],
+  cfg: Gen2PresaleEnvConfig,
+  buyerNorm: string,
+  parsed: ParsedTransactionWithMeta
+): { quantity: number; breakdown: Gen2PriceBreakdown } | null {
+  const unitTarget = lamportsPerSpot(cfg)
+  let best: {
+    quantity: number
+    breakdown: Gen2PriceBreakdown
+    usdDiff: number
+    unitDiff: bigint
+  } | null = null
+
+  for (const q of candidates) {
+    const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, parsed, q)
+    if (!breakdown) continue
+
+    const usdDiff = Math.abs(breakdown.solUsdPrice - cfg.solUsdPrice)
+    const u = breakdown.unitLamports
+    const unitDiff = u >= unitTarget ? u - unitTarget : unitTarget - u
+
+    if (!best) {
+      best = { quantity: q, breakdown, usdDiff, unitDiff }
+      continue
+    }
+    if (usdDiff < best.usdDiff - 1e-12) {
+      best = { quantity: q, breakdown, usdDiff, unitDiff }
+      continue
+    }
+    if (Math.abs(usdDiff - best.usdDiff) <= 1e-12) {
+      if (unitDiff < best.unitDiff) {
+        best = { quantity: q, breakdown, usdDiff, unitDiff }
+      } else if (unitDiff === best.unitDiff && q > best.quantity) {
+        best = { quantity: q, breakdown, usdDiff, unitDiff }
+      }
+    }
+  }
+
+  return best ? { quantity: best.quantity, breakdown: best.breakdown } : null
+}
+
 export type Gen2ConfirmOkInserted = {
   ok: true
   inserted: true
@@ -254,10 +305,18 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
     bounds.minQ,
     bounds.maxQ
   )
-  for (const q of candidates) {
-    const breakdown = getVerifiedBreakdownForQuantity(cfg, buyerNorm, params.parsedTx, q)
-    if (breakdown) {
-      return { ok: true, buyerWallet: buyerNorm, quantity: q, breakdown }
+  const picked = pickBestGen2PresaleQuantityFromCandidates(
+    candidates,
+    cfg,
+    buyerNorm,
+    params.parsedTx
+  )
+  if (picked) {
+    return {
+      ok: true,
+      buyerWallet: buyerNorm,
+      quantity: picked.quantity,
+      breakdown: picked.breakdown,
     }
   }
 
@@ -430,11 +489,10 @@ export async function executeGen2PresaleConfirm(params: {
 }
 
 /**
- * Try candidate quantities (derived from total SOL to founders) until confirm succeeds.
- *
- * Candidates are filtered to divisors of total lamports and ordered by closeness to the
- * economically implied spot count (total / spot lamports from price oracle), so we do not pick an
- * arbitrary large divisor when chain-aligned math accepts multiple q values.
+ * Resolve spot count from founder payment total, then confirm once. Divisors of the on-chain total
+ * can all verify under chain-aligned rules; the chosen quantity is
+ * {@link pickBestGen2PresaleQuantityFromCandidates} (oracle / per-spot match), not first by hint
+ * distance.
  */
 export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
   buyerWallet: string
@@ -533,21 +591,17 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
   }
 
   const candidates = enumerateGen2PresaleQuantityCandidates(split.total, cfg, minQ, maxQ)
-  for (const q of candidates) {
-    tried.push(q)
-    const preview = getVerifiedBreakdownForQuantity(cfg, buyerNormEarly, parsedOnce, q)
-    if (!preview) {
-      lastFail = {
-        ok: false,
-        httpStatus: 400,
-        code: 'payment_mismatch',
-        message: 'Could not verify founder payments in this transaction',
-      }
-      continue
-    }
+  const picked = pickBestGen2PresaleQuantityFromCandidates(
+    candidates,
+    cfg,
+    buyerNormEarly,
+    parsedOnce
+  )
+  if (picked) {
+    tried.push(...candidates)
     const r = await executeGen2PresaleConfirm({
       buyerWallet: params.buyerWallet,
-      quantity: q,
+      quantity: picked.quantity,
       txSignature: params.txSignature,
       parsedTx: parsedOnce,
       quantityCap,
@@ -565,6 +619,16 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
       return { ...r, quantityTried: tried }
     }
     lastFail = r
+  } else {
+    for (const q of candidates) {
+      tried.push(q)
+    }
+    lastFail = {
+      ok: false,
+      httpStatus: 400,
+      code: 'payment_mismatch',
+      message: 'Could not verify founder payments in this transaction',
+    }
   }
 
   return {

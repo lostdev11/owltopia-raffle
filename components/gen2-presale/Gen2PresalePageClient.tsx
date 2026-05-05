@@ -7,6 +7,7 @@ import { ChevronRight } from 'lucide-react'
 
 import { HeroVideoBackground } from '@/components/HeroVideoBackground'
 import { Gen2BalanceCard } from '@/components/gen2-presale/Gen2BalanceCard'
+import { Gen2ParticipantsCard } from '@/components/gen2-presale/Gen2ParticipantsCard'
 import { Gen2ElectricBorder } from '@/components/gen2-presale/Gen2ElectricBorder'
 import { Gen2LiveBadge } from '@/components/gen2-presale/Gen2LiveBadge'
 import { Gen2PresaleBanner } from '@/components/gen2-presale/Gen2PresaleBanner'
@@ -52,9 +53,15 @@ function Gen2Countdown() {
   )
 }
 
-export function Gen2PresalePageClient() {
+type Gen2PresalePageClientProps = {
+  /** SIWS session is gen2 presale admin — show internal note when presale toggle is off */
+  showAdminPausedNote?: boolean
+}
+
+export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2PresalePageClientProps) {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? null
+  const [participantsListKey, setParticipantsListKey] = useState(0)
   const { stats, loading: statsLoading, error: statsError, refresh: refreshStats, applyStatsPatch } =
     useGen2PresaleStats(20_000)
   const { balance, loading: balLoading, refresh: refreshBal, applySnapshot } = useGen2PresaleBalance(wallet)
@@ -77,6 +84,7 @@ export function Gen2PresalePageClient() {
       if (result?.stats) applyStatsPatch(result.stats)
       void refreshStats()
       void refreshBal()
+      setParticipantsListKey((k) => k + 1)
     },
     [applySnapshot, applyStatsPatch, refreshStats, refreshBal]
   )
@@ -84,6 +92,7 @@ export function Gen2PresalePageClient() {
   const refreshPresaleData = useCallback(() => {
     void refreshStats()
     void refreshBal()
+    setParticipantsListKey((k) => k + 1)
   }, [refreshStats, refreshBal])
 
   useEffect(() => {
@@ -140,10 +149,9 @@ export function Gen2PresalePageClient() {
               </h1>
               <p className="text-lg font-semibold text-[#00FF9C]">1 presale spot = 1 Gen2 mint</p>
               <p className="rounded-xl border border-[#00E58B]/25 bg-[#10161C]/85 px-4 py-3 text-base font-semibold text-[#EAFBF4] shadow-[0_0_32px_rgba(0,0,0,0.35)] ring-1 ring-[#00FF9C]/10 backdrop-blur-md">
-                <span className="text-[#00FF9C]">${spotPriceUsdc} USDC</span> per spot ·{' '}
-                <span className="font-normal text-[#A9CBB9]">you pay in SOL</span>{' '}
+                <span className="text-[#00FF9C]">${spotPriceUsdc} dollars in SOL</span> per spot.{' '}
                 <span className="text-sm font-normal text-[#A9CBB9]">
-                  (amount is calculated on-chain from the live SOL/USD rate on the server).
+                  Amount is calculated on-chain from the live SOL/USD rate on the server.
                 </span>
               </p>
               <p className="text-[#A9CBB9] leading-relaxed">
@@ -205,7 +213,7 @@ export function Gen2PresalePageClient() {
         {/* Stats */}
         <section className="mt-14 space-y-4 animate-page-enter">
           <h2 className="text-center font-display text-2xl text-[#EAFBF4] md:text-left">Live allocation</h2>
-          {stats && stats.presale_live === false && (
+          {stats && stats.presale_live === false && showAdminPausedNote && (
             <p className="text-center text-sm text-[#FFD769] md:text-left">
               Purchasing is paused in admin — numbers below are informational.
             </p>
@@ -218,6 +226,14 @@ export function Gen2PresalePageClient() {
           <Gen2ElectricBorder>
             <Gen2ProgressCard stats={stats} loading={statsLoading} className="border-0 shadow-none ring-0" />
           </Gen2ElectricBorder>
+
+          <div id="gen2-participants" className="scroll-mt-28">
+            <Gen2ParticipantsCard
+              highlightWallet={wallet}
+              listRefreshKey={participantsListKey}
+              className="mt-8"
+            />
+          </div>
         </section>
 
         {/* About Gen2 — supply, mint schedule, tier pricing, utilities */}

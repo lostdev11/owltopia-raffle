@@ -60,7 +60,7 @@ export default function AdminGen2PresalePage() {
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [backfillPageSize, setBackfillPageSize] = useState(100)
-  const [backfillMaxPages, setBackfillMaxPages] = useState(25)
+  const [backfillMaxPages, setBackfillMaxPages] = useState(8)
   const [backfillLoading, setBackfillLoading] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
@@ -157,14 +157,17 @@ export default function AdminGen2PresalePage() {
     setBackfillMsg(null)
     setBackfillResult(null)
     setBackfillLoading(true)
+    const controller = new AbortController()
+    const tid = window.setTimeout(() => controller.abort(), 280_000)
     try {
       const res = await fetch('/api/admin/gen2-presale/backfill-from-chain', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           pageSize: Math.min(1000, Math.max(1, Math.floor(backfillPageSize) || 100)),
-          maxPages: Math.min(80, Math.max(1, Math.floor(backfillMaxPages) || 25)),
+          maxPages: Math.min(80, Math.max(1, Math.floor(backfillMaxPages) || 8)),
         }),
       })
       const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
@@ -172,12 +175,26 @@ export default function AdminGen2PresalePage() {
         throw new Error((j.error as string | undefined) || 'Backfill failed')
       }
       setBackfillResult(j)
-      const ins = (j as { summary?: { inserted?: number } }).summary?.inserted ?? 0
-      setBackfillMsg(`Backfill complete. Recorded ${ins} new purchase(s).`)
+      const s = (j as { summary?: Record<string, number> }).summary ?? {}
+      const ins = typeof s.inserted === 'number' ? s.inserted : 0
+      const rep = typeof s.existing_repaired_quantity === 'number' ? s.existing_repaired_quantity : 0
+      const def =
+        typeof s.deferred_past_verification_cap === 'number' ? s.deferred_past_verification_cap : 0
+      const cap = (j as { limits?: { max_deep_verifications?: number } }).limits?.max_deep_verifications ?? 150
+      let msg = `Backfill complete. Recorded ${ins} new purchase(s). Repaired ${rep} existing row(s) with missing credits.`
+      if (def > 0) {
+        msg += ` ${def} signature(s) not processed yet — run again (max ${cap} deep checks per run).`
+      }
+      setBackfillMsg(msg)
       void load()
     } catch (e) {
-      setBackfillMsg(e instanceof Error ? e.message : 'Backfill failed')
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setBackfillMsg('Backfill timed out — lower max pages or page size and try again.')
+      } else {
+        setBackfillMsg(e instanceof Error ? e.message : 'Backfill failed')
+      }
     } finally {
+      window.clearTimeout(tid)
       setBackfillLoading(false)
     }
   }
@@ -360,11 +377,10 @@ export default function AdminGen2PresalePage() {
             <CardHeader>
               <CardTitle>Backfill from chain</CardTitle>
               <CardDescription>
-                Paginates <strong>founder A</strong> (<code className="text-xs">FOUNDER_A_WALLET</code>) transaction
-                history — each presale pays both founders, so scanning one wallet reaches every presale signature. Older
-                payments were often missed when only the newest few dozen txs were merged across both wallets. Records any
-                payment missing from the database (same verification as confirm). Increase pages if sold count still lags
-                expected chain volume; already-recorded signatures are skipped.
+                Paginates <strong>founder A</strong> and <strong>founder B</strong>, merges unique signatures (newest
+                first). <strong>Inserts</strong> missing payments and <strong>re-checks</strong> signatures already in
+                the database so under-reported quantities from an old backfill can be repaired. Up to{' '}
+                <strong>150</strong> signatures fully verified per run — run again if deferred remain.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

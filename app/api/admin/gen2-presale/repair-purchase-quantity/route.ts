@@ -48,10 +48,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 
-  const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
+  const rpcUrl = resolveServerSolanaRpcUrl()
+  const connection = new Connection(rpcUrl, 'confirmed')
   const parsed = await fetchParsedTransactionConfirmed(connection, rawSig)
-  if (!parsed || parsed.meta?.err) {
-    return NextResponse.json({ error: 'Transaction not found or failed on-chain' }, { status: 404 })
+  if (!parsed) {
+    return NextResponse.json(
+      {
+        error:
+          'Could not load this transaction from your Solana RPC (parsed tx was null). Common causes: the tx is on mainnet but the server uses a devnet RPC (or the opposite), a typo in the signature, or an RPC that dropped getParsedTransaction. Set NEXT_PUBLIC_SOLANA_RPC_URL or SOLANA_RPC_URL to an HTTP endpoint on the same cluster where the payment was made, redeploy, then retry.',
+        rpc_host: (() => {
+          try {
+            return new URL(rpcUrl).hostname
+          } catch {
+            return undefined
+          }
+        })(),
+      },
+      { status: 404 }
+    )
+  }
+  if (parsed.meta?.err) {
+    return NextResponse.json(
+      {
+        error:
+          'This transaction failed on-chain, so it cannot be used for presale repair. Use a successful payment signature.',
+        chain_err: parsed.meta.err,
+      },
+      { status: 404 }
+    )
   }
 
   const feePayer = getFeePayerPublicKey(parsed)
@@ -102,13 +126,48 @@ export async function POST(request: NextRequest) {
   const prevTotal = String((row as { total_lamports: string | number }).total_lamports)
   const newTotalStr = bigintToRpcParam(resolved.breakdown.totalLamports)
   if (sameQty && prevTotal === newTotalStr) {
+    const { data: recResult, error: recErr } = await db.rpc('reconcile_gen2_presale_wallet_purchased_mints', {
+      p_wallet: resolved.buyerWallet,
+    })
+
+    if (recErr) {
+      console.error('reconcile_gen2_presale_wallet_purchased_mints:', recErr.message)
+      return NextResponse.json(
+        { error: 'Wallet reconcile failed — apply migration 100_gen2_presale_reconcile_wallet_balance or check logs.' },
+        { status: 500 }
+      )
+    }
+
+    const rec = recResult as {
+      ok?: boolean
+      reconciled?: boolean
+      unchanged?: boolean
+      error?: string
+      delta?: number
+      previous_purchased_mints?: number
+      new_purchased_mints?: number
+      reason?: string
+    } | null
+
+    if (rec?.ok === false) {
+      return NextResponse.json({ error: rec.error ?? 'reconcile_failed', detail: rec }, { status: 409 })
+    }
+
+    const purchaseRowUnchanged = true
+    const balanceSynced = rec?.reconciled === true
+
     return NextResponse.json({
       ok: true,
-      unchanged: true,
+      unchanged: !balanceSynced,
+      purchase_row_unchanged: purchaseRowUnchanged,
+      balance_reconciled: balanceSynced,
       tx_signature: rawSig,
       wallet: resolved.buyerWallet,
       quantity: resolved.quantity,
-      message: 'Row already matches on-chain quantity and lamports.',
+      message: balanceSynced
+        ? 'Purchase row matched chain; wallet purchased_mints updated to match all confirmed purchase rows for this wallet.'
+        : 'Purchase row matched chain; wallet balance already matched the sum of confirmed purchases.',
+      reconcile: rec,
     })
   }
 

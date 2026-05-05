@@ -62,8 +62,7 @@ export function Gen2PresaleBanner({ className, live, statsLoading }: Props) {
             )}
             <span className="text-[#A9CBB9]">
               — 1 spot = 1 Gen2 mint ·{' '}
-              <span className="font-semibold text-[#EAFBF4]">${spotUsdc} USDC</span>{' '}
-              <span className="text-[#A9CBB9]">(paid in SOL)</span>
+              <span className="font-semibold text-[#EAFBF4]">${spotUsdc} dollars in SOL</span>
             </span>
           </span>
         </p>

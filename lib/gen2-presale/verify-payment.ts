@@ -237,13 +237,22 @@ export async function fetchParsedTransactionConfirmed(
   connection: Connection,
   signature: string
 ): Promise<ParsedTransactionWithMeta | null> {
-  const opts = [
-    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
-  ]
-  for (const o of opts) {
+  /** v0 and legacy messages use different `maxSupportedTransactionVersion`; RPC cluster must match the tx. */
+  const commitments = ['confirmed', 'finalized'] as const
+  for (const commitment of commitments) {
+    for (const maxSupportedTransactionVersion of [0] as const) {
+      try {
+        const tx = await connection.getParsedTransaction(signature, { commitment, maxSupportedTransactionVersion })
+        if (tx) return tx
+      } catch {
+        // retry
+      }
+    }
     try {
-      const tx = await connection.getParsedTransaction(signature, o)
+      const tx = await connection.getParsedTransaction(signature, {
+        commitment,
+        maxSupportedTransactionVersion: 'legacy',
+      } as never)
       if (tx) return tx
     } catch {
       // retry

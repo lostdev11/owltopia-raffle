@@ -368,7 +368,7 @@ export function Gen2PurchaseCard({ stats, statsLoading, presaleLive, onPurchased
               <dt className="text-[#A9CBB9]">Unit price</dt>
               <dd className="text-right font-mono text-[#EAFBF4]">
                 <span className="tabular-nums">${unitPriceUsdc}</span>
-                <span className="font-sans text-sm font-normal text-[#A9CBB9]"> USDC → SOL</span>
+                <span className="font-sans text-sm font-normal text-[#A9CBB9]"> dollars → SOL</span>
                 {unitLamports ? (
                   <span className="mt-1 block text-sm font-normal text-[#A9CBB9] sm:mt-0 sm:inline sm:ml-1">
                     ≈ {lamportsToSolDisplay(BigInt(unitLamports))} SOL / spot

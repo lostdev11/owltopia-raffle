@@ -162,9 +162,11 @@ export function Gen2BalanceCard({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold text-[#EAFBF4]">My Gen2 mint credits</h3>
+          <h3 className="text-lg font-bold text-[#EAFBF4]">Your Gen2 mint credits</h3>
           <p className="mt-1 text-sm text-[#A9CBB9]">
-            The quantity you buy is what appears here as purchased spots (after payment confirms).
+            For <strong className="font-semibold text-[#EAFBF4]">this connected wallet</strong>: spots you bought show as{' '}
+            <strong className="font-semibold text-[#EAFBF4]">Purchased spots</strong> after payment confirms. Compare with the
+            presale buyers list above.
           </p>
         </div>
         {onRefresh && (
