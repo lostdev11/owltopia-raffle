@@ -69,9 +69,11 @@ export async function tryAutoDrawCommunityGiveaway(giveawayId: string): Promise<
 
   const updated = await getCommunityGiveawayById(giveawayId)
   if (updated) {
-    void notifyDiscordCommunityGiveawayWinner(updated, winner).catch((e) =>
+    try {
+      await notifyDiscordCommunityGiveawayWinner(updated, winner)
+    } catch (e) {
       console.error('[community-giveaway auto-draw] Discord notify failed:', e)
-    )
+    }
   }
 
   return { giveawayId, title, drawn: true, winnerWallet: winner }

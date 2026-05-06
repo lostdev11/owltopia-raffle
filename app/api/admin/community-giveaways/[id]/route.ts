@@ -159,7 +159,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Update failed' }, { status: 500 })
     }
 
-    if (patch.status === 'open' && existing.status === 'draft') {
+    // Ping Discord when giveaway becomes live for entries (new draft→open or restored cancelled→open).
+    if (patch.status === 'open' && (existing.status === 'draft' || existing.status === 'cancelled')) {
       const host = existing.created_by_wallet?.trim()
       let hostDiscord: string | null = null
       if (host) {

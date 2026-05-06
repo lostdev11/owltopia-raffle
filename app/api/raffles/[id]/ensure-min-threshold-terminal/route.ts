@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import {
+  canSelectWinner,
   getEntriesByRaffleId,
   getRaffleById,
-  getRaffleMinimum,
-  isRaffleEligibleToDraw,
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
@@ -13,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/ensure-min-threshold-terminal
- * Idempotent: moves a stuck ended raffle (min not met after max extension) to `failed_refund_available`
+ * Idempotent: moves a stuck ended raffle (cannot draw — min not met / no sales — after max extension) to `failed_refund_available`
  * so buyers can claim escrow refunds. Public + rate-limited; same rules as the raffle page auto-runner.
  */
 export async function POST(
@@ -61,12 +60,11 @@ export async function POST(
     }
 
     const entries = await getEntriesByRaffleId(raffleId)
-    const min = getRaffleMinimum(raffle)
-    if (min == null) {
-      return NextResponse.json({ error: 'No draw threshold is set for this raffle' }, { status: 400 })
-    }
-    if (isRaffleEligibleToDraw(raffle, entries)) {
-      return NextResponse.json({ error: 'Ticket minimum was met; refunds are not available' }, { status: 400 })
+    if (canSelectWinner(raffle, entries)) {
+      return NextResponse.json(
+        { error: 'Draw requirements are met; refunds and prize return are not available.' },
+        { status: 400 }
+      )
     }
     if (!hasExhaustedMinThresholdTimeExtensions(raffle)) {
       return NextResponse.json(

@@ -86,17 +86,20 @@ export function CommunityGiveawayPageClient({
         cache: 'no-store',
         headers: { 'X-Connected-Wallet': addr },
       })
+      const json = await res.json().catch(() => ({}))
       if (res.status === 401) {
         setStatus(null)
         setNeedsSignIn(true)
+        const msg = typeof json?.error === 'string' ? json.error.trim() : ''
+        if (msg) setSignInError(msg)
         return
       }
-      const json = await res.json().catch(() => ({}))
       if (!res.ok) {
         setStatus(null)
         return
       }
       setNeedsSignIn(false)
+      setSignInError(null)
       setStatus(json as CommunityGiveawayMeStatusPayload)
     } catch {
       setStatus(null)
@@ -113,6 +116,7 @@ export function CommunityGiveawayPageClient({
     if (sessionWallet && addr === sessionWallet && initialMeStatus) {
       setStatus(initialMeStatus)
       setNeedsSignIn(false)
+      setSignInError(null)
       return
     }
     void loadStatus()
@@ -212,7 +216,11 @@ export function CommunityGiveawayPageClient({
       const json = await res.json().catch(() => ({}))
       if (res.status === 401) {
         setNeedsSignIn(true)
-        setActionError('Sign in with your wallet to participate.')
+        setActionError(
+          typeof json?.error === 'string' && json.error.trim()
+            ? json.error.trim()
+            : 'Sign in with your wallet to participate.'
+        )
         return
       }
       if (!res.ok) {

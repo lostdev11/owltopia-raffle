@@ -33,7 +33,13 @@ import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '
 import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
+import {
+  getRaffleProfitInfo,
+  normalizeRaffleTicketCurrency,
+  revenueFlexPromoChipUppercase,
+  revenueInCurrency,
+  shouldShowRevenueFlexPublic,
+} from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
@@ -2438,7 +2444,7 @@ export function RaffleDetailClient({
               fullWidth={false}
             />
           )}
-          {isActive && profitInfoForSocialFlex.isProfitable && (
+          {isActive && shouldShowRevenueFlexPublic(profitInfoForSocialFlex) && (
             <RaffleOverThresholdPngButton
               title={raffle.title}
               slug={raffle.slug}
@@ -2447,6 +2453,7 @@ export function RaffleDetailClient({
               endTime={raffle.end_time}
               imageUrl={heroImageDead ? null : heroImageSrc}
               metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfoForSocialFlex)}
+              promoChipText={revenueFlexPromoChipUppercase(profitInfoForSocialFlex)}
               buttonLabel="Flex PNG (social)"
               fullWidth={false}
             />
@@ -3722,8 +3729,13 @@ export function RaffleDetailClient({
               const ticketRevenue = revenueInCurrency(profitInfo.revenue, ticketCur)
               const threshold = profitInfo.threshold
               const amountOver = profitInfo.surplusOverThreshold
+              const floorVal = profitInfo.floorComparisonValue
+              const floorCur = profitInfo.floorComparisonCurrency
+              const revenueAtFloorCur =
+                floorCur != null ? revenueInCurrency(profitInfo.revenue, floorCur) : ticketRevenue
+              const amountOverFloor = profitInfo.surplusOverFloor
               const thresholdLabel =
-                raffle.prize_type === 'nft' ? 'Revenue threshold' : 'Threshold'
+                raffle.prize_type === 'nft' ? 'Revenue threshold (draw goal and floor)' : 'Threshold'
               return (
                 <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
                   <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Revenue &amp; threshold</h3>
@@ -3734,6 +3746,25 @@ export function RaffleDetailClient({
                         {ticketRevenue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
                       </p>
                     </div>
+                    {floorVal != null && floorCur != null && (
+                      <div>
+                        <p className={classes.labelText + ' text-muted-foreground'}>Listed floor price</p>
+                        <p className={classes.contentText + ' font-semibold'}>
+                          {floorVal.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}
+                        </p>
+                        {profitInfo.isRevenueAboveFloor && amountOverFloor != null && amountOverFloor > 0 ? (
+                          <p className={classes.labelText + ' text-emerald-600 dark:text-emerald-400 font-semibold mt-2'}>
+                            Ticket revenue ({revenueAtFloorCur.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}) is above
+                            this floor by +{amountOverFloor.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}.
+                          </p>
+                        ) : (
+                          <p className={classes.labelText + ' text-muted-foreground mt-2'}>
+                            Draw rules still use the higher of floor and ticket-count goal—the full bar below. Beating the
+                            floor alone does not guarantee the draw threshold is met.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>{thresholdLabel}</p>
                       <p className={classes.contentText + ' font-semibold'}>

@@ -17,7 +17,11 @@ import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import type { Raffle, Entry } from '@/lib/types'
-import type { RaffleProfitInfo } from '@/lib/raffle-profit'
+import {
+  type RaffleProfitInfo,
+  revenueFlexPromoChipUppercase,
+  shouldShowRevenueFlexPublic,
+} from '@/lib/raffle-profit'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import {
@@ -659,10 +663,14 @@ export function RaffleCard({
                     score={owlVisionScore}
                     className="!gap-1 !px-1.5 !py-0 !text-[10px] sm:!text-[11px] !leading-none [&_svg]:!h-2.5 [&_svg]:!w-2.5 sm:[&_svg]:!h-3 sm:[&_svg]:!w-3"
                   />
-                  {profitInfo?.isProfitable && section === 'active' && (
+                  {profitInfo && shouldShowRevenueFlexPublic(profitInfo) && section === 'active' && (
                     <span
                       className="inline-flex items-center justify-center gap-0.5 rounded-full border border-emerald-500/45 bg-emerald-500/15 px-1 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase leading-none tracking-wide text-emerald-200"
-                      title="Ticket revenue is past the platform revenue bar (e.g. floor or draw goal)."
+                      title={
+                        profitInfo.floorComparisonValue != null
+                          ? 'Ticket revenue is above the listed floor price for this prize.'
+                          : 'Ticket revenue is past the platform revenue bar (e.g. draw minimum or prize value).'
+                      }
                     >
                       <Trophy className="h-2.5 w-2.5 sm:h-2.5 sm:w-2.5" aria-hidden />
                       Flex
@@ -1194,7 +1202,7 @@ export function RaffleCard({
                 )}
                 {showQuickBuy && isActive && !isFuture && !purchasesBlocked && (
             <div className="w-full space-y-3 pt-2">
-              {profitInfo?.isProfitable && profitInfo && (
+              {profitInfo && shouldShowRevenueFlexPublic(profitInfo) && (
                 <div
                   className="relative z-20 w-full"
                   onClick={(e) => e.stopPropagation()}
@@ -1207,6 +1215,7 @@ export function RaffleCard({
                     endTime={raffle.end_time}
                     imageUrl={listThumbDead ? null : listThumbSrc}
                     metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfo)}
+                    promoChipText={revenueFlexPromoChipUppercase(profitInfo)}
                     buttonLabel="Download flex PNG (social)"
                   />
                 </div>

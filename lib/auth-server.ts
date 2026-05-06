@@ -115,14 +115,30 @@ export function createSessionCookie(wallet: string): string {
   return value
 }
 
-export function parseSessionCookie(cookieHeader: string | null): { wallet: string } | null {
-  if (!cookieHeader) return null
-  const match = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`))
-  const value = match?.[1]?.trim()
-  if (!value) return null
+/** Split `Cookie` header into name=value (handles quoted values; avoids brittle regex on base64url). */
+function extractCookieRawValue(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader?.trim()) return null
+  for (const part of cookieHeader.split(';')) {
+    const idx = part.indexOf('=')
+    if (idx <= 0) continue
+    const k = part.slice(0, idx).trim()
+    if (k !== name) continue
+    let v = part.slice(idx + 1).trim()
+    if (
+      (v.startsWith('"') && v.endsWith('"')) ||
+      (v.startsWith("'") && v.endsWith("'"))
+    ) {
+      v = v.slice(1, -1).trim()
+    }
+    return v || null
+  }
+  return null
+}
+
+function verifySignedSessionToken(token: string): { wallet: string } | null {
   try {
     const secret = getSecret()
-    const [payloadB64, sigB64] = value.split('.')
+    const [payloadB64, sigB64] = token.split('.')
     if (!payloadB64 || !sigB64) return null
     const payload = Buffer.from(payloadB64, 'base64url').toString('utf8')
     const expectedSigBuf = createHmac('sha256', secret).update(payload).digest()
@@ -138,15 +154,44 @@ export function parseSessionCookie(cookieHeader: string | null): { wallet: strin
   }
 }
 
+/** Validate `owl_session` cookie value (raw token only). */
+export function decodeSessionCookieValue(raw: string): { wallet: string } | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const unquoted = trimmed.replace(/^["']|["']$/g, '').trim()
+  const candidates = [trimmed, unquoted]
+  try {
+    const dec = decodeURIComponent(unquoted)
+    if (dec !== unquoted) candidates.push(dec)
+  } catch {
+    // ignore
+  }
+  for (const c of candidates) {
+    const s = verifySignedSessionToken(c)
+    if (s) return s
+  }
+  return null
+}
+
+export function parseSessionCookie(cookieHeader: string | null): { wallet: string } | null {
+  const value = extractCookieRawValue(cookieHeader, SESSION_COOKIE_NAME)
+  if (!value) return null
+  return decodeSessionCookieValue(value)
+}
+
 export function getSessionFromRequest(request: NextRequest): { wallet: string } | null {
-  const cookie = request.headers.get('cookie')
-  return parseSessionCookie(cookie)
+  const fromNext = request.cookies.get(SESSION_COOKIE_NAME)?.value
+  if (fromNext) {
+    const s = decodeSessionCookieValue(fromNext)
+    if (s) return s
+  }
+  return parseSessionCookie(request.headers.get('cookie'))
 }
 
 /** Parse session from cookie value (for server components that use cookies() from next/headers). */
 export function parseSessionCookieValue(value: string | undefined): { wallet: string } | null {
   if (!value?.trim()) return null
-  return parseSessionCookie(`${SESSION_COOKIE_NAME}=${value.trim()}`)
+  return decodeSessionCookieValue(value)
 }
 
 /**
@@ -159,7 +204,10 @@ export async function requireSession(
   const session = getSessionFromRequest(request)
   if (!session) {
     return NextResponse.json(
-      { error: 'Sign in required. Connect your wallet and sign in.' },
+      {
+        error:
+          'Sign in required. Use Sign in on this page with the same browser tab (in-app wallet browsers do not share cookies with Safari/Chrome).',
+      },
       { status: 401 }
     )
   }

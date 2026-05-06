@@ -11,7 +11,6 @@ import {
   getEntriesByRaffleId,
   getRaffleById,
   canSelectWinner,
-  isRaffleEligibleToDraw,
   selectWinner,
   updateRaffle,
   getRaffleMinimum,
@@ -59,53 +58,41 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
   try {
     const entries = await getEntriesByRaffleId(raffle.id)
     const canDraw = canSelectWinner(raffle, entries)
-    const meetsMinTickets = isRaffleEligibleToDraw(raffle, entries)
 
+    // If {@link canSelectWinner} is false (min not hit, or no sales when there's no drawable min),
+    // extend once then terminal refund state — do not force `ready_to_draw` while still undrawable.
     if (!canDraw) {
-      if (!meetsMinTickets) {
-        if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
-          await finalizeMinThresholdTerminalFailure(raffle.id)
-          return {
-            raffleId: raffle.id,
-            raffleTitle: raffle.title,
-            success: false,
-            winnerWallet: null,
-            error:
-              'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
-          }
-        }
-        // Threshold not met: second selling round — extend once by the original raffle duration.
-        const patch = buildMinThresholdMissExtensionPatch(raffle)
-        const durationMs =
-          new Date(patch.end_time).getTime() - new Date(raffle.end_time).getTime()
-
-        await updateRaffle(raffle.id, patch)
-
+      if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+        await finalizeMinThresholdTerminalFailure(raffle.id)
         return {
           raffleId: raffle.id,
           raffleTitle: raffle.title,
           success: false,
           winnerWallet: null,
-          error: `Minimum ticket threshold not met (min: ${
-            getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
-          }, sold: ${entries
-            .filter((e) => e.status === 'confirmed' && !e.refunded_at)
-            .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
-            durationMs / (24 * 60 * 60 * 1000)
-          } days.`,
-          extended: true,
+          error:
+            'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
         }
       }
-      // Threshold met but caller decided not to draw yet – mark as ready_to_draw
-      if (raffle.status !== 'ready_to_draw') {
-        await updateRaffle(raffle.id, { status: 'ready_to_draw' })
-      }
+      // Threshold not met (or zero sales): second selling round — extend once by the original raffle duration.
+      const patch = buildMinThresholdMissExtensionPatch(raffle)
+      const durationMs =
+        new Date(patch.end_time).getTime() - new Date(raffle.end_time).getTime()
+
+      await updateRaffle(raffle.id, patch)
+
       return {
         raffleId: raffle.id,
         raffleTitle: raffle.title,
         success: false,
         winnerWallet: null,
-        error: 'Raffle is ready to draw but winner selection was not run in this cycle.',
+        error: `Minimum ticket threshold not met (min: ${
+          getRaffleMinimum(raffle) ?? raffle.min_tickets ?? 'N/A'
+        }, sold: ${entries
+          .filter((e) => e.status === 'confirmed' && !e.refunded_at)
+          .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)}). Extended by ${
+          durationMs / (24 * 60 * 60 * 1000)
+        } days.`,
+        extended: true,
       }
     }
 

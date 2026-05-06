@@ -6,9 +6,52 @@
  */
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
-import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
-import { mplTokenMetadata, transferV1, TokenStandard } from '@metaplex-foundation/mpl-token-metadata'
+import {
+  createSignerFromKeypair,
+  publicKey as umiPublicKey,
+  signerIdentity,
+  unwrapOption,
+} from '@metaplex-foundation/umi'
+import type { DigitalAssetWithToken } from '@metaplex-foundation/mpl-token-metadata'
+import {
+  fetchDigitalAssetWithAssociatedToken,
+  mplTokenMetadata,
+  transferV1,
+  TokenStandard,
+} from '@metaplex-foundation/mpl-token-metadata'
 import { toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters'
+
+/**
+ * Metaplex Token Metadata error **159** = **Missing token record account**. Generated `transferV1` only
+ * derives Token Record PDAs when `tokenStandard === ProgrammableNonFungible`. Using `NonFungible` on a pNFT
+ * omits those accounts → 159 on-chain. We resolve the mint's Token Metadata (and Token Record presence) first.
+ */
+function tokenStandardsToTryForEscrowMint(
+  onChainStandard: TokenStandard | null | undefined,
+  escrowHasTokenRecord: boolean
+): TokenStandard[] {
+  if (
+    onChainStandard === TokenStandard.ProgrammableNonFungible ||
+    onChainStandard === TokenStandard.ProgrammableNonFungibleEdition
+  ) {
+    return [TokenStandard.ProgrammableNonFungible]
+  }
+  if (onChainStandard === TokenStandard.NonFungible || onChainStandard === TokenStandard.NonFungibleEdition) {
+    return [TokenStandard.NonFungible]
+  }
+  // Legacy / ambiguous metadata: Token Record implies pNFT mechanics.
+  if (escrowHasTokenRecord) {
+    return [TokenStandard.ProgrammableNonFungible, TokenStandard.NonFungible]
+  }
+  return [TokenStandard.NonFungible, TokenStandard.ProgrammableNonFungible]
+}
+
+function authorizationRulesFromFetchedAsset(asset: DigitalAssetWithToken) {
+  const pc = unwrapOption(asset.metadata.programmableConfig)
+  if (!pc || pc.__kind !== 'V1') return undefined
+  const pk = unwrapOption(pc.ruleSet)
+  return pk ? umiPublicKey(pk) : undefined
+}
 
 export type TokenMetadataEscrowPayoutParams = {
   connection: Connection
@@ -19,8 +62,10 @@ export type TokenMetadataEscrowPayoutParams = {
 }
 
 /**
- * Tries NonFungible then ProgrammableNonFungible Token Metadata transfer from escrow to destination.
- * Returns null if both standards fail (caller may fall back to raw SPL transfer).
+ * Token Metadata transfer from escrow to destination, using on-chain metadata to pick the token standard
+ * (avoids programmable NFT transfers without token-record accounts).
+ *
+ * Returns null if no attempt succeeds (caller may fall back to raw SPL transfer).
  */
 export async function trySendSplNftViaTokenMetadataFromEscrow(
   opts: TokenMetadataEscrowPayoutParams
@@ -37,7 +82,23 @@ export async function trySendSplNftViaTokenMetadataFromEscrow(
   const mintPk = umiPublicKey(mint)
   const destPk = umiPublicKey(destinationOwner)
 
-  const standards = [TokenStandard.NonFungible, TokenStandard.ProgrammableNonFungible]
+  let standards: TokenStandard[] = [
+    TokenStandard.ProgrammableNonFungible,
+    TokenStandard.NonFungible,
+  ]
+  let authorizationRules: ReturnType<typeof umiPublicKey> | undefined
+  try {
+    const asset = await fetchDigitalAssetWithAssociatedToken(umi, mintPk, umiEscrowSigner.publicKey)
+    const fromMeta = unwrapOption(asset.metadata.tokenStandard)
+    standards = tokenStandardsToTryForEscrowMint(fromMeta, asset.tokenRecord != null)
+    authorizationRules = authorizationRulesFromFetchedAsset(asset)
+  } catch (e) {
+    console.info(
+      '[trySendSplNftViaTokenMetadataFromEscrow] Could not fetch digital asset; using pNFT-first heuristic.',
+      e instanceof Error ? e.message : e
+    )
+  }
+
   let lastErr: string | null = null
 
   for (const tokenStandard of standards) {
@@ -46,6 +107,7 @@ export async function trySendSplNftViaTokenMetadataFromEscrow(
         mint: mintPk,
         destinationOwner: destPk,
         tokenStandard,
+        ...(authorizationRules ? { authorizationRules } : {}),
       })
       const built = await tb.buildWithLatestBlockhash(umi)
       const innerLegacy = toWeb3JsLegacyTransaction(built)

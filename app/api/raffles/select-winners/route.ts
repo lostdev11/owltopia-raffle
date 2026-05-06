@@ -4,7 +4,6 @@ import {
   selectWinner,
   getRaffleById,
   getEntriesByRaffleId,
-  isRaffleEligibleToDraw,
   canSelectWinner,
   updateRaffle,
   getRaffleMinimum,
@@ -71,59 +70,43 @@ export async function POST(request: NextRequest) {
       
       if (!forceOverride) {
         const canDraw = canSelectWinner(raffle, entries)
-        const hasMinTickets = getRaffleMinimum(raffle) != null
-        const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
 
         if (!canDraw) {
-          // Ticket threshold (min_tickets) not met: extend once; then refunds + NFT return.
-          if (hasMinTickets && !meetsMinTickets) {
-            if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
-              await finalizeMinThresholdTerminalFailure(raffle.id)
-              return NextResponse.json(
-                {
-                  error:
-                    'Minimum still not met after the extension. Raffle set to refund-available; NFT returned to creator when possible.',
-                  raffleId: raffle.id,
-                  minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
-                  ticketsSold: entries
-                    .filter((e) => e.status === 'confirmed' && !e.refunded_at)
-                    .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
-                  failedRefundAvailable: true,
-                },
-                { status: 400 }
-              )
-            }
-
-            const patch = buildMinThresholdMissExtensionPatch(raffle)
-            await updateRaffle(raffle.id, patch)
-
-            return NextResponse.json(
-              {
-                error: 'Raffle does not meet minimum ticket requirements. Extended by another period.',
-                raffleId: raffle.id,
-                minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
-                ticketsSold: entries
-                  .filter((e) => e.status === 'confirmed' && !e.refunded_at)
-                  .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
-                extended: true,
-                newEndTime: patch.end_time,
-              },
-              { status: 400 }
-            )
-          } else if (!hasMinTickets) {
+          // Same rules as cron / {@link processOneEndedRaffle}: extend once, then refund-available + NFT return.
+          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
+            await finalizeMinThresholdTerminalFailure(raffle.id)
             return NextResponse.json(
               {
                 error:
-                  'Raffle has no minimum ticket threshold and cannot draw a winner (no confirmed tickets).',
+                  'Draw requirements were not met after the extension. Raffle set to refund-available; NFT returned to creator when possible.',
                 raffleId: raffle.id,
                 minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
                 ticketsSold: entries
                   .filter((e) => e.status === 'confirmed' && !e.refunded_at)
                   .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
+                failedRefundAvailable: true,
               },
               { status: 400 }
             )
           }
+
+          const patch = buildMinThresholdMissExtensionPatch(raffle)
+          await updateRaffle(raffle.id, patch)
+
+          return NextResponse.json(
+            {
+              error:
+                'Raffle cannot draw yet (ticket threshold not met or no confirmed sales where required). Deadline extended.',
+              raffleId: raffle.id,
+              minTickets: getRaffleMinimum(raffle) ?? raffle.min_tickets,
+              ticketsSold: entries
+                .filter((e) => e.status === 'confirmed' && !e.refunded_at)
+                .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0),
+              extended: true,
+              newEndTime: patch.end_time,
+            },
+            { status: 400 }
+          )
         }
       }
 

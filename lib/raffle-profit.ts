@@ -35,6 +35,76 @@ export interface RaffleProfitInfo {
    * does not show a false “+” when revenue and the bar match in practice (e.g. ticket sum vs min×price).
    */
   surplusOverThreshold: number | null
+  /**
+   * Parsed numeric value from `floor_price` (listed prize value) in {@link floorComparisonCurrency}, when parseable.
+   * Unlike {@link threshold}, this is **not** merged with draw-goal revenue.
+   */
+  floorComparisonValue: number | null
+  floorComparisonCurrency: RaffleCurrency | null
+  /** True when ticket revenue in {@link floorComparisonCurrency} is strictly greater than {@link floorComparisonValue}. */
+  isRevenueAboveFloor: boolean
+  /** Surplus past listed floor only (null if no floor or not above). */
+  surplusOverFloor: number | null
+}
+
+/**
+ * Public “flex” badge / showcase: prefer **above listed floor** when `floor_price` parses; otherwise composite threshold {@link isProfitable}.
+ */
+export function shouldShowRevenueFlexPublic(profitInfo: RaffleProfitInfo): boolean {
+  if (profitInfo.floorComparisonValue != null && profitInfo.floorComparisonCurrency != null) {
+    return profitInfo.isRevenueAboveFloor
+  }
+  return profitInfo.isProfitable
+}
+
+/** Generated flex PNG chip text (uppercase). */
+export function revenueFlexPromoChipUppercase(profitInfo: RaffleProfitInfo): string {
+  if (profitInfo.floorComparisonValue != null && profitInfo.floorComparisonCurrency != null) {
+    return 'ABOVE FLOOR'
+  }
+  return 'OVER THRESHOLD'
+}
+
+/**
+ * Listed floor from `floor_price` (ticket currency); null if unset or unparsable.
+ */
+export function getRaffleListedFloorForComparison(
+  raffle: Raffle
+): { value: number; currency: RaffleCurrency } | null {
+  const floorN = lenientParseNftFloorAmount(raffle.floor_price)
+  if (floorN == null || floorN <= 0) return null
+  const cur = normalizeRaffleTicketCurrency(raffle.currency)
+  return { value: floorN, currency: cur }
+}
+
+function computeFloorComparisonProfit(
+  raffle: Raffle,
+  revenue: RaffleRevenue
+): Pick<
+  RaffleProfitInfo,
+  'floorComparisonValue' | 'floorComparisonCurrency' | 'isRevenueAboveFloor' | 'surplusOverFloor'
+> {
+  const fb = getRaffleListedFloorForComparison(raffle)
+  if (!fb) {
+    return {
+      floorComparisonValue: null,
+      floorComparisonCurrency: null,
+      isRevenueAboveFloor: false,
+      surplusOverFloor: null,
+    }
+  }
+  const revenueInCur = revenueInCurrency(revenue, fb.currency)
+  const rRounded = roundForProfitDisplay(revenueInCur, fb.currency)
+  const fRounded = roundForProfitDisplay(fb.value, fb.currency)
+  const isRevenueAboveFloor = rRounded > fRounded
+  const surplusOverFloor =
+    fRounded > 0 && rRounded > fRounded ? roundForProfitDisplay(rRounded - fRounded, fb.currency) : null
+  return {
+    floorComparisonValue: fb.value,
+    floorComparisonCurrency: fb.currency,
+    isRevenueAboveFloor,
+    surplusOverFloor,
+  }
 }
 
 /** Aligns with raffle detail display: USDC 2 decimals, SOL/OWL 4. */
@@ -203,6 +273,7 @@ export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurren
  */
 export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RaffleProfitInfo {
   const revenue = getRaffleRevenue(entries)
+  const floorPart = computeFloorComparisonProfit(raffle, revenue)
   const th = getRaffleThreshold(raffle)
   if (!th) {
     return {
@@ -211,6 +282,7 @@ export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RafflePro
       thresholdCurrency: null,
       isProfitable: false,
       surplusOverThreshold: null,
+      ...floorPart,
     }
   }
   const revenueInThreshold = revenueInCurrency(revenue, th.currency)
@@ -227,6 +299,7 @@ export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RafflePro
     thresholdCurrency: th.currency,
     isProfitable,
     surplusOverThreshold,
+    ...floorPart,
   }
 }
 
