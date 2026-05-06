@@ -65,6 +65,7 @@ type Raffle = {
   end_time: string
   prize_type?: string | null
   nft_mint_address?: string | null
+  nft_token_id?: string | null
   nft_transfer_transaction?: string | null
   prize_deposited_at?: string | null
   prize_returned_at?: string | null
@@ -165,7 +166,9 @@ function canCreatorClaimFailedMinThresholdPrize(raffle: Raffle, wallet: string):
   if (raffle.prize_returned_at) return false
   if (raffle.nft_transfer_transaction?.trim()) return false
   if (isPartnerSplPrizeRaffle(raffle as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)) return true
-  return raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()
+  const prizeAssetId =
+    (raffle.nft_mint_address || '').trim() || (raffle.nft_token_id || '').trim()
+  return raffle.prize_type === 'nft' && !!prizeAssetId
 }
 
 function solscanTxUrl(signature: string): string {

@@ -1,5 +1,5 @@
 /**
- * When `REFERRAL_ATTRIBUTION_ENABLED=false`, we do not persist referrer on new entries and the referral leaderboard is empty.
+ * When `REFERRAL_ATTRIBUTION_ENABLED=false`, we do not persist referrer on new entries.
  * Use for dry-runs; default is enabled when unset.
  */
 export function isReferralAttributionEnabled(): boolean {

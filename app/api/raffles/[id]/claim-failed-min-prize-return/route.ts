@@ -88,7 +88,9 @@ export async function POST(
     }
 
     const partnerSpl = isPartnerSplPrizeRaffle(raffle)
-    if (!partnerSpl && (raffle.prize_type !== 'nft' || !raffle.nft_mint_address?.trim())) {
+    const nftAssetId =
+      (raffle.nft_mint_address || '').trim() || (raffle.nft_token_id || '').trim()
+    if (!partnerSpl && (raffle.prize_type !== 'nft' || !nftAssetId)) {
       return NextResponse.json(
         { error: 'This raffle does not have an escrowed NFT or partner token prize to return' },
         { status: 400 }

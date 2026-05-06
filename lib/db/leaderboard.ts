@@ -1,9 +1,11 @@
 /**
  * Public leaderboard: top 10 by raffles entered, tickets purchased, raffles created, raffles won, and tickets sold (by creators).
  * Supports all-time, UTC calendar month, and UTC calendar year scopes.
- * Raffles in `failed_refund_available` (e.g. min threshold not met after extension) do not contribute to any category.
- * Raffles priced at or below the platform floor (default: 0.001 SOL equivalent) never count — uses each raffle's `ticket_price`.
- * Entries ignore complimentary, refunded, and zero-amount rows. Tickets purchased cap per wallet per raffle; tickets sold need distinct buyers — lib/leaderboard/hardening.ts.
+ *
+ * **Rollup modes** (`LEADERBOARD_NEW_RULES_EFFECTIVE_MONTH`, UTC `YYYY-MM`):
+ * - **All-time** and months/years **before** that month keep **legacy** rules (floor price + `failed_refund_available` only).
+ * - From the effective month onward, **threshold** rules apply: draw threshold met, plus exclude `cancelled` / `draft`.
+ * Entries ignore complimentary, refunded, and zero-amount rows. Caps / distinct buyers — lib/leaderboard/hardening.ts.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -11,8 +13,11 @@ import {
   entryQualifiesForPlayerLeaderboard,
   leaderboardPurchaseMaxTicketsPerWalletPerRaffle,
   leaderboardTicketsSoldMinDistinctNonCreatorBuyers,
+  leaderboardWalletIsExcluded,
   raffleCountsTowardLeaderboard,
 } from '@/lib/leaderboard/hardening'
+import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
+import type { Raffle } from '@/lib/types'
 
 /** PostgREST page size; must paginate — a hard .limit() undercounts once row count exceeds the cap. */
 const LEADERBOARD_PAGE_SIZE = 2500
@@ -40,6 +45,9 @@ export type LeaderboardPeriod =
   | { kind: 'month'; year: number; month: number }
   | { kind: 'year'; year: number }
 
+/** `legacy` = pre-cutover methodology; `threshold` = draw-threshold + stricter statuses (see module doc). */
+export type LeaderboardRulesMode = 'legacy' | 'threshold'
+
 export type LeaderboardPeriodMeta = {
   kind: 'all' | 'month' | 'year'
   year?: number
@@ -50,6 +58,7 @@ export type LeaderboardPeriodMeta = {
   rangeStart?: string
   /** Exclusive UTC range end (ISO), if scoped */
   rangeEndExclusive?: string
+  leaderboardRules?: LeaderboardRulesMode
 }
 
 type TimeWindow = { startIso: string; endIso: string }
@@ -64,6 +73,9 @@ type LeaderboardRaffleRow = {
   winner_selected_at: string | null
   ticket_price: number | string | null
   currency: string | null
+  prize_type: string | null
+  min_tickets: number | string | null
+  floor_price: string | null
 }
 
 type LeaderboardEntryRow = {
@@ -170,9 +182,101 @@ function statusCountsAsRaffleWon(status: string | null): boolean {
   return s === 'completed' || s === 'successful_pending_claims'
 }
 
-/** Terminal min-threshold failure: exclude from entered / purchased / created / tickets-sold aggregates. */
-function isFailedRefundLeaderboardExcluded(status: string | null): boolean {
+/** Legacy aggregates: same terminal exclusion as early leaderboard (min-threshold failure refunds only). */
+function isFailedRefundOnlyLeaderboardExcluded(status: string | null): boolean {
   return (status || '').toLowerCase() === 'failed_refund_available'
+}
+
+/** Threshold aggregates: also drop cancelled / draft. */
+function isLeaderboardExcludedByStatusThreshold(status: string | null): boolean {
+  const s = (status || '').toLowerCase()
+  return s === 'failed_refund_available' || s === 'cancelled' || s === 'draft'
+}
+
+/**
+ * Same rule as {@link canSelectWinner}: confirmed non-refunded ticket count vs effective draw threshold;
+ * when no positive threshold, require at least one ticket.
+ */
+function drawThresholdMetForLeaderboard(r: LeaderboardRaffleRow, soldTickets: number): boolean {
+  const prize_type: Raffle['prize_type'] = (r.prize_type || '').toLowerCase() === 'nft' ? 'nft' : 'crypto'
+  const minParsed = r.min_tickets == null ? null : Number(r.min_tickets)
+  const slice = {
+    prize_type,
+    min_tickets: minParsed != null && Number.isFinite(minParsed) ? minParsed : null,
+    floor_price: r.floor_price,
+    ticket_price: r.ticket_price,
+  } as Pick<Raffle, 'prize_type' | 'min_tickets' | 'floor_price' | 'ticket_price'>
+  const min = getEffectiveDrawThresholdTickets(slice as Raffle)
+  if (min != null && min > 0) {
+    return soldTickets >= min
+  }
+  return soldTickets > 0
+}
+
+function raffleQualifiesForThresholdLeaderboardAggregates(r: LeaderboardRaffleRow, soldTickets: number): boolean {
+  if (!raffleCountsTowardLeaderboard(r)) return false
+  if (isLeaderboardExcludedByStatusThreshold(r.status)) return false
+  return drawThresholdMetForLeaderboard(r, soldTickets)
+}
+
+function raffleQualifiesForLegacyLeaderboardAggregates(r: LeaderboardRaffleRow): boolean {
+  if (!raffleCountsTowardLeaderboard(r)) return false
+  if (isFailedRefundOnlyLeaderboardExcluded(r.status)) return false
+  return true
+}
+
+/** First UTC calendar month where threshold rules apply (`YYYY-MM`). Invalid/unset uses default (May 2026). */
+function parseLeaderboardNewRulesEffectiveYm(): { year: number; month: number } {
+  const raw = process.env.LEADERBOARD_NEW_RULES_EFFECTIVE_MONTH?.trim()
+  const fallback = { year: 2026, month: 5 }
+  if (!raw) return fallback
+  const m = /^(\d{4})-(\d{2})$/.exec(raw)
+  if (!m) return fallback
+  const year = parseInt(m[1], 10)
+  const month = parseInt(m[2], 10)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return fallback
+  return { year, month }
+}
+
+function compareUtcYearMonth(y1: number, m1: number, y2: number, m2: number): number {
+  if (y1 !== y2) return y1 - y2
+  return m1 - m2
+}
+
+/**
+ * Which aggregation rules apply. All-time stays **legacy** so historic totals stay comparable.
+ * Month: threshold from the effective month forward (UTC).
+ * Year: legacy for calendar years that start entirely before the effective month in the same year as cutover (see code).
+ */
+export function leaderboardRollupModeForPeriod(period: LeaderboardPeriod): LeaderboardRulesMode {
+  const cut = parseLeaderboardNewRulesEffectiveYm()
+
+  if (period.kind === 'all') return 'legacy'
+
+  if (period.kind === 'month') {
+    return compareUtcYearMonth(period.year, period.month, cut.year, cut.month) >= 0 ? 'threshold' : 'legacy'
+  }
+
+  if (period.year < cut.year) return 'legacy'
+  if (period.year > cut.year) return 'threshold'
+  return 1 < cut.month ? 'legacy' : 'threshold'
+}
+
+function buildExcludedRaffleIds(
+  raffles: LeaderboardRaffleRow[],
+  mode: LeaderboardRulesMode,
+  ticketTotalsByRaffleId: Map<string, number>
+): Set<string> {
+  const excluded = new Set<string>()
+  for (const r of raffles) {
+    if (mode === 'legacy') {
+      if (!raffleQualifiesForLegacyLeaderboardAggregates(r)) excluded.add(r.id)
+    } else {
+      const sold = ticketTotalsByRaffleId.get(r.id) ?? 0
+      if (!raffleQualifiesForThresholdLeaderboardAggregates(r, sold)) excluded.add(r.id)
+    }
+  }
+  return excluded
 }
 
 function parseTimeMs(iso: string | null | undefined): number | null {
@@ -200,7 +304,7 @@ async function fetchAllLeaderboardRaffles(db: SupabaseClient): Promise<Leaderboa
     const { data, error } = await db
       .from('raffles')
       .select(
-        'id, created_by, creator_wallet, winner_wallet, status, created_at, winner_selected_at, ticket_price, currency'
+        'id, created_by, creator_wallet, winner_wallet, status, created_at, winner_selected_at, ticket_price, currency, prize_type, min_tickets, floor_price'
       )
       .order('id', { ascending: true })
       .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
@@ -281,11 +385,50 @@ async function fetchAllConfirmedEntriesForLeaderboard(db: SupabaseClient, window
   return [...byId.values()]
 }
 
-function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: LeaderboardEntryRow[], window: TimeWindow | null): LeaderboardData {
-  const excludedRaffleIds = new Set<string>()
-  for (const r of raffles) {
-    if (isFailedRefundLeaderboardExcluded(r.status) || !raffleCountsTowardLeaderboard(r)) excludedRaffleIds.add(r.id)
+/** Confirmed, non-refunded ticket quantities per raffle (aligns with {@link calculateTicketsSold} in raffles). */
+function buildTicketTotalsForDrawThreshold(entries: Iterable<LeaderboardEntryRow>): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const e of entries) {
+    if (e.refunded_at != null && String(e.refunded_at).trim() !== '') continue
+    const q = Number(e.ticket_quantity)
+    if (!Number.isFinite(q) || q < 0) continue
+    totals.set(e.raffle_id, (totals.get(e.raffle_id) ?? 0) + q)
   }
+  return totals
+}
+
+async function fetchAllConfirmedTicketTotalsForDrawThreshold(db: SupabaseClient): Promise<Map<string, number>> {
+  const totals = new Map<string, number>()
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('entries')
+      .select('raffle_id, ticket_quantity, refunded_at')
+      .eq('status', 'confirmed')
+      .order('id', { ascending: true })
+      .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const chunk = (data || []) as Pick<LeaderboardEntryRow, 'raffle_id' | 'ticket_quantity' | 'refunded_at'>[]
+    for (const e of chunk) {
+      if (e.refunded_at != null && String(e.refunded_at).trim() !== '') continue
+      const q = Number(e.ticket_quantity)
+      if (!Number.isFinite(q) || q < 0) continue
+      totals.set(e.raffle_id, (totals.get(e.raffle_id) ?? 0) + q)
+    }
+    if (chunk.length < LEADERBOARD_PAGE_SIZE) break
+    from += LEADERBOARD_PAGE_SIZE
+  }
+  return totals
+}
+
+function aggregateLeaderboard(
+  raffles: LeaderboardRaffleRow[],
+  entries: LeaderboardEntryRow[],
+  window: TimeWindow | null,
+  ticketTotalsByRaffleId: Map<string, number>,
+  mode: LeaderboardRulesMode
+): LeaderboardData {
+  const excludedRaffleIds = buildExcludedRaffleIds(raffles, mode, ticketTotalsByRaffleId)
 
   // Raffles entered: distinct raffle count per wallet (entries already scoped)
   const enteredByWallet = new Map<string, Set<string>>()
@@ -293,7 +436,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
     if (excludedRaffleIds.has(e.raffle_id)) continue
     if (!entryQualifiesForPlayerLeaderboard(e)) continue
     const w = normalizeWallet(e.wallet_address)
-    if (!w) continue
+    if (!w || leaderboardWalletIsExcluded(w)) continue
     let set = enteredByWallet.get(w)
     if (!set) {
       set = new Set()
@@ -320,7 +463,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
   const purchasedWalletRaffleTotal = new Map<string, number>()
   for (const e of purchaseRows) {
     const w = normalizeWallet(e.wallet_address)
-    if (!w) continue
+    if (!w || leaderboardWalletIsExcluded(w)) continue
     const qty = Number(e.ticket_quantity)
     if (!Number.isFinite(qty) || qty < 0) continue
     const wrKey = `${w}\t${e.raffle_id}`
@@ -341,7 +484,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
     if (excludedRaffleIds.has(r.id)) continue
     if (window && !inUtcWindow(r.created_at, window)) continue
     const w = normalizeWallet(r.creator_wallet ?? r.created_by)
-    if (!w) continue
+    if (!w || leaderboardWalletIsExcluded(w)) continue
     createdByWallet.set(w, (createdByWallet.get(w) ?? 0) + 1)
   }
   const rafflesCreated = takeTopTen(
@@ -382,7 +525,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
     if (!raffleEligibleForSoldLeaderboard.has(e.raffle_id)) continue
     if (!entryQualifiesForPlayerLeaderboard(e)) continue
     const creator = raffleToCreator.get(e.raffle_id)
-    if (!creator) continue
+    if (!creator || leaderboardWalletIsExcluded(creator)) continue
     const buyer = normalizeWallet(e.wallet_address)
     if (!buyer || buyer === creator) continue
     const qty = Number(e.ticket_quantity)
@@ -397,7 +540,7 @@ function aggregateLeaderboard(raffles: LeaderboardRaffleRow[], entries: Leaderbo
   for (const r of raffles) {
     if (excludedRaffleIds.has(r.id)) continue
     const winner = normalizeWallet(r.winner_wallet)
-    if (!winner) continue
+    if (!winner || leaderboardWalletIsExcluded(winner)) continue
     if (!statusCountsAsRaffleWon(r.status)) continue
     if (window) {
       if (!inUtcWindow(r.winner_selected_at, window)) continue
@@ -431,13 +574,25 @@ export async function getLeaderboardWithMeta(period: LeaderboardPeriod): Promise
 }> {
   const db = getSupabaseAdmin()
   const window = periodToWindow(period)
-  const meta = buildLeaderboardPeriodMeta(period)
+  const rulesMode = leaderboardRollupModeForPeriod(period)
+  const meta: LeaderboardPeriodMeta = {
+    ...buildLeaderboardPeriodMeta(period),
+    leaderboardRules: rulesMode,
+  }
 
-  const [raffles, entries] = await Promise.all([
+  const needThresholdTicketScan = rulesMode === 'threshold' && window != null
+
+  const [raffles, entries, thresholdTotalsFullScan] = await Promise.all([
     fetchAllLeaderboardRaffles(db),
     fetchAllConfirmedEntriesForLeaderboard(db, window),
+    needThresholdTicketScan ? fetchAllConfirmedTicketTotalsForDrawThreshold(db) : Promise.resolve(null),
   ])
 
-  const leaderboard = aggregateLeaderboard(raffles, entries, window)
+  const ticketTotalsByRaffleId =
+    rulesMode === 'threshold'
+      ? thresholdTotalsFullScan ?? buildTicketTotalsForDrawThreshold(entries)
+      : new Map<string, number>()
+
+  const leaderboard = aggregateLeaderboard(raffles, entries, window, ticketTotalsByRaffleId, rulesMode)
   return { leaderboard, period: meta }
 }

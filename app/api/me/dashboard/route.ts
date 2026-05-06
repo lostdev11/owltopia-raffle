@@ -30,6 +30,43 @@ import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
 
 export const dynamic = 'force-dynamic'
 
+/** Same filters as {@link processEndedRaffleByIdIfApplicable} — used so hosts see claim UI without buying their own tickets. */
+function isEndedNoWinnerProcessCandidate(
+  raffle:
+    | {
+        id?: string
+        winner_wallet?: string | null
+        winner_selected_at?: string | null
+        status?: string | null
+        end_time?: string
+        prize_type?: string | null
+        prize_deposited_at?: string | null
+        prize_currency?: string | null
+      }
+    | null
+    | undefined
+): raffle is { id: string } {
+  if (!raffle?.id) return false
+  if (
+    (raffle.winner_wallet && String(raffle.winner_wallet).trim()) ||
+    (raffle.winner_selected_at && String(raffle.winner_selected_at).trim())
+  ) {
+    return false
+  }
+  if (
+    raffle.status !== 'live' &&
+    raffle.status !== 'ready_to_draw' &&
+    raffle.status !== 'pending_min_not_met'
+  ) {
+    return false
+  }
+  const endMs = new Date(raffle.end_time ?? '').getTime()
+  if (Number.isNaN(endMs) || endMs > Date.now()) return false
+  const partnerFungible = isPartnerSplPrizeRaffle(raffle as Parameters<typeof isPartnerSplPrizeRaffle>[0])
+  if ((raffle.prize_type === 'nft' || partnerFungible) && !raffle.prize_deposited_at) return false
+  return true
+}
+
 /**
  * GET /api/me/dashboard
  * Returns dashboard data for the signed-in wallet: my raffles, my entries, creator revenue, fee tier, display name.
@@ -65,25 +102,23 @@ export async function GET(request: NextRequest) {
     }
 
     let entriesWithRaffles = await getEntriesByWallet(wallet)
+    let rafflesForResponse = await getRafflesByCreator(wallet)
+
     const endedNoWinnerCandidateIds = new Set<string>()
     for (const row of entriesWithRaffles) {
       const r = row.raffle
-      if (!r?.id) continue
-      if ((r.winner_wallet && String(r.winner_wallet).trim()) || (r.winner_selected_at && String(r.winner_selected_at).trim())) continue
-      if (r.status !== 'live' && r.status !== 'ready_to_draw' && r.status !== 'pending_min_not_met') {
-        continue
-      }
-      const endMs = new Date(r.end_time).getTime()
-      if (Number.isNaN(endMs) || endMs > Date.now()) continue
-      const partnerFungible = isPartnerSplPrizeRaffle(r)
-      if ((r.prize_type === 'nft' || partnerFungible) && !r.prize_deposited_at) continue
-      endedNoWinnerCandidateIds.add(r.id)
+      if (isEndedNoWinnerProcessCandidate(r ?? undefined)) endedNoWinnerCandidateIds.add(r!.id)
     }
+    for (const r of rafflesForResponse) {
+      if (isEndedNoWinnerProcessCandidate(r)) endedNoWinnerCandidateIds.add(r.id)
+    }
+
     if (endedNoWinnerCandidateIds.size > 0) {
       for (const raffleId of endedNoWinnerCandidateIds) {
         await processEndedRaffleByIdIfApplicable(raffleId)
       }
       entriesWithRaffles = await getEntriesByWallet(wallet)
+      rafflesForResponse = await getRafflesByCreator(wallet)
     }
 
     const [
@@ -102,7 +137,7 @@ export async function GET(request: NextRequest) {
       buyoutOffers,
       viewerIsSiteAdmin,
     ] = await Promise.all([
-      getRafflesByCreator(wallet),
+      Promise.resolve(rafflesForResponse),
       getCreatorRevenueByWallet(wallet),
       getCreatorLiveEarningsByWallet(wallet),
       getCreatorTicketSalesGrossByWallet(wallet),
