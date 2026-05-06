@@ -3156,6 +3156,11 @@ export default function DashboardPage() {
                       {rr.candidates.filter((c) => c.pendingAmount > 0).length !== 1 ? 's' : ''} still owed — they claim
                       from escrow.
                     </p>
+                    <div className="pt-1">
+                      <Button asChild size="sm" variant="outline" className="touch-manipulation min-h-[44px] w-full sm:w-auto">
+                        <Link href={`/raffles/${rr.raffleSlug}`}>Open raffle</Link>
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
