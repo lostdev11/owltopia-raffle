@@ -81,6 +81,7 @@ import {
   Ticket,
   RefreshCw,
   ShoppingCart,
+  Wallet,
 } from 'lucide-react'
 import {
   Transaction,
@@ -143,6 +144,10 @@ import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
+import {
+  canCreatorClaimPrizeBackFromEscrow,
+  needsPayCancellationFeeBeforePrizeReturn,
+} from '@/lib/raffles/creator-prize-return-eligibility'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 function solscanClusterQuery(): string {
@@ -260,6 +265,7 @@ export function RaffleDetailClient({
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
+  const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator = connected && walletAddress && creatorWallet === walletAddress
@@ -751,6 +757,15 @@ export function RaffleDetailClient({
     }
     return Array.from(byWallet.values()).sort((a, b) => b.totalAmount - a.totalAmount)
   }, [entries, showCreatorRefundCandidates])
+
+  /** Same rules as My Dashboard — many creators only revisit the public raffle URL. */
+  const showCreatorClaimPrizeBackFromEscrow = useMemo(
+    () =>
+      isCreator &&
+      canCreatorClaimPrizeBackFromEscrow(raffle, walletAddress) &&
+      !needsPayCancellationFeeBeforePrizeReturn(raffle),
+    [isCreator, raffle, walletAddress]
+  )
 
   const creatorRefundTotalPending = useMemo(() => {
     return creatorRefundCandidates.reduce((sum, row) => {
@@ -2145,6 +2160,31 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
+    setError(null)
+    setClaimFailedPrizeReturnLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/claim-failed-min-prize-return`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(
+          typeof (data as { error?: string }).error === 'string'
+            ? (data as { error: string }).error
+            : 'Could not return prize from escrow. Sign in on My Dashboard with your creator wallet if you see a session error.'
+        )
+        return
+      }
+      router.refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setClaimFailedPrizeReturnLoading(false)
+    }
+  }, [raffle.id, router])
+
   const fetchOffers = useCallback(async () => {
     setOffersLoading(true)
     setOffersError(null)
@@ -2515,7 +2555,7 @@ export function RaffleDetailClient({
               <p className="font-medium">Pay cancellation fee to claim your prize from escrow</p>
               <p className="text-xs text-muted-foreground mt-1">
                 This raffle was cancelled after it started. Pay {getCancellationFeeSol()} SOL to the platform
-                wallet, then you can use Claim prize on your dashboard.
+                wallet, then claim your prize below or on My Dashboard.
               </p>
               <Button
                 type="button"
@@ -2529,6 +2569,37 @@ export function RaffleDetailClient({
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
                 Pay {getCancellationFeeSol()} SOL
+              </Button>
+            </div>
+          )}
+          {showCreatorClaimPrizeBackFromEscrow && (
+            <div
+              className="w-full sm:w-auto rounded-lg border border-amber-500/40 bg-amber-500/[0.07] px-3 py-3 text-sm space-y-2"
+              role="status"
+            >
+              <p className="font-medium text-foreground">
+                {raffle.status === 'cancelled' ? 'Claim your prize from escrow' : 'Minimum not met — claim your prize from escrow'}
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your NFT or token prize is still in platform escrow. One signed transaction returns it to this wallet.
+                If something fails on mobile data, try Wi‑Fi or My Dashboard.
+              </p>
+              <Button
+                type="button"
+                variant="default"
+                size="default"
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                disabled={claimFailedPrizeReturnLoading}
+                onClick={() => void handleCreatorClaimPrizeBackFromEscrow()}
+              >
+                {claimFailedPrizeReturnLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin shrink-0" aria-hidden />
+                ) : (
+                  <Wallet className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                )}
+                {isPartnerSplPrizeRaffle(raffle)
+                  ? 'Claim prize tokens from escrow'
+                  : 'Claim NFT from escrow'}
               </Button>
             </div>
           )}

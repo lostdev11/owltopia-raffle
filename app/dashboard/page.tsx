@@ -42,6 +42,10 @@ import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-po
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import {
+  canCreatorClaimPrizeBackFromEscrow,
+  needsPayCancellationFeeBeforePrizeReturn,
+} from '@/lib/raffles/creator-prize-return-eligibility'
 import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle } from '@/lib/types'
 import {
   getEmptyEngagementPayload,
@@ -119,14 +123,6 @@ function raffleEndedOrCompleted(raffle: { end_time: string; status: string | nul
   return !Number.isNaN(endMs) && endMs <= Date.now()
 }
 
-/** Matches server rules in POST /api/raffles/[id]/claim-prize */
-function needsPayCancellationBeforeClaim(raffle: Raffle): boolean {
-  if (raffle.status !== 'cancelled') return false
-  if (!raffle.start_time) return false
-  if (!raffleRequiresCancellationFee(raffle as unknown as FullRaffle, new Date())) return false
-  return !raffle.cancellation_fee_paid_at
-}
-
 /** Live / ready listing: cancellation was requested but post-start fee not recorded yet. */
 function needsPayCancellationStraggler(raffle: Raffle): boolean {
   const s = (raffle.status ?? '').toLowerCase()
@@ -150,25 +146,6 @@ function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string):
   if (raffle.nft_transfer_transaction?.trim()) return false
   if (!raffleEndedOrCompleted(raffle)) return false
   return true
-}
-
-/** Creator can pull prize back from escrow after min-threshold failure or cancellation (matches claim-failed-min-prize-return API). */
-function canCreatorClaimFailedMinThresholdPrize(raffle: Raffle, wallet: string): boolean {
-  const w = wallet.trim()
-  if (!w) return false
-  const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
-  if (!creator || !walletsEqualSolana(creator, w)) return false
-  if (raffle.status !== 'failed_refund_available' && raffle.status !== 'cancelled') return false
-  if (raffle.winner_wallet?.trim() || (raffle.winner_selected_at && String(raffle.winner_selected_at).trim())) {
-    return false
-  }
-  if (!raffle.prize_deposited_at) return false
-  if (raffle.prize_returned_at) return false
-  if (raffle.nft_transfer_transaction?.trim()) return false
-  if (isPartnerSplPrizeRaffle(raffle as Pick<FullRaffle, 'prize_type' | 'prize_currency'>)) return true
-  const prizeAssetId =
-    (raffle.nft_mint_address || '').trim() || (raffle.nft_token_id || '').trim()
-  return raffle.prize_type === 'nft' && !!prizeAssetId
 }
 
 function solscanTxUrl(signature: string): string {
@@ -1013,7 +990,7 @@ export default function DashboardPage() {
   }, [myRafflesForMemo, data?.claimTrackerLiveFundsEscrowSales?.trackedRaffleIds])
 
   const creatorFailedMinPrizeReturnClaimable = useMemo(
-    () => myRafflesForMemo.filter((r) => canCreatorClaimFailedMinThresholdPrize(r, walletForMemo)),
+    () => myRafflesForMemo.filter((r) => canCreatorClaimPrizeBackFromEscrow(r, walletForMemo)),
     [myRafflesForMemo, walletForMemo]
   )
 
@@ -2509,7 +2486,7 @@ export default function DashboardPage() {
                     <Link href={`/raffles/${r.slug}`} className="text-sm font-medium text-primary hover:underline">
                       {r.title}
                     </Link>
-                    {needsPayCancellationBeforeClaim(r) ? (
+                    {needsPayCancellationFeeBeforePrizeReturn(r) ? (
                       <Button
                         type="button"
                         size="sm"
@@ -2638,8 +2615,8 @@ export default function DashboardPage() {
                             )}
                           </Button>
                         )}
-                        {canCreatorClaimFailedMinThresholdPrize(r, wallet) &&
-                          !needsPayCancellationBeforeClaim(r) &&
+                        {canCreatorClaimPrizeBackFromEscrow(r, wallet) &&
+                          !needsPayCancellationFeeBeforePrizeReturn(r) &&
                           !needsPayCancellationStraggler(r) && (
                             <Button
                               type="button"
@@ -2850,7 +2827,7 @@ export default function DashboardPage() {
                                 ? 'Raffle cancelled'
                                 : 'Minimum tickets not met (after extension)'}
                             </p>
-                            {canCreatorClaimFailedMinThresholdPrize(r, wallet) && needsPayCancellationBeforeClaim(r) ? (
+                            {canCreatorClaimPrizeBackFromEscrow(r, wallet) && needsPayCancellationFeeBeforePrizeReturn(r) ? (
                               <>
                                 <p className="text-xs text-muted-foreground leading-relaxed">
                                   This listing was cancelled after it started. Pay the {getCancellationFeeSol()} SOL
@@ -2879,7 +2856,7 @@ export default function DashboardPage() {
                                   )}
                                 </Button>
                               </>
-                            ) : canCreatorClaimFailedMinThresholdPrize(r, wallet) ? (
+                            ) : canCreatorClaimPrizeBackFromEscrow(r, wallet) ? (
                               <>
                                 <p className="text-xs text-muted-foreground leading-relaxed">
                                   {r.status === 'cancelled'
