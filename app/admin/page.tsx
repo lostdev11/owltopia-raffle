@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -2244,6 +2244,19 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Allowlist creator wallets for the 2% partner fee tier and partner raffles spotlight — add, edit,
                       activate, or remove without running SQL.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/partner-applications">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Inbox className="h-5 w-5" />
+                      Partner applications
+                    </CardTitle>
+                    <CardDescription>
+                      Review inbound partner requests from the public partner page before allowlisting creator wallets.
                     </CardDescription>
                   </CardHeader>
                 </Link>

@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PartnerProgramApplyForm } from '@/components/PartnerProgramApplyForm'
 import {
   PLATFORM_NAME,
   OG_ALT,
@@ -95,6 +96,39 @@ const benefits: { icon: ReactNode; title: string; body: string }[] = [
   },
 ]
 
+const tiers = [
+  {
+    name: '$0 Partner',
+    price: '$0 setup + 2% raffle fee',
+    bullets: [
+      'Host with your wallet on Owltopia at the 2% partner fee tier.',
+      'Discord support from our team for rollout and ops questions.',
+      'No separate monthly subscription for this tier.',
+    ],
+    notIncluded: 'Not white-label and not a separate branded standalone app.',
+  },
+  {
+    name: 'Partner Pro',
+    price: '$100 setup + $20/month',
+    bullets: [
+      'Everything in $0 Partner, plus custom onboarding and partner server setup.',
+      'Discord partner tenant linking for raffle create/winner webhooks.',
+      'Option to run direct-link / Discord-only raffles (hide from main public list).',
+    ],
+    notIncluded: 'Not full white-label; still runs on Owltopia core infrastructure.',
+  },
+  {
+    name: 'White-label',
+    price: 'Custom quote',
+    bullets: [
+      'Separate branded experience and custom product scope.',
+      'Dedicated roadmap, delivery milestones, and support terms.',
+      'Quoted only after technical discovery.',
+    ],
+    notIncluded: 'Not part of standard partner setup.',
+  },
+]
+
 export default function PartnerProgramPage() {
   return (
     <div className="container mx-auto max-w-4xl px-3 py-8 sm:px-4">
@@ -138,6 +172,30 @@ export default function PartnerProgramPage() {
         </section>
 
         <section className="mb-10">
+          <h2 className="text-2xl font-semibold">Program tiers</h2>
+          <p className="text-muted-foreground mb-4">
+            To keep partnerships clear, we scope every partner into one tier before payment and onboarding.
+          </p>
+          <div className="not-prose grid gap-4 md:grid-cols-3">
+            {tiers.map((tier) => (
+              <div key={tier.name} className="rounded-lg border border-border/70 bg-card p-4">
+                <p className="text-sm font-medium text-violet-300">{tier.name}</p>
+                <p className="mt-1 text-lg font-semibold">{tier.price}</p>
+                <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                  {tier.bullets.map((b) => (
+                    <li key={b} className="flex gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-400" />
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-xs text-muted-foreground">Not included: {tier.notIncluded}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mb-10">
           <h2 className="text-2xl font-semibold">See partner raffles live</h2>
           <p className="text-muted-foreground">
             The Main raffles view lists other hosts; partner program listings are only under Partner raffles (or{' '}
@@ -162,9 +220,12 @@ export default function PartnerProgramPage() {
         <section className="mb-8 rounded-lg border border-green-500/25 bg-green-500/[0.04] p-4 sm:p-6">
           <h2 className="mt-0 text-xl font-semibold sm:text-2xl">Apply or ask a question</h2>
           <p className="text-muted-foreground mb-4 text-sm sm:text-base">
-            Tell us about your project and audience. We review fit, fee tier (allowlisted partner wallets), and any custom
-            Discord or prize setup. No obligation — start in Discord.
+            Tell us about your project and audience. We review fit, tier, wallet setup, and Discord flow. You can submit
+            here or message us directly.
           </p>
+          <div className="mb-4">
+            <PartnerProgramApplyForm />
+          </div>
           <Button asChild className="min-h-[44px] w-full touch-manipulation sm:w-auto" size="lg">
             <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2">
               <MessageCircle className="h-5 w-5" aria-hidden />

@@ -9,6 +9,7 @@ import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+const VALID_PARTNER_TIERS = new Set(['$0_partner', 'partner_pro', 'white_label'])
 
 function walletFromParams(params: { wallet: string }): string | null {
   const decoded = decodeURIComponent(params.wallet ?? '').trim()
@@ -33,6 +34,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
     const body = await request.json().catch(() => ({}))
     const patch: {
       display_label?: string | null
+      partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
       sort_order?: number
       is_active?: boolean
       discord_partner_tenant_id?: string | null
@@ -53,6 +55,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
         return NextResponse.json({ error: 'sort_order must be an integer' }, { status: 400 })
       }
       patch.sort_order = n
+    }
+    if ('partner_tier' in body) {
+      if (typeof body.partner_tier !== 'string') {
+        return NextResponse.json({ error: 'partner_tier must be a string' }, { status: 400 })
+      }
+      const tier = body.partner_tier.trim()
+      if (!VALID_PARTNER_TIERS.has(tier)) {
+        return NextResponse.json({ error: 'partner_tier must be $0_partner, partner_pro, or white_label' }, { status: 400 })
+      }
+      patch.partner_tier = tier as '$0_partner' | 'partner_pro' | 'white_label'
     }
     if ('is_active' in body) {
       if (typeof body.is_active !== 'boolean') {

@@ -13,6 +13,11 @@ import { Loader2, ArrowLeft, HeartHandshake, Trash2 } from 'lucide-react'
 import type { PartnerCommunityCreatorRow } from '@/lib/db/partner-community-creators-admin'
 
 type PartnerCreatorAdminRow = PartnerCommunityCreatorRow & { profile_display_name: string | null }
+const TIER_OPTIONS = [
+  { value: '$0_partner', label: '$0 Partner (2% fee + Discord support)' },
+  { value: 'partner_pro', label: 'Partner Pro ($100 setup + $20/mo)' },
+  { value: 'white_label', label: 'White-label (custom)' },
+] as const
 
 export default function AdminPartnerCreatorsPage() {
   const { publicKey, connected } = useWallet()
@@ -23,13 +28,16 @@ export default function AdminPartnerCreatorsPage() {
   const [rows, setRows] = useState<PartnerCreatorAdminRow[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deletingWallet, setDeletingWallet] = useState<string | null>(null)
   const [savingWallet, setSavingWallet] = useState<string | null>(null)
+  const [savedWallet, setSavedWallet] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     creator_wallet: '',
     display_label: '',
+    partner_tier: '$0_partner',
     sort_order: '0',
     is_active: true,
     discord_partner_tenant_id: '',
@@ -71,16 +79,17 @@ export default function AdminPartnerCreatorsPage() {
 
   const fetchList = useCallback(async () => {
     setLoadingList(true)
+    setListError(null)
     try {
       const res = await fetch('/api/admin/partner-community-creators', { credentials: 'include' })
       const data = await res.json().catch(() => ({}))
       if (res.ok && Array.isArray(data.creators)) {
         setRows(data.creators)
       } else {
-        setRows([])
+        setListError(typeof data.error === 'string' ? data.error : 'Could not load partner creators')
       }
     } catch {
-      setRows([])
+      setListError('Could not load partner creators')
     } finally {
       setLoadingList(false)
     }
@@ -103,6 +112,7 @@ export default function AdminPartnerCreatorsPage() {
         body: JSON.stringify({
           creator_wallet: form.creator_wallet.trim(),
           display_label: form.display_label.trim() || null,
+          partner_tier: form.partner_tier,
           sort_order: Number.isFinite(sortParsed) ? sortParsed : 0,
           is_active: form.is_active,
           discord_partner_tenant_id:
@@ -117,6 +127,7 @@ export default function AdminPartnerCreatorsPage() {
       setForm({
         creator_wallet: '',
         display_label: '',
+        partner_tier: '$0_partner',
         sort_order: '0',
         is_active: true,
         discord_partner_tenant_id: '',
@@ -129,6 +140,14 @@ export default function AdminPartnerCreatorsPage() {
 
   const patchRow = async (creator_wallet: string, body: Record<string, unknown>) => {
     setSavingWallet(creator_wallet)
+    setSavedWallet(null)
+    setListError(null)
+    const previousRows = rows
+    if (Object.keys(body).length > 0) {
+      setRows((prev) =>
+        prev.map((r) => (r.creator_wallet === creator_wallet ? { ...r, ...body } : r))
+      )
+    }
     try {
       const enc = encodeURIComponent(creator_wallet)
       const res = await fetch(`/api/admin/partner-community-creators/${enc}`, {
@@ -137,7 +156,20 @@ export default function AdminPartnerCreatorsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (res.ok) await fetchList()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setRows(previousRows)
+        setListError(typeof data.error === 'string' ? data.error : 'Could not save partner update')
+        return
+      }
+      setSavedWallet(creator_wallet)
+      setTimeout(() => {
+        setSavedWallet((current) => (current === creator_wallet ? null : current))
+      }, 1800)
+      await fetchList()
+    } catch {
+      setRows(previousRows)
+      setListError('Could not save partner update')
     } finally {
       setSavingWallet(null)
     }
@@ -200,8 +232,9 @@ export default function AdminPartnerCreatorsPage() {
         Partner program creators
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
-        Wallets here get the <strong className="text-foreground">2%</strong> partner fee tier and appear in the partner
-        spotlight on <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
+        Wallets here get the <strong className="text-foreground">2%</strong> partner fee tier (including the $0 partner
+        program) and appear in the partner spotlight on{' '}
+        <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
         If you set a <strong className="text-foreground">Discord partner tenant id</strong> (from{' '}
         <Link href="/admin/discord-giveaway-partners" className="text-primary underline-offset-4 hover:underline">
           Discord partners
@@ -248,6 +281,21 @@ export default function AdminPartnerCreatorsPage() {
                 value={form.display_label}
                 onChange={(e) => setForm((f) => ({ ...f, display_label: e.target.value }))}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="partner_tier">Partner tier</Label>
+              <select
+                id="partner_tier"
+                value={form.partner_tier}
+                onChange={(e) => setForm((f) => ({ ...f, partner_tier: e.target.value }))}
+                className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {TIER_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="discord_partner_tenant_id">Discord partner tenant id (optional)</Label>
@@ -297,6 +345,7 @@ export default function AdminPartnerCreatorsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {listError ? <p className="mb-3 text-sm text-destructive">{listError}</p> : null}
           {loadingList ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -320,6 +369,18 @@ export default function AdminPartnerCreatorsPage() {
                     </p>
                   )}
                   <p className="text-sm text-muted-foreground">
+                    Partner tier:{' '}
+                    <span className="font-medium text-foreground">
+                      {r.partner_tier === '$0_partner'
+                        ? '$0 Partner'
+                        : r.partner_tier === 'partner_pro'
+                          ? 'Partner Pro'
+                          : r.partner_tier === 'white_label'
+                            ? 'White-label'
+                            : r.partner_tier}
+                    </span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
                     Discord partner tenant:{' '}
                     <span className="font-mono text-xs text-foreground break-all">
                       {r.discord_partner_tenant_id ?? '— (not linked)'}
@@ -337,6 +398,36 @@ export default function AdminPartnerCreatorsPage() {
                       <span className="text-sm">Active</span>
                     </label>
                     <div className="flex flex-wrap items-center gap-2">
+                      <Label htmlFor={`tier-${r.creator_wallet}`} className="text-sm sr-only sm:not-sr-only sm:inline">
+                        Tier
+                      </Label>
+                      <select
+                        id={`tier-${r.creator_wallet}`}
+                        value={
+                          r.partner_tier === '$0_partner' ||
+                          r.partner_tier === 'partner_pro' ||
+                          r.partner_tier === 'white_label'
+                            ? r.partner_tier
+                            : '$0_partner'
+                        }
+                        className="min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
+                        disabled={savingWallet === r.creator_wallet}
+                        onChange={(e) => {
+                          const t = e.target.value
+                          if (t !== r.partner_tier) {
+                            void patchRow(r.creator_wallet, { partner_tier: t })
+                          }
+                        }}
+                      >
+                        {TIER_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                      {savedWallet === r.creator_wallet ? (
+                        <span className="text-xs font-medium text-green-500">Saved</span>
+                      ) : null}
                       <Label htmlFor={`sort-${r.creator_wallet}`} className="text-sm sr-only sm:not-sr-only sm:inline">
                         Sort
                       </Label>
