@@ -628,9 +628,10 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
       }
 
       const hasNftSupport = columns.includes('prize_type')
-      let raffles = (data || []) as unknown as Raffle[]
-      if (!hasNftSupport && data?.length) {
-        raffles = data.map((raffle: Record<string, unknown>) => ({
+      const rows = (data || []) as unknown as Record<string, unknown>[]
+      let raffles = rows as unknown as Raffle[]
+      if (!hasNftSupport && rows.length) {
+        raffles = rows.map((raffle) => ({
           ...raffle,
           prize_type: 'crypto' as const,
           nft_mint_address: null,
