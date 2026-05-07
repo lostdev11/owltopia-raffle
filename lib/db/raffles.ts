@@ -594,6 +594,65 @@ export async function getRaffles(
   }
 }
 
+/**
+ * Raffles where the creator requested cancellation and an admin must still finish the flow in Owl Vision.
+ * Matches GET /api/admin/pending-cancellations (cancellation_requested_at set, status not cancelled).
+ * Unlike {@link getRaffles}, this does **not** filter by `RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT`, so legacy or
+ * unexpected `status` values still appear — otherwise Manage Raffles can show an empty queue while Owl Vision lists many.
+ */
+export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesResult> {
+  try {
+    return await withRetry(async () => {
+      const client = getSupabaseForRead()
+      const columns = await getRaffleColumns()
+      const { data, error } = await client
+        .from('raffles')
+        .select(columns)
+        .not('cancellation_requested_at', 'is', null)
+        .neq('status', 'cancelled')
+        .order('cancellation_requested_at', { ascending: false })
+
+      if (error) {
+        const err = error as { message?: string; code?: string; details?: string }
+        const msg = err?.message ?? 'unknown'
+        if (isRetryableMessage(msg)) throw new Error(msg)
+        const code = err?.code ?? ''
+        const details = err?.details ?? ''
+        console.warn(
+          `[getAdminPendingCancellationRaffles] message=${msg} code=${code} details=${details}`
+        )
+        return {
+          data: [],
+          error: { message: toUserFriendlyMessage(msg), code: err?.code },
+        }
+      }
+
+      const hasNftSupport = columns.includes('prize_type')
+      let raffles = (data || []) as unknown as Raffle[]
+      if (!hasNftSupport && data?.length) {
+        raffles = data.map((raffle: Record<string, unknown>) => ({
+          ...raffle,
+          prize_type: 'crypto' as const,
+          nft_mint_address: null,
+          nft_collection_name: null,
+          nft_token_id: null,
+          nft_metadata_uri: null,
+        })) as Raffle[]
+      }
+      return { data: raffles, error: null }
+    }, { maxRetries: 2 })
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error))
+    console.warn(
+      `[getAdminPendingCancellationRaffles] after retries: message=${err.message} name=${err.name}`
+    )
+    return {
+      data: [],
+      error: { message: toUserFriendlyMessage(err.message) },
+    }
+  }
+}
+
 export async function getRaffleBySlug(slug: string) {
   return withRetry(async () => {
     const client = getSupabaseForRead()
@@ -1746,9 +1805,10 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
         ? 'successful_pending_claims'
         : 'completed'
 
-      // Update the raffle with the winner and settlement info
+      // Update the raffle with the winner and settlement info.
+      // Guard on winner fields so concurrent draws cannot both commit + fire webhooks.
       const now = new Date().toISOString()
-      const { error } = await getSupabaseAdmin()
+      const { data: updatedRaffle, error } = await getSupabaseAdmin()
         .from('raffles')
         .update({
           winner_wallet: winnerWallet,
@@ -1762,10 +1822,20 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
           settled_at: now,
         })
         .eq('id', raffleId)
+        .is('winner_wallet', null)
+        .is('winner_selected_at', null)
+        .select('id')
+        .maybeSingle()
 
       if (error) {
         console.error('Error updating raffle with winner:', error)
         throw new Error(`Failed to update raffle with winner: ${error.message}`)
+      }
+
+      // Another request already selected a winner first; do not send webhook again.
+      if (!updatedRaffle) {
+        const latest = await getRaffleById(raffleId)
+        return latest?.winner_wallet ?? null
       }
 
       const rawTickets = walletTickets.get(winnerWallet) ?? 0
@@ -1799,7 +1869,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     : 'completed'
 
   const now = new Date().toISOString()
-  const { error } = await getSupabaseAdmin()
+  const { data: updatedRaffle, error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
       winner_wallet: winnerWallet,
@@ -1813,10 +1883,19 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       settled_at: now,
     })
     .eq('id', raffleId)
+    .is('winner_wallet', null)
+    .is('winner_selected_at', null)
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     console.error('Error updating raffle with winner:', error)
     throw new Error(`Failed to update raffle with winner: ${error.message}`)
+  }
+
+  if (!updatedRaffle) {
+    const latest = await getRaffleById(raffleId)
+    return latest?.winner_wallet ?? null
   }
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)

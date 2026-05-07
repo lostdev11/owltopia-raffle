@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { RafflesList } from '@/components/RafflesList'
@@ -29,6 +29,33 @@ export function AdminRafflesPageClient({
   pendingCancellationRafflesWithEntries,
 }: AdminRafflesPageClientProps) {
   const router = useRouter()
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const queue = params.get('queue')
+    const shouldScroll =
+      window.location.hash === '#pending-cancellation' ||
+      queue === 'pending-cancellation' ||
+      queue === 'cancellation'
+    if (!shouldScroll) return
+
+    let cancelled = false
+    const scrollToQueue = () => {
+      if (cancelled) return
+      document.getElementById('pending-cancellation')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }
+    scrollToQueue()
+    const t = window.setTimeout(scrollToQueue, 120)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [])
+
   const [rafflesState, setRafflesState] = useState({
     active: activeRafflesWithEntries,
     future: futureRafflesWithEntries,

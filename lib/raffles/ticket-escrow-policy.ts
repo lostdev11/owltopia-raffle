@@ -7,6 +7,9 @@ import type { Raffle } from '@/lib/types'
  *
  * Additionally: returning the escrow prize to the creator does not always move status off `live` /
  * `ready_to_draw`; once `prize_returned_at` is set, admins may unwind ticket escrow without requiring a cancel row.
+ *
+ * Pending cancellation queue: creators who requested cancel (`cancellation_requested_at`) still show as live /
+ * completed until an admin accepts — bulk escrow refunds should be available then too.
  */
 const ADMIN_FUNDS_ESCROW_REFUND_STATUSES: ReadonlySet<string> = new Set([
   'failed_refund_available',
@@ -24,13 +27,30 @@ function hasRecordedPrizeReturnToCreator(
   return tx.length >= 80
 }
 
+function hasCreatorPendingCancellationRequest(
+  raffle: Pick<Raffle, 'cancellation_requested_at' | 'status'>
+): boolean {
+  const req = raffle.cancellation_requested_at
+  if (!req || !String(req).trim()) return false
+  const s = (raffle.status ?? '').toLowerCase()
+  return s !== 'cancelled'
+}
+
 /** Whether the admin "send refunds from funds escrow" tool may run for this raffle (UI + API). */
 export function raffleAllowsAdminFundsEscrowRefund(
-  raffle: Pick<Raffle, 'status' | 'ticket_payments_to_funds_escrow' | 'prize_returned_at' | 'prize_return_tx'>
+  raffle: Pick<
+    Raffle,
+    | 'status'
+    | 'ticket_payments_to_funds_escrow'
+    | 'prize_returned_at'
+    | 'prize_return_tx'
+    | 'cancellation_requested_at'
+  >
 ): boolean {
   if (!raffleUsesFundsEscrow(raffle)) return false
   const s = (raffle.status ?? '').toLowerCase()
   if (ADMIN_FUNDS_ESCROW_REFUND_STATUSES.has(s)) return true
+  if (hasCreatorPendingCancellationRequest(raffle)) return true
   return (
     hasRecordedPrizeReturnToCreator(raffle) && ADMIN_ESCROW_REFUND_AFTER_PRIZE_RETURN_STATUSES.has(s)
   )

@@ -1304,7 +1304,9 @@ export default function AdminDashboardPage() {
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Button asChild className="min-h-11 touch-manipulation">
-                <Link href="/admin/raffles#pending-cancellation">Open cancellation queue</Link>
+                <Link href="/admin/raffles?queue=pending-cancellation#pending-cancellation">
+                  Open cancellation queue
+                </Link>
               </Button>
               <Button
                 type="button"

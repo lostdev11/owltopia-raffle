@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       if (!raffleAllowsAdminFundsEscrowRefund(raffle)) {
         const statusErr = !raffleUsesFundsEscrow(raffle)
           ? 'This raffle does not use funds escrow for ticket payments; send from treasury (or host wallet) and record the payout tx manually.'
-          : `Admin escrow refunds need status cancelled, pending_min_not_met, or failed_refund_available — or live/ready_to_draw with the escrow prize return recorded (prize_returned_at / prize_return_tx). Current status: ${raffle.status ?? 'unknown'}.`
+          : `Admin escrow refunds need status cancelled, pending_min_not_met, or failed_refund_available — a pending creator cancellation request — or live/ready_to_draw with the escrow prize return recorded (prize_returned_at / prize_return_tx). Current status: ${raffle.status ?? 'unknown'}.`
         results.push({
           entryId,
           ok: false,

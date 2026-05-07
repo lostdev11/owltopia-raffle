@@ -242,8 +242,9 @@ export function AdminManualRefundRecorder({
                 <>
                   Select tickets, then use Send from funds escrow to pay buyers
                   from the server escrow wallet (same as buyer &quot;Claim refund&quot;). Each row is sent in its own
-                  transaction. This includes live or ready-to-draw raffles after the escrow prize was returned to the
-                  creator. Or, if you already paid from treasury or another wallet, paste the Solana signature to record{' '}
+                  transaction.                   This includes listings on the pending cancellation queue, live or ready-to-draw raffles after the escrow
+                  prize was returned to the creator, and usual refund statuses. Or, if you already paid from treasury or
+                  another wallet, paste the Solana signature to record{' '}
                   <code className="text-xs">refunded_at</code> only.
                 </>
               ) : (
