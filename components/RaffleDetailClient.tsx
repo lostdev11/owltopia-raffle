@@ -148,7 +148,7 @@ import {
   canCreatorClaimPrizeBackFromEscrow,
   needsPayCancellationFeeBeforePrizeReturn,
 } from '@/lib/raffles/creator-prize-return-eligibility'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -268,7 +268,11 @@ export function RaffleDetailClient({
   const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-  const isCreator = connected && walletAddress && creatorWallet === walletAddress
+  const isCreator =
+    connected &&
+    !!walletAddress &&
+    !!creatorWallet &&
+    walletsEqualSolana(walletAddress, creatorWallet)
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && walletAddress ? getCachedAdmin(walletAddress) : null
   )
@@ -794,15 +798,18 @@ export function RaffleDetailClient({
       .join('\n')
   }, [creatorRefundCandidates, raffle.currency])
 
-  /** Buyer self-claim from funds escrow (same rules as dashboard). */
+  /** Buyer self-claim from funds escrow (same rules as dashboard + POST /api/entries/claim-refund). */
   const buyerRefundableEntries = useMemo(() => {
     const canBuyerClaimFromEscrow =
-      raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met'
+      raffle.status === 'failed_refund_available' ||
+      raffle.status === 'pending_min_not_met' ||
+      (raffle.status === 'cancelled' && raffleUsesFundsEscrow(raffle))
     if (!connected || !publicKey || !canBuyerClaimFromEscrow) return []
     if (!raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter(
-      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
     )
   }, [connected, publicKey, raffle, entries])
 
@@ -812,19 +819,27 @@ export function RaffleDetailClient({
     if (!connected || !publicKey || !canBuyerClaimLegacy) return []
     if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
-    return entries.filter((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
+    return entries.filter(
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
+    )
   }, [connected, publicKey, raffle, entries])
 
   const buyerLegacyRefundEligible = buyerLegacyRefundEntries.length > 0
 
-  /** Cancelled raffles use `cancelled` status + manual treasury refunds — not `failed_refund_available`, so buyers need explicit copy here and on the dashboard. */
+  /**
+   * Cancelled + legacy (no funds escrow): manual treasury refunds.
+   * Cancelled + funds escrow: use {@link buyerRefundableEntries} on-chain claim (same API as failed draw).
+   */
   const buyerCancelledRefundEntries = useMemo(() => {
     if (!connected || !publicKey || raffle.status !== 'cancelled') return []
+    if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter(
-      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
     )
-  }, [connected, publicKey, raffle.status, entries])
+  }, [connected, publicKey, raffle, entries])
 
   const buyerCancelledRefundEligible = buyerCancelledRefundEntries.length > 0
 

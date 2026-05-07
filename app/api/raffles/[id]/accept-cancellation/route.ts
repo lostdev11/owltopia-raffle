@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
-import {
-  canCompleteCancellationForAdmin,
-  raffleRequiresCancellationFee,
-} from '@/lib/raffles/cancellation-fee-policy'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import {
   transferNftPrizeToCreator,
   transferPartnerSplPrizeToCreator,
@@ -16,8 +13,9 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/accept-cancellation
- * Full admin accepts a cancellation request. If the raffle had already started, the creator must have paid
- * the on-chain cancellation fee first. Ticket buyers with funds-escrow entries can claim refunds on the dashboard.
+ * Full admin accepts a cancellation request. Creators who started the raffle are normally expected to pay the
+ * on-chain cancellation fee first; admins may still accept without a recorded fee when support agrees (fee fields
+ * stay unset / refund policy reflects no host fee). Ticket buyers with funds-escrow entries can claim refunds on the dashboard.
  * After the raffle is marked cancelled, attempts the same automatic escrow → creator transfer as
  * POST /return-prize-to-creator (NFT and partner SPL prizes). Non-escrow prize types are skipped.
  */
@@ -50,16 +48,6 @@ export async function POST(
     if (raffle.status === 'cancelled' && raffle.cancelled_at) {
       return NextResponse.json(
         { error: 'Raffle is already cancelled' },
-        { status: 400 }
-      )
-    }
-
-    if (!canCompleteCancellationForAdmin(raffle)) {
-      return NextResponse.json(
-        {
-          error:
-            'The creator has not paid the post-start cancellation fee on-chain. They must complete the 0.1 SOL transfer (or the amount set in CANCELLATION_FEE_SOL) to treasury before you can accept.',
-        },
         { status: 400 }
       )
     }
@@ -118,7 +106,9 @@ export async function POST(
     const baseMessage =
       hostPaidFee && feeApplies
         ? `Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). The creator paid the ${feeSol} SOL cancellation fee.`
-        : 'Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). No post-start cancellation fee applied.'
+        : feeApplies && !hostPaidFee
+          ? `Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). No verified post-start cancellation fee on file — admin accepted without treasury fee recording.`
+          : 'Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). No post-start cancellation fee applied (raffle had not started by scheduled start time).'
 
     let message = baseMessage
     if (prizeReturnAttempted && prizeReturnOk && prizeReturnSignature) {

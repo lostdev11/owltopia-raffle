@@ -59,6 +59,8 @@ type Raffle = {
   title: string
   status: string | null
   start_time?: string
+  /** Used with {@link hasExhaustedMinThresholdTimeExtensions} for creator prize-return eligibility when status lags. */
+  time_extension_count?: number | null
   created_by?: string | null
   creator_wallet?: string | null
   creator_payout_amount: number | null
@@ -1281,7 +1283,9 @@ export default function DashboardPage() {
 
   const refundableEntries = myEntries.filter(
     (x) =>
-      (x.raffle.status === 'failed_refund_available' || x.raffle.status === 'cancelled') &&
+      (x.raffle.status === 'failed_refund_available' ||
+        x.raffle.status === 'pending_min_not_met' ||
+        x.raffle.status === 'cancelled') &&
       x.entry.status === 'confirmed' &&
       !x.entry.refunded_at &&
       raffleUsesFundsEscrow(x.raffle)
@@ -1290,7 +1294,8 @@ export default function DashboardPage() {
   /** Same terminal status but legacy row: migration 044 set funds-escrow off when entries already existed — no on-chain claim. */
   const legacyRefundEligibleEntries = myEntries.filter(
     (x) =>
-      x.raffle.status === 'failed_refund_available' &&
+      (x.raffle.status === 'failed_refund_available' ||
+        x.raffle.status === 'pending_min_not_met') &&
       x.entry.status === 'confirmed' &&
       !x.entry.refunded_at &&
       !raffleUsesFundsEscrow(x.raffle)
@@ -1594,7 +1599,12 @@ export default function DashboardPage() {
       </Card>
 
       {showTicketRefundHub && (
-        <Card className="mb-8 border-amber-500/50 bg-amber-500/[0.07]" role="region" aria-label="Ticket refunds and draw status">
+        <Card
+          id="ticket-refunds"
+          className="mb-8 scroll-mt-28 border-amber-500/50 bg-amber-500/[0.07]"
+          role="region"
+          aria-label="Ticket refunds and draw status"
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <Ticket className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -2750,6 +2760,73 @@ export default function DashboardPage() {
                           <span className="font-medium text-foreground">Status:</span>{' '}
                           <span className="capitalize">{myRaffleStatusLabel(r.status)}</span>
                         </p>
+                        {refundableEntries.filter((x) => x.raffle.id === r.id).length > 0 && (
+                          <div
+                            className="rounded-md border border-primary/30 bg-primary/[0.06] p-3 space-y-2 mt-2"
+                            role="region"
+                            aria-label="Claim ticket refunds for this raffle"
+                          >
+                            <p className="text-xs font-medium text-foreground">
+                              Your ticket refunds (this wallet)
+                            </p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              You bought tickets on this listing. Claim each confirmed payment back from funds escrow —
+                              same as{' '}
+                              <a href="#ticket-refunds" className="text-primary underline font-medium">
+                                Ticket refunds at the top of the dashboard
+                              </a>{' '}
+                              or the raffle page Overview while connected.
+                            </p>
+                            <ul className="space-y-2 pt-1">
+                              {refundableEntries
+                                .filter((x) => x.raffle.id === r.id)
+                                .map(({ entry, raffle }) => (
+                                  <li
+                                    key={entry.id}
+                                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                                  >
+                                    <span className="text-xs text-muted-foreground">
+                                      {entry.ticket_quantity === 1
+                                        ? '1 ticket purchase'
+                                        : `${entry.ticket_quantity} ticket purchases`}
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
+                                      disabled={claimRefundLoadingEntryId === entry.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        void handleClaimRefund(entry.id)
+                                      }}
+                                    >
+                                      {claimRefundLoadingEntryId === entry.id ? (
+                                        <>
+                                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                          Refunding…
+                                        </>
+                                      ) : (
+                                        `Claim ${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+                                      )}
+                                    </Button>
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                        )}
+                        {legacyRefundOwedByRaffle.some((row) => row.raffle.id === r.id) && (
+                          <div className="rounded-md border border-amber-500/35 bg-amber-500/[0.06] p-3 mt-2 text-xs text-muted-foreground leading-relaxed">
+                            <p className="font-medium text-foreground mb-1">Buyers on legacy payout (including you)</p>
+                            <p>
+                              This raffle did not use funds escrow for tickets. Refunds are manual — see{' '}
+                              <a href="#ticket-refunds" className="text-primary underline font-medium">
+                                Ticket refunds
+                              </a>{' '}
+                              at the top of this page for amounts and next steps.
+                            </p>
+                          </div>
+                        )}
                         {r.status === 'completed' && (
                           <div className="text-xs text-muted-foreground space-y-2 pt-1 border-t border-border/40 mt-2">
                             {raffleUsesFundsEscrow(r) && r.creator_claim_tx?.trim() ? (

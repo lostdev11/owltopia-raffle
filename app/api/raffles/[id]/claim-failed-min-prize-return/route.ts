@@ -6,6 +6,7 @@ import {
   clearNftPrizeClaimLock,
   getRaffleById,
 } from '@/lib/db/raffles'
+import { ensureMinThresholdTerminalBeforeCreatorPrizeReturn } from '@/lib/raffles/min-threshold-terminal'
 import {
   type PrizeReturnReason,
   transferNftPrizeToCreator,
@@ -50,7 +51,7 @@ export async function POST(
       return NextResponse.json({ error: 'Too many requests for this raffle' }, { status: 429 })
     }
 
-    const raffle = await getRaffleById(raffleId)
+    let raffle = await getRaffleById(raffleId)
     if (!raffle) {
       return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
     }
@@ -61,13 +62,15 @@ export async function POST(
       return NextResponse.json({ error: 'Only the raffle creator can claim this return' }, { status: 403 })
     }
 
+    raffle = (await ensureMinThresholdTerminalBeforeCreatorPrizeReturn(raffleId)) ?? raffle
+
     const isFailedMin = raffle.status === 'failed_refund_available'
     const isCancelled = raffle.status === 'cancelled'
     if (!isFailedMin && !isCancelled) {
       return NextResponse.json(
         {
           error:
-            'Prize can only be claimed back when the raffle is cancelled or failed the minimum-ticket rule with refunds open. If it just ended, open the listing once or wait for status to update.',
+            'Prize can only be claimed back after the raffle is cancelled or closed for refunds (minimum not met after the extension). If the end time just passed, wait a minute and tap Refresh, or open the raffle page once so status can update. If a draw is still possible (enough tickets sold), finish the winner draw first.',
         },
         { status: 400 }
       )

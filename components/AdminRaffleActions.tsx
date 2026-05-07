@@ -26,10 +26,7 @@ import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
-import {
-  canCompleteCancellationForAdmin,
-  raffleRequiresCancellationFee,
-} from '@/lib/raffles/cancellation-fee-policy'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
@@ -373,7 +370,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
   const feeApplies = raffleRequiresCancellationFee(raffle)
-  const canAcceptCancel = canCompleteCancellationForAdmin(raffle)
+  /** Treasury fee not recorded; admin can still accept (support override). */
+  const postStartFeeMissing = feeApplies && !raffle.cancellation_fee_paid_at
   const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
@@ -1272,12 +1270,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {feeApplies
-                      ? `Raffle has started. The creator must pay ${feeSol} SOL to treasury before you can accept. Ticket buyers can claim refunds in-app (funds escrow).`
+                      ? `Raffle has started (by scheduled start time). Creators are normally asked to pay ${feeSol} SOL to treasury before cancellation is finalized; you can still accept below if support approves a waiver or the fee failed to record. Ticket buyers can claim refunds in-app (funds escrow).`
                       : 'Raffle has not started yet (by start time). No post-start cancellation fee. Ticket buyers can still claim refunds if this raffle used funds escrow.'}
                   </p>
-                  {feeApplies && !raffle.cancellation_fee_paid_at && (
-                    <p className="mt-2 text-xs font-medium text-destructive">
-                      Waiting for creator to complete the on-chain cancellation fee payment.
+                  {postStartFeeMissing && (
+                    <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                      No verified cancellation fee on file — you can accept anyway; treasury will not show a recorded fee for this listing.
                     </p>
                   )}
                 </div>
@@ -1287,8 +1285,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => setAcceptCancelDialogOpen(true)}
-                    disabled={acceptingCancel || !canAcceptCancel}
-                    title={!canAcceptCancel ? 'Creator must pay the cancellation fee on-chain first' : undefined}
+                    disabled={acceptingCancel}
+                    title={
+                      postStartFeeMissing
+                        ? 'Creator fee not recorded — open to accept with override'
+                        : undefined
+                    }
                   >
                     <XCircle className="h-4 w-4 mr-2 shrink-0" />
                     Accept cancellation
@@ -1307,14 +1309,25 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                             <strong className="text-foreground">Record manual prize return</strong> below.
                           </>
                         ) : null}
-                        {canAcceptCancel ? (
-                          feeApplies ? (
-                            <> The creator already paid the {feeSol} SOL post-start fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
-                          ) : (
-                            <> No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
-                          )
+                        {postStartFeeMissing ? (
+                          <>
+                            {' '}
+                            <strong className="text-foreground">No verified post-start fee.</strong> Accepting will
+                            cancel the listing anyway (support override). Ticket buyers with funds-escrow tickets can
+                            claim refunds in their dashboard.
+                          </>
+                        ) : feeApplies ? (
+                          <>
+                            {' '}
+                            The creator paid the {feeSol} SOL post-start fee (on file). Ticket buyers with
+                            funds-escrow tickets can claim refunds in their dashboard.
+                          </>
                         ) : (
-                          <> You cannot accept until the creator pays the {feeSol} SOL fee to the platform wallet (on-chain) from their creator wallet.</>
+                          <>
+                            {' '}
+                            No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds
+                            in their dashboard.
+                          </>
                         )}
                       </DialogDescription>
                     </DialogHeader>
@@ -1329,7 +1342,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       </Button>
                       <Button
                         onClick={handleAcceptCancellation}
-                        disabled={acceptingCancel || !canAcceptCancel}
+                        disabled={acceptingCancel}
                         className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}

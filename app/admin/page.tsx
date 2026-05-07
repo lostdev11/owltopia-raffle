@@ -416,7 +416,7 @@ export default function AdminDashboardPage() {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
     setLoadingPendingCancellations(true)
     try {
-      const response = await fetch('/api/raffles', {
+      const response = await fetch('/api/admin/pending-cancellations', {
         credentials: 'include',
         cache: 'no-store',
       })
@@ -427,12 +427,7 @@ export default function AdminDashboardPage() {
       const data = await response.json().catch(() => [])
       const rows = Array.isArray(data) ? data : []
       const next = rows
-        .filter((row) => {
-          if (!row || typeof row !== 'object') return false
-          const status = String((row as { status?: unknown }).status ?? '').toLowerCase()
-          const requestedAt = (row as { cancellation_requested_at?: unknown }).cancellation_requested_at
-          return !!requestedAt && status !== 'cancelled'
-        })
+        .filter((row) => row && typeof row === 'object')
         .map((row) => {
           const item = row as Record<string, unknown>
           return {
@@ -1301,6 +1296,10 @@ export default function AdminDashboardPage() {
         >
           <CardDescription className="mb-4">
             Track creator cancellation requests and jump directly to the raffle queue in Manage Raffles.
+            <span className="mt-2 block text-foreground/90">
+              Each row below is a pending cancellation — the listing stays live, completed, or refund-available until an
+              admin completes cancellation in Owl Vision. “Listing status” is not cancellation status.
+            </span>
           </CardDescription>
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
@@ -1332,23 +1331,28 @@ export default function AdminDashboardPage() {
             ) : pendingCancellationRaffles.length === 0 ? (
               <p className="text-sm text-muted-foreground">No pending cancellation requests right now.</p>
             ) : (
-              <div className="rounded-md border overflow-x-auto">
+              <div className="rounded-md border overflow-x-auto max-h-[min(70vh,560px)] overflow-y-auto">
                 <table className="w-full min-w-[640px] text-sm">
-                  <thead className="bg-muted/50">
+                  <thead className="bg-muted/50 sticky top-0 z-[1] shadow-[0_1px_0_hsl(var(--border))]">
                     <tr className="text-left">
                       <th className="px-3 py-2 font-medium">Raffle</th>
                       <th className="px-3 py-2 font-medium">Requested</th>
                       <th className="px-3 py-2 font-medium">Fee</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium">Listing status</th>
                       <th className="px-3 py-2 font-medium text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pendingCancellationRaffles.slice(0, 8).map((row) => (
+                    {pendingCancellationRaffles.map((row) => (
                       <tr key={row.id} className="border-t">
                         <td className="px-3 py-2">
                           <div className="font-medium">{row.title}</div>
                           <div className="text-xs text-muted-foreground">/{row.slug}</div>
+                          <div className="mt-1">
+                            <span className="inline-flex rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                              Cancellation pending admin
+                            </span>
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">
                           {row.cancellation_requested_at
@@ -2493,14 +2497,14 @@ export default function AdminDashboardPage() {
           title={
             <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
               <Banknote className="h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400" />
-              Manual ticket refunds
+              Ticket refunds
             </span>
           }
         >
           <CardDescription className="mb-4">
-            After you send refunds from treasury or funds escrow, open a raffle below, select ticket rows, and paste
-            the payout transaction signature so buyers see refunded/sent on their dashboards. Same tool as on each
-            raffle&apos;s Owl Vision tab.
+            Open a raffle below (Owl Vision tab on the listing). For funds-escrow listings in a refund-eligible status,
+            use Send selected refunds from funds escrow to pay buyers without pasting a signature. If payouts already went
+            out from treasury or another wallet, paste the Solana tx signature to record refunded rows only.
           </CardDescription>
           <div>
             {loadingPendingManualRefunds ? (
