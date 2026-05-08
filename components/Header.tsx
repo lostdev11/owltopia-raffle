@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, ShoppingCart, Sparkles } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, ShoppingCart, Sparkles, Rocket } from 'lucide-react'
 import { useCart } from '@/components/cart/CartProvider'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
@@ -81,6 +81,7 @@ export function Header() {
     { href: '/cart' as const, label: cartLabel, icon: ShoppingCart },
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { href: '/council', label: 'Council', icon: Landmark },
+    { href: '/owl-center', label: 'Owl Center', icon: Rocket },
     { href: '/gen2-presale', label: 'Gen2 Presale', icon: Sparkles },
     ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
@@ -124,6 +125,12 @@ export function Header() {
                 <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                   <Landmark className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Council</span>
+                </Button>
+              </Link>
+              <Link href="/owl-center">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
+                  <Rocket className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Owl Center</span>
                 </Button>
               </Link>
               <Link href="/gen2-presale">

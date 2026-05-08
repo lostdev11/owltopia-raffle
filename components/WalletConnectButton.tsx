@@ -15,6 +15,43 @@ import {
 import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, isSolflareBrowser, redirectToPhantomBrowser, redirectToSolflareBrowser } from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 
+const ANDROID_REDIRECT_GUARD_KEY = 'android_wallet_redirect_in_flight'
+const ANDROID_REDIRECT_GUARD_WINDOW_MS = 5000
+
+function normalizeCompareUrl(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = new URL(trimmed, window.location.origin)
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '')
+  } catch {
+    return trimmed.split('?')[0]!.split('#')[0]!.replace(/\/+$/, '')
+  }
+}
+
+function isAndroidErrorPageHref(href: string): boolean {
+  return href === 'about:blank' || href === 'chrome-error://chromewebdata/'
+}
+
+function guardedAndroidRedirect(nextUrl: string): boolean {
+  if (typeof window === 'undefined') return false
+  const currentHref = window.location.href
+  const from = normalizeCompareUrl(currentHref)
+  const to = normalizeCompareUrl(nextUrl)
+  if (!to || from === to) return false
+
+  const now = Date.now()
+  const lastRaw = sessionStorage.getItem(ANDROID_REDIRECT_GUARD_KEY)
+  const last = lastRaw ? Number(lastRaw) : 0
+  if (Number.isFinite(last) && last > 0 && now - last < ANDROID_REDIRECT_GUARD_WINDOW_MS) {
+    return false
+  }
+
+  sessionStorage.setItem(ANDROID_REDIRECT_GUARD_KEY, String(now))
+  window.location.href = nextUrl
+  return true
+}
+
 export function WalletConnectButton() {
   const { publicKey, connected, disconnect, wallet, connecting } = useWallet()
   const { setVisible } = useWalletModal()
@@ -155,10 +192,7 @@ export function WalletConnectButton() {
         if (document.readyState === 'loading') return
         
         const currentHref = window.location.href
-        const isBlankPage = 
-          currentHref === 'about:blank' ||
-          currentHref === 'chrome-error://chromewebdata/' ||
-          (document.body && document.body.textContent?.trim() === '' && document.body.children.length === 0 && document.body.innerHTML.trim() === '')
+        const isBlankPage = isAndroidErrorPageHref(currentHref)
         
         if (isBlankPage) {
           // Check for stored redirect URL from any mobile wallet
@@ -186,7 +220,7 @@ export function WalletConnectButton() {
             if (process.env.NODE_ENV === 'development') {
               console.log(`Detected blank page on mount (${walletName || 'unknown wallet'}), redirecting to stored URL:`, storedUrl)
             }
-            window.location.href = storedUrl
+            guardedAndroidRedirect(storedUrl)
             return
           }
           
@@ -195,10 +229,10 @@ export function WalletConnectButton() {
             if (window.history.length > 1) {
               window.history.back()
             } else {
-              window.location.href = window.location.origin
+              guardedAndroidRedirect(window.location.origin)
             }
           } catch (e) {
-            window.location.href = window.location.origin
+            guardedAndroidRedirect(window.location.origin)
           }
         }
       }
@@ -256,9 +290,7 @@ export function WalletConnectButton() {
         // On Android, ensure we're not on a blank page before cleaning
         if (isAndroidDevice()) {
           const currentHref = window.location.href
-          const isBlankPage = 
-            currentHref === 'about:blank' ||
-            currentHref === 'chrome-error://chromewebdata/'
+          const isBlankPage = isAndroidErrorPageHref(currentHref)
           
           if (isBlankPage) {
             // If we're on blank page but have callback params, redirect to stored URL
@@ -295,7 +327,7 @@ export function WalletConnectButton() {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Redirecting from blank page with callback params (${walletName || 'unknown wallet'}) to:`, storedUrlObj.toString())
               }
-              window.location.href = storedUrlObj.toString()
+              guardedAndroidRedirect(storedUrlObj.toString())
               return
             }
           }
@@ -386,11 +418,7 @@ export function WalletConnectButton() {
             // Check if we're on a blank page or error page
             setTimeout(() => {
               const currentHref = window.location.href
-              const isBlankPage = 
-                currentHref === 'about:blank' ||
-                currentHref === 'chrome-error://chromewebdata/' ||
-                document.body?.textContent?.trim() === '' ||
-                (document.body?.children?.length === 0 && !document.body?.textContent)
+              const isBlankPage = isAndroidErrorPageHref(currentHref)
               
               // Get stored URL (try wallet-specific first, then generic)
               let storedUrl = sessionStorage.getItem(storageKey)
@@ -403,7 +431,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Detected blank page after ${walletName} connection, redirecting to:`, storedUrl)
                 }
-                window.location.href = storedUrl
+                guardedAndroidRedirect(storedUrl)
                 return
               }
               
@@ -429,7 +457,11 @@ export function WalletConnectButton() {
               }
               
               // If we have callback params but are on wrong page, redirect to stored URL
-              if (hasCallback && storedUrl && !currentHref.startsWith(storedUrl.split('?')[0])) {
+              if (
+                hasCallback &&
+                storedUrl &&
+                normalizeCompareUrl(currentHref) !== normalizeCompareUrl(storedUrl)
+              ) {
                 // Merge callback params with stored URL
                 const storedUrlObj = new URL(storedUrl)
                 urlParams.forEach((value, key) => {
@@ -442,7 +474,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Redirecting to stored URL with callback params (${walletName}):`, storedUrlObj.toString())
                 }
-                window.location.href = storedUrlObj.toString()
+                guardedAndroidRedirect(storedUrlObj.toString())
               }
             }, 500) // Small delay to allow page to load
           }
@@ -459,11 +491,11 @@ export function WalletConnectButton() {
               storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
             }
             
-            if (storedUrl && (currentHref === 'about:blank' || currentHref.includes('chrome-error'))) {
+            if (storedUrl && isAndroidErrorPageHref(currentHref)) {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Detected blank/error page on focus (${walletName}), redirecting to:`, storedUrl)
               }
-              window.location.href = storedUrl
+              guardedAndroidRedirect(storedUrl)
             }
           }, 500)
         }
