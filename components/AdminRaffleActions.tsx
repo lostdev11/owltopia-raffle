@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download } from 'lucide-react'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
@@ -67,6 +67,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
   const [imageFallbackInput, setImageFallbackInput] = useState(raffle.image_fallback_url ?? '')
   const [savingImageFallback, setSavingImageFallback] = useState(false)
+  const [uploadingImageFallback, setUploadingImageFallback] = useState(false)
+  const [fallbackUploadFile, setFallbackUploadFile] = useState<File | null>(null)
+  const fallbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const [entrantsCsvLoading, setEntrantsCsvLoading] = useState(false)
 
   const [listOnPlatform, setListOnPlatform] = useState(() => raffle.list_on_platform !== false)
@@ -540,6 +543,66 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     }
   }
 
+  const handleUploadImageFallback = async () => {
+    if (!fallbackUploadFile) {
+      setMessage({ type: 'error', text: 'Choose an image first.' })
+      return
+    }
+    setUploadingImageFallback(true)
+    setMessage(null)
+    try {
+      const uploadForm = new FormData()
+      uploadForm.append('image', fallbackUploadFile)
+
+      const uploadRes = await fetch('/api/upload/image', {
+        method: 'POST',
+        body: uploadForm,
+        credentials: 'include',
+      })
+      const uploadData = await uploadRes.json().catch(() => ({}))
+      if (!uploadRes.ok || typeof uploadData?.url !== 'string' || !uploadData.url.trim()) {
+        setMessage({
+          type: 'error',
+          text: typeof uploadData?.error === 'string' ? uploadData.error : 'Upload failed',
+        })
+        return
+      }
+
+      const uploadedUrl = uploadData.url.trim()
+      setImageFallbackInput(uploadedUrl)
+
+      const saveRes = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ image_fallback_url: uploadedUrl }),
+      })
+      const saveData = await saveRes.json().catch(() => ({}))
+      if (!saveRes.ok) {
+        setMessage({
+          type: 'error',
+          text:
+            typeof saveData?.error === 'string'
+              ? saveData.error
+              : 'Uploaded image, but saving fallback URL failed',
+        })
+        return
+      }
+
+      setFallbackUploadFile(null)
+      if (fallbackFileInputRef.current) fallbackFileInputRef.current.value = ''
+      setMessage({ type: 'success', text: 'Fallback image uploaded and saved.' })
+      router.refresh()
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Upload failed',
+      })
+    } finally {
+      setUploadingImageFallback(false)
+    }
+  }
+
   const handleSaveNftEconomics = async () => {
     setMessage(null)
     const minParsed = parseInt(nftMinInput.trim(), 10)
@@ -955,6 +1018,31 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="admin-image-fallback-file">Upload fallback image (phone or desktop)</Label>
+              <Input
+                id="admin-image-fallback-file"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={fallbackFileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null
+                  setFallbackUploadFile(file)
+                }}
+                className="touch-manipulation min-h-[44px]"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleUploadImageFallback}
+                disabled={uploadingImageFallback || !fallbackUploadFile}
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+              >
+                <Upload className="h-4 w-4 mr-2 shrink-0" />
+                {uploadingImageFallback ? 'Uploading…' : 'Upload and save fallback image'}
+              </Button>
+            </div>
             <Label htmlFor="admin-image-fallback">Image URL</Label>
             <Input
               id="admin-image-fallback"
@@ -968,7 +1056,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
               type="button"
               variant="secondary"
               onClick={handleSaveImageFallback}
-              disabled={savingImageFallback}
+              disabled={savingImageFallback || uploadingImageFallback}
               className="touch-manipulation min-h-[44px] w-full sm:w-auto"
             >
               {savingImageFallback ? 'Saving…' : 'Save fallback image'}
