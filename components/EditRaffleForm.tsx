@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,7 @@ import {
   getThemeAccentClasses,
   THEME_ACCENT_SELECT_OPTIONS,
 } from '@/lib/theme-accent'
-import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
+import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy, Upload } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import {
   canSelectWinner,
@@ -82,6 +82,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const { publicKey, connected } = useWallet()
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [savingFallbackOnly, setSavingFallbackOnly] = useState(false)
+  const [uploadingFallback, setUploadingFallback] = useState(false)
+  const [fallbackUploadFile, setFallbackUploadFile] = useState<File | null>(null)
+  const [fallbackUploadPreviewUrl, setFallbackUploadPreviewUrl] = useState<string | null>(null)
+  const [fallbackInputValue, setFallbackInputValue] = useState(raffle.image_fallback_url ?? '')
+  const fallbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const wallet = publicKey?.toBase58() ?? ''
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
@@ -111,6 +117,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     setNftDraftFloor(raffle.floor_price ?? '')
     setNftDraftTicket(raffle.ticket_price != null ? String(raffle.ticket_price) : '')
   }, [raffle.id, raffle.floor_price, raffle.ticket_price])
+  useEffect(() => {
+    setFallbackInputValue(raffle.image_fallback_url ?? '')
+    setFallbackUploadFile(null)
+    if (fallbackFileInputRef.current) fallbackFileInputRef.current.value = ''
+  }, [raffle.id, raffle.image_fallback_url])
+  useEffect(() => {
+    if (!fallbackUploadFile) {
+      setFallbackUploadPreviewUrl(null)
+      return
+    }
+    const preview = URL.createObjectURL(fallbackUploadFile)
+    setFallbackUploadPreviewUrl(preview)
+    return () => URL.revokeObjectURL(preview)
+  }, [fallbackUploadFile])
 
   const noWinnerNft = !(raffle.winner_wallet ?? '').trim() && !raffle.winner_selected_at
   const statusLcNft = (raffle.status ?? '').toLowerCase()
@@ -398,6 +418,80 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       alert('Error updating raffle')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSaveFallbackOnly = async () => {
+    const fb = fallbackInputValue.trim()
+    setSavingFallbackOnly(true)
+    try {
+      const response = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ image_fallback_url: fb ? fb : null }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        alert(typeof data?.error === 'string' ? data.error : 'Failed to save fallback image')
+        return
+      }
+      alert('Fallback image saved.')
+      router.refresh()
+    } catch (error) {
+      console.error('Error saving fallback image:', error)
+      alert('Failed to save fallback image')
+    } finally {
+      setSavingFallbackOnly(false)
+    }
+  }
+
+  const handleUploadFallbackImage = async () => {
+    if (!fallbackUploadFile) {
+      alert('Choose an image first.')
+      return
+    }
+    setUploadingFallback(true)
+    try {
+      const uploadForm = new FormData()
+      uploadForm.append('image', fallbackUploadFile)
+      const uploadRes = await fetch('/api/upload/image', {
+        method: 'POST',
+        credentials: 'include',
+        body: uploadForm,
+      })
+      const uploadData = await uploadRes.json().catch(() => ({}))
+      if (!uploadRes.ok || typeof uploadData?.url !== 'string' || !uploadData.url.trim()) {
+        alert(typeof uploadData?.error === 'string' ? uploadData.error : 'Upload failed')
+        return
+      }
+      const uploadedUrl = uploadData.url.trim()
+      setFallbackInputValue(uploadedUrl)
+
+      const saveRes = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ image_fallback_url: uploadedUrl }),
+      })
+      const saveData = await saveRes.json().catch(() => ({}))
+      if (!saveRes.ok) {
+        alert(
+          typeof saveData?.error === 'string'
+            ? saveData.error
+            : 'Uploaded image, but saving fallback URL failed'
+        )
+        return
+      }
+      setFallbackUploadFile(null)
+      if (fallbackFileInputRef.current) fallbackFileInputRef.current.value = ''
+      alert('Fallback image uploaded and saved.')
+      router.refresh()
+    } catch (error) {
+      console.error('Error uploading fallback image:', error)
+      alert('Failed to upload fallback image')
+    } finally {
+      setUploadingFallback(false)
     }
   }
 
@@ -1240,14 +1334,52 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       If the NFT image fails to load (e.g. dead gateway), this URL is shown instead. HTTPS or ipfs://. Leave empty and save to clear.
                     </p>
                     <Input
+                      id="image_fallback_upload_file"
+                      type="file"
+                      accept="image/*"
+                      ref={fallbackFileInputRef}
+                      onChange={(e) => setFallbackUploadFile(e.target.files?.[0] ?? null)}
+                      className="touch-manipulation min-h-[44px]"
+                    />
+                    {fallbackUploadPreviewUrl && (
+                      <div className="relative w-full max-w-sm h-40 rounded-md overflow-hidden border border-input bg-muted">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={fallbackUploadPreviewUrl}
+                          alt="Selected fallback preview"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleUploadFallbackImage}
+                      disabled={uploadingFallback || !fallbackUploadFile || loading || deleting}
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
+                      <Upload className="h-4 w-4 mr-2 shrink-0" />
+                      {uploadingFallback ? 'Uploading…' : 'Upload and save fallback image'}
+                    </Button>
+                    <Input
                       id="image_fallback_url"
                       name="image_fallback_url"
                       type="url"
-                      defaultValue={raffle.image_fallback_url ?? ''}
+                      value={fallbackInputValue}
+                      onChange={(e) => setFallbackInputValue(e.target.value)}
                       placeholder="https://… or ipfs://…"
                       className="font-mono text-sm touch-manipulation min-h-[44px]"
                       autoComplete="off"
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleSaveFallbackOnly}
+                      disabled={savingFallbackOnly || uploadingFallback || loading || deleting}
+                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                    >
+                      {savingFallbackOnly ? 'Saving…' : 'Save fallback image'}
+                    </Button>
                   </div>
                 )}
               </div>

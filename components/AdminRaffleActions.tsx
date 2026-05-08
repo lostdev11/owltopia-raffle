@@ -69,6 +69,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [savingImageFallback, setSavingImageFallback] = useState(false)
   const [uploadingImageFallback, setUploadingImageFallback] = useState(false)
   const [fallbackUploadFile, setFallbackUploadFile] = useState<File | null>(null)
+  const [fallbackUploadPreviewUrl, setFallbackUploadPreviewUrl] = useState<string | null>(null)
   const fallbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const [entrantsCsvLoading, setEntrantsCsvLoading] = useState(false)
 
@@ -78,6 +79,16 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   useEffect(() => {
     setImageFallbackInput(raffle.image_fallback_url ?? '')
   }, [raffle.id, raffle.image_fallback_url])
+
+  useEffect(() => {
+    if (!fallbackUploadFile) {
+      setFallbackUploadPreviewUrl(null)
+      return
+    }
+    const preview = URL.createObjectURL(fallbackUploadFile)
+    setFallbackUploadPreviewUrl(preview)
+    return () => URL.revokeObjectURL(preview)
+  }, [fallbackUploadFile])
 
   useEffect(() => {
     setListOnPlatform(raffle.list_on_platform !== false)
@@ -1024,7 +1035,6 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 id="admin-image-fallback-file"
                 type="file"
                 accept="image/*"
-                capture="environment"
                 ref={fallbackFileInputRef}
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null
@@ -1032,6 +1042,16 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                 }}
                 className="touch-manipulation min-h-[44px]"
               />
+              {fallbackUploadPreviewUrl && (
+                <div className="relative w-full max-w-sm h-40 rounded-md overflow-hidden border border-input bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={fallbackUploadPreviewUrl}
+                    alt="Selected fallback preview"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              )}
               <Button
                 type="button"
                 variant="secondary"
