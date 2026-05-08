@@ -11,7 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import type { Raffle, Entry, OwlVisionScore } from '@/lib/types'
-import { getThemeAccentBorderStyle, getThemeAccentClasses } from '@/lib/theme-accent'
+import {
+  getThemeAccentBorderStyle,
+  getThemeAccentClasses,
+  THEME_ACCENT_SELECT_OPTIONS,
+} from '@/lib/theme-accent'
 import { AlertCircle, ArrowLeftCircle, RotateCcw, Trash2, Trophy } from 'lucide-react'
 import { utcToLocalDateTime, localDateTimeToUtc } from '@/lib/utils'
 import {
@@ -31,6 +35,17 @@ import {
   ADMIN_HARD_DELETE_REASON_MAX_CHARS,
   ADMIN_HARD_DELETE_REASON_MIN_CHARS,
 } from '@/lib/raffles/admin-hard-delete'
+import { isOwlEnabled } from '@/lib/tokens'
+
+function editFormTicketCurrencyDefault(
+  raffleCurrency: string | null | undefined,
+  owlUi: boolean
+): 'SOL' | 'USDC' | 'OWL' {
+  const u = String(raffleCurrency ?? '').trim().toUpperCase()
+  if (u === 'USDC') return 'USDC'
+  if (u === 'OWL' && owlUi) return 'OWL'
+  return 'SOL'
+}
 
 interface EditRaffleFormProps {
   raffle: Raffle
@@ -114,6 +129,56 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   useEffect(() => {
     setNftLiveEconomicsConfirm(false)
   }, [raffle.id])
+
+  const [listOnPlatform, setListOnPlatform] = useState(() => raffle.list_on_platform !== false)
+  const [listPlatformSaving, setListPlatformSaving] = useState(false)
+  const [listPlatformError, setListPlatformError] = useState<string | null>(null)
+  const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
+
+  useEffect(() => {
+    setListOnPlatform(raffle.list_on_platform !== false)
+    setListPlatformError(null)
+  }, [raffle.id, raffle.list_on_platform])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let cancelled = false
+    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+      .then((r) => (cancelled || !r.ok ? null : r.json()))
+      .then((d: { partnerDiscordLinked?: boolean } | null) => {
+        if (cancelled || !d) return
+        setPartnerDiscordLinked(d.partnerDiscordLinked === true)
+      })
+      .catch(() => {
+        if (!cancelled) setPartnerDiscordLinked(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const persistListOnPlatform = async (next: boolean) => {
+    setListPlatformSaving(true)
+    setListPlatformError(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ list_on_platform: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not update listing visibility')
+      }
+      setListOnPlatform(next)
+      router.refresh()
+    } catch (e) {
+      setListPlatformError(e instanceof Error ? e.message : 'Could not update listing visibility')
+    } finally {
+      setListPlatformSaving(false)
+    }
+  }
 
   const nftComputedMin = useMemo(() => {
     const forDraftOrAdminNft =
@@ -1105,6 +1170,37 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <Label htmlFor="edit-list-on-platform" className="text-base">
+                      Show on public raffles list
+                    </Label>
+                    <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                      When off, NFT prizes stay off the main <code className="text-xs bg-muted/80 px-1 rounded">/raffles</code>{' '}
+                      grid (Discord / link-only); the raffle page URL still works. Turn on to show the card on the
+                      browse feed again. Uses your admin sign-in session (wallet does not need to match).
+                    </p>
+                    {partnerDiscordLinked && (
+                      <p className="text-xs text-muted-foreground pt-0.5">
+                        Partner label: “Hide from public raffles list” — same setting.
+                      </p>
+                    )}
+                    {listPlatformError && (
+                      <p className="text-sm text-destructive pt-1">{listPlatformError}</p>
+                    )}
+                  </div>
+                  <Switch
+                    id="edit-list-on-platform"
+                    checked={listOnPlatform}
+                    onCheckedChange={(v) => void persistListOnPlatform(v)}
+                    disabled={listPlatformSaving}
+                    className="shrink-0 mt-1 touch-manipulation"
+                    ariaLabel="Show on public raffles list"
+                  />
+                </div>
+                {listPlatformSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="title">Title *</Label>
                 <Input id="title" name="title" defaultValue={raffle.title} required />
@@ -1167,36 +1263,53 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         cap, and currency in other states, use the deeper controls on the admin actions page.
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="currency_nft_live">Currency *</Label>
-                        {raffle.currency === 'OWL' && (
+                        {raffle.currency === 'OWL' && !isOwlEnabled() && (
                           <p className="text-xs text-amber-600 dark:text-amber-500">
-                            This listing used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                            OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                            selling tickets.
                           </p>
                         )}
                         <select
                           id="currency_nft_live"
                           name="currency"
-                          defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                          defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                           className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         >
                           <option value="SOL">SOL</option>
                           <option value="USDC">USDC</option>
+                          {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="ticket_price_nft_live">Ticket price *</Label>
-                        <Input
-                          id="ticket_price_nft_live"
-                          name="ticket_price_nft_live"
-                          type="number"
-                          step="any"
-                          className="min-h-[44px] touch-manipulation"
-                          value={nftDraftTicket}
-                          onChange={(e) => setNftDraftTicket(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">Suggested: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="ticket_price_nft_live">Ticket price *</Label>
+                          <Input
+                            id="ticket_price_nft_live"
+                            name="ticket_price_nft_live"
+                            type="number"
+                            step="any"
+                            className="min-h-[44px] touch-manipulation"
+                            value={nftDraftTicket}
+                            onChange={(e) => setNftDraftTicket(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Suggested: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="floor_price_nft_live">Floor price (prize value) *</Label>
+                          <Input
+                            id="floor_price_nft_live"
+                            name="floor_price_nft_live"
+                            type="text"
+                            inputMode="decimal"
+                            value={nftDraftFloor}
+                            onChange={(e) => setNftDraftFloor(e.target.value)}
+                            placeholder="e.g. 0.25 (in raffle currency)"
+                            className="min-h-[44px] touch-manipulation"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1221,19 +1334,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       {nftComputedMin != null
                         ? `${nftComputedMin} tickets`
                         : 'Enter valid floor and ticket price.'}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="floor_price_nft_live">Floor price (prize value) *</Label>
-                      <Input
-                        id="floor_price_nft_live"
-                        name="floor_price_nft_live"
-                        type="text"
-                        inputMode="decimal"
-                        value={nftDraftFloor}
-                        onChange={(e) => setNftDraftFloor(e.target.value)}
-                        placeholder="e.g. 0.25 (in raffle currency)"
-                        className="min-h-[44px] touch-manipulation"
-                      />
                     </div>
                     <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1">
                       <input
@@ -1284,40 +1384,61 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     Set floor price and ticket price. Draw goal is computed as round(floor ÷ ticket price) — not editable
                     on its own. We suggest starting with ticket = floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}.
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
-                      {raffle.currency === 'OWL' && (
+                      {raffle.currency === 'OWL' && !isOwlEnabled() && (
                         <p className="text-xs text-amber-600 dark:text-amber-500">
-                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                          OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                          selling tickets.
                         </p>
                       )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                        defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
+                        {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="ticket_price">Ticket price *</Label>
-                      <Input
-                        id="ticket_price"
-                        name="ticket_price"
-                        type="number"
-                        step="any"
-                        required
-                        className="min-h-[44px] touch-manipulation"
-                        value={nftDraftTicket}
-                        onChange={(e) => setNftDraftTicket(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Suggested default: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}
-                      </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="ticket_price">Ticket price *</Label>
+                        <Input
+                          id="ticket_price"
+                          name="ticket_price"
+                          type="number"
+                          step="any"
+                          required
+                          className="min-h-[44px] touch-manipulation"
+                          value={nftDraftTicket}
+                          onChange={(e) => setNftDraftTicket(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Suggested default: floor ÷ {NFT_DEFAULT_SUGGEST_TICKET_COUNT}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                        <Input
+                          id="floor_price"
+                          name="floor_price"
+                          type="text"
+                          inputMode="decimal"
+                          value={nftDraftFloor}
+                          onChange={(e) => setNftDraftFloor(e.target.value)}
+                          placeholder="e.g., 0.25 (in raffle currency)"
+                          className="min-h-[44px] touch-manipulation"
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Revenue threshold for rev share; ticket price is derived from this value.
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1341,36 +1462,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       ? `${nftComputedMin} tickets`
                       : 'Enter valid floor and ticket price.'}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="rank">Rank (optional)</Label>
-                      <Input
-                        id="rank"
-                        name="rank"
-                        type="text"
-                        defaultValue={raffle.rank || ''}
-                        placeholder="e.g., #123 or 123"
-                        className="min-h-[44px] touch-manipulation"
-                      />
-                      <p className="text-xs text-muted-foreground">Optional rank metadata (text or integer)</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="floor_price">Floor price (prize value) *</Label>
-                      <Input
-                        id="floor_price"
-                        name="floor_price"
-                        type="text"
-                        inputMode="decimal"
-                        value={nftDraftFloor}
-                        onChange={(e) => setNftDraftFloor(e.target.value)}
-                        placeholder="e.g., 0.25 (in raffle currency)"
-                        className="min-h-[44px] touch-manipulation"
-                        required
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Revenue threshold for rev share; ticket price is derived from this value.
-                      </p>
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rank">Rank (optional)</Label>
+                    <Input
+                      id="rank"
+                      name="rank"
+                      type="text"
+                      defaultValue={raffle.rank || ''}
+                      placeholder="e.g., #123 or 123"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">Optional rank metadata (text or integer)</p>
                   </div>
                 </>
               ) : (
@@ -1390,20 +1492,22 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="currency">Currency *</Label>
-                      {raffle.currency === 'OWL' && (
+                      {raffle.currency === 'OWL' && !isOwlEnabled() && (
                         <p className="text-xs text-amber-600 dark:text-amber-500">
-                          This raffle used OWL; ticket currency is now SOL or USDC only. Choose one and save.
+                          OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS). Choose SOL or USDC to continue
+                          selling tickets.
                         </p>
                       )}
                       <select
                         id="currency"
                         name="currency"
-                        defaultValue={raffle.currency === 'USDC' ? 'USDC' : 'SOL'}
+                        defaultValue={editFormTicketCurrencyDefault(raffle.currency, isOwlEnabled())}
                         className="flex h-10 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
                         required
                       >
                         <option value="SOL">SOL</option>
                         <option value="USDC">USDC</option>
+                        {isOwlEnabled() && isAdmin === true ? <option value="OWL">OWL</option> : null}
                       </select>
                     </div>
                   </div>
@@ -1511,12 +1615,11 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   required
                 >
-                  <option value="prime">Prime Time (Electric Green)</option>
-                  <option value="midnight">Midnight Drop (Cool Teal)</option>
-                  <option value="dawn">Dawn Run (Soft Lime)</option>
-                  <option value="ember">Ember (Warm Orange)</option>
-                  <option value="violet">Violet (Purple)</option>
-                  <option value="coral">Coral (Rose)</option>
+                  {THEME_ACCENT_SELECT_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
 

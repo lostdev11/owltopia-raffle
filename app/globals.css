@@ -102,9 +102,16 @@
       radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.04) 0%, transparent 42%),
       radial-gradient(circle at 80% 80%, rgba(0, 212, 255, 0.035) 0%, transparent 42%),
       radial-gradient(circle at 40% 20%, rgba(168, 255, 0, 0.03) 0%, transparent 42%);
+    /* `fixed` background repaints on scroll and causes layout jump in many mobile / in-app WebViews */
     background-attachment: fixed;
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  @media (max-width: 1023px), (hover: none) and (pointer: coarse) {
+    body {
+      background-attachment: scroll;
+    }
   }
 
   .dark body {
@@ -268,9 +275,13 @@
   pointer-events: auto !important;
 }
 
-/* Solflare in-app browser: ensure ALL interactive elements respond to touch (fixes "can't hit any buttons") */
+/* Solflare in-app: do NOT set touch-action on `body` — it breaks vertical scroll in some WebViews.
+   Interactive elements below still get manipulation for fast tap / no double-tap zoom. */
 body.solflare-browser {
-  touch-action: manipulation !important;
+  touch-action: auto;
+}
+body.solflare-browser main {
+  touch-action: pan-y;
 }
 body.solflare-browser button,
 body.solflare-browser [role="button"],

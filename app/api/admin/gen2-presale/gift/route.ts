@@ -58,6 +58,15 @@ export async function POST(request: NextRequest) {
     })
     if (error) {
       const msg = error.message || ''
+      if (msg.includes('gen2_presale_wallet_cap_exceeded')) {
+        return NextResponse.json(
+          {
+            error: 'Recipient would exceed 20 total presale credits for this wallet.',
+            code: 'wallet_cap',
+          },
+          { status: 409 }
+        )
+      }
       if (msg.includes('does not exist') || msg.includes('42883')) {
         return NextResponse.json(
           {

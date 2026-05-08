@@ -428,7 +428,12 @@ export async function notifyCommunityGiveawayOpened(
   hostDiscordUserId?: string | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayOpen()
-  if (!url) return
+  if (!url) {
+    console.warn(
+      '[discord] Community giveaway open: no webhook URL. Set DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN, DISCORD_WEBHOOK_LIVE_RAFFLES, or DISCORD_WEBHOOK_URL.'
+    )
+    return
+  }
 
   const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
@@ -461,7 +466,7 @@ export async function notifyCommunityGiveawayOpened(
       }
     : undefined
 
-  await postDiscordWebhook(
+  const posted = await postDiscordWebhook(
     url,
     {
       title: 'Community giveaway — open for entries',
@@ -479,6 +484,9 @@ export async function notifyCommunityGiveawayOpened(
     },
     extras
   )
+  if (!posted) {
+    console.warn('[discord] Community giveaway open: webhook POST failed or URL blocked by allowlist')
+  }
 }
 
 /**
@@ -491,7 +499,12 @@ export async function notifyCommunityGiveawayWinnerDrawn(
   winnerDiscordUserId?: string | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayWinner()
-  if (!url) return
+  if (!url) {
+    console.warn(
+      '[discord] Community giveaway winner: no webhook URL. Set DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER, DISCORD_WEBHOOK_RAFFLE_WINNER, or DISCORD_WEBHOOK_URL.'
+    )
+    return
+  }
 
   const prizeImage = await resolveNftPrizeImageForDiscordEmbed(
     giveaway.nft_mint_address,
@@ -517,7 +530,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
       }
     : undefined
 
-  await postDiscordWebhook(
+  const posted = await postDiscordWebhook(
     url,
     {
       title: 'Community giveaway — winner drawn',
@@ -533,6 +546,9 @@ export async function notifyCommunityGiveawayWinnerDrawn(
     },
     extras
   )
+  if (!posted) {
+    console.warn('[discord] Community giveaway winner: webhook POST failed or URL blocked by allowlist')
+  }
 }
 
 /**

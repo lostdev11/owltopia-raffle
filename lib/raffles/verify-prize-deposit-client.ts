@@ -67,23 +67,29 @@ export async function verifyPrizeDepositWithRetries(
     signal?: AbortSignal
     /** Called before each HTTP attempt (1-based index). For deposit progress UI on mobile. */
     onAttempt?: (attemptIndex: number, maxAttempts: number) => void
+    /** Defaults to VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS (e.g. create-raffle flow uses more). */
+    maxAttempts?: number
+    /** Defaults to VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS */
+    retryDelayMs?: number
   } = {}
 ): Promise<VerifyPrizeDepositClientResult> {
   const depositTx =
     normalizeDepositTxSignatureInput(options.depositTx?.trim() || '') || null
   const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
   const headers: HeadersInit | undefined = body ? { 'Content-Type': 'application/json' } : undefined
+  const maxAttempts = Math.max(1, options.maxAttempts ?? VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
+  const retryDelayMs = Math.max(100, options.retryDelayMs ?? VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS)
 
   let lastError = 'Verification failed'
   let lastStatus: number | undefined
   let lastFrozenDiagnostics: FrozenEscrowDiagnostics | undefined
 
-  for (let attempt = 0; attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (options.signal?.aborted) {
       return { ok: false, error: 'Aborted' }
     }
 
-    options.onAttempt?.(attempt + 1, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
+    options.onAttempt?.(attempt + 1, maxAttempts)
 
     let res: Response
     try {
@@ -97,8 +103,8 @@ export async function verifyPrizeDepositWithRetries(
     } catch {
       lastError = 'Network error while verifying deposit'
       lastStatus = undefined
-      if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, retryDelayMs))
       }
       continue
     }
@@ -138,8 +144,8 @@ export async function verifyPrizeDepositWithRetries(
       }
     }
 
-    if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
-      await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, retryDelayMs))
     }
   }
 
@@ -160,23 +166,27 @@ export async function verifyCommunityGiveawayDepositWithRetries(
     depositTx?: string | null
     signal?: AbortSignal
     onAttempt?: (attemptIndex: number, maxAttempts: number) => void
+    maxAttempts?: number
+    retryDelayMs?: number
   } = {}
 ): Promise<VerifyPrizeDepositClientResult> {
   const depositTx =
     normalizeDepositTxSignatureInput(options.depositTx?.trim() || '') || null
   const body = depositTx ? JSON.stringify({ deposit_tx: depositTx }) : undefined
   const headers: HeadersInit | undefined = body ? { 'Content-Type': 'application/json' } : undefined
+  const maxAttempts = Math.max(1, options.maxAttempts ?? VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
+  const retryDelayMs = Math.max(100, options.retryDelayMs ?? VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS)
 
   let lastError = 'Verification failed'
   let lastStatus: number | undefined
   let lastFrozenDiagnostics: FrozenEscrowDiagnostics | undefined
 
-  for (let attempt = 0; attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (options.signal?.aborted) {
       return { ok: false, error: 'Aborted' }
     }
 
-    options.onAttempt?.(attempt + 1, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS)
+    options.onAttempt?.(attempt + 1, maxAttempts)
 
     let res: Response
     try {
@@ -190,8 +200,8 @@ export async function verifyCommunityGiveawayDepositWithRetries(
     } catch {
       lastError = 'Network error while verifying deposit'
       lastStatus = undefined
-      if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, retryDelayMs))
       }
       continue
     }
@@ -231,8 +241,8 @@ export async function verifyCommunityGiveawayDepositWithRetries(
       }
     }
 
-    if (attempt < VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS - 1) {
-      await new Promise((r) => setTimeout(r, VERIFY_PRIZE_DEPOSIT_RETRY_DELAY_MS))
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, retryDelayMs))
     }
   }
 

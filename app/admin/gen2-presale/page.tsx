@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Gift, Loader2, Search } from 'lucide-react'
+import { ArrowLeft, Gift, Loader2, RefreshCw, RotateCcw, Search, Wrench } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
@@ -45,6 +45,14 @@ type PurchaseRow = {
   total_lamports: string | number
 }
 
+type WalletPurchaseGroup = {
+  wallet: string
+  totalQuantity: number
+  purchaseCount: number
+  latestCreatedAt: string
+  purchases: PurchaseRow[]
+}
+
 export default function AdminGen2PresalePage() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
@@ -55,10 +63,44 @@ export default function AdminGen2PresalePage() {
   const [searchWallet, setSearchWallet] = useState('')
   const [balance, setBalance] = useState<Balance | null>(null)
   const [giftQty, setGiftQty] = useState(1)
+  const [refundQty, setRefundQty] = useState(1)
+  const [refundTxSig, setRefundTxSig] = useState('')
+  const [refundReason, setRefundReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
+  const [refundMsg, setRefundMsg] = useState<string | null>(null)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [backfillPageSize, setBackfillPageSize] = useState(100)
+  const [backfillMaxPages, setBackfillMaxPages] = useState(8)
+  const [backfillLoading, setBackfillLoading] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
+  const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
+  const [repairSig, setRepairSig] = useState('')
+  const [repairLoading, setRepairLoading] = useState(false)
+  const [repairMsg, setRepairMsg] = useState<string | null>(null)
+  const [repairResult, setRepairResult] = useState<Record<string, unknown> | null>(null)
+
+  const groupedPurchases = useMemo<WalletPurchaseGroup[]>(() => {
+    const groups = new Map<string, WalletPurchaseGroup>()
+    for (const purchase of purchases) {
+      const existing = groups.get(purchase.wallet)
+      if (existing) {
+        existing.purchases.push(purchase)
+        existing.purchaseCount += 1
+        existing.totalQuantity += purchase.quantity
+      } else {
+        groups.set(purchase.wallet, {
+          wallet: purchase.wallet,
+          totalQuantity: purchase.quantity,
+          purchaseCount: 1,
+          latestCreatedAt: purchase.created_at,
+          purchases: [purchase],
+        })
+      }
+    }
+    return Array.from(groups.values())
+  }, [purchases])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -144,6 +186,90 @@ export default function AdminGen2PresalePage() {
     }
   }
 
+  const backfillFromChain = async () => {
+    setBackfillMsg(null)
+    setBackfillResult(null)
+    setBackfillLoading(true)
+    const controller = new AbortController()
+    const tid = window.setTimeout(() => controller.abort(), 280_000)
+    try {
+      const res = await fetch('/api/admin/gen2-presale/backfill-from-chain', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          pageSize: Math.min(1000, Math.max(1, Math.floor(backfillPageSize) || 100)),
+          maxPages: Math.min(80, Math.max(1, Math.floor(backfillMaxPages) || 8)),
+        }),
+      })
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        throw new Error((j.error as string | undefined) || 'Backfill failed')
+      }
+      setBackfillResult(j)
+      const s = (j as { summary?: Record<string, number> }).summary ?? {}
+      const ins = typeof s.inserted === 'number' ? s.inserted : 0
+      const rep = typeof s.existing_repaired_quantity === 'number' ? s.existing_repaired_quantity : 0
+      const def =
+        typeof s.deferred_past_verification_cap === 'number' ? s.deferred_past_verification_cap : 0
+      const cap = (j as { limits?: { max_deep_verifications?: number } }).limits?.max_deep_verifications ?? 150
+      let msg = `Backfill complete. Recorded ${ins} new purchase(s). Repaired ${rep} existing row(s) with missing credits.`
+      if (def > 0) {
+        msg += ` ${def} signature(s) not processed yet — run again (max ${cap} deep checks per run).`
+      }
+      setBackfillMsg(msg)
+      void load()
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setBackfillMsg('Backfill timed out — lower max pages or page size and try again.')
+      } else {
+        setBackfillMsg(e instanceof Error ? e.message : 'Backfill failed')
+      }
+    } finally {
+      window.clearTimeout(tid)
+      setBackfillLoading(false)
+    }
+  }
+
+  const repairPurchaseQuantity = async () => {
+    const sig = repairSig.trim()
+    setRepairMsg(null)
+    setRepairResult(null)
+    if (!sig) {
+      setRepairMsg('Paste a transaction signature first.')
+      return
+    }
+    setRepairLoading(true)
+    try {
+      const res = await fetch('/api/admin/gen2-presale/repair-purchase-quantity', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txSignature: sig }),
+      })
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        throw new Error((j.error as string | undefined) || 'Repair failed')
+      }
+      setRepairResult(j)
+      const unchanged = j.unchanged === true
+      const rpc = j.rpc as { previous_quantity?: number; quantity?: number; delta?: number } | undefined
+      setRepairMsg(
+        unchanged
+          ? 'Already correct — no database changes.'
+          : `Updated quantity ${rpc?.previous_quantity ?? '?'} → ${rpc?.quantity ?? j.resolved_quantity ?? '?'}` +
+              (rpc?.delta != null ? ` (Δ ${rpc.delta > 0 ? '+' : ''}${rpc.delta})` : '') +
+              '.'
+      )
+      void load()
+    } catch (e) {
+      setRepairMsg(e instanceof Error ? e.message : 'Repair failed')
+    } finally {
+      setRepairLoading(false)
+    }
+  }
+
   const gift = async () => {
     setGiftMsg(null)
     const w = searchWallet.trim()
@@ -165,6 +291,52 @@ export default function AdminGen2PresalePage() {
       void load()
     } catch (e) {
       setGiftMsg(e instanceof Error ? e.message : 'Gift failed')
+    }
+  }
+
+  const refund = async () => {
+    setRefundMsg(null)
+    const w = searchWallet.trim()
+    if (!w) {
+      setRefundMsg('Enter a wallet address first.')
+      return
+    }
+    if (!Number.isFinite(refundQty) || refundQty < 1) {
+      setRefundMsg('Set refund quantity to at least 1.')
+      return
+    }
+    try {
+      const res = await fetch('/api/admin/gen2-presale/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          wallet: w,
+          quantity: refundQty,
+          purchaseTxSignature: null,
+          refundTxSignature: refundTxSig.trim() || null,
+          reason: refundReason.trim() || null,
+        }),
+      })
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string
+        detail?: { error?: string; max_refundable?: number; refunded_quantity?: number }
+        balance?: Balance
+        result?: { refunded_quantity?: number }
+      }
+      if (!res.ok) {
+        const detailError = j.detail?.error
+        if (detailError === 'refund_exceeds_refundable_purchased_mints') {
+          throw new Error(`Refund too high. Max refundable now: ${j.detail?.max_refundable ?? 0}.`)
+        }
+        throw new Error(j.error || detailError || 'Refund failed')
+      }
+      const refundedQty = j.result?.refunded_quantity ?? j.detail?.refunded_quantity ?? refundQty
+      setBalance(j.balance ?? null)
+      setRefundMsg(`Refund applied. Deducted ${refundedQty} purchased credit(s).`)
+      void load()
+    } catch (e) {
+      setRefundMsg(e instanceof Error ? e.message : 'Refund failed')
     }
   }
 
@@ -282,6 +454,118 @@ export default function AdminGen2PresalePage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Backfill from chain</CardTitle>
+              <CardDescription>
+                Paginates <strong>founder A</strong> and <strong>founder B</strong>, merges unique signatures (newest
+                first). <strong>Inserts</strong> missing payments and <strong>re-checks</strong> signatures already in
+                the database so under-reported quantities from an old backfill can be repaired. Up to{' '}
+                <strong>150</strong> signatures fully verified per run — run again if deferred remain.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="bf-page">Page size (per RPC call, max 1000)</Label>
+                  <Input
+                    id="bf-page"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={backfillPageSize}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setBackfillPageSize(Math.min(1000, Math.max(1, Math.floor(n))))
+                    }}
+                    className="w-28 min-h-11"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bf-pages">Max pages</Label>
+                  <Input
+                    id="bf-pages"
+                    type="number"
+                    min={1}
+                    max={80}
+                    value={backfillMaxPages}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setBackfillMaxPages(Math.min(80, Math.max(1, Math.floor(n))))
+                    }}
+                    className="w-24 min-h-11"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={backfillLoading}
+                  onClick={() => void backfillFromChain()}
+                >
+                  {backfillLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Run backfill
+                </Button>
+              </div>
+              {backfillMsg && <p className="text-sm text-muted-foreground">{backfillMsg}</p>}
+              {backfillResult != null ? (
+                <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+                  {JSON.stringify(backfillResult, null, 2)}
+                </pre>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Repair purchase quantity</CardTitle>
+              <CardDescription>
+                If backfill recorded <strong>too few spots</strong> for a signature (known bug: quantity stopped at 1),
+                paste the payment <strong>transaction signature</strong> here. The server re-reads the tx from chain,
+                infers the correct spot count, updates the purchase row, and adds the difference to the buyer&apos;s{' '}
+                <code className="text-xs">purchased_mints</code>. Requires migration{' '}
+                <code className="text-xs">098_gen2_presale_repair_purchase_quantity.sql</code> on Supabase. Run once per
+                bad signature.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label htmlFor="repair-sig">Transaction signature</Label>
+                  <Input
+                    id="repair-sig"
+                    value={repairSig}
+                    onChange={(e) => setRepairSig(e.target.value)}
+                    placeholder="Base58 signature"
+                    className="min-h-11 font-mono text-xs"
+                    autoComplete="off"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={repairLoading}
+                  className="min-h-11 shrink-0 touch-manipulation"
+                  onClick={() => void repairPurchaseQuantity()}
+                >
+                  {repairLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wrench className="mr-2 h-4 w-4" />
+                  )}
+                  Repair from chain
+                </Button>
+              </div>
+              {repairMsg && <p className="text-sm text-muted-foreground">{repairMsg}</p>}
+              {repairResult != null ? (
+                <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+                  {JSON.stringify(repairResult, null, 2)}
+                </pre>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Wallet lookup & gifts</CardTitle>
               <CardDescription>
                 Search balances and add gifted Gen2 mint credits (bonus allocations). Each gift is written to an audit
@@ -356,49 +640,134 @@ export default function AdminGen2PresalePage() {
                 </Button>
               </div>
               {giftMsg && <p className="text-sm text-muted-foreground">{giftMsg}</p>}
+
+              <div className="border-t pt-4">
+                <p className="mb-2 text-sm font-medium">Refund purchased credits</p>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  After sending funds back, deduct credits from this wallet. Paste the buyer wallet (or tap a grouped
+                  wallet below), set quantity, then apply refund.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="refund-qty">Refund quantity</Label>
+                    <Input
+                      id="refund-qty"
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={refundQty}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isFinite(n)) return
+                        setRefundQty(Math.min(500, Math.max(1, Math.floor(n))))
+                      }}
+                      className="w-28 min-h-11"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="refund-tx-sig">Your refund tx signature (optional)</Label>
+                    <Input
+                      id="refund-tx-sig"
+                      value={refundTxSig}
+                      onChange={(e) => setRefundTxSig(e.target.value)}
+                      placeholder="Tx you sent back to buyer"
+                      className="min-h-11 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="refund-reason">Reason (optional)</Label>
+                    <Input
+                      id="refund-reason"
+                      value={refundReason}
+                      onChange={(e) => setRefundReason(e.target.value)}
+                      placeholder="duplicate charge / customer support note"
+                      className="min-h-11"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Button type="button" variant="destructive" className="min-h-11" onClick={() => void refund()}>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Apply refund deduction
+                  </Button>
+                </div>
+                {refundMsg && <p className="mt-2 text-sm text-muted-foreground">{refundMsg}</p>}
+              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle>Recent purchases</CardTitle>
-              <CardDescription>Latest confirmed presale transactions.</CardDescription>
+              <CardDescription>
+                Latest confirmed presale transactions grouped by wallet for quicker multi-purchase review.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="py-2 pr-4">When</th>
-                    <th className="py-2 pr-4">Wallet</th>
-                    <th className="py-2 pr-4">Qty</th>
-                    <th className="py-2">Tx</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchases.map((p) => (
-                    <tr key={p.id} className="border-b border-border/50">
-                      <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
-                        {new Date(p.created_at).toLocaleString()}
-                      </td>
-                      <td className="max-w-[140px] truncate py-2 pr-4 font-mono text-xs" title={p.wallet}>
-                        {p.wallet}
-                      </td>
-                      <td className="py-2 pr-4">{p.quantity}</td>
-                      <td className="max-w-[120px] truncate py-2 font-mono text-xs">
-                        <a
-                          className="text-primary underline"
-                          href={`https://solscan.io/tx/${p.tx_signature}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {p.tx_signature.slice(0, 8)}…
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {purchases.length === 0 && <p className="py-4 text-muted-foreground">No purchases yet.</p>}
+            <CardContent className="space-y-4">
+              {groupedPurchases.map((group) => (
+                <div key={group.wallet} className="rounded-lg border bg-muted/30 p-3 sm:p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs text-muted-foreground">{group.wallet}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Last purchase {new Date(group.latestCreatedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 text-xs">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs touch-manipulation"
+                        onClick={() => {
+                          setSearchWallet(group.wallet)
+                          setBalance(null)
+                        }}
+                      >
+                        Use wallet for refund
+                      </Button>
+                      <span className="rounded-md border bg-background px-2 py-1">
+                        Txns: <strong>{group.purchaseCount}</strong>
+                      </span>
+                      <span className="rounded-md border bg-background px-2 py-1">
+                        Qty: <strong>{group.totalQuantity}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left">
+                          <th className="py-2 pr-4">When</th>
+                          <th className="py-2 pr-4">Qty</th>
+                          <th className="py-2">Tx</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.purchases.map((p) => (
+                          <tr key={p.id} className="border-b border-border/50">
+                            <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
+                              {new Date(p.created_at).toLocaleString()}
+                            </td>
+                            <td className="py-2 pr-4">{p.quantity}</td>
+                            <td className="max-w-[140px] truncate py-2 font-mono text-xs">
+                              <a
+                                className="text-primary underline"
+                                href={`https://solscan.io/tx/${p.tx_signature}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {p.tx_signature.slice(0, 8)}…
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+              {groupedPurchases.length === 0 && <p className="py-4 text-muted-foreground">No purchases yet.</p>}
             </CardContent>
           </Card>
         </div>

@@ -10,6 +10,10 @@ export function raffleRequiresCancellationFee(raffle: Pick<Raffle, 'start_time'>
   return now.getTime() >= startMs
 }
 
+/**
+ * Whether the creator has satisfied the post-start fee gate (for dashboards / messaging).
+ * Admins may still accept cancellation without this via Owl Vision override.
+ */
 export function canCompleteCancellationForAdmin(
   raffle: Pick<Raffle, 'start_time' | 'cancellation_fee_paid_at'>
 ): boolean {

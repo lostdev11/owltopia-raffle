@@ -20,17 +20,12 @@ export type AdminManualRefundRecorderProps = {
   entries: Entry[]
   /** After a successful record, e.g. refresh RSC + refetch client entries */
   onRecorded?: () => void
-  /**
-   * TEMPORARY — remove with /api/admin/legacy-escrow-refund after one-time payouts.
-   * When true (raffle status allows admin escrow refunds, e.g. failed minimum or cancelled), show full-admin
-   * button to send refunds from FUNDS_ESCROW.
-   */
+  /** When true (funds-escrow raffle in a refund-eligible status), show bulk send from FUNDS_ESCROW. */
   adminFundsEscrowRefundEnabled?: boolean
 }
 
 /**
- * Full admin: after manual refunds from treasury or funds escrow, select ticket rows and paste the payout tx.
- * Sets refunded_at so buyers and creators see refunded/sent (same as /admin/raffles/[id] tools).
+ * Full admin: bulk-send from FUNDS_ESCROW when eligible, or record an existing payout via tx signature.
  */
 export function AdminManualRefundRecorder({
   raffleId,
@@ -145,8 +140,7 @@ export function AdminManualRefundRecorder({
     }
   }
 
-  /** TEMPORARY — remove with legacy escrow refund API. */
-  const handleLegacyEscrowRefund = async () => {
+  const handleBulkFundsEscrowRefund = async () => {
     setMessage(null)
     if (selectedRefundEntryIds.length === 0) {
       setMessage({ type: 'error', text: 'Select at least one ticket row first.' })
@@ -183,7 +177,7 @@ export function AdminManualRefundRecorder({
       if (!res.ok) {
         setMessage({
           type: 'error',
-          text: typeof data?.error === 'string' ? data.error : 'Legacy escrow refund request failed',
+          text: typeof data?.error === 'string' ? data.error : 'Funds escrow bulk refund request failed',
         })
         return
       }
@@ -212,7 +206,7 @@ export function AdminManualRefundRecorder({
     } catch (e) {
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Legacy escrow refund failed',
+        text: e instanceof Error ? e.message : 'Funds escrow bulk refund failed',
       })
     } finally {
       setLegacyEscrowSending(false)
@@ -242,13 +236,25 @@ export function AdminManualRefundRecorder({
       {unrefundedConfirmed.length > 0 && (
         <Card className="border-teal-500/30 bg-teal-500/5">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Record manual ticket refunds</CardTitle>
+            <CardTitle className="text-base">Pending ticket refunds</CardTitle>
             <CardDescription>
-              After refunds are sent from treasury or funds escrow (including when the host topped up escrow off-app),
-              select the ticket rows that payout covered and paste the Solana transaction signature. This sets{' '}
-              <code className="text-xs">refunded_at</code> so buyers and hosts see refunded/sent and cannot
-              double-claim in the app. One chain transaction can cover multiple rows — use the same signature for all of
-              them. Requires full admin and Owl Vision sign-in.
+              {adminFundsEscrowRefundEnabled ? (
+                <>
+                  Select tickets, then use Send from funds escrow to pay buyers
+                  from the server escrow wallet (same as buyer &quot;Claim refund&quot;). Each row is sent in its own
+                  transaction.                   This includes listings on the pending cancellation queue, live or ready-to-draw raffles after the escrow
+                  prize was returned to the creator, and usual refund statuses. Or, if you already paid from treasury or
+                  another wallet, paste the Solana signature to record{' '}
+                  <code className="text-xs">refunded_at</code> only.
+                </>
+              ) : (
+                <>
+                  If refunds were sent from treasury or another wallet, select the rows the payout covered and paste the
+                  Solana transaction signature. This sets <code className="text-xs">refunded_at</code> so buyers and hosts
+                  see refunded/sent. One chain transaction can cover multiple rows — use the same signature for all of
+                  them.
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -299,7 +305,7 @@ export function AdminManualRefundRecorder({
                             checked={checked}
                             onChange={() => toggleRefundEntrySelected(e.id)}
                             className="h-5 w-5 touch-manipulation"
-                            aria-label={`Select ticket ${e.id} for refund recording`}
+                            aria-label={`Select ticket ${e.id} for refund`}
                           />
                         </td>
                         <td className="py-2 pr-2 font-mono text-xs break-all align-top" title={w}>
@@ -318,8 +324,31 @@ export function AdminManualRefundRecorder({
                 </tbody>
               </table>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={refundTxInputId}>Transaction signature</Label>
+
+            {adminFundsEscrowRefundEnabled && (
+              <div className="rounded-lg border border-amber-500/35 bg-amber-500/[0.07] p-3 space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Sends from <code className="text-xs">FUNDS_ESCROW</code>. Ensure the escrow wallet holds enough for the
+                  selected amounts.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
+                  disabled={
+                    legacyEscrowSending || recordingRefunds || selectedRefundEntryIds.length === 0
+                  }
+                  onClick={handleBulkFundsEscrowRefund}
+                >
+                  {legacyEscrowSending ? 'Sending…' : 'Send selected refunds from funds escrow'}
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-1 border-t border-border/60">
+              <Label htmlFor={refundTxInputId}>
+                {adminFundsEscrowRefundEnabled ? 'Or paste payout tx (already sent off-app)' : 'Transaction signature'}
+              </Label>
               <Input
                 id={refundTxInputId}
                 value={recordRefundTx}
@@ -337,35 +366,6 @@ export function AdminManualRefundRecorder({
               onClick={handleRecordManualRefunds}
             >
               {recordingRefunds ? 'Recording…' : 'Record refund for selected tickets'}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {adminFundsEscrowRefundEnabled && unrefundedConfirmed.length > 0 && (
-        <Card className="border-amber-500/40 bg-amber-500/[0.06]">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">One-time: send refunds from funds escrow (admin)</CardTitle>
-            <CardDescription>
-              TEMPORARY — remove from the codebase after these payouts are done. Uses the server{' '}
-              <code className="text-xs">FUNDS_ESCROW</code> keypair (same as buyer &quot;Claim refund&quot;). Use for
-              any failed minimum-not-met raffle where refunds should leave escrow to buyers — including standard
-              funds-escrow listings (e.g. when you want to pay everyone out without each wallet connecting).
-              Ensure the escrow wallet holds enough for the selected rows. Use the checkboxes above. Each selected
-              ticket gets its own on-chain transaction, in sequence (not one batched tx).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button
-              type="button"
-              variant="secondary"
-              className="touch-manipulation min-h-[44px] w-full sm:w-auto border-amber-600/50"
-              disabled={
-                legacyEscrowSending || recordingRefunds || selectedRefundEntryIds.length === 0
-              }
-              onClick={handleLegacyEscrowRefund}
-            >
-              {legacyEscrowSending ? 'Sending…' : 'Send selected refunds from funds escrow'}
             </Button>
           </CardContent>
         </Card>

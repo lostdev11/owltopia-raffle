@@ -45,6 +45,8 @@ type RaffleOverThresholdPngButtonProps = {
   imageUrl?: string | null
   /** Revenue / bar / surplus lines (faint Owltopia mark matches X promo cards). */
   metaLines: string[]
+  /** Uppercase badge on generated PNG (e.g. above listed floor vs composite threshold). */
+  promoChipText?: string
   className?: string
   fullWidth?: boolean
   buttonLabel?: string
@@ -156,6 +158,22 @@ function watermarkIconUrl(): string {
  */
 export function buildOverThresholdFlexMetaLines(raffle: Raffle, profitInfo: RaffleProfitInfo): string[] {
   const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
+  const listedFloor = profitInfo.floorComparisonValue
+  const floorCur = profitInfo.floorComparisonCurrency
+
+  if (listedFloor != null && floorCur != null) {
+    const rev = revenueInCurrency(profitInfo.revenue, floorCur)
+    const surplus = profitInfo.surplusOverFloor
+    const lines = [
+      `Revenue: ${rev.toFixed(floorCur === 'USDC' ? 2 : 4)} ${floorCur}`,
+      `Floor: ${listedFloor.toFixed(floorCur === 'USDC' ? 2 : 4)} ${floorCur}`,
+    ]
+    if (surplus != null && surplus > 0) {
+      lines.push(`+${surplus.toFixed(floorCur === 'USDC' ? 2 : 4)} ${floorCur} past floor`)
+    }
+    return lines
+  }
+
   const thCur = profitInfo.thresholdCurrency
     ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
     : ticketCur
@@ -183,6 +201,7 @@ export function RaffleOverThresholdPngButton({
   endTime,
   imageUrl,
   metaLines,
+  promoChipText = 'OVER THRESHOLD',
   className,
   fullWidth = true,
   buttonLabel = 'Download flex PNG (social)',
@@ -329,8 +348,8 @@ export function RaffleOverThresholdPngButton({
       ctx.stroke()
       ctx.restore()
 
-      // "Over threshold" chip — title below uses textBaseline: top so glyphs do not overlap the chip
-      const chipText = 'OVER THRESHOLD'
+      // Flex chip — title below uses textBaseline: top so glyphs do not overlap the chip
+      const chipText = promoChipText.trim().toUpperCase() || 'OVER THRESHOLD'
       ctx.font = `800 20px ${FONT_SANS}`
       const chipPadX = 14
       const chipH = 32

@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { getAdminPendingCancellationRaffles, getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { getRaffleProfitInfo } from '@/lib/raffle-profit'
 import { getSupabaseConfigError } from '@/lib/supabase'
 import { getAdminRole } from '@/lib/db/admins'
@@ -34,7 +34,10 @@ export default async function AdminRafflesPage() {
     )
   }
 
-  const { data: allRaffles, error: rafflesError } = await getRaffles(false, { includeDraft: true })
+  const [{ data: allRaffles, error: rafflesError }, pendingCancelResult] = await Promise.all([
+    getRaffles(false, { includeDraft: true }),
+    getAdminPendingCancellationRaffles(),
+  ])
   if (rafflesError) {
     return (
       <div className="container mx-auto py-8 px-4">
@@ -50,15 +53,24 @@ export default async function AdminRafflesPage() {
   const now = new Date()
   const nowTime = now.getTime()
 
-  const pendingCancellationRaffles: typeof allRaffles = []
+  /** Same predicate as Owl Vision `/api/admin/pending-cancellations`; on query error, mirror legacy split from primary list. */
+  let pendingCancellationRaffles: typeof allRaffles
+  if (!pendingCancelResult.error) {
+    pendingCancellationRaffles = [...pendingCancelResult.data]
+  } else {
+    pendingCancellationRaffles = []
+    for (const raffle of allRaffles) {
+      const st = (raffle.status ?? '').toLowerCase()
+      if (raffle.cancellation_requested_at && st !== 'cancelled') {
+        pendingCancellationRaffles.push(raffle)
+      }
+    }
+  }
+
+  const pendingIds = new Set(pendingCancellationRaffles.map((r) => r.id))
   const rafflesToBucket: typeof allRaffles = []
   for (const raffle of allRaffles) {
-    const st = (raffle.status ?? '').toLowerCase()
-    if (raffle.cancellation_requested_at && st !== 'cancelled') {
-      pendingCancellationRaffles.push(raffle)
-    } else {
-      rafflesToBucket.push(raffle)
-    }
+    if (!pendingIds.has(raffle.id)) rafflesToBucket.push(raffle)
   }
 
   const pastRaffles: typeof allRaffles = []

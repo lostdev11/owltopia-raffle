@@ -1,5 +1,7 @@
 import { z } from 'zod'
+import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
+import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
 
 const solanaAddress = z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/)
 
@@ -29,12 +31,12 @@ export const entriesCreateBatchBody = z.object({
       })
     )
     .min(1)
-    .max(20),
+    .max(CART_BATCH_MAX_RAFFLES_PER_TX),
 })
 
 export const entriesVerifyBatchBody = z.object({
   transactionSignature: z.string().min(80).max(120),
-  entryIds: z.array(z.string().uuid()).min(1).max(20),
+  entryIds: z.array(z.string().uuid()).min(1).max(CART_BATCH_MAX_RAFFLES_PER_TX),
 })
 
 export const entriesConfirmComplimentaryBody = z.object({
@@ -78,7 +80,7 @@ export const rafflesPostBody = z.object({
   prize_currency: z.string().optional(),
   nft_mint_address: z.string().optional().nullable(),
   nft_token_id: z.string().optional().nullable(),
-  theme_accent: z.enum(['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']).optional(),
+  theme_accent: z.enum(THEME_ACCENT_VALUES).optional(),
 })
 
 export const authVerifyBody = z.object({
@@ -99,6 +101,10 @@ const councilSlug = z
 
 export const councilVoteBody = z.object({
   vote_choice: z.enum(['yes', 'no', 'abstain']),
+})
+
+export const raffleSentimentBody = z.object({
+  sentiment: z.enum(['up', 'down']),
 })
 
 /** Status is always `draft` at create — only admins may publish (set active). `slug` optional (server derives from title). */

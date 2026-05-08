@@ -25,6 +25,11 @@ export function useGen2PresaleStats(pollMs = 45_000) {
     }
   }, [])
 
+  /** Merge server values right after a confirmed purchase (before the next poll/refetch). */
+  const applyStatsPatch = useCallback((patch: Partial<Gen2PresaleStats>) => {
+    setStats((prev) => (prev ? { ...prev, ...patch } : prev))
+  }, [])
+
   useEffect(() => {
     void refresh()
     if (pollMs <= 0) return
@@ -32,5 +37,5 @@ export function useGen2PresaleStats(pollMs = 45_000) {
     return () => clearInterval(id)
   }, [pollMs, refresh])
 
-  return { stats, error, loading, refresh }
+  return { stats, error, loading, refresh, applyStatsPatch }
 }

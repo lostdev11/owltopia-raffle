@@ -6,7 +6,11 @@ import { RaffleScrollReveal } from '@/components/RaffleScrollReveal'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
  import type { Raffle, Entry } from '@/lib/types'
  import type { RaffleProfitInfo } from '@/lib/raffle-profit'
-import { getRaffleProfitInfo, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
+import {
+  getRaffleProfitInfo,
+  normalizeRaffleTicketCurrency,
+  shouldShowRevenueFlexPublic,
+} from '@/lib/raffle-profit'
 import { Flame } from 'lucide-react'
 import Link from 'next/link'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
@@ -173,11 +177,11 @@ export function RafflesList({
     [sortedRaffles]
   )
 
-  // Notify parent when profitable raffles change for the active section (based on isProfitable flag)
+  // Notify parent when “flex” raffles change: above listed floor when parseable, else composite threshold.
   useEffect(() => {
     if (section === 'active' && typeof onTopProfitableChange === 'function') {
       const profitableByFlag = sortedRaffles.filter(
-        (item) => item.profitInfo && item.profitInfo.isProfitable
+        (item) => item.profitInfo && shouldShowRevenueFlexPublic(item.profitInfo)
       )
       onTopProfitableChange(profitableByFlag)
     }

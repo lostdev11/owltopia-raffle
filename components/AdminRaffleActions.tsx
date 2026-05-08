@@ -19,16 +19,14 @@ import {
 } from '@/lib/raffles/admin-hard-delete'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
-import {
-  canCompleteCancellationForAdmin,
-  raffleRequiresCancellationFee,
-} from '@/lib/raffles/cancellation-fee-policy'
+import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
@@ -56,6 +54,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [returning, setReturning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [returnReason, setReturnReason] = useState<string>('cancelled')
+  const [manualReturnTx, setManualReturnTx] = useState('')
+  const [manualReturnReason, setManualReturnReason] = useState<string>('cancelled')
+  const [recordingManualReturn, setRecordingManualReturn] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [acceptCancelDialogOpen, setAcceptCancelDialogOpen] = useState(false)
   const [acceptingCancel, setAcceptingCancel] = useState(false)
@@ -68,9 +69,54 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const [savingImageFallback, setSavingImageFallback] = useState(false)
   const [entrantsCsvLoading, setEntrantsCsvLoading] = useState(false)
 
+  const [listOnPlatform, setListOnPlatform] = useState(() => raffle.list_on_platform !== false)
+  const [listPlatformSaving, setListPlatformSaving] = useState(false)
+
   useEffect(() => {
     setImageFallbackInput(raffle.image_fallback_url ?? '')
   }, [raffle.id, raffle.image_fallback_url])
+
+  useEffect(() => {
+    setListOnPlatform(raffle.list_on_platform !== false)
+  }, [raffle.id, raffle.list_on_platform])
+
+  const persistListOnPlatform = async (next: boolean) => {
+    setListPlatformSaving(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ list_on_platform: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Could not update listing visibility',
+        })
+        setListOnPlatform(!next)
+        return
+      }
+      setListOnPlatform(next)
+      setMessage({
+        type: 'success',
+        text: next
+          ? 'This raffle will appear on the public /raffles browse list.'
+          : 'Hidden from the public browse list; direct link still works.',
+      })
+      router.refresh()
+    } catch (e) {
+      setListOnPlatform(!next)
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Could not update listing visibility',
+      })
+    } finally {
+      setListPlatformSaving(false)
+    }
+  }
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isNftRaffle = raffle.prize_type === 'nft' && !!raffle.nft_mint_address
@@ -204,6 +250,54 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     !raffle.nft_transfer_transaction &&
     !prizeReturnRecorded
 
+  const handleRecordManualPrizeReturn = async () => {
+    const sig = manualReturnTx.trim()
+    if (sig.length < 80) {
+      setMessage({
+        type: 'error',
+        text: 'Paste the full Solana transaction signature from the transfer back to the creator.',
+      })
+      return
+    }
+    setRecordingManualReturn(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/record-prize-return-to-creator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionSignature: sig,
+          reason: manualReturnReason,
+        }),
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({
+          type: 'success',
+          text:
+            typeof data.transactionSignature === 'string'
+              ? `Recorded prize return. TX: ${data.transactionSignature}`
+              : (data.message as string) || 'Recorded manual prize return.',
+        })
+        setManualReturnTx('')
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Failed to record prize return',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to record prize return',
+      })
+    } finally {
+      setRecordingManualReturn(false)
+    }
+  }
+
   const handleReturnNft = async () => {
     // No wallet signature needed — server signs with escrow keypair; only admin session required
     setReturning(true)
@@ -276,7 +370,8 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
   const feeApplies = raffleRequiresCancellationFee(raffle)
-  const canAcceptCancel = canCompleteCancellationForAdmin(raffle)
+  /** Treasury fee not recorded; admin can still accept (support override). */
+  const postStartFeeMissing = feeApplies && !raffle.cancellation_fee_paid_at
   const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
@@ -757,6 +852,34 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             )}
           </p>
         </div>
+
+        <Card className="border-violet-500/30 bg-violet-500/[0.04]">
+          <CardHeader className="pb-2">
+            <CardTitle>Public raffles list</CardTitle>
+            <CardDescription>
+              Turn this on so the raffle appears on the main{' '}
+              <code className="text-xs bg-muted px-1 rounded">/raffles</code> browse page. When off, NFT prizes stay
+              link-only (this page URL still works).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex items-start justify-between gap-3">
+              <Label htmlFor="admin-list-on-platform" className="text-sm font-medium leading-relaxed cursor-pointer">
+                Show on public browse
+              </Label>
+              <Switch
+                id="admin-list-on-platform"
+                checked={listOnPlatform}
+                onCheckedChange={(v) => void persistListOnPlatform(v)}
+                disabled={listPlatformSaving}
+                className="shrink-0 touch-manipulation"
+                ariaLabel="Show on public raffles browse list"
+              />
+            </div>
+            {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
+          </CardContent>
+        </Card>
+
         {isNftRaffle && (
           <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">
             <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
@@ -1126,9 +1249,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           <CardHeader>
             <CardTitle>Admin actions</CardTitle>
             <CardDescription>
-              Return an escrowed prize (NFT or partner SPL) to the creator&apos;s wallet, then delete
-              the raffle if needed. Return the prize first so the creator gets it back before
-              deleting.
+              Return an escrowed prize (NFT or partner SPL) from the platform escrow to the creator&apos;s wallet,
+              or record a signature if you sent it manually. Accepting a creator cancellation also triggers an
+              automatic return when there is a verified deposit. Return or record before deleting the raffle.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1147,12 +1270,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {feeApplies
-                      ? `Raffle has started. The creator must pay ${feeSol} SOL to treasury before you can accept. Ticket buyers can claim refunds in-app (funds escrow).`
+                      ? `Raffle has started (by scheduled start time). Creators are normally asked to pay ${feeSol} SOL to treasury before cancellation is finalized; you can still accept below if support approves a waiver or the fee failed to record. Ticket buyers can claim refunds in-app (funds escrow).`
                       : 'Raffle has not started yet (by start time). No post-start cancellation fee. Ticket buyers can still claim refunds if this raffle used funds escrow.'}
                   </p>
-                  {feeApplies && !raffle.cancellation_fee_paid_at && (
-                    <p className="mt-2 text-xs font-medium text-destructive">
-                      Waiting for creator to complete the on-chain cancellation fee payment.
+                  {postStartFeeMissing && (
+                    <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                      No verified cancellation fee on file — you can accept anyway; treasury will not show a recorded fee for this listing.
                     </p>
                   )}
                 </div>
@@ -1162,8 +1285,12 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                     variant="outline"
                     className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 touch-manipulation min-h-[44px]"
                     onClick={() => setAcceptCancelDialogOpen(true)}
-                    disabled={acceptingCancel || !canAcceptCancel}
-                    title={!canAcceptCancel ? 'Creator must pay the cancellation fee on-chain first' : undefined}
+                    disabled={acceptingCancel}
+                    title={
+                      postStartFeeMissing
+                        ? 'Creator fee not recorded — open to accept with override'
+                        : undefined
+                    }
                   >
                     <XCircle className="h-4 w-4 mr-2 shrink-0" />
                     Accept cancellation
@@ -1173,14 +1300,34 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       <DialogTitle>Accept cancellation</DialogTitle>
                       <DialogDescription>
                         This will mark the raffle as cancelled.
-                        {canAcceptCancel ? (
-                          feeApplies ? (
-                            <> The creator already paid the {feeSol} SOL post-start fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
-                          ) : (
-                            <> No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds in their dashboard.</>
-                          )
+                        {isEscrowPrizeRaffle && raffle.prize_deposited_at ? (
+                          <>
+                            {' '}
+                            For this escrow prize listing, the platform will attempt to send the NFT or partner
+                            token back to the creator&apos;s wallet immediately after cancellation (same path as
+                            &quot;Return prize to creator&quot;). If that fails, use manual return or{' '}
+                            <strong className="text-foreground">Record manual prize return</strong> below.
+                          </>
+                        ) : null}
+                        {postStartFeeMissing ? (
+                          <>
+                            {' '}
+                            <strong className="text-foreground">No verified post-start fee.</strong> Accepting will
+                            cancel the listing anyway (support override). Ticket buyers with funds-escrow tickets can
+                            claim refunds in their dashboard.
+                          </>
+                        ) : feeApplies ? (
+                          <>
+                            {' '}
+                            The creator paid the {feeSol} SOL post-start fee (on file). Ticket buyers with
+                            funds-escrow tickets can claim refunds in their dashboard.
+                          </>
                         ) : (
-                          <> You cannot accept until the creator pays the {feeSol} SOL fee to the platform wallet (on-chain) from their creator wallet.</>
+                          <>
+                            {' '}
+                            No post-start cancellation fee. Ticket buyers with funds-escrow tickets can claim refunds
+                            in their dashboard.
+                          </>
                         )}
                       </DialogDescription>
                     </DialogHeader>
@@ -1195,7 +1342,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                       </Button>
                       <Button
                         onClick={handleAcceptCancellation}
-                        disabled={acceptingCancel || !canAcceptCancel}
+                        disabled={acceptingCancel}
                         className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}
@@ -1498,6 +1645,53 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            ) : null}
+
+            {canReturnEscrowedPrize ? (
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Record manual prize return</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    If you already sent the NFT or partner prize back to the creator from another wallet
+                    (treasury, multisig, thaw authority), paste the Solana transaction signature here so the
+                    raffle state matches on-chain custody.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manual-prize-return-reason">Reason (audit)</Label>
+                  <select
+                    id="manual-prize-return-reason"
+                    value={manualReturnReason}
+                    onChange={(e) => setManualReturnReason(e.target.value)}
+                    className="flex h-11 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm touch-manipulation"
+                  >
+                    {PRIZE_RETURN_REASONS.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manual-prize-return-tx">Transaction signature</Label>
+                  <Input
+                    id="manual-prize-return-tx"
+                    placeholder="Paste Solana signature"
+                    value={manualReturnTx}
+                    onChange={(e) => setManualReturnTx(e.target.value)}
+                    className="font-mono text-xs sm:text-sm touch-manipulation min-h-[44px]"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                  disabled={recordingManualReturn || !manualReturnTx.trim()}
+                  onClick={handleRecordManualPrizeReturn}
+                >
+                  {recordingManualReturn ? 'Recording…' : 'Record manual prize return'}
+                </Button>
+              </div>
             ) : null}
 
             <div className="pt-2">

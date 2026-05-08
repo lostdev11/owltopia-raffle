@@ -1,7 +1,38 @@
 /**
  * Leaderboard rules: creator-set `ticket_price` floors (per currency), entry hygiene, purchase caps, tickets-sold buyers.
+ * Founder/treasury wallets do not appear in leaderboard rankings (entered, purchased, created, wins).
+ * Purchases by those wallets still count toward creators’ tickets-sold totals and distinct-buyer thresholds.
+ * Optional `LEADERBOARD_EXCLUDED_WALLETS` adds more (comma-separated).
  * Referral program uses separate thresholds (lib/referrals/hardening.ts).
  */
+
+/** Owltopia founder + treasury wallets: never appear on public leaderboard (base58, exact string match after trim). */
+const LEADERBOARD_EXCLUDED_BUILTIN: readonly string[] = [
+  'FuknitCEim3gKsYAMnnqGD3MxnhrMecAWFPLjkZRaTHn',
+  '7gra2JyY969Lt3BXLb6FMx9DxouXcEpRzpiKnc6wFgrq',
+  'qg7pNNZq7qDQuc6Xkd1x4NvS2VM3aHtCqHEzucZxRGA',
+]
+
+let excludedWalletSetCache: ReadonlySet<string> | null = null
+
+/**
+ * Wallets built-in (founders/treasury) plus `LEADERBOARD_EXCLUDED_WALLETS` (comma or whitespace separated).
+ */
+export function leaderboardExcludedWalletSet(): ReadonlySet<string> {
+  if (excludedWalletSetCache) return excludedWalletSetCache
+  const fromEnv = (process.env.LEADERBOARD_EXCLUDED_WALLETS ?? '')
+    .split(/[,\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  excludedWalletSetCache = new Set([...LEADERBOARD_EXCLUDED_BUILTIN, ...fromEnv])
+  return excludedWalletSetCache
+}
+
+export function leaderboardWalletIsExcluded(wallet: string | null | undefined): boolean {
+  const w = typeof wallet === 'string' ? wallet.trim() : ''
+  if (!w) return false
+  return leaderboardExcludedWalletSet().has(w)
+}
 
 /** Same ratios as referral anti-dust (0.02 SOL : 1 USDC : 10 OWL) for default USDC/OWL floors from SOL. */
 const REF_SOL = 0.02

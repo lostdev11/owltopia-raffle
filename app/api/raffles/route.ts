@@ -17,6 +17,7 @@ import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, ThemeAccent } from '@/lib/types'
+import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { isNonRetryableDbErrorMessage } from '@/lib/db-retry'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -55,11 +56,9 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
 
-const THEME_ACCENTS: readonly ThemeAccent[] = ['prime', 'midnight', 'dawn', 'ember', 'violet', 'coral']
-
 function coerceThemeAccent(raw: unknown): ThemeAccent {
   const s = typeof raw === 'string' ? raw.trim() : ''
-  return (THEME_ACCENTS as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
+  return (THEME_ACCENT_VALUES as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
 }
 
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
@@ -254,8 +253,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ticket currency: SOL or USDC only
-    const validCurrencies = ['USDC', 'SOL']
+    // Ticket currency: SOL, USDC; OWL when mint is configured
+    const validCurrencies: string[] = isOwlEnabled() ? ['USDC', 'SOL', 'OWL'] : ['USDC', 'SOL']
     const requestedCurrency =
       typeof body.currency === 'string' && body.currency.trim()
         ? body.currency.trim().toUpperCase()
@@ -302,6 +301,26 @@ export async function POST(request: NextRequest) {
     }
 
     const adminRole = await getAdminRole(walletAddress)
+
+    const effectiveTicketCurrency = requestedCurrency || 'SOL'
+    if (effectiveTicketCurrency === 'OWL' && adminRole === null) {
+      return NextResponse.json(
+        {
+          error:
+            'OWL ticket currency is only available to platform admins. Choose SOL or USDC for public raffles.',
+        },
+        { status: 403 }
+      )
+    }
+    if (partnerCurrencyRaw === 'OWL' && adminRole === null) {
+      return NextResponse.json(
+        {
+          error:
+            'OWL partner-token prizes are only available to platform admins. Choose a different partner token.',
+        },
+        { status: 403 }
+      )
+    }
 
     let discordPartnerTenantId: string | null = null
     try {
@@ -701,6 +720,17 @@ export async function POST(request: NextRequest) {
         {
           error:
             'New raffles cannot be saved until the database is updated (legacy NFT ticket rules). Please contact the site administrator.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
+    // UI allows accents added after migration 037; without 093 (extend_theme_accent_more) INSERT fails this CHECK.
+    if (/raffles_theme_accent_check/i.test(raw) || /theme_accent.*check constraint/i.test(raw)) {
+      return NextResponse.json(
+        {
+          error:
+            'This accent color needs a quick database update on the server. Try Prime, Midnight, or Dawn for now, or ask an admin to apply migration 093_extend_theme_accent_more.sql.',
           step,
         },
         { status: 503 }

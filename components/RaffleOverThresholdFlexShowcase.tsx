@@ -46,12 +46,12 @@ export function RaffleOverThresholdFlexShowcase({
           topLeft={
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/50 bg-emerald-500/30 px-2.5 py-1 text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-50 shadow-[0_0_20px_rgba(16,185,129,0.35)]">
               <TrendingUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Over threshold
+              Past listed floor
             </span>
           }
           bottomContent={
             <p className="max-w-md text-sm font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:text-base">
-              Raffles beat a static list price when the room shows up.
+              Ticket revenue is above the creator&apos;s listed floor—more than a static marketplace listing.
             </p>
           }
         />
@@ -64,8 +64,9 @@ export function RaffleOverThresholdFlexShowcase({
               Beating the floor on Owltopia
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-              These live raffles already cleared the revenue bar—community demand is past what a static marketplace list
-              usually captures. That is the raffles flex: price discovery with tickets, not just a floor ask.
+              Compared to each raffle&apos;s <span className="font-medium text-foreground">listed floor price</span> (shown
+              on the prize), gross ticket revenue is higher than that floor—or, when only a blended threshold applies, past
+              the full revenue bar. Same flex: discovery with tickets, not only a floor ask.
             </p>
           </div>
           <ul
@@ -75,16 +76,31 @@ export function RaffleOverThresholdFlexShowcase({
           >
             {items.slice(0, 3).map(({ raffle, profitInfo }) => {
               const ticketCur = normalizeRaffleTicketCurrency(raffle.currency)
-              const thresholdCur = profitInfo?.thresholdCurrency
-                ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
-                : ticketCur
+              const thresholdCur =
+                profitInfo?.thresholdCurrency != null
+                  ? normalizeRaffleTicketCurrency(profitInfo.thresholdCurrency)
+                  : ticketCur
+              const displayCur =
+                profitInfo?.floorComparisonCurrency != null
+                  ? normalizeRaffleTicketCurrency(profitInfo.floorComparisonCurrency)
+                  : thresholdCur
               const cardImageSrc =
                 getRaffleDisplayImageUrl(raffle.image_url) ??
                 getRaffleDisplayImageUrl(raffle.image_fallback_url)
               const revenueValue =
-                profitInfo != null ? revenueInCurrency(profitInfo.revenue, ticketCur) : null
-              const threshold = profitInfo?.threshold ?? null
-              const surplus = profitInfo?.surplusOverThreshold
+                profitInfo != null ? revenueInCurrency(profitInfo.revenue, displayCur) : null
+              const displayBar =
+                profitInfo?.floorComparisonValue ?? profitInfo?.threshold ?? null
+              const surplus =
+                profitInfo?.surplusOverFloor ?? profitInfo?.surplusOverThreshold ?? null
+              const chipLabel =
+                profitInfo?.floorComparisonValue != null ? 'Above floor' : 'Over threshold'
+              const barLabelShort =
+                profitInfo?.floorComparisonValue != null
+                  ? 'Floor'
+                  : raffle.prize_type === 'nft'
+                    ? 'Bar'
+                    : 'Threshold'
 
               return (
                 <li key={raffle.id} className="min-w-0">
@@ -119,7 +135,7 @@ export function RaffleOverThresholdFlexShowcase({
                           </p>
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-700/25 bg-emerald-600/15 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-emerald-900 dark:border-emerald-400/40 dark:bg-emerald-500/20 dark:text-emerald-100">
                             <Trophy className="h-3 w-3 shrink-0" aria-hidden />
-                            Over threshold
+                            {chipLabel}
                           </span>
                         </div>
                       </div>
@@ -128,14 +144,14 @@ export function RaffleOverThresholdFlexShowcase({
                       <p className="text-[11px] sm:text-xs text-foreground/90">
                         <span className="text-muted-foreground">Revenue</span>{' '}
                         <span className="font-semibold">
-                          {revenueValue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
+                          {revenueValue.toFixed(displayCur === 'USDC' ? 2 : 4)} {displayCur}
                         </span>
-                        {threshold != null && (
+                        {displayBar != null && (
                           <>
                             {' '}
-                            <span className="text-muted-foreground">·</span> {raffle.prize_type === 'nft' ? 'Bar' : 'Threshold'}{' '}
+                            <span className="text-muted-foreground">·</span> {barLabelShort}{' '}
                             <span className="font-semibold">
-                              {threshold.toFixed(thresholdCur === 'USDC' ? 2 : 4)} {thresholdCur}
+                              {displayBar.toFixed(displayCur === 'USDC' ? 2 : 4)} {displayCur}
                             </span>
                           </>
                         )}
@@ -144,7 +160,8 @@ export function RaffleOverThresholdFlexShowcase({
                             {' '}
                             <span className="text-muted-foreground">·</span>{' '}
                             <span className="text-emerald-700 dark:text-emerald-200/95 font-medium">
-                              +{surplus.toFixed(thresholdCur === 'USDC' ? 2 : 4)} {thresholdCur} past bar
+                              +{surplus.toFixed(displayCur === 'USDC' ? 2 : 4)} {displayCur}{' '}
+                              {profitInfo?.floorComparisonValue != null ? 'past floor' : 'past bar'}
                             </span>
                           </>
                         )}

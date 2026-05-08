@@ -19,7 +19,7 @@ function allowDegradedGen2Read(): boolean {
   return process.env.NODE_ENV !== 'production'
 }
 
-export async function sumConfirmedPresaleSold(): Promise<number> {
+async function sumConfirmedPurchasesPaginated(): Promise<number> {
   const db = getSupabaseAdmin()
   const page = 1000
   let from = 0
@@ -29,6 +29,7 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
       .from('gen2_presale_purchases')
       .select('quantity')
       .eq('status', 'confirmed')
+      .order('id', { ascending: true })
       .range(from, from + page - 1)
     if (error) {
       if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
@@ -47,6 +48,69 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
     from += page
   }
   return sum
+}
+
+async function sumPurchasedMintsPaginated(): Promise<number> {
+  const db = getSupabaseAdmin()
+  const page = 1000
+  let from = 0
+  let sum = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('gen2_presale_balances')
+      .select('purchased_mints')
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) {
+      if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+        return 0
+      }
+      throw new Error(error.message)
+    }
+    const rows = data ?? []
+    for (const r of rows) {
+      sum += Number((r as { purchased_mints?: number }).purchased_mints ?? 0)
+    }
+    if (rows.length < page) break
+    from += page
+  }
+  return sum
+}
+
+/**
+ * Spots counted toward presale progress.
+ *
+ * Source of truth is sum(purchased_mints) from balances because admin refunds deduct
+ * purchased_mints without requiring a purchase-row status change. This keeps sold/remaining
+ * accurate after partial or wallet-level refunds.
+ */
+export async function sumConfirmedPresaleSold(): Promise<number> {
+  const db = getSupabaseAdmin()
+  try {
+    const [{ data: soldRows, error: e1 }, { data: mintSum, error: e2 }] = await Promise.all([
+      db.rpc('gen2_presale_sold_confirmed_quantity'),
+      db.rpc('gen2_presale_sum_purchased_mints'),
+    ])
+    if (!e2 && mintSum != null) {
+      const b = Number(mintSum)
+      if (Number.isFinite(b)) {
+        return Math.max(0, b)
+      }
+    }
+    if (!e1 && soldRows != null) {
+      const a = Number(soldRows)
+      if (Number.isFinite(a)) return Math.max(0, a)
+    }
+  } catch {
+    // fall through to legacy
+  }
+
+  const [fromPurchases, fromBalances] = await Promise.all([
+    sumConfirmedPurchasesPaginated(),
+    sumPurchasedMintsPaginated(),
+  ])
+  if (Number.isFinite(fromBalances)) return Math.max(0, fromBalances)
+  return Math.max(0, fromPurchases)
 }
 
 export type Gen2BalanceRow = {
@@ -78,4 +142,104 @@ export async function getBalanceByWallet(wallet: string): Promise<Gen2BalanceRow
     used_mints: Number(r.used_mints ?? 0),
     available_mints: Number(r.available_mints ?? 0),
   }
+}
+
+const TX_SIG_IN_CHUNK = 200
+
+/**
+ * Which of the given presale `tx_signature` values already exist (batched IN queries).
+ * Used by admin backfill to avoid one round-trip per signature.
+ */
+export async function getGen2PresaleExistingTxSignatures(signatures: string[]): Promise<Set<string>> {
+  const db = getSupabaseAdmin()
+  const out = new Set<string>()
+  const uniq = [...new Set(signatures.map((s) => s.trim()).filter(Boolean))]
+  for (let i = 0; i < uniq.length; i += TX_SIG_IN_CHUNK) {
+    const chunk = uniq.slice(i, i + TX_SIG_IN_CHUNK)
+    const { data, error } = await db
+      .from('gen2_presale_purchases')
+      .select('tx_signature')
+      .in('tx_signature', chunk)
+    if (error) {
+      if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+        return out
+      }
+      throw new Error(error.message)
+    }
+    for (const row of data ?? []) {
+      const tx = (row as { tx_signature?: string }).tx_signature
+      if (tx) out.add(tx)
+    }
+  }
+  return out
+}
+
+export type Gen2PresalePurchaseRowLite = {
+  wallet: string
+  quantity: number
+}
+
+/**
+ * Purchase rows for the given tx signatures (batched). Used by admin backfill to re-verify amounts.
+ */
+export async function getGen2PresalePurchaseRowsBySignatures(
+  signatures: string[]
+): Promise<Map<string, Gen2PresalePurchaseRowLite>> {
+  const db = getSupabaseAdmin()
+  const out = new Map<string, Gen2PresalePurchaseRowLite>()
+  const uniq = [...new Set(signatures.map((s) => s.trim()).filter(Boolean))]
+  for (let i = 0; i < uniq.length; i += TX_SIG_IN_CHUNK) {
+    const chunk = uniq.slice(i, i + TX_SIG_IN_CHUNK)
+    const { data, error } = await db
+      .from('gen2_presale_purchases')
+      .select('tx_signature,wallet,quantity')
+      .in('tx_signature', chunk)
+    if (error) {
+      if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+        return out
+      }
+      throw new Error(error.message)
+    }
+    for (const row of data ?? []) {
+      const r = row as { tx_signature?: string; wallet?: string; quantity?: number }
+      if (r.tx_signature) {
+        out.set(String(r.tx_signature), {
+          wallet: String(r.wallet ?? ''),
+          quantity: Number(r.quantity ?? 0),
+        })
+      }
+    }
+  }
+  return out
+}
+
+export type Gen2PresaleParticipant = {
+  wallet: string
+  /** Confirmed presale spots purchased (sum of recorded purchases). */
+  purchased_spots: number
+}
+
+/** Public leaderboard: wallets with presale purchases, highest spot count first. */
+export async function listGen2PresaleParticipants(limit: number): Promise<Gen2PresaleParticipant[]> {
+  const db = getSupabaseAdmin()
+  const cap = Math.min(500, Math.max(1, Math.floor(limit)))
+  const { data, error } = await db
+    .from('gen2_presale_balances')
+    .select('wallet,purchased_mints')
+    .gt('purchased_mints', 0)
+    .order('purchased_mints', { ascending: false })
+    .order('wallet', { ascending: true })
+    .limit(cap)
+
+  if (error) {
+    if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+      return []
+    }
+    throw new Error(error.message)
+  }
+
+  return (data ?? []).map((r) => ({
+    wallet: String((r as { wallet: string }).wallet),
+    purchased_spots: Number((r as { purchased_mints?: number }).purchased_mints ?? 0),
+  }))
 }

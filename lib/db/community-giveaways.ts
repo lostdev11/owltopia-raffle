@@ -155,6 +155,40 @@ export async function countEntriesByGiveawayId(giveawayId: string): Promise<numb
   return count ?? 0
 }
 
+/** One grouped query for browse lists; falls back to per-id counts if RPC is unavailable. */
+export async function countEntriesByGiveawayIds(giveawayIds: string[]): Promise<Map<string, number>> {
+  const unique = [...new Set(giveawayIds.map((id) => id.trim()).filter(Boolean))]
+  const map = new Map<string, number>()
+  if (unique.length === 0) return map
+
+  const { data, error } = await getSupabaseAdmin().rpc('count_community_giveaway_entries_for_ids', {
+    p_ids: unique,
+  })
+
+  if (!error && Array.isArray(data)) {
+    for (const row of data as { giveaway_id: string; entry_count: number | string }[]) {
+      const gid = String(row.giveaway_id)
+      const n = Number(row.entry_count)
+      map.set(gid, Number.isFinite(n) ? n : 0)
+    }
+    for (const id of unique) {
+      if (!map.has(id)) map.set(id, 0)
+    }
+    return map
+  }
+
+  if (error) {
+    console.warn('countEntriesByGiveawayIds: RPC failed, falling back:', error.message)
+  }
+
+  await Promise.all(
+    unique.map(async (id) => {
+      map.set(id, await countEntriesByGiveawayId(id))
+    })
+  )
+  return map
+}
+
 /** True if this tx was already used for any OWL boost. */
 export async function isOwlBoostTxUsed(signature: string): Promise<boolean> {
   const sig = signature.trim()

@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 export type PartnerCommunityCreatorRow = {
   creator_wallet: string
   display_label: string | null
+  partner_tier: '$0_partner' | 'partner_pro' | 'white_label' | string
   sort_order: number
   is_active: boolean
   /** When set, new raffles from this wallet use that partner tenant for Discord raffle webhooks. */
@@ -18,7 +19,7 @@ export async function listPartnerCommunityCreatorsAdmin(): Promise<PartnerCommun
   const sb = getSupabaseAdmin()
   const { data, error } = await sb
     .from('partner_community_creators')
-    .select('creator_wallet, display_label, sort_order, is_active, discord_partner_tenant_id, created_at, updated_at')
+    .select('creator_wallet, display_label, partner_tier, sort_order, is_active, discord_partner_tenant_id, created_at, updated_at')
     .order('sort_order', { ascending: true })
     .order('creator_wallet', { ascending: true })
 
@@ -29,6 +30,7 @@ export async function listPartnerCommunityCreatorsAdmin(): Promise<PartnerCommun
 export async function insertPartnerCommunityCreator(input: {
   creator_wallet: string
   display_label?: string | null
+  partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
   sort_order?: number
   is_active?: boolean
   discord_partner_tenant_id?: string | null
@@ -37,6 +39,7 @@ export async function insertPartnerCommunityCreator(input: {
   const row: Record<string, unknown> = {
     creator_wallet: input.creator_wallet,
     display_label: input.display_label?.trim() || null,
+    partner_tier: input.partner_tier ?? '$0_partner',
     sort_order: input.sort_order ?? 0,
     is_active: input.is_active !== false,
   }
@@ -54,6 +57,7 @@ export async function updatePartnerCommunityCreator(
   creator_wallet: string,
   patch: {
     display_label?: string | null
+    partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
     sort_order?: number
     is_active?: boolean
     discord_partner_tenant_id?: string | null
@@ -68,6 +72,7 @@ export async function updatePartnerCommunityCreator(
         : String(patch.display_label).trim()
   }
   if (patch.sort_order !== undefined) updates.sort_order = patch.sort_order
+  if (patch.partner_tier !== undefined) updates.partner_tier = patch.partner_tier
   if (patch.is_active !== undefined) updates.is_active = patch.is_active
   if (patch.discord_partner_tenant_id !== undefined) {
     const t = patch.discord_partner_tenant_id?.trim()

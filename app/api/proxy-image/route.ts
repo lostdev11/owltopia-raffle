@@ -186,9 +186,48 @@ function getArweaveUrls(normalizedUrl: string): string[] {
   return urls
 }
 
+/** Metaplex / gateways often use https://{node}.arweave.net/{txId} — same origin rules as arweave.net. */
+function isArweaveHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return (
+    h === 'arweave.net' ||
+    h.endsWith('.arweave.net') ||
+    h === 'arweave.dev' ||
+    h.endsWith('.arweave.dev')
+  )
+}
+
 /** Whether the target is an Arweave URL (gateways may 403 without Referer). */
 function isArweaveUrl(url: string): boolean {
-  return ARWEAVE_GATEWAYS.some((g) => url.startsWith(g))
+  try {
+    return isArweaveHost(new URL(url).hostname)
+  } catch {
+    return ARWEAVE_GATEWAYS.some((g) => url.startsWith(g))
+  }
+}
+
+/**
+ * NFT metadata often returns subdomain gateways (HTTP/2 quirks in-browser). Race those URLs
+ * against canonical arweave.net / arweave.dev paths so the proxy has the same multi-gateway
+ * behavior as plain https://arweave.net/{id}.
+ */
+function expandArweaveProxyUrls(normalizedUrl: string): string[] {
+  try {
+    const u = new URL(normalizedUrl)
+    const h = u.hostname.toLowerCase()
+    const pathWithQs = u.pathname + u.search + u.hash
+    if (h.endsWith('.arweave.net') && h !== 'arweave.net') {
+      const canonical = `https://arweave.net${pathWithQs}`
+      return [...new Set([normalizedUrl, ...getArweaveUrls(canonical)])]
+    }
+    if (h.endsWith('.arweave.dev') && h !== 'arweave.dev') {
+      const canonical = `https://arweave.dev${pathWithQs}`
+      return [...new Set([normalizedUrl, ...getArweaveUrls(canonical)])]
+    }
+  } catch {
+    /* fall through */
+  }
+  return getArweaveUrls(normalizedUrl)
 }
 
 /**
@@ -326,7 +365,7 @@ export async function GET(request: NextRequest) {
 
     const targetStr = targetUrl.toString()
     const urlsToTry = isArweaveUrl(targetStr)
-      ? getArweaveUrls(targetStr)
+      ? expandArweaveProxyUrls(targetStr)
       : getIpfsGatewayUrls(targetStr)
 
     if (urlsToTry.length === 0) {

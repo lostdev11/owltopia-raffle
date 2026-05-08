@@ -11,6 +11,7 @@ import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+const VALID_PARTNER_TIERS = new Set(['$0_partner', 'partner_pro', 'white_label'])
 
 /**
  * GET /api/admin/partner-community-creators — full admin; lists all allowlisted partner creator wallets.
@@ -78,6 +79,10 @@ export async function POST(request: NextRequest) {
     }
 
     const is_active = typeof body.is_active === 'boolean' ? body.is_active : true
+    const partner_tier_raw = typeof body.partner_tier === 'string' ? body.partner_tier.trim() : '$0_partner'
+    if (!VALID_PARTNER_TIERS.has(partner_tier_raw)) {
+      return NextResponse.json({ error: 'partner_tier must be $0_partner, partner_pro, or white_label' }, { status: 400 })
+    }
 
     let discord_partner_tenant_id: string | null | undefined
     if (body.discord_partner_tenant_id === null) {
@@ -98,6 +103,7 @@ export async function POST(request: NextRequest) {
       creator_wallet,
       display_label: display_label === undefined ? null : display_label,
       sort_order,
+      partner_tier: partner_tier_raw as '$0_partner' | 'partner_pro' | 'white_label',
       is_active,
       discord_partner_tenant_id,
     })

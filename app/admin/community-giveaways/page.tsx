@@ -33,6 +33,20 @@ function mintsEqual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
+/** Same source as NFT raffle create — avoids skipping deposit when admin list hasn’t loaded escrow yet. */
+async function fetchPrizeEscrowAddress(): Promise<string | null> {
+  try {
+    const escRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
+    const escData = await escRes.json().catch(() => ({}))
+    if (escRes.ok && typeof escData.address === 'string' && escData.address.trim()) {
+      return escData.address.trim()
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
 /** Mirrors server rules for PATCH status open from cancelled — used to enable the Restore button. */
 function canRestoreCancelledCommunityGiveaway(g: CommunityGiveaway): boolean {
   if (g.status !== 'cancelled' || g.winner_wallet) return false
@@ -215,16 +229,32 @@ export default function AdminCommunityGiveawaysPage() {
   }, [connected, publicKey, isAdmin, loadWalletNfts])
 
   const runDepositAndVerify = useCallback(
-    async (giveawayId: string, prizeMint: string, nft: WalletNft): Promise<boolean> => {
-      if (!publicKey || !escrowAddress) {
-        setActionError('Connect wallet and ensure prize escrow is configured.')
+    async (
+      giveawayId: string,
+      prizeMint: string,
+      nft: WalletNft,
+      escrowAddressOverride?: string | null
+    ): Promise<boolean> => {
+      if (!publicKey) {
+        setActionError('Connect your wallet first.')
+        return false
+      }
+      let escrow = (escrowAddressOverride ?? escrowAddress)?.trim() || null
+      if (!escrow) {
+        escrow = await fetchPrizeEscrowAddress()
+        if (escrow) setEscrowAddress(escrow)
+      }
+      if (!escrow) {
+        setActionError(
+          'Prize escrow is not configured on this deployment. Draft is saved — set escrow env vars or deposit manually, then tap Verify deposit.'
+        )
         return false
       }
       const logCtx = {
         communityGiveawayId: giveawayId,
         nftMint: prizeMint.trim(),
         transferAssetId: nft.mint,
-        escrowAddress,
+        escrowAddress: escrow,
         fromWallet: publicKey.toBase58(),
       }
       setEscrowDialog({
@@ -241,7 +271,7 @@ export default function AdminCommunityGiveawaysPage() {
           walletAdapter: wallet?.adapter ?? null,
           selectedNft: nft,
           prizeMintAddress: prizeMint.trim(),
-          escrowAddress,
+          escrowAddress: escrow,
           logCtx,
         })
         if (!dep.ok) {
@@ -358,13 +388,14 @@ export default function AdminCommunityGiveawaysPage() {
       const freshWalletNfts = await loadWalletNfts()
       const nftForDeposit = resolveWalletNftForDeposit(mintTrim, savedSelectedNft, freshWalletNfts)
 
+      // Match NFT raffle flow: sign SPL transfer via sendTransaction even when wallet.adapter is missing;
+      // escrow is fetched here if the giveaway list hasn’t populated it yet.
       if (
         !manualDepositSig &&
         created?.id &&
-        escrowAddress &&
         !created.prize_deposited_at &&
         publicKey &&
-        wallet?.adapter
+        connected
       ) {
         setActionError(null)
         setDepositingId(created.id)

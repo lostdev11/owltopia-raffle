@@ -6,6 +6,7 @@ import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { verifyCancellationFeeTransaction } from '@/lib/verify-cancellation-fee-tx'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,7 +61,7 @@ export async function POST(
 
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
     const wallet = session.wallet.trim()
-    if (creatorWallet !== wallet) {
+    if (!walletsEqualSolana(creatorWallet, wallet)) {
       return NextResponse.json(
         { error: 'Only the raffle creator can request cancellation' },
         { status: 403 }

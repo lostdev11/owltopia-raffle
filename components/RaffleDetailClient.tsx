@@ -19,6 +19,7 @@ import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -29,9 +30,16 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '@/lib/types'
+import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
-import { getRaffleProfitInfo, normalizeRaffleTicketCurrency, revenueInCurrency } from '@/lib/raffle-profit'
+import {
+  getRaffleProfitInfo,
+  normalizeRaffleTicketCurrency,
+  revenueFlexPromoChipUppercase,
+  revenueInCurrency,
+  shouldShowRevenueFlexPublic,
+} from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
@@ -73,6 +81,7 @@ import {
   Ticket,
   RefreshCw,
   ShoppingCart,
+  Wallet,
 } from 'lucide-react'
 import {
   Transaction,
@@ -120,6 +129,7 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
+import { RaffleSentimentBar } from '@/components/RaffleSentimentBar'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
 import {
@@ -130,10 +140,15 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import {
+  canCreatorClaimPrizeBackFromEscrow,
+  needsPayCancellationFeeBeforePrizeReturn,
+} from '@/lib/raffles/creator-prize-return-eligibility'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -161,12 +176,18 @@ interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
   owlVisionScore: OwlVisionScore
+  sessionWallet: string | null
+  sentimentTotals: RaffleSentimentTotals
+  initialSentiment: RaffleSentimentChoice | null
 }
 
 export function RaffleDetailClient({
   raffle,
   entries: initialEntries,
   owlVisionScore,
+  sessionWallet,
+  sentimentTotals,
+  initialSentiment,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -244,15 +265,25 @@ export function RaffleDetailClient({
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
+  const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-  const isCreator = connected && walletAddress && creatorWallet === walletAddress
+  const isCreator =
+    connected &&
+    !!walletAddress &&
+    !!creatorWallet &&
+    walletsEqualSolana(walletAddress, creatorWallet)
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && walletAddress ? getCachedAdmin(walletAddress) : null
   )
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() =>
     typeof window !== 'undefined' && walletAddress ? getCachedAdminRole(walletAddress) : null
   )
+  /** True when SIWS session cookie is an admin wallet (no adapter connect required). */
+  const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+  const [browseListedOnFeed, setBrowseListedOnFeed] = useState(() => raffle.list_on_platform !== false)
+  const [browseListSaving, setBrowseListSaving] = useState(false)
+  const [browseListError, setBrowseListError] = useState<string | null>(null)
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   type HeroImgPhase =
@@ -499,6 +530,58 @@ export function RaffleDetailClient({
   }, [connected, publicKey])
 
   useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/check?session=1', { credentials: 'include' })
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        setAdminSessionActive(data?.isAdmin === true)
+      })
+      .catch(() => {
+        if (!cancelled) setAdminSessionActive(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setBrowseListedOnFeed(raffle.list_on_platform !== false)
+    setBrowseListError(null)
+  }, [raffle.id, raffle.list_on_platform])
+
+  const persistBrowseListSetting = useCallback(
+    async (next: boolean) => {
+      setBrowseListSaving(true)
+      setBrowseListError(null)
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ list_on_platform: next }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(
+            typeof data?.error === 'string'
+              ? data.error
+              : 'Could not update. Sign in on Admin with an admin wallet (SIWS), then try again.'
+          )
+        }
+        setBrowseListedOnFeed(next)
+        router.refresh()
+      } catch (e) {
+        setBrowseListedOnFeed(!next)
+        setBrowseListError(e instanceof Error ? e.message : 'Update failed')
+      } finally {
+        setBrowseListSaving(false)
+      }
+    },
+    [raffle.id, router]
+  )
+
+  useEffect(() => {
     if (!creatorWallet) {
       setCreatorDisplayName(null)
       return
@@ -584,6 +667,29 @@ export function RaffleDetailClient({
     }
   }, [raffle.prize_deposited_at])
 
+  // Pending deposit: tx registered server-side but verify still catching up (cron + immediate verify).
+  useEffect(() => {
+    const pending =
+      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) &&
+      !raffle.prize_deposited_at &&
+      !!(raffle.prize_deposit_tx || '').trim()
+    if (!pending) return
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      router.refresh()
+      if (ticks >= 120) clearInterval(iv)
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [
+    raffle.id,
+    raffle.prize_type,
+    raffle.prize_currency,
+    raffle.prize_deposited_at,
+    raffle.prize_deposit_tx,
+    router,
+  ])
+
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
 
@@ -656,6 +762,15 @@ export function RaffleDetailClient({
     return Array.from(byWallet.values()).sort((a, b) => b.totalAmount - a.totalAmount)
   }, [entries, showCreatorRefundCandidates])
 
+  /** Same rules as My Dashboard — many creators only revisit the public raffle URL. */
+  const showCreatorClaimPrizeBackFromEscrow = useMemo(
+    () =>
+      isCreator &&
+      canCreatorClaimPrizeBackFromEscrow(raffle, walletAddress) &&
+      !needsPayCancellationFeeBeforePrizeReturn(raffle),
+    [isCreator, raffle, walletAddress]
+  )
+
   const creatorRefundTotalPending = useMemo(() => {
     return creatorRefundCandidates.reduce((sum, row) => {
       const pending = Math.max(0, row.totalAmount - row.refundedAmount)
@@ -683,33 +798,48 @@ export function RaffleDetailClient({
       .join('\n')
   }, [creatorRefundCandidates, raffle.currency])
 
-  /** Buyer self-claim from funds escrow (same rules as dashboard). */
+  /** Buyer self-claim from funds escrow (same rules as dashboard + POST /api/entries/claim-refund). */
   const buyerRefundableEntries = useMemo(() => {
-    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    const canBuyerClaimFromEscrow =
+      raffle.status === 'failed_refund_available' ||
+      raffle.status === 'pending_min_not_met' ||
+      (raffle.status === 'cancelled' && raffleUsesFundsEscrow(raffle))
+    if (!connected || !publicKey || !canBuyerClaimFromEscrow) return []
     if (!raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter(
-      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
     )
   }, [connected, publicKey, raffle, entries])
 
   const buyerLegacyRefundEntries = useMemo(() => {
-    if (!connected || !publicKey || raffle.status !== 'failed_refund_available') return []
+    const canBuyerClaimLegacy =
+      raffle.status === 'failed_refund_available' || raffle.status === 'pending_min_not_met'
+    if (!connected || !publicKey || !canBuyerClaimLegacy) return []
     if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
-    return entries.filter((e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at)
+    return entries.filter(
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
+    )
   }, [connected, publicKey, raffle, entries])
 
   const buyerLegacyRefundEligible = buyerLegacyRefundEntries.length > 0
 
-  /** Cancelled raffles use `cancelled` status + manual treasury refunds — not `failed_refund_available`, so buyers need explicit copy here and on the dashboard. */
+  /**
+   * Cancelled + legacy (no funds escrow): manual treasury refunds.
+   * Cancelled + funds escrow: use {@link buyerRefundableEntries} on-chain claim (same API as failed draw).
+   */
   const buyerCancelledRefundEntries = useMemo(() => {
     if (!connected || !publicKey || raffle.status !== 'cancelled') return []
+    if (raffleUsesFundsEscrow(raffle)) return []
     const w = publicKey.toBase58()
     return entries.filter(
-      (e) => e.status === 'confirmed' && e.wallet_address === w && !e.refunded_at
+      (e) =>
+        e.status === 'confirmed' && walletsEqualSolana(e.wallet_address, w) && !e.refunded_at
     )
-  }, [connected, publicKey, raffle.status, entries])
+  }, [connected, publicKey, raffle, entries])
 
   const buyerCancelledRefundEligible = buyerCancelledRefundEntries.length > 0
 
@@ -1273,55 +1403,74 @@ export function RaffleDetailClient({
       }
     }
 
-    const runVerifyWithOptionalSignIn = async (depositTx?: string | null): Promise<boolean> => {
-      const attemptOpts = {
-        onAttempt: (current: number, max: number) => {
-          setDepositEscrowProgressStep('verify')
-          setDepositVerifyAttemptLabel({ current, max })
-        },
-      }
-      try {
-        let result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
-        if (!result.ok && result.status === 401) {
-          setDepositEscrowProgressStep('sign_in')
-          const signedIn = await signInForSession()
-          if (!signedIn) return false
-          setDepositEscrowProgressStep('verify')
-          result = await verifyPrizeDepositWithRetries(raffle.id, { depositTx, ...attemptOpts })
-        }
-        if (!result.ok) {
-          setDepositEscrowError(result.error)
-          setDepositEscrowFrozenDiagnostics(result.frozenEscrowDiagnostics ?? null)
-          return false
-        }
-        return true
-      } catch (e) {
-        setDepositEscrowError(e instanceof Error ? e.message : 'Verification failed')
-        return false
-      }
-    }
-
     const finalizeAfterTransfer = async (depositTx?: string): Promise<boolean> => {
       if (depositTx?.trim()) {
         setDepositLastTxSignature(depositTx.trim())
       }
       setDepositEscrowProgressStep('verify')
-      const verified = await runVerifyWithOptionalSignIn(depositTx)
-      logEscrowDepositVerify(
-        depositLogCtx,
-        verified,
-        verified ? undefined : 'Server verify did not confirm escrow yet (see UI message)'
-      )
-      if (verified) {
-        setDepositEscrowSuccess(true)
-        setDepositEscrowError(null)
-        setDepositEscrowFrozenDiagnostics(null)
-        setShowManualEscrowFallback(false)
-        router.refresh()
-      } else {
+      try {
+        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+        })
+        let data = (await res.json().catch(() => ({}))) as {
+          verified?: boolean
+          pendingReason?: string
+          error?: string
+          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+        }
+        if (!res.ok && res.status === 401) {
+          setDepositEscrowProgressStep('sign_in')
+          const signedIn = await signInForSession()
+          if (!signedIn) return false
+          setDepositEscrowProgressStep('verify')
+          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+          })
+          data = (await res.json().catch(() => ({}))) as typeof data
+        }
+        if (!res.ok) {
+          const msg =
+            typeof data.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : 'Could not save deposit'
+          setDepositEscrowError(msg)
+          setDepositEscrowFrozenDiagnostics(null)
+          logEscrowDepositVerify(depositLogCtx, false, msg)
+          return false
+        }
+        if (data.verified) {
+          setDepositEscrowSuccess(true)
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+          setShowManualEscrowFallback(false)
+          router.refresh()
+          logEscrowDepositVerify(depositLogCtx, true)
+          return true
+        }
         setDepositEscrowSuccess(false)
+        if (data.pendingReason && isEscrowSplPrizeFrozenVerifyError(data.pendingReason)) {
+          setDepositEscrowError(data.pendingReason)
+          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
+        } else {
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+        }
+        router.refresh()
+        logEscrowDepositVerify(depositLogCtx, false, data.pendingReason)
+        return false
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not register deposit'
+        setDepositEscrowError(msg)
+        setDepositEscrowFrozenDiagnostics(null)
+        logEscrowDepositVerify(depositLogCtx, false, msg)
+        return false
       }
-      return verified
     }
 
     /** Same UX for every path: show “confirming on-chain”, wait for RPC, then server verify. */
@@ -1531,7 +1680,7 @@ export function RaffleDetailClient({
           setShowManualEscrowFallback(false)
         } else {
           setDepositEscrowError(
-            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then tap Verify deposit below. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
+            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
           )
           setShowManualEscrowFallback(true)
         }
@@ -1540,7 +1689,7 @@ export function RaffleDetailClient({
       if ('delegated' in holder && holder.delegated) {
         logEscrowDepositAbort(depositLogCtx, 'nft_delegated_or_staked')
         setDepositEscrowError(
-          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then tap Verify deposit.'
+          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then paste the transfer signature below and tap Submit signature.'
         )
         setShowManualEscrowFallback(true)
         return
@@ -1665,7 +1814,7 @@ export function RaffleDetailClient({
       !normalizeDepositTxSignatureInput(depositTxFromUi)
     ) {
       setDepositEscrowError(
-        'Paste the Solana transaction signature (or a Solscan /tx/… link) for the transfer that sent the prize to escrow, then tap Verify deposit. If you used Transfer to escrow here, tap Verify again — we also try your last on-chain transfer from this page.'
+        'Paste the Solana transaction signature (or a Solscan /tx/… link) for the transfer that sent the prize to escrow, then tap Submit signature. If you already used Transfer to escrow here, wait for this page to refresh. If it stays stuck, open a ticket in our Discord.'
       )
       setShowManualEscrowFallback(true)
       return
@@ -1726,13 +1875,73 @@ export function RaffleDetailClient({
         }
       }
 
+      const manualNorm = normalizeDepositTxSignatureInput(manualTx)
+      if (manualNorm) {
+        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ deposit_tx: manualNorm }),
+        })
+        let data = (await res.json().catch(() => ({}))) as {
+          verified?: boolean
+          pendingReason?: string
+          error?: string
+          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
+        }
+        if (!res.ok && res.status === 401) {
+          setDepositEscrowProgressStep('sign_in')
+          const signedIn = await signInForSession()
+          if (!signedIn) return
+          setDepositEscrowProgressStep('verify')
+          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ deposit_tx: manualNorm }),
+          })
+          data = (await res.json().catch(() => ({}))) as typeof data
+        }
+        if (!res.ok) {
+          const msg =
+            typeof data.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : 'Could not save deposit'
+          setDepositEscrowError(msg)
+          setDepositEscrowFrozenDiagnostics(null)
+          setShowManualEscrowFallback(true)
+          return
+        }
+        if (data.verified) {
+          setDepositEscrowSuccess(true)
+          setDepositEscrowError(null)
+          setDepositEscrowFrozenDiagnostics(null)
+          setDepositLastTxSignature(manualNorm)
+          setManualDepositTx('')
+          router.refresh()
+          return
+        }
+        const pr = typeof data.pendingReason === 'string' ? data.pendingReason : ''
+        if (pr && isEscrowSplPrizeFrozenVerifyError(pr)) {
+          setDepositEscrowError(pr)
+          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
+          setShowManualEscrowFallback(true)
+          return
+        }
+        setDepositEscrowError(null)
+        setDepositEscrowFrozenDiagnostics(null)
+        setManualDepositTx('')
+        router.refresh()
+        return
+      }
+
       const attemptOpts = {
         onAttempt: (current: number, max: number) => {
           setDepositVerifyAttemptLabel({ current, max })
         },
       }
       let result = await verifyPrizeDepositWithRetries(raffle.id, {
-        depositTx: manualTx || undefined,
+        depositTx: depositLastTxSignature || undefined,
         ...attemptOpts,
       })
       if (!result.ok && result.status === 401) {
@@ -1741,7 +1950,7 @@ export function RaffleDetailClient({
         if (!signedIn) return
         setDepositEscrowProgressStep('verify')
         result = await verifyPrizeDepositWithRetries(raffle.id, {
-          depositTx: manualTx || undefined,
+          depositTx: depositLastTxSignature || undefined,
           ...attemptOpts,
         })
       }
@@ -1754,9 +1963,6 @@ export function RaffleDetailClient({
       setDepositEscrowSuccess(true)
       setDepositEscrowError(null)
       setDepositEscrowFrozenDiagnostics(null)
-      if (manualTx) {
-        setDepositLastTxSignature(manualTx)
-      }
       setManualDepositTx('')
       router.refresh()
     } catch (e) {
@@ -1969,6 +2175,31 @@ export function RaffleDetailClient({
     }
   }, [raffle.id, router])
 
+  const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
+    setError(null)
+    setClaimFailedPrizeReturnLoading(true)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/claim-failed-min-prize-return`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(
+          typeof (data as { error?: string }).error === 'string'
+            ? (data as { error: string }).error
+            : 'Could not return prize from escrow. Sign in on My Dashboard with your creator wallet if you see a session error.'
+        )
+        return
+      }
+      router.refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setClaimFailedPrizeReturnLoading(false)
+    }
+  }, [raffle.id, router])
+
   const fetchOffers = useCallback(async () => {
     setOffersLoading(true)
     setOffersError(null)
@@ -2105,12 +2336,18 @@ export function RaffleDetailClient({
     preloadConfetti()
     fireGreenConfetti()
   }, [isWinnerDetail, showWinner, raffle.id, raffle.winner_wallet])
+  const adminCapable = (isAdmin === true) || adminSessionActive === true
+  /** Browse-list toggle: do not use session alone while a non-admin wallet is connected (avoids showing admin UI to creators on a browser with an admin SIWS cookie). */
+  const showPublicBrowseListAdminControl =
+    (connected && publicKey && isAdmin === true) ||
+    (!connected && adminSessionActive === true)
+
   // Check if we should show the NFT transfer button (ended, has winner, NFT prize, admin, no transaction recorded yet)
   const showNftTransferButton = 
     hasEnded && 
     raffle.winner_wallet && 
     raffle.prize_type === 'nft' && 
-    isAdmin && 
+    adminCapable && 
     !raffle.nft_transfer_transaction
 
   const claimableEscrowPrize =
@@ -2127,7 +2364,7 @@ export function RaffleDetailClient({
 
   // Show "Return prize to creator" when: admin, NFT raffle, prize in escrow, not yet sent to winner, not already returned
   const showReturnPrizeButton =
-    isAdmin &&
+    adminCapable &&
     raffle.prize_type === 'nft' &&
     !!raffle.prize_deposited_at &&
     !raffle.nft_transfer_transaction &&
@@ -2262,7 +2499,7 @@ export function RaffleDetailClient({
               fullWidth={false}
             />
           )}
-          {isActive && profitInfoForSocialFlex.isProfitable && (
+          {isActive && shouldShowRevenueFlexPublic(profitInfoForSocialFlex) && (
             <RaffleOverThresholdPngButton
               title={raffle.title}
               slug={raffle.slug}
@@ -2271,6 +2508,7 @@ export function RaffleDetailClient({
               endTime={raffle.end_time}
               imageUrl={heroImageDead ? null : heroImageSrc}
               metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfoForSocialFlex)}
+              promoChipText={revenueFlexPromoChipUppercase(profitInfoForSocialFlex)}
               buttonLabel="Flex PNG (social)"
               fullWidth={false}
             />
@@ -2332,7 +2570,7 @@ export function RaffleDetailClient({
               <p className="font-medium">Pay cancellation fee to claim your prize from escrow</p>
               <p className="text-xs text-muted-foreground mt-1">
                 This raffle was cancelled after it started. Pay {getCancellationFeeSol()} SOL to the platform
-                wallet, then you can use Claim prize on your dashboard.
+                wallet, then claim your prize below or on My Dashboard.
               </p>
               <Button
                 type="button"
@@ -2346,6 +2584,37 @@ export function RaffleDetailClient({
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
                 Pay {getCancellationFeeSol()} SOL
+              </Button>
+            </div>
+          )}
+          {showCreatorClaimPrizeBackFromEscrow && (
+            <div
+              className="w-full sm:w-auto rounded-lg border border-amber-500/40 bg-amber-500/[0.07] px-3 py-3 text-sm space-y-2"
+              role="status"
+            >
+              <p className="font-medium text-foreground">
+                {raffle.status === 'cancelled' ? 'Claim your prize from escrow' : 'Minimum not met — claim your prize from escrow'}
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your NFT or token prize is still in platform escrow. One signed transaction returns it to this wallet.
+                If something fails on mobile data, try Wi‑Fi or My Dashboard.
+              </p>
+              <Button
+                type="button"
+                variant="default"
+                size="default"
+                className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                disabled={claimFailedPrizeReturnLoading}
+                onClick={() => void handleCreatorClaimPrizeBackFromEscrow()}
+              >
+                {claimFailedPrizeReturnLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin shrink-0" aria-hidden />
+                ) : (
+                  <Wallet className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                )}
+                {isPartnerSplPrizeRaffle(raffle)
+                  ? 'Claim prize tokens from escrow'
+                  : 'Claim NFT from escrow'}
               </Button>
             </div>
           )}
@@ -2612,23 +2881,61 @@ export function RaffleDetailClient({
                     <>
                       <strong>Flow:</strong> Transfer your{' '}
                       <strong>{String(raffle.prize_currency || '').trim().toUpperCase() || 'Token'} prize</strong> to escrow
-                      (your wallet will ask you to sign one SPL transaction). After it confirms, we{' '}
-                      <strong>automatically verify</strong> the deposit and activate the raffle. Use <strong>Verify deposit</strong>{' '}
-                      if you sent the prize manually — you must paste the transaction signature (deposit_tx). Tickets are still
-                      paid in {raffle.currency}.
+                      (your wallet will ask you to sign one SPL transaction). After it confirms, we save the deposit and{' '}
+                      <strong>activate the raffle automatically</strong> (including server retries). If you sent manually,
+                      paste the transaction signature below and tap <strong>Submit signature</strong>. Tickets are still paid in{' '}
+                      {raffle.currency}.
                     </>
                   ) : (
                     <>
                       <strong>Flow:</strong> Transfer the NFT to escrow below (your wallet will ask you to sign). After the
-                      transaction succeeds, we <strong>automatically verify</strong> that the prize is in escrow and activate
-                      the raffle—watch the progress popup. Use <strong>Verify deposit</strong> only if you sent the NFT
-                      manually or the automatic step timed out. <strong>No listing fee</strong> — only network fees. The
-                      prize stays locked until a winner claims it.
+                      transaction succeeds, we save your deposit and <strong>activate the raffle automatically</strong> on our
+                      servers (with retries). If you sent the NFT manually, paste the tx below and tap <strong>Submit signature</strong>.
+                      If something stays stuck, wait for this page to refresh, then{' '}
+                      <a
+                        href={COMMUNITY_DISCORD_INVITE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary font-medium underline touch-manipulation min-h-[44px] inline-flex items-center gap-1 py-0.5"
+                        onTouchStart={handleMobileLinkTouchStart}
+                        onTouchMove={handleMobileLinkTouchMove}
+                        onTouchEnd={handleMobileLinkTouchEnd}
+                      >
+                        open a ticket in Discord
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                      </a>
+                      . <strong>No listing fee</strong> — only network fees. The prize stays locked until a winner claims it.
                     </>
                   )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
+                {(raffle.prize_deposit_tx || '').trim() && !raffle.prize_deposited_at && (
+                  <div
+                    className="rounded-md border border-sky-500/45 bg-sky-500/[0.12] p-3 text-sm text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <p className="font-medium text-foreground mb-1">Confirming your prize deposit</p>
+                    <p>
+                      Your transfer signature is saved. Our servers confirm escrow in the background — this page
+                      refreshes every few seconds until tickets open. On mobile RPC this can take a minute or two. If it
+                      never clears,{' '}
+                      <a
+                        href={COMMUNITY_DISCORD_INVITE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary font-medium underline touch-manipulation"
+                        onTouchStart={handleMobileLinkTouchStart}
+                        onTouchMove={handleMobileLinkTouchMove}
+                        onTouchEnd={handleMobileLinkTouchEnd}
+                      >
+                        open a ticket in Discord
+                      </a>
+                      .
+                    </p>
+                  </div>
+                )}
                 {!connected && (
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Connect your wallet to transfer the{' '}
@@ -2662,34 +2969,39 @@ export function RaffleDetailClient({
                             ? `Transfer ${String(raffle.prize_currency || '').trim().toUpperCase() || 'token'} to escrow`
                             : 'Transfer NFT to escrow'}
                       </Button>
-                      <Button
-                        variant="outline"
-                        onClick={handleVerifyPrizeDeposit}
-                        disabled={depositVerifyLoading}
-                        title={
-                          isPartnerSplPrizeRaffle(raffle)
-                            ? 'Requires deposit transaction signature in the field below for token prizes'
-                            : 'Checks on-chain that the NFT is in platform escrow, then activates the raffle'
-                        }
-                      >
-                        {depositVerifyLoading
-                          ? depositVerifyAttemptLabel.current > 0
-                            ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
-                            : 'Verifying…'
-                          : 'Verify deposit'}
-                      </Button>
+                      {isAdmin === true ? (
+                        <Button
+                          variant="outline"
+                          onClick={handleVerifyPrizeDeposit}
+                          disabled={depositVerifyLoading}
+                          title={
+                            isPartnerSplPrizeRaffle(raffle)
+                              ? 'Requires deposit transaction signature in the field below for token prizes'
+                              : 'Checks on-chain that the NFT is in platform escrow, then activates the raffle'
+                          }
+                        >
+                          {depositVerifyLoading
+                            ? depositVerifyAttemptLabel.current > 0
+                              ? `Verifying (${depositVerifyAttemptLabel.current}/${depositVerifyAttemptLabel.max})…`
+                              : 'Verifying…'
+                            : 'Verify deposit'}
+                        </Button>
+                      ) : null}
                     </div>
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                       <p className="text-xs text-muted-foreground">
                         {isPartnerSplPrizeRaffle(raffle) ? (
                           <>
-                            If you send the prize token manually, paste the transaction signature below and tap Verify deposit.
-                            The verify step checks that your tx credits the escrow token account for at least the declared prize
-                            amount.
+                            If you send the prize token manually, paste the transaction signature below and tap{' '}
+                            <strong>Submit signature</strong>. That checks that your tx credits the escrow token account for at
+                            least the declared prize amount.
                           </>
                         ) : (
                           <>
-                            If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT manually to escrow in your wallet app, then tap Verify deposit. Phantom and similar wallets sometimes show &quot;No balance changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change; if you trust this site, confirming is still normal.
+                            If your wallet does not open a signature prompt here (common for some compressed NFTs), send the NFT
+                            manually to escrow in your wallet app, then paste the transfer signature below and tap{' '}
+                            <strong>Submit signature</strong>. Phantom and similar wallets sometimes show &quot;No balance
+                            changes&quot; for Metaplex or Core NFT transfers — that preview can miss the real custody change.
                           </>
                         )}
                       </p>
@@ -2734,27 +3046,33 @@ export function RaffleDetailClient({
                           {depositVerifyLoading ? 'Submitting…' : 'Submit signature'}
                         </Button>
                         <p className="text-xs text-muted-foreground">
-                          If auto-verify fails after manual transfer, paste the transfer signature and tap Verify deposit again.
+                          If automatic confirmation stalls after a manual transfer, paste the signature again and tap Submit
+                          signature.
                         </p>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {isPartnerSplPrizeRaffle(raffle)
-                        ? 'Verify deposit checks on-chain that the prize tokens reached escrow, then opens the raffle for entries.'
-                        : 'Verify deposit checks on-chain that the NFT is in escrow, then opens the raffle for entries.'}
-                    </p>
+                    {isAdmin === true ? (
+                      <p className="text-xs text-muted-foreground">
+                        Admin: <strong>Verify deposit</strong> retries server confirmation without pasting a new signature (odd
+                        RPC cases).
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        We confirm on-chain that the prize reached escrow before ticket purchases count.
+                      </p>
+                    )}
                     {depositLastTxSignature &&
                       !(depositEscrowSuccess && !depositEscrowError) && (
                         <div className="rounded-lg border border-sky-500/45 bg-sky-500/[0.12] p-4 space-y-2">
                           <p className="text-sm font-semibold text-sky-950 dark:text-sky-100">
                             {depositEscrowLoading
-                              ? 'Transaction submitted — checking escrow…'
-                              : 'On-chain transaction (proof)'}
+                              ? 'Deposit submitted — confirming escrow…'
+                              : 'Deposit to escrow succeeded on-chain'}
                           </p>
                           <p className="text-xs text-sky-950/85 dark:text-sky-50/85 leading-relaxed">
                             {depositEscrowLoading
-                              ? 'Your wallet already signed. Open Solscan to confirm the transfer on-chain while we finish the server check.'
-                              : 'Use Solscan to see that the transfer executed. If our app still shows a warning, wait a few seconds for RPC to catch up, then tap Verify deposit again.'}
+                              ? 'Your wallet already signed. We are confirming custody with the server — this page will refresh when ready.'
+                              : `Your ${isPartnerSplPrizeRaffle(raffle) ? 'prize tokens reached' : 'NFT reached'} escrow in that transaction. If this card still shows, wait for a refresh or paste the tx above and tap Submit signature.`}
                           </p>
                           <a
                             href={solscanTransactionUrl(depositLastTxSignature)}
@@ -2819,11 +3137,11 @@ export function RaffleDetailClient({
                       />
                       <div className="space-y-2 min-w-0">
                         <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                          Escrow confirmed — raffle updating
+                          Deposit successful — prize is in escrow
                         </p>
                         <p className="text-sm text-emerald-900/90 dark:text-emerald-50/90 leading-relaxed">
-                          The prize is verified in escrow. This page should refresh momentarily; if it does not, reload
-                          once. Your wallet UI can lag behind the chain — that does not mean the NFT is still yours.
+                          We verified custody on-chain. This page should refresh shortly; reload once if it does not. Your
+                          wallet UI may lag behind the chain — that does not mean the prize is still in your wallet.
                         </p>
                         {depositLastTxSignature && (
                           <a
@@ -2928,11 +3246,12 @@ export function RaffleDetailClient({
                           <>
                             send the <strong>prize tokens</strong> to the escrow address above (or confirm you already
                             did), paste the transfer&apos;s <strong>transaction signature</strong> (raw base58 or a Solscan
-                            /tx/ link) in the field, then tap <strong>Verify deposit</strong>.
+                            /tx/ link) in the field, then tap <strong>Submit signature</strong>.
                           </>
                         ) : (
                           <>
-                            send the NFT to the escrow address above, then tap <strong>Verify deposit</strong>.
+                            send the NFT to the escrow address above, then paste the tx signature and tap{' '}
+                            <strong>Submit signature</strong>.
                           </>
                         )}
                       </p>
@@ -3132,6 +3451,43 @@ export function RaffleDetailClient({
               </div>
             </div>
           </CardHeader>
+
+          <RaffleSentimentBar
+            raffleId={raffle.id}
+            sessionWallet={sessionWallet}
+            initialTotals={sentimentTotals}
+            initialMine={initialSentiment}
+          />
+
+          {showPublicBrowseListAdminControl && (
+            <div className={`${classes.headerPadding} pt-0 pb-3 border-b border-border/60`}>
+              <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="text-sm font-medium text-foreground">Show on public /raffles list</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    When off, link-only NFT raffles are hidden from the browse grid. Admins only — connect an admin
+                    wallet, or disconnect to use admin sign-in alone.
+                  </p>
+                  {browseListError && (
+                    <p className="text-xs text-destructive pt-1">{browseListError}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {browseListSaving && (
+                    <span className="text-xs text-muted-foreground">Saving…</span>
+                  )}
+                  <Switch
+                    id="raffle-detail-browse-listed"
+                    checked={browseListedOnFeed}
+                    onCheckedChange={(v) => void persistBrowseListSetting(v)}
+                    disabled={browseListSaving}
+                    className="touch-manipulation"
+                    ariaLabel="Show this raffle on the public browse list"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {hasHeroImageSection && (
             <>
@@ -3459,8 +3815,13 @@ export function RaffleDetailClient({
               const ticketRevenue = revenueInCurrency(profitInfo.revenue, ticketCur)
               const threshold = profitInfo.threshold
               const amountOver = profitInfo.surplusOverThreshold
+              const floorVal = profitInfo.floorComparisonValue
+              const floorCur = profitInfo.floorComparisonCurrency
+              const revenueAtFloorCur =
+                floorCur != null ? revenueInCurrency(profitInfo.revenue, floorCur) : ticketRevenue
+              const amountOverFloor = profitInfo.surplusOverFloor
               const thresholdLabel =
-                raffle.prize_type === 'nft' ? 'Revenue threshold' : 'Threshold'
+                raffle.prize_type === 'nft' ? 'Revenue threshold (draw goal and floor)' : 'Threshold'
               return (
                 <div className={`${imageSize === 'small' ? 'p-3' : imageSize === 'medium' ? 'p-4' : 'p-5'} rounded-lg bg-muted/30 border`}>
                   <h3 className={`${imageSize === 'small' ? 'text-sm' : imageSize === 'medium' ? 'text-base' : 'text-lg'} font-semibold mb-3`}>Revenue &amp; threshold</h3>
@@ -3471,6 +3832,25 @@ export function RaffleDetailClient({
                         {ticketRevenue.toFixed(ticketCur === 'USDC' ? 2 : 4)} {ticketCur}
                       </p>
                     </div>
+                    {floorVal != null && floorCur != null && (
+                      <div>
+                        <p className={classes.labelText + ' text-muted-foreground'}>Listed floor price</p>
+                        <p className={classes.contentText + ' font-semibold'}>
+                          {floorVal.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}
+                        </p>
+                        {profitInfo.isRevenueAboveFloor && amountOverFloor != null && amountOverFloor > 0 ? (
+                          <p className={classes.labelText + ' text-emerald-600 dark:text-emerald-400 font-semibold mt-2'}>
+                            Ticket revenue ({revenueAtFloorCur.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}) is above
+                            this floor by +{amountOverFloor.toFixed(floorCur === 'USDC' ? 2 : 4)} {floorCur}.
+                          </p>
+                        ) : (
+                          <p className={classes.labelText + ' text-muted-foreground mt-2'}>
+                            Draw rules still use the higher of floor and ticket-count goal—the full bar below. Beating the
+                            floor alone does not guarantee the draw threshold is met.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <p className={classes.labelText + ' text-muted-foreground'}>{thresholdLabel}</p>
                       <p className={classes.contentText + ' font-semibold'}>
@@ -3831,7 +4211,7 @@ export function RaffleDetailClient({
                   <span className="sm:hidden">Return Prize</span>
                 </Button>
               )}
-              {isAdmin && (
+              {adminCapable && (
                 <Button
                   variant="outline"
                   size="default"
@@ -4152,7 +4532,7 @@ export function RaffleDetailClient({
                 </p>
               </div>
             )}
-            {Boolean(isAdmin) && cartAddedHint && (
+            {cartAddedHint && (
               <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/40 text-blue-200 text-sm flex items-start gap-2">
                 <ShoppingCart className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
                 <span>Added to cart. Open the cart in the header to pay for multiple raffles in one session.</span>
@@ -4169,20 +4549,18 @@ export function RaffleDetailClient({
             >
               Cancel
             </Button>
-            {Boolean(isAdmin) ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleAddToCart}
-                disabled={
-                  (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
-                }
-                className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
-              >
-                <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
-                Add to cart
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleAddToCart}
+              disabled={
+                (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
+              }
+              className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
+            >
+              <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+              Add to cart
+            </Button>
             <Button
               onClick={handlePurchase}
               disabled={

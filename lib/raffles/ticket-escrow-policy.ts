@@ -1,19 +1,59 @@
-import type { Raffle, RaffleStatus } from '@/lib/types'
+import type { Raffle } from '@/lib/types'
 
 /**
- * Statuses where full admins may push ticket payouts from FUNDS_ESCROW via legacy-escrow-refund
- * (same on-chain path as buyer "Claim refund"). Cancelled listings never reach `failed_refund_available`
- * but often still need escrow-driven refunds when ticket revenue sat in funds escrow.
+ * Statuses where full admins may push ticket payouts from FUNDS_ESCROW via /api/admin/legacy-escrow-refund
+ * (same on-chain path as buyer POST /api/entries/claim-refund). Match buyer-eligible statuses except we still
+ * require funds-escrow ticket routing — treasury-only listings need manual payout + record signature.
+ *
+ * Additionally: returning the escrow prize to the creator does not always move status off `live` /
+ * `ready_to_draw`; once `prize_returned_at` is set, admins may unwind ticket escrow without requiring a cancel row.
+ *
+ * Pending cancellation queue: creators who requested cancel (`cancellation_requested_at`) still show as live /
+ * completed until an admin accepts — bulk escrow refunds should be available then too.
  */
 const ADMIN_FUNDS_ESCROW_REFUND_STATUSES: ReadonlySet<string> = new Set([
   'failed_refund_available',
+  'pending_min_not_met',
   'cancelled',
 ])
 
-/** Whether the admin "send refunds from funds escrow" tool may run for this raffle (UI + API). */
-export function raffleAllowsAdminFundsEscrowRefund(raffle: { status: RaffleStatus }): boolean {
+const ADMIN_ESCROW_REFUND_AFTER_PRIZE_RETURN_STATUSES: ReadonlySet<string> = new Set(['live', 'ready_to_draw'])
+
+function hasRecordedPrizeReturnToCreator(
+  raffle: Pick<Raffle, 'prize_returned_at' | 'prize_return_tx'>
+): boolean {
+  if (raffle.prize_returned_at && String(raffle.prize_returned_at).trim()) return true
+  const tx = typeof raffle.prize_return_tx === 'string' ? raffle.prize_return_tx.trim() : ''
+  return tx.length >= 80
+}
+
+function hasCreatorPendingCancellationRequest(
+  raffle: Pick<Raffle, 'cancellation_requested_at' | 'status'>
+): boolean {
+  const req = raffle.cancellation_requested_at
+  if (!req || !String(req).trim()) return false
   const s = (raffle.status ?? '').toLowerCase()
-  return ADMIN_FUNDS_ESCROW_REFUND_STATUSES.has(s)
+  return s !== 'cancelled'
+}
+
+/** Whether the admin "send refunds from funds escrow" tool may run for this raffle (UI + API). */
+export function raffleAllowsAdminFundsEscrowRefund(
+  raffle: Pick<
+    Raffle,
+    | 'status'
+    | 'ticket_payments_to_funds_escrow'
+    | 'prize_returned_at'
+    | 'prize_return_tx'
+    | 'cancellation_requested_at'
+  >
+): boolean {
+  if (!raffleUsesFundsEscrow(raffle)) return false
+  const s = (raffle.status ?? '').toLowerCase()
+  if (ADMIN_FUNDS_ESCROW_REFUND_STATUSES.has(s)) return true
+  if (hasCreatorPendingCancellationRequest(raffle)) return true
+  return (
+    hasRecordedPrizeReturnToCreator(raffle) && ADMIN_ESCROW_REFUND_AFTER_PRIZE_RETURN_STATUSES.has(s)
+  )
 }
 
 /** Max automatic deadline extensions when min_tickets is not met at end; then refunds + NFT return. */

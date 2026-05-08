@@ -3,8 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { buildGen2PresalePaymentTransaction } from '@/lib/gen2-presale/build-transaction'
 import { getGen2PresaleServerConfig } from '@/lib/gen2-presale/config'
-import { sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
-import { GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE } from '@/lib/gen2-presale/max-per-purchase'
+import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
+import {
+  GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
+  gen2PresaleCreditsRemainingForWallet,
+} from '@/lib/gen2-presale/max-per-purchase'
 import { getGen2PresaleSettings } from '@/lib/db/gen2-presale-settings'
 import { computePurchaseLamports } from '@/lib/gen2-presale/pricing'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
@@ -53,6 +56,28 @@ export async function POST(request: NextRequest) {
           error: `quantity must be an integer between 1 and ${GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE}`,
         },
         { status: 400 }
+      )
+    }
+
+    const bal = await getBalanceByWallet(buyerNorm)
+    const walletRemaining = gen2PresaleCreditsRemainingForWallet(bal)
+    if (walletRemaining <= 0) {
+      return NextResponse.json(
+        {
+          error: 'This wallet already has the maximum Gen2 presale credits.',
+          code: 'wallet_cap',
+        },
+        { status: 409 }
+      )
+    }
+    if (qty > walletRemaining) {
+      return NextResponse.json(
+        {
+          error: `You can buy at most ${walletRemaining} more spot(s) on this wallet (20 credit cap).`,
+          code: 'wallet_cap',
+          wallet_remaining: walletRemaining,
+        },
+        { status: 409 }
       )
     }
 

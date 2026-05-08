@@ -7,6 +7,7 @@ import { ChevronRight } from 'lucide-react'
 
 import { HeroVideoBackground } from '@/components/HeroVideoBackground'
 import { Gen2BalanceCard } from '@/components/gen2-presale/Gen2BalanceCard'
+import { Gen2ParticipantsCard } from '@/components/gen2-presale/Gen2ParticipantsCard'
 import { Gen2ElectricBorder } from '@/components/gen2-presale/Gen2ElectricBorder'
 import { Gen2LiveBadge } from '@/components/gen2-presale/Gen2LiveBadge'
 import { Gen2PresaleBanner } from '@/components/gen2-presale/Gen2PresaleBanner'
@@ -17,6 +18,7 @@ import { useGen2PresaleBalance } from '@/hooks/use-gen2-presale-balance'
 import { useGen2PresaleStats } from '@/hooks/use-gen2-presale-stats'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { getGen2PresaleBalanceIssues, getGen2PresaleStatsIssues } from '@/lib/gen2-presale/presale-sanity'
+import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
 
 function Gen2Countdown() {
@@ -38,7 +40,7 @@ function Gen2Countdown() {
     const m = Math.floor(diff / 60000) % 60
     const h = Math.floor(diff / 3600000) % 24
     const d = Math.floor(diff / 86400000)
-    if (diff <= 0) return 'Mint window: live soon'
+    if (diff <= 0) return 'Live'
     return `${d}d ${h}h ${m}m ${s}s`
   }, [valid, targetMs, now])
 
@@ -51,11 +53,18 @@ function Gen2Countdown() {
   )
 }
 
-export function Gen2PresalePageClient() {
+type Gen2PresalePageClientProps = {
+  /** SIWS session is gen2 presale admin — show internal note when presale toggle is off */
+  showAdminPausedNote?: boolean
+}
+
+export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2PresalePageClientProps) {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? null
-  const { stats, loading: statsLoading, error: statsError, refresh: refreshStats } = useGen2PresaleStats()
-  const { balance, loading: balLoading, refresh: refreshBal } = useGen2PresaleBalance(wallet)
+  const [participantsListKey, setParticipantsListKey] = useState(0)
+  const { stats, loading: statsLoading, error: statsError, refresh: refreshStats, applyStatsPatch } =
+    useGen2PresaleStats(20_000)
+  const { balance, loading: balLoading, refresh: refreshBal, applySnapshot } = useGen2PresaleBalance(wallet)
 
   const presaleLive = stats?.presale_live === true
   const statsStatusLoading = statsLoading && stats == null
@@ -66,10 +75,38 @@ export function Gen2PresalePageClient() {
       return Number.isFinite(n) && n > 0 ? n : 20
     })()
 
-  const refreshAll = useCallback(() => {
+  const onPresalePurchaseSettled = useCallback(
+    (result?: {
+      balance?: Gen2PresaleBalance
+      stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
+    }) => {
+      if (result?.balance) applySnapshot(result.balance)
+      if (result?.stats) applyStatsPatch(result.stats)
+      void refreshStats()
+      void refreshBal()
+      setParticipantsListKey((k) => k + 1)
+    },
+    [applySnapshot, applyStatsPatch, refreshStats, refreshBal]
+  )
+
+  const refreshPresaleData = useCallback(() => {
     void refreshStats()
     void refreshBal()
+    setParticipantsListKey((k) => k + 1)
   }, [refreshStats, refreshBal])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshPresaleData()
+    }
+    const onPageShow = () => refreshPresaleData()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [refreshPresaleData])
 
   const presaleSanityIssues = useMemo(() => {
     const fromStats = stats ? getGen2PresaleStatsIssues(stats) : []
@@ -112,10 +149,9 @@ export function Gen2PresalePageClient() {
               </h1>
               <p className="text-lg font-semibold text-[#00FF9C]">1 presale spot = 1 Gen2 mint</p>
               <p className="rounded-xl border border-[#00E58B]/25 bg-[#10161C]/85 px-4 py-3 text-base font-semibold text-[#EAFBF4] shadow-[0_0_32px_rgba(0,0,0,0.35)] ring-1 ring-[#00FF9C]/10 backdrop-blur-md">
-                <span className="text-[#00FF9C]">${spotPriceUsdc} USDC</span> per spot ·{' '}
-                <span className="font-normal text-[#A9CBB9]">you pay in SOL</span>{' '}
+                <span className="text-[#00FF9C]">${spotPriceUsdc} dollars in SOL</span> per spot.{' '}
                 <span className="text-sm font-normal text-[#A9CBB9]">
-                  (amount is calculated on-chain from the live SOL/USD rate on the server).
+                  Amount is calculated on-chain from the live SOL/USD rate on the server.
                 </span>
               </p>
               <p className="text-[#A9CBB9] leading-relaxed">
@@ -133,6 +169,12 @@ export function Gen2PresalePageClient() {
                 >
                   {presaleLive ? 'Buy presale spots' : 'Presale details'}{' '}
                   <ChevronRight className="ml-1 h-5 w-5" />
+                </Link>
+                <Link
+                  href="#gen2-about"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#1F6F54] px-6 font-semibold text-[#A9CBB9] touch-manipulation hover:border-[#00E58B]/40 hover:text-[#EAFBF4]"
+                >
+                  About Gen2
                 </Link>
                 <Link
                   href="#gen2-how"
@@ -171,7 +213,7 @@ export function Gen2PresalePageClient() {
         {/* Stats */}
         <section className="mt-14 space-y-4 animate-page-enter">
           <h2 className="text-center font-display text-2xl text-[#EAFBF4] md:text-left">Live allocation</h2>
-          {stats && stats.presale_live === false && (
+          {stats && stats.presale_live === false && showAdminPausedNote && (
             <p className="text-center text-sm text-[#FFD769] md:text-left">
               Purchasing is paused in admin — numbers below are informational.
             </p>
@@ -184,19 +226,110 @@ export function Gen2PresalePageClient() {
           <Gen2ElectricBorder>
             <Gen2ProgressCard stats={stats} loading={statsLoading} className="border-0 shadow-none ring-0" />
           </Gen2ElectricBorder>
+
+          {/* Purchase + balance — above participant list */}
+          <div className="mt-10 grid gap-8 lg:grid-cols-2">
+            <Gen2PurchaseCard
+              stats={stats}
+              statsLoading={statsLoading}
+              balance={balance}
+              balanceLoading={balLoading}
+              presaleLive={presaleLive}
+              onPurchased={onPresalePurchaseSettled}
+              className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
+            />
+            <Gen2ElectricBorder>
+              <Gen2BalanceCard
+                balance={balance}
+                loading={balLoading}
+                connected={connected}
+                onRefresh={refreshPresaleData}
+                walletAddress={wallet}
+                onRecorded={onPresalePurchaseSettled}
+                className="border-0 shadow-none ring-0"
+              />
+            </Gen2ElectricBorder>
+          </div>
+
+          <div id="gen2-participants" className="scroll-mt-28">
+            <Gen2ParticipantsCard
+              highlightWallet={wallet}
+              listRefreshKey={participantsListKey}
+              className="mt-10"
+            />
+          </div>
         </section>
 
-        {/* Purchase + balance */}
-        <section className="mt-14 grid gap-8 lg:grid-cols-2">
-          <Gen2PurchaseCard
-            stats={stats}
-            statsLoading={statsLoading}
-            presaleLive={presaleLive}
-            onPurchased={refreshAll}
-            className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
-          />
-          <Gen2ElectricBorder>
-            <Gen2BalanceCard balance={balance} loading={balLoading} connected={connected} className="border-0 shadow-none ring-0" />
+        {/* About Gen2 — supply, mint schedule, tier pricing, utilities */}
+        <section id="gen2-about" className="mt-14 scroll-mt-28 animate-page-enter">
+          <h2 className="font-display text-3xl text-[#EAFBF4]">About Gen2</h2>
+          <Gen2ElectricBorder className="mt-6">
+            <div className="rounded-2xl border border-[#00E58B]/25 bg-[#151D24]/95 p-6 shadow-[inset_0_0_40px_rgba(0,229,139,0.06)] md:p-8">
+              <dl className="grid gap-5 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Supply</dt>
+                  <dd className="mt-1 font-mono text-xl font-bold tabular-nums text-[#EAFBF4]">2,000</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Mint</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">June 27, 2026</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Presale</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#00FF9C]">
+                    20 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Whitelist</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">
+                    30 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Public</dt>
+                  <dd className="mt-1 text-lg font-semibold text-[#EAFBF4]">
+                    40 USDC <span className="font-normal text-[#A9CBB9]">(in SOL)</span>
+                  </dd>
+                </div>
+              </dl>
+
+              <div
+                className="my-8 h-px w-full bg-gradient-to-r from-transparent via-[#1F6F54]/80 to-transparent"
+                role="separator"
+                aria-hidden
+              />
+
+              <h3 className="font-display text-xl text-[#EAFBF4]">Gen2 utilities</h3>
+              <ul className="mt-4 space-y-3 text-sm leading-relaxed text-[#A9CBB9] sm:text-base">
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>100% secondary sales revenue share</span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>
+                    20% launchpad revenue share (designed to let projects create and run their own mints)
+                  </span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>20% staking platform revenue share (infrastructure for projects on Solana)</span>
+                </li>
+                <li className="flex gap-3">
+                  <span className="mt-1.5 shrink-0 text-[#00FF9C]" aria-hidden>
+                    •
+                  </span>
+                  <span>50% game revenue share</span>
+                </li>
+              </ul>
+            </div>
           </Gen2ElectricBorder>
         </section>
 

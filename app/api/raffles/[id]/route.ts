@@ -22,6 +22,7 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import { isOwlEnabled } from '@/lib/tokens'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -105,6 +106,26 @@ export async function PATCH(
         )
       }
       const raffle = await updateRaffle(raffleId, { image_fallback_url })
+      if (!raffle) {
+        return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
+      }
+      return NextResponse.json(raffle)
+    }
+
+    const listPatchKeys = Object.keys(body).filter(
+      (k) => k !== 'wallet_address' && (body as Record<string, unknown>)[k] !== undefined
+    )
+    const isListOnPlatformOnlyPatch =
+      listPatchKeys.length === 1 &&
+      (listPatchKeys[0] === 'list_on_platform' || listPatchKeys[0] === 'listOnPlatform')
+
+    if (isListOnPlatformOnlyPatch) {
+      const raw =
+        (body as Record<string, unknown>).list_on_platform !== undefined
+          ? (body as Record<string, unknown>).list_on_platform
+          : (body as Record<string, unknown>).listOnPlatform
+      const list_on_platform = !(raw === false || raw === 'false')
+      const raffle = await updateRaffle(raffleId, { list_on_platform })
       if (!raffle) {
         return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
       }
@@ -424,8 +445,8 @@ export async function PATCH(
     const isLiveLike = status === 'live' || status === 'ready_to_draw'
     const isNft = existingRaffle.prize_type === 'nft'
 
-    // Ticket currency: SOL or USDC only
-    const validCurrencies = ['USDC', 'SOL']
+    // Ticket currency: SOL, USDC; OWL when mint is configured
+    const validCurrencies: string[] = isOwlEnabled() ? ['USDC', 'SOL', 'OWL'] : ['USDC', 'SOL']
     const requestedCurrency =
       typeof body.currency === 'string' && body.currency.trim()
         ? body.currency.trim().toUpperCase()

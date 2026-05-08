@@ -18,7 +18,7 @@
  * SPL Token–program prizes: winner payout and return-to-creator try Metaplex Token Metadata
  * transferV1 first (same as creator deposit in-app), then fall back to raw SPL transfer.
  */
-import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -155,11 +155,16 @@ async function getEscrowTokenProgramForMint(
  * Get the escrow's token account address for a given mint (SPL Token or Token-2022).
  * Used for explorer links and any flow that needs to reference the escrow token account.
  * Returns null if escrow is not configured or does not hold this NFT.
+ *
+ * Pass `connection` (e.g. {@link getSolanaConnection}) right after a deposit so verification
+ * does not lag behind a separate `SOLANA_RPC_READ_URL` replica.
  */
-export async function getEscrowTokenAccountForMint(mint: PublicKey): Promise<PublicKey | null> {
+export async function getEscrowTokenAccountForMint(
+  mint: PublicKey,
+  connection: Connection = getSolanaReadConnection()
+): Promise<PublicKey | null> {
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) return null
-  const connection = getSolanaReadConnection()
   for (const programId of TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -1073,6 +1078,72 @@ async function persistPrizeReturnToCreator(
     nft_claim_locked_at: null,
     nft_claim_locked_wallet: null,
   })
+}
+
+/**
+ * Full admin: record an on-chain prize return that was sent manually (e.g. from treasury or another wallet)
+ * when automated escrow signing is unavailable. Same DB fields as {@link transferNftPrizeToCreator}.
+ */
+export async function recordManualPrizeReturnToCreator(
+  raffleId: string,
+  reason: PrizeReturnReason,
+  signature: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const sig = signature.trim()
+  if (sig.length < 80 || sig.length > 120) {
+    return { ok: false, error: 'Transaction signature must look like a Solana signature (length).' }
+  }
+
+  const raffle = await getRaffleById(raffleId)
+  if (!raffle) {
+    return { ok: false, error: 'Raffle not found' }
+  }
+
+  const escrowPrizeKind =
+    raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)
+  if (!escrowPrizeKind) {
+    return {
+      ok: false,
+      error: 'This raffle does not use an NFT or partner SPL escrow prize.',
+    }
+  }
+  if (!raffle.prize_deposited_at) {
+    return {
+      ok: false,
+      error: 'No verified prize deposit on this raffle; nothing to reconcile.',
+    }
+  }
+  if ((raffle.nft_transfer_transaction ?? '').trim()) {
+    return {
+      ok: false,
+      error: 'Prize was already sent to a winner; cannot record return to creator.',
+    }
+  }
+
+  const existingTx = (raffle.prize_return_tx ?? '').trim()
+  if (raffle.prize_returned_at && existingTx) {
+    if (existingTx === sig) {
+      return { ok: true, signature: existingTx }
+    }
+    return {
+      ok: false,
+      error: `Prize return already recorded with a different transaction (${existingTx.slice(0, 12)}…).`,
+    }
+  }
+
+  // Rare: timestamp set without tx — fill in signature / reason.
+  if (raffle.prize_returned_at && !existingTx) {
+    await updateRaffle(raffleId, {
+      prize_return_tx: sig,
+      prize_return_reason: reason,
+      nft_claim_locked_at: null,
+      nft_claim_locked_wallet: null,
+    })
+    return { ok: true, signature: sig }
+  }
+
+  await persistPrizeReturnToCreator(raffleId, reason, sig)
+  return { ok: true, signature: sig }
 }
 
 /**
