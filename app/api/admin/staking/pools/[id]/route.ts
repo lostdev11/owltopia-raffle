@@ -9,6 +9,7 @@ import {
   type NestingAdapterMode,
   type LockEnforcementSource,
 } from '@/lib/db/staking-pools'
+import { validatePoolAgainstNestingEmissionPolicy } from '@/lib/nesting/policy'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -117,6 +118,16 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       patch.lock_enforcement_source = body.lock_enforcement_source
     }
+
+    validatePoolAgainstNestingEmissionPolicy({
+      asset_type: (patch.asset_type ?? existing.asset_type) as 'nft' | 'token',
+      reward_token: (patch.reward_token ?? existing.reward_token) ?? null,
+      reward_rate: Number(patch.reward_rate ?? existing.reward_rate),
+      reward_rate_unit: (patch.reward_rate_unit ?? existing.reward_rate_unit) as
+        | 'hourly'
+        | 'daily'
+        | 'weekly',
+    })
 
     const pool = await updateStakingPool(id, patch)
     return NextResponse.json({ pool })

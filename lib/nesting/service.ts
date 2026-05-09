@@ -4,17 +4,24 @@
 
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
-import { getStakingPositionForWallet } from '@/lib/db/staking-positions'
+import { getActivePositionByAssetIdentifier, getStakingPositionForWallet } from '@/lib/db/staking-positions'
 import { estimateClaimableRewards } from '@/lib/staking/rewards'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
+import {
+  assertNestingSelloutReached,
+  assertRewardTreasuryConfigured,
+  validatePoolAgainstNestingEmissionPolicy,
+} from '@/lib/nesting/policy'
 
 export async function executeStake(params: {
   wallet: string
   pool_id: string
   rawAmount: unknown
   rawAssetIdentifier: unknown
+  /** Admin-only QA: stake before `NESTING_SELL_OUT_*` gate is cleared. */
+  bypassSelloutGate?: boolean
 }) {
   const pool_id = params.pool_id.trim()
   if (!STAKING_UUID_RE.test(pool_id)) {
@@ -24,6 +31,13 @@ export async function executeStake(params: {
   const pool = await getStakingPoolById(pool_id)
   if (!pool || !pool.is_active) {
     throw new StakingUserError('Pool not found or inactive', 400)
+  }
+  validatePoolAgainstNestingEmissionPolicy(pool)
+  if (!params.bypassSelloutGate) {
+    assertNestingSelloutReached()
+  }
+  if (pool.adapter_mode === 'onchain_enabled') {
+    assertRewardTreasuryConfigured()
   }
 
   let amount =
@@ -40,6 +54,15 @@ export async function executeStake(params: {
     typeof params.rawAssetIdentifier === 'string' && params.rawAssetIdentifier.trim()
       ? params.rawAssetIdentifier.trim()
       : null
+  if (pool.asset_type === 'nft' && !asset_identifier) {
+    throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
+  }
+  if (pool.asset_type === 'nft' && asset_identifier) {
+    const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
+    if (existing) {
+      throw new StakingUserError('This NFT is already in an active staking position.', 400)
+    }
+  }
 
   if (pool.minimum_stake != null && amount < Number(pool.minimum_stake)) {
     throw new StakingUserError(`amount below minimum_stake (${pool.minimum_stake})`, 400)

@@ -23,7 +23,7 @@ export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, clas
         <ShieldCheck className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
         <div className="space-y-2 min-w-0">
           <h2 id="nesting-security-heading" className="text-sm font-semibold text-foreground">
-            Security checks (review before staking)
+            Peek at safeguards before you nest
           </h2>
           <ul className="text-xs text-muted-foreground space-y-1.5 list-disc pl-4 leading-relaxed">
             {NESTING_SECURITY_BULLETS.map((line, index) => (
@@ -44,12 +44,12 @@ export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, clas
           className="mt-1 h-4 w-4 shrink-0 rounded border-input accent-muted-foreground"
         />
         <span className="text-xs text-muted-foreground leading-snug font-normal">
-          I have read the safeguards above. I understand mock staking updates database records only until on-chain pools are
-          enabled.
+          I have read this. I know some perches record my nest inside Owltopia until that perch upgrades to fuller
+          wallet-backed custody.
         </span>
       </label>
       <p className="text-[11px] text-muted-foreground/90">
-        Preference is saved in session storage for this browsing session only.
+        We remember this choice for this browsing session only.
       </p>
     </section>
   )

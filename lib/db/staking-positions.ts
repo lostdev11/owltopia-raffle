@@ -70,6 +70,23 @@ export async function getStakingPositionForWallet(
   return data as StakingPositionRow | null
 }
 
+export async function getActivePositionByAssetIdentifier(
+  poolId: string,
+  assetIdentifier: string
+): Promise<StakingPositionRow | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('staking_positions')
+    .select('*')
+    .eq('pool_id', poolId)
+    .eq('asset_identifier', assetIdentifier.trim())
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data as StakingPositionRow | null
+}
+
 export async function insertStakingPosition(row: {
   wallet_address: string
   pool_id: string

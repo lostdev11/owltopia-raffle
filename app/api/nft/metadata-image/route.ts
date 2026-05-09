@@ -20,7 +20,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'NFT API not configured' }, { status: 503 })
     }
 
-    const image = await fetchNftImageUriFromHelius(mint)
+    const preferMainnet =
+      request.nextUrl.searchParams.get('preferMainnet') === '1' ||
+      request.nextUrl.searchParams.get('preferMainnet') === 'true'
+    const image = await fetchNftImageUriFromHelius(mint, { preferMainnet })
     return NextResponse.json({ image: image ?? null }, { status: 200 })
   } catch (e) {
     console.error('[nft/metadata-image]', e)

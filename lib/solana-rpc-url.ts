@@ -104,13 +104,3 @@ export function resolveServerSolanaRpcUrl(): string {
   if (pub) return sanitizeRpcUrl(pub)
   return DEFAULT_SERVER_RPC
 }
-
-/**
- * Optional dedicated read RPC for lightweight server reads (e.g. Owl Nesting tx verification).
- * When unset, matches {@link resolveServerSolanaRpcUrl}.
- */
-export function resolveServerSolanaReadRpcUrl(): string {
-  const read = process.env.SOLANA_RPC_READ_URL?.trim()
-  if (read) return sanitizeRpcUrl(read)
-  return resolveServerSolanaRpcUrl()
-}
