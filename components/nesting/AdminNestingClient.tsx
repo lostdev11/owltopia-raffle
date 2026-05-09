@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, Globe, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -68,6 +68,12 @@ export function AdminNestingClient() {
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
+
+  const [landingPublic, setLandingPublic] = useState(false)
+  const [landingPublicLoading, setLandingPublicLoading] = useState(false)
+  const [landingPublicSaving, setLandingPublicSaving] = useState(false)
+  const [landingPublicUpdatedAt, setLandingPublicUpdatedAt] = useState<string | null>(null)
+  const [landingPublicUpdatedBy, setLandingPublicUpdatedBy] = useState<string | null>(null)
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -139,6 +145,60 @@ export function AdminNestingClient() {
   useEffect(() => {
     if (isAdmin && sessionReady) void fetchPools()
   }, [isAdmin, sessionReady, fetchPools])
+
+  useEffect(() => {
+    if (!sessionReady || !isAdmin) return
+    let cancelled = false
+    setLandingPublicLoading(true)
+    fetch('/api/admin/nesting/public-landing', { credentials: 'include', cache: 'no-store' })
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((json) => {
+        if (cancelled || !json) return
+        setLandingPublic(Boolean(json.landing_public))
+        setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+        setLandingPublicUpdatedBy(
+          typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+        )
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLandingPublic(false)
+          setLandingPublicUpdatedAt(null)
+          setLandingPublicUpdatedBy(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLandingPublicLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionReady, isAdmin, visibilityTick])
+
+  const patchLandingPublic = useCallback(async (next: boolean) => {
+    setLandingPublicSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/nesting/public-landing', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landing_public: next }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Could not update public landing')
+        return
+      }
+      setLandingPublic(Boolean(json.landing_public))
+      setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+      setLandingPublicUpdatedBy(
+        typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+      )
+    } finally {
+      setLandingPublicSaving(false)
+    }
+  }, [])
 
   const handleSignIn = useCallback(async () => {
     if (!publicKey || !signMessage) {
@@ -342,6 +402,50 @@ export function AdminNestingClient() {
           {saveError}
         </div>
       )}
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Public staking page"
+          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on."
+        />
+        <Card className="rounded-xl border-green-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe className="h-5 w-5 shrink-0" aria-hidden />
+              Public /nesting page
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Visible to everyone</p>
+                <p className="text-xs text-muted-foreground">
+                  When off, only admins can open /nesting (others are sent to the dashboard nest). When on, anyone can
+                  browse perches; staking still requires wallet connect and sign-in.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                {landingPublicLoading || landingPublicSaving ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+                <Switch
+                  id="nesting-public-landing"
+                  ariaLabel="Make Owl Nesting landing page public"
+                  checked={landingPublic}
+                  disabled={landingPublicLoading || landingPublicSaving}
+                  onCheckedChange={(v) => void patchLandingPublic(v)}
+                />
+              </div>
+            </div>
+            {landingPublicUpdatedAt ? (
+              <p className="text-xs text-muted-foreground">
+                Last updated {new Date(landingPublicUpdatedAt).toLocaleString()}
+                {landingPublicUpdatedBy ? ` · ${landingPublicUpdatedBy}` : ''}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      </section>
 
       <section className="space-y-4">
         <SectionHeader title="Create pool" description="Slug must be unique. Reward rate uses the selected unit (snapshot at user stake time)." />

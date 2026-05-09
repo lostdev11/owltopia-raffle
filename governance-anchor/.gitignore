@@ -1,0 +1,8 @@
+.anchor
+test-ledger
+keys/*-keypair.json
+target/
+target-check/
+target-check2/
+**/*.rs.bk
+node_modules

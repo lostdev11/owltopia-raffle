@@ -8,6 +8,7 @@ import {
   type NestingAdapterMode,
   type LockEnforcementSource,
 } from '@/lib/db/staking-pools'
+import { validatePoolAgainstNestingEmissionPolicy } from '@/lib/nesting/policy'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -96,6 +97,13 @@ export async function POST(request: NextRequest) {
       body?.lock_enforcement_source !== undefined && isLockEnforcement(body.lock_enforcement_source)
         ? body.lock_enforcement_source
         : undefined
+
+    validatePoolAgainstNestingEmissionPolicy({
+      asset_type: body.asset_type,
+      reward_token: body.reward_token ?? null,
+      reward_rate,
+      reward_rate_unit: unit,
+    })
 
     const pool = await insertStakingPool({
       name,

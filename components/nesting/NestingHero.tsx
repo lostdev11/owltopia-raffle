@@ -15,17 +15,19 @@ export function NestingHero() {
         <h1 className="font-display text-3xl sm:text-4xl md:text-5xl tracking-wide text-theme-prime drop-shadow-[0_0_24px_rgba(0,255,136,0.25)]">
           Owl Nesting
         </h1>
-        <p className="text-lg text-muted-foreground">Earn while you hold.</p>
+        <p className="text-lg text-muted-foreground font-medium">
+          Chill, nest, rack up OWL—with one quick wallet hello.
+        </p>
         <p className="text-sm text-muted-foreground max-w-lg mx-auto leading-relaxed">
-          DB-backed staking for the Owltopia MVP — lock period, snapshots, and reward estimates. Full on-chain custody
-          comes later; nothing here calls the Solana RPC.
+          Pick a perch, settle in for the countdown, then grab rewards whenever you want. Signing in costs no gas—you
+          just prove it is still you.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
           <Button asChild variant="outline" size="lg" className={cn(nestingMutedActionButtonClass, 'text-base')}>
-            <Link href="#pools">View pools</Link>
+            <Link href="#perches">See perches</Link>
           </Button>
           <Button asChild variant="outline" size="lg" className={cn(nestingMutedActionButtonClass, 'text-base')}>
-            <Link href="/dashboard/nesting">Your nest</Link>
+            <Link href="/dashboard/nesting">My nest</Link>
           </Button>
         </div>
       </div>

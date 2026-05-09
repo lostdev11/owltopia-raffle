@@ -27,11 +27,14 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null)
 
+    const bypassSelloutGate = body?.bypass_nesting_sellout_gate === true
+
     const { position } = await executeStake({
       wallet: session.wallet,
       pool_id: typeof body?.pool_id === 'string' ? body.pool_id.trim() : '',
       rawAmount: body?.amount,
       rawAssetIdentifier: body?.asset_identifier,
+      bypassSelloutGate,
     })
 
     return NextResponse.json({

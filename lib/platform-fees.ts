@@ -1,5 +1,6 @@
 import { PublicKey } from '@solana/web3.js'
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
+import { dasAssetBelongsToCollection } from '@/lib/helius/das-asset-collection'
 import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
 import { getOwltopiaSnapshotIfFresh, upsertOwltopiaHolderSnapshot } from '@/lib/db/owltopia-holder-snapshot'
 
@@ -18,42 +19,6 @@ function retryAfterMsFromResponse(res: Response): number {
   const date = Date.parse(h)
   if (!Number.isNaN(date)) return Math.min(Math.max(date - Date.now(), 500), 30_000)
   return 1_000
-}
-
-/** True if DAS asset belongs to the Owltopia collection (grouping and/or on-chain metadata). */
-function assetMatchesOwltopiaCollection(item: unknown, collectionAddress: string): boolean {
-  if (!item || typeof item !== 'object') return false
-  const o = item as Record<string, unknown>
-
-  const grouping = o.grouping
-  if (Array.isArray(grouping)) {
-    const inCollection = grouping.some(
-      (g: unknown) =>
-        g &&
-        typeof g === 'object' &&
-        (g as { group_key?: string; group_value?: string }).group_key === 'collection' &&
-        typeof (g as { group_value?: string }).group_value === 'string' &&
-        (g as { group_value: string }).group_value === collectionAddress,
-    )
-    if (inCollection) return true
-  }
-
-  const topCol = o.collection
-  if (topCol && typeof topCol === 'object') {
-    const key = (topCol as { key?: string; address?: string }).key
-    const addr = (topCol as { key?: string; address?: string }).address
-    if (typeof key === 'string' && key === collectionAddress) return true
-    if (typeof addr === 'string' && addr === collectionAddress) return true
-  }
-
-  const content = o.content
-  if (content && typeof content === 'object') {
-    const metadata = (content as { metadata?: { collection?: { key?: string; verified?: boolean } } }).metadata
-    const key = metadata?.collection?.key
-    if (typeof key === 'string' && key === collectionAddress) return true
-  }
-
-  return false
 }
 
 export type OwnsOwltopiaOptions = {
@@ -192,7 +157,7 @@ export async function ownsOwltopia(
         const searchItems = searchJson.result?.items
         if (!Array.isArray(searchItems) || searchItems.length === 0) continue
 
-        if (searchItems.some((item) => assetMatchesOwltopiaCollection(item, collectionAddress))) {
+        if (searchItems.some((item) => dasAssetBelongsToCollection(item, collectionAddress))) {
           ownsOwltopiaCache.set(normalized, {
             value: true,
             expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
@@ -270,7 +235,7 @@ export async function ownsOwltopia(
         }
 
         for (const item of items) {
-          if (assetMatchesOwltopiaCollection(item, collectionAddress)) {
+          if (dasAssetBelongsToCollection(item, collectionAddress)) {
             ownsOwltopiaCache.set(normalized, {
               value: true,
               expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,

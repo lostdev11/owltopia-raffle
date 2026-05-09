@@ -17,7 +17,6 @@ import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, Sh
 import { useCart } from '@/components/cart/CartProvider'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
-
 export function Header() {
   const { publicKey, connected } = useWallet()
   const { ticketCount } = useCart()
@@ -67,8 +66,27 @@ export function Header() {
 
   // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
   const showOwlVision = Boolean(isAdmin)
-  /** Nesting is admin-only in nav until the public flow is ready — avoids a dead link for visitors. */
-  const showNestingNav = Boolean(isAdmin)
+  const [nestingLandingPublic, setNestingLandingPublic] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/nesting/public-settings', { cache: 'no-store' })
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        setNestingLandingPublic(data?.landingPublic === true)
+      })
+      .catch(() => {
+        if (!cancelled) setNestingLandingPublic(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visibilityTick])
+
+  /** Nesting appears for admins always; for everyone when `/nesting` is turned on in Owl Nesting admin. */
+  const showNestingNav = Boolean(isAdmin) || nestingLandingPublic
+  const nestingNavHref = nestingLandingPublic ? '/nesting' : '/dashboard/nesting'
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -83,7 +101,7 @@ export function Header() {
     { href: '/council', label: 'Council', icon: Landmark },
     { href: '/owl-center', label: 'Owl Center', icon: Rocket },
     { href: '/gen2-presale', label: 'Gen2 Presale', icon: Sparkles },
-    ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
+    ...(showNestingNav ? [{ href: nestingNavHref, label: 'Nesting', icon: Bird }] : []),
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -140,7 +158,7 @@ export function Header() {
                 </Button>
               </Link>
               {showNestingNav && (
-                <Link href="/nesting">
+                <Link href={nestingNavHref}>
                   <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                     <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">Nesting</span>

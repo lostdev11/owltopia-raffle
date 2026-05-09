@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,7 +9,22 @@ import { estimateClaimableRewards } from '@/lib/staking/rewards'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { LockTimer } from '@/components/nesting/LockTimer'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
+import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import { cn } from '@/lib/utils'
+
+function nestStatusPhrase(status: StakingPositionRow['status']) {
+  switch (status) {
+    case 'active':
+      return 'Nesting'
+    case 'unstaked':
+      return 'Nest closed'
+    case 'pending':
+      return 'Opening…'
+    default:
+      return status
+  }
+}
 
 type Props = {
   position: StakingPositionRow
@@ -31,7 +46,13 @@ export function PositionCard({
   unstakePhase = 'idle',
   actionsEnabled = true,
 }: Props) {
-  const nowMs = new Date().getTime()
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
   const claimable = useMemo(
     () =>
       estimateClaimableRewards({
@@ -50,6 +71,7 @@ export function PositionCard({
     (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs)
 
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
+  const claimAmountLabel = claimAmountInput.toFixed(6)
 
   const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
   const canAct = actionsEnabled
@@ -83,41 +105,55 @@ export function PositionCard({
               position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
             }`}
           >
-            {position.status}
+            {nestStatusPhrase(position.status)}
           </span>
         </div>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <dl className="grid grid-cols-2 gap-2 text-xs sm:text-sm">
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+          {position.asset_identifier ? (
+            <NestingStakedAssetThumb
+              mint={position.asset_identifier}
+              size="md"
+              className="mx-auto shrink-0 sm:mx-0"
+            />
+          ) : null}
+          <dl
+            className={cn(
+              'grid min-w-0 flex-1 grid-cols-2 gap-2 text-xs sm:text-sm',
+              !position.asset_identifier && 'w-full flex-none'
+            )}
+          >
           <div>
-            <dt className="text-muted-foreground">Amount</dt>
+            <dt className="text-muted-foreground">Nest size</dt>
             <dd className="font-mono tabular-nums">{Number(position.amount).toLocaleString()}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Claimable (est.)</dt>
-            <dd className="font-mono tabular-nums text-theme-prime">{claimable.toFixed(6)}</dd>
+            <dt className="text-muted-foreground">Ready to claim</dt>
+            <dd className="font-mono tabular-nums text-theme-prime">{claimAmountLabel}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Claimed</dt>
+            <dt className="text-muted-foreground">Claimed so far</dt>
             <dd className="font-mono tabular-nums">{Number(position.claimed_rewards).toFixed(6)}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Staked</dt>
+            <dt className="text-muted-foreground">Opened</dt>
             <dd className="text-xs">{new Date(position.staked_at).toLocaleString()}</dd>
           </div>
           <div className="col-span-2">
-            <dt className="text-muted-foreground mb-1">Unlock</dt>
+            <dt className="text-muted-foreground mb-1">Countdown</dt>
             <dd>
               <LockTimer unlockAtIso={position.unlock_at} />
             </dd>
           </div>
           {position.asset_identifier ? (
             <div className="col-span-2">
-              <dt className="text-muted-foreground">Asset id</dt>
+              <dt className="text-muted-foreground">Asset tag</dt>
               <dd className="font-mono text-xs break-all">{position.asset_identifier}</dd>
             </div>
           ) : null}
         </dl>
+        </div>
       </CardContent>
       <CardFooter className="flex flex-col gap-2 border-t border-border/60">
         <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
@@ -129,9 +165,24 @@ export function PositionCard({
           className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
           disabled={!canAct || anyTxActive || claimAmountInput <= 0}
           onClick={() => void handleClaimMax()}
+          aria-label={
+            claimAmountInput > 0
+              ? `Claim ${claimAmountLabel} OWL rewards`
+              : 'Claim OWL rewards'
+          }
         >
           {claimPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          {claimPhase === 'idle' ? 'Claim max (est.)' : nestingTxPhaseLabel(claimPhase)}
+          {claimPhase === 'idle' ? (
+            claimAmountInput > 0 ? (
+              <span className="tabular-nums">
+                Claim <span className="font-medium text-theme-prime">{claimAmountLabel}</span> OWL
+              </span>
+            ) : (
+              'Claim OWL'
+            )
+          ) : (
+            nestingTxPhaseLabel(claimPhase)
+          )}
         </Button>
         <Button
           type="button"
@@ -142,7 +193,7 @@ export function PositionCard({
           onClick={() => void handleUnstake()}
         >
           {unstakePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          {unstakePhase === 'idle' ? 'Unstake' : nestingTxPhaseLabel(unstakePhase)}
+          {unstakePhase === 'idle' ? 'Leave nest' : nestingTxPhaseLabel(unstakePhase)}
         </Button>
         </div>
       </CardFooter>

@@ -1,0 +1,16 @@
+[package]
+name = "owltopia_governance"
+version = "0.1.0"
+description = "Owltopia governance staking (v1: vote weight from current stake at vote time)"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "owltopia_governance"
+
+[features]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-spl = "0.32.1"
