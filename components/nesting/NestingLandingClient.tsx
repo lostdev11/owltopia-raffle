@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { Bird, Coins, Layers, Shield } from 'lucide-react'
+import { ArrowLeft, Bird, Coins, Layers, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
@@ -61,6 +61,13 @@ export function NestingLandingClient({ initialPools }: Props) {
 
   return (
     <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-6xl space-y-12 sm:space-y-16">
+      <Link
+        href="/raffles"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground min-h-[44px] py-2 touch-manipulation -mt-1"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+        Back to raffles
+      </Link>
       <NestingHero />
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

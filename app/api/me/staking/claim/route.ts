@@ -32,10 +32,16 @@ export async function POST(request: NextRequest) {
       rawAmount: body?.amount,
     })
 
+    const txSig =
+      typeof result.transaction_signature === 'string' ? result.transaction_signature.trim() : ''
+
     return NextResponse.json({
       claimed: result.claimed,
       claimed_rewards_total: result.claimed_rewards_total,
-      execution: { path: 'database_mock' as const },
+      transaction_signature: txSig || null,
+      execution: {
+        path: txSig ? ('onchain_transfer' as const) : ('database_only' as const),
+      },
     })
   } catch (e) {
     if (isStakingUserError(e)) {

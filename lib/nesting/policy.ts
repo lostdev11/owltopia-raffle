@@ -50,6 +50,11 @@ export function getNestingRewardTreasuryWallet(): string {
   return process.env.NESTING_OWL_REWARD_TREASURY_WALLET?.trim() || ''
 }
 
+/** When true, OWL reward claims may succeed with database-only credits (no SPL transfer). Default false. */
+export function isNestingDbOnlyOwlClaimsAllowed(): boolean {
+  return readBoolean(process.env.NESTING_ALLOW_DB_ONLY_OWL_CLAIMS, false)
+}
+
 export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
   StakingPoolRow,
   'asset_type' | 'reward_token' | 'reward_rate' | 'reward_rate_unit'

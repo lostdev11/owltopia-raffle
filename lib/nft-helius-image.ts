@@ -48,6 +48,15 @@ export function pickImageFromHeliusAsset(result: unknown): string | null {
   return null
 }
 
+export function pickNameFromHeliusAsset(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null
+  const content = (result as Record<string, unknown>).content as Record<string, unknown> | undefined
+  if (!content) return null
+  const metadata = content.metadata as Record<string, unknown> | undefined
+  const n = metadata?.name
+  return typeof n === 'string' && n.trim() ? n.trim() : null
+}
+
 function extractJsonUriFromDasAsset(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null
   const content = (result as Record<string, unknown>).content as Record<string, unknown> | undefined
@@ -58,10 +67,25 @@ function extractJsonUriFromDasAsset(result: unknown): string | null {
 
 const METADATA_JSON_TIMEOUT_MS = 3_500
 
-/** Off-chain TM / Core metadata JSON (`json_uri`) often holds `image` when DAS omits `content.files`. */
-async function fetchImageFromMetadataJson(jsonUri: string): Promise<string | null> {
+/** Resolve `image.png` / `./x` against the metadata JSON URL (common on Arweave / IPFS). */
+function normalizeMediaUri(uri: string | null, baseJsonUri: string | null): string | null {
+  if (!uri?.trim()) return null
+  const u = uri.trim()
+  if (/^(https?:|ipfs:|ar:)/i.test(u)) return u
+  if (!baseJsonUri?.trim()) return u
+  try {
+    return new URL(u, baseJsonUri.trim()).href
+  } catch {
+    return u
+  }
+}
+
+/** Off-chain TM / Core metadata JSON (`json_uri`) often holds `image` / `name` when DAS omits inline fields. */
+async function fetchMintFieldsFromMetadataJson(
+  jsonUri: string
+): Promise<{ image: string | null; name: string | null }> {
   const u = jsonUri.trim()
-  if (!u) return null
+  if (!u) return { image: null, name: null }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), METADATA_JSON_TIMEOUT_MS)
   try {
@@ -70,27 +94,49 @@ async function fetchImageFromMetadataJson(jsonUri: string): Promise<string | nul
       signal: controller.signal,
       headers: { Accept: 'application/json, text/plain;q=0.9,*/*;q=0.8' },
     })
-    if (!res.ok) return null
+    if (!res.ok) return { image: null, name: null }
     const data: unknown = await res.json().catch(() => null)
-    if (!data || typeof data !== 'object') return null
-    const img = (data as { image?: unknown }).image
-    return typeof img === 'string' && img.trim() ? img.trim() : null
+    if (!data || typeof data !== 'object') return { image: null, name: null }
+    const rec = data as { image?: unknown; name?: unknown }
+    const img = rec.image
+    const image = typeof img === 'string' && img.trim() ? img.trim() : null
+    const nm = rec.name
+    const name = typeof nm === 'string' && nm.trim() ? nm.trim() : null
+    return { image, name }
   } catch {
-    return null
+    return { image: null, name: null }
   } finally {
     clearTimeout(timer)
   }
 }
 
 /**
+ * Inline DAS fields first, then optional single `json_uri` fetch (Metaplex Core / sparse indexer rows).
+ */
+export async function resolveMintMetaFromDasAssetPayload(
+  result: unknown
+): Promise<{ image: string | null; name: string | null }> {
+  const jsonUri = extractJsonUriFromDasAsset(result)
+  let image = normalizeMediaUri(pickImageFromHeliusAsset(result), jsonUri)
+  let name = pickNameFromHeliusAsset(result)
+
+  if (image && name) return { image, name }
+
+  if (jsonUri) {
+    const j = await fetchMintFieldsFromMetadataJson(jsonUri)
+    if (!image && j.image) image = j.image
+    if (!name && j.name) name = j.name
+  }
+
+  return { image, name }
+}
+
+/**
  * Inline DAS fields first, then optional `json_uri` fetch (Metaplex Core / sparse indexer rows).
  */
 export async function resolveImageUriFromDasAssetPayload(result: unknown): Promise<string | null> {
-  const inline = pickImageFromHeliusAsset(result)
-  if (inline) return inline
-  const jsonUri = extractJsonUriFromDasAsset(result)
-  if (!jsonUri) return null
-  return fetchImageFromMetadataJson(jsonUri)
+  const { image } = await resolveMintMetaFromDasAssetPayload(result)
+  return image
 }
 
 const FETCH_TIMEOUT_MS = 4_500
@@ -98,18 +144,21 @@ const FETCH_TIMEOUT_MS = 4_500
 /** Short TTL cache (same Node process / warm serverless) to avoid repeat DAS getAsset for Discord embeds, etc. */
 const IMAGE_URI_CACHE_MAX = 400
 const IMAGE_URI_CACHE_TTL_MS = 86_400_000
-const imageUriCache = new Map<string, { expiresAt: number; uri: string | null }>()
+const mintMetaCache = new Map<string, { expiresAt: number; image: string | null; name: string | null }>()
 
-function cacheImageUri(assetId: string, uri: string | null): void {
+function cacheMintMeta(
+  assetId: string,
+  meta: { image: string | null; name: string | null }
+): void {
   const now = Date.now()
-  while (imageUriCache.size >= IMAGE_URI_CACHE_MAX) {
-    const first = imageUriCache.keys().next().value as string | undefined
-    if (first) imageUriCache.delete(first)
+  while (mintMetaCache.size >= IMAGE_URI_CACHE_MAX) {
+    const first = mintMetaCache.keys().next().value as string | undefined
+    if (first) mintMetaCache.delete(first)
     else break
   }
-  // Short TTL on misses so new json_uri fallbacks / indexer fixes apply without waiting a day.
-  const ttl = uri === null ? 120_000 : IMAGE_URI_CACHE_TTL_MS
-  imageUriCache.set(assetId, { expiresAt: now + ttl, uri })
+  const miss = meta.image === null && meta.name === null
+  const ttl = miss ? 120_000 : IMAGE_URI_CACHE_TTL_MS
+  mintMetaCache.set(assetId, { expiresAt: now + ttl, ...meta })
 }
 
 export type FetchNftImageFromHeliusOptions = {
@@ -117,13 +166,19 @@ export type FetchNftImageFromHeliusOptions = {
   preferMainnet?: boolean
 }
 
+export type NftMintMetaFromHelius = {
+  /** Raw image URI (may be ipfs://, https, ar://…). */
+  image: string | null
+  name: string | null
+}
+
 /**
- * Returns a raw image URI from metadata (may be ipfs://, https, ar://…).
+ * Returns display metadata for a mint via Helius DAS getAsset (+ optional json_uri).
  */
-export async function fetchNftImageUriFromHelius(
+export async function fetchNftMintMetaFromHelius(
   assetId: string,
   options?: FetchNftImageFromHeliusOptions
-): Promise<string | null> {
+): Promise<NftMintMetaFromHelius | null> {
   const id = assetId.trim()
   if (!id) return null
 
@@ -133,8 +188,10 @@ export async function fetchNftImageUriFromHelius(
   const heliusUrl = preferMainnet ? getHeliusMainnetRpcUrl() : getHeliusRpcUrl()
   if (!heliusUrl) return null
 
-  const cached = imageUriCache.get(cacheLookupKey)
-  if (cached && cached.expiresAt > Date.now()) return cached.uri
+  const cached = mintMetaCache.get(cacheLookupKey)
+  if (cached && cached.expiresAt > Date.now()) {
+    return { image: cached.image, name: cached.name }
+  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -154,12 +211,23 @@ export async function fetchNftImageUriFromHelius(
     if (!res.ok) return null
     const json: { result?: unknown; error?: unknown } = await res.json().catch(() => ({}))
     if (json.error) return null
-    const uri = await resolveImageUriFromDasAssetPayload(json.result)
-    cacheImageUri(cacheLookupKey, uri)
-    return uri
+    const meta = await resolveMintMetaFromDasAssetPayload(json.result)
+    cacheMintMeta(cacheLookupKey, meta)
+    return meta
   } catch {
     return null
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Returns a raw image URI from metadata (may be ipfs://, https, ar://…).
+ */
+export async function fetchNftImageUriFromHelius(
+  assetId: string,
+  options?: FetchNftImageFromHeliusOptions
+): Promise<string | null> {
+  const meta = await fetchNftMintMetaFromHelius(assetId, options)
+  return meta?.image ?? null
 }

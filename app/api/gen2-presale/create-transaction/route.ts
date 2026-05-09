@@ -1,6 +1,8 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 import { NextRequest, NextResponse } from 'next/server'
 
+import { forbidUnlessSelfOrAdmin } from '@/lib/api-wallet-auth'
+import { requireSession } from '@/lib/auth-server'
 import { buildGen2PresalePaymentTransaction } from '@/lib/gen2-presale/build-transaction'
 import { getGen2PresaleServerConfig } from '@/lib/gen2-presale/config'
 import { getBalanceByWallet, sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
@@ -18,6 +20,9 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const ip = getClientIp(request)
     const rl = rateLimit(`gen2-create-tx:${ip}`, 30, 60_000)
     if (!rl.allowed) {
@@ -43,6 +48,9 @@ export async function POST(request: NextRequest) {
     if (!buyerNorm) {
       return NextResponse.json({ error: 'Invalid buyer wallet' }, { status: 400 })
     }
+
+    const authz = await forbidUnlessSelfOrAdmin(session, buyerNorm)
+    if (authz) return authz
 
     const qty = Number(body.quantity)
     if (

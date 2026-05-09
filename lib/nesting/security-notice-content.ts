@@ -7,4 +7,5 @@ export const NESTING_SECURITY_BULLETS: readonly string[] = [
   'Whatever wallet stays connected must match what you signed in with, so nests never hop to the wrong person.',
   'Nesting moves run through Owltopia’s servers after safety checks—we do not expose direct database taps from your browser.',
   'Every tap double-checks perch rules, IDs, amounts, and that the nest belongs to you before anything changes.',
+  'OWL reward claims are delivered on-chain from the platform reward treasury when it is configured and funded; otherwise only your in-app totals update.',
 ]

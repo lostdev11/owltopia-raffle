@@ -56,11 +56,12 @@ export function PoolOnChainSettingsForm({
 }: Props) {
   const [draft, setDraft] = useState<Draft>(() => poolToDraft(pool))
   const [localError, setLocalError] = useState<string | null>(null)
+  const onChainCustodyEnabled = draft.adapter_mode === 'onchain_enabled'
 
   useEffect(() => {
     setDraft(poolToDraft(pool))
     setLocalError(null)
-  }, [pool.id, pool.updated_at])
+  }, [pool])
 
   const save = async () => {
     setLocalError(null)
@@ -110,6 +111,29 @@ export function PoolOnChainSettingsForm({
             {localError}
           </p>
         )}
+        <div className="flex flex-col gap-3 rounded-lg border border-green-500/20 bg-green-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">On-chain staking</p>
+            <p className="text-xs text-muted-foreground">
+              When on, token stakes require a wallet-signed OWL transfer into this pool&apos;s vault before the
+              position becomes active.
+            </p>
+          </div>
+          <Switch
+            id={`onchain-custody-${pool.id}`}
+            ariaLabel={`Toggle on-chain staking for pool ${pool.name}`}
+            checked={onChainCustodyEnabled}
+            onCheckedChange={(enabled) =>
+              setDraft((d) => ({
+                ...d,
+                adapter_mode: enabled ? 'onchain_enabled' : 'solana_ready',
+                is_onchain_enabled: enabled,
+                requires_onchain_sync: enabled,
+                lock_enforcement_source: enabled ? 'hybrid' : 'database',
+              }))
+            }
+          />
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor={`adapter-${pool.id}`}>Adapter mode</Label>
@@ -183,13 +207,13 @@ export function PoolOnChainSettingsForm({
             />
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor={`vault-${pool.id}`}>Vault address</Label>
+            <Label htmlFor={`vault-${pool.id}`}>Vault owner address</Label>
             <Input
               id={`vault-${pool.id}`}
               className="font-mono text-xs min-h-[44px]"
               value={draft.vault_address}
               onChange={(e) => setDraft((d) => ({ ...d, vault_address: e.target.value }))}
-              placeholder="Optional"
+              placeholder="Wallet owner for the OWL vault ATA"
             />
           </div>
           <div className="space-y-2">

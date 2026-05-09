@@ -5,7 +5,12 @@ import {
   ipfsGatewayCandidateUrls,
   rewriteDeadIpfsGatewayHttpsUrl,
 } from '@/lib/ipfs-gateways'
-import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-uri'
+import {
+  arweaveUriToHttps,
+  fullyDecodeURIComponentSafe,
+  irysUploaderMirrorHttpsUrls,
+  isIrysUploaderHttpsUrl,
+} from '@/lib/nft-media-uri'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -366,7 +371,9 @@ export async function GET(request: NextRequest) {
     const targetStr = targetUrl.toString()
     const urlsToTry = isArweaveUrl(targetStr)
       ? expandArweaveProxyUrls(targetStr)
-      : getIpfsGatewayUrls(targetStr)
+      : isIrysUploaderHttpsUrl(targetStr)
+        ? irysUploaderMirrorHttpsUrls(targetStr)
+        : getIpfsGatewayUrls(targetStr)
 
     if (urlsToTry.length === 0) {
       return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })

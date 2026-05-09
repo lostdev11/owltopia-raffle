@@ -137,6 +137,7 @@ export function Gen2PurchaseCard({
       const createRes = await fetch('/api/gen2-presale/create-transaction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ buyerWallet, quantity: qty }),
       })
       const createJson = (await createRes.json().catch(() => ({}))) as {
@@ -149,8 +150,19 @@ export function Gen2PurchaseCard({
         expected?: { solUsdPriceUsed?: number }
       }
       if (!createRes.ok) {
+        if (createRes.status === 401) {
+          throw new Error(
+            'Sign in with Owltopia first (Dashboard → sign in with wallet), then try your purchase again.'
+          )
+        }
         if (createRes.status === 403 && createJson.code === 'presale_not_live') {
           throw new Error(createJson.error || 'Presale is not live.')
+        }
+        if (createRes.status === 403) {
+          throw new Error(
+            createJson.error ||
+              'Your signed-in Owltopia session must match this connected wallet. Sign in again from Dashboard.'
+          )
         }
         if (createRes.status === 409) {
           if (createJson.code === 'wallet_cap') {
@@ -204,6 +216,7 @@ export function Gen2PurchaseCard({
       const confirmRes = await fetch('/api/gen2-presale/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           buyerWallet,
           quantity: qty,
@@ -220,6 +233,11 @@ export function Gen2PurchaseCard({
         stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
       }
       if (!confirmRes.ok) {
+        if (confirmRes.status === 401 || confirmRes.status === 403) {
+          throw new Error(
+            'Sign-in session missing or does not match this wallet. From Dashboard, sign in again, then use Record payment with your transaction signature if credits did not appear.'
+          )
+        }
         const failMsg =
           confirmRes.status === 409 && confirmJson.code === 'duplicate_tx'
             ? 'This purchase was already recorded. Refresh your balance.'

@@ -39,7 +39,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       position,
-      execution: { path: 'database_mock' as const },
+      execution: {
+        path: position.sync_status === 'pending' ? ('onchain_token_transfer_required' as const) : ('database_mock' as const),
+      },
     })
   } catch (e) {
     if (isStakingUserError(e)) {

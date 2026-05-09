@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Globe, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Globe, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,11 @@ import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
 import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
+import {
+  buildQuickNftPoolDescription,
+  isProbableSolanaPubkey,
+  suggestedNftPoolSlug,
+} from '@/lib/nesting/admin-quick-pool'
 
 const emptyForm = () => ({
   name: '',
@@ -65,6 +70,11 @@ export function AdminNestingClient() {
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState(emptyForm)
+  const [quickName, setQuickName] = useState('')
+  const [quickCollection, setQuickCollection] = useState('')
+  const [quickLocked, setQuickLocked] = useState(true)
+  const [quickMaxLockDays, setQuickMaxLockDays] = useState('365')
+  const [quickMinLockDays, setQuickMinLockDays] = useState('30')
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
@@ -244,6 +254,91 @@ export function AdminNestingClient() {
       setSigningIn(false)
     }
   }, [publicKey, signMessage, fetchPools])
+
+  const createQuickPool = async () => {
+    const name = quickName.trim()
+    const coll = quickCollection.trim()
+    setSaveError(null)
+    if (!name || !coll) {
+      setSaveError('Enter a pool name and collection address.')
+      return
+    }
+    if (!isProbableSolanaPubkey(coll)) {
+      setSaveError('Collection address does not look like a Solana public key.')
+      return
+    }
+    let maxLock = 365
+    let minLock = 30
+    if (quickLocked) {
+      maxLock = Number(quickMaxLockDays)
+      minLock = Number(quickMinLockDays)
+      if (!Number.isFinite(maxLock) || !Number.isFinite(minLock)) {
+        setSaveError('Lock days must be valid numbers.')
+        return
+      }
+      if (!Number.isInteger(maxLock) || !Number.isInteger(minLock) || maxLock < 1 || minLock < 1) {
+        setSaveError('Lock days must be whole numbers of at least 1.')
+        return
+      }
+      if (minLock > maxLock) {
+        setSaveError('Minimum lock days cannot be greater than maximum lock days.')
+        return
+      }
+    }
+
+    const slug = suggestedNftPoolSlug(name, coll)
+    const description = buildQuickNftPoolDescription({
+      poolName: name,
+      collectionMint: coll,
+      locked: quickLocked,
+      minLockDays: quickLocked ? minLock : 0,
+      maxLockDays: quickLocked ? maxLock : 0,
+    })
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/staking/pools', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          slug,
+          description,
+          asset_type: 'nft',
+          token_mint: null,
+          collection_key: coll,
+          reward_token: 'OWL',
+          reward_rate: 1,
+          reward_rate_unit: 'daily',
+          lock_period_days: quickLocked ? maxLock : 0,
+          minimum_stake: null,
+          maximum_stake: null,
+          platform_fee_bps: 0,
+          display_order: 0,
+          is_active: true,
+          partner_project_slug: null,
+          adapter_mode: 'mock',
+          lock_enforcement_source: 'database',
+          is_onchain_enabled: false,
+          requires_onchain_sync: false,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Save failed')
+        return
+      }
+      setQuickName('')
+      setQuickCollection('')
+      setQuickLocked(true)
+      setQuickMaxLockDays('365')
+      setQuickMinLockDays('30')
+      await fetchPools()
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const createPool = async () => {
     setSaving(true)
@@ -448,15 +543,112 @@ export function AdminNestingClient() {
       </section>
 
       <section className="space-y-4">
-        <SectionHeader title="Create pool" description="Slug must be unique. Reward rate uses the selected unit (snapshot at user stake time)." />
+        <SectionHeader
+          title="Create pool"
+          description="Quick path: NFT collection perch with a preset description and OWL/day rewards. Expand Advanced for token pools, custom slug, or economics."
+        />
         <Card className="rounded-xl border-green-500/20">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Plus className="h-5 w-5" aria-hidden />
-              New pool
+              New pool (quick)
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+          <CardContent className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="qk-name">Pool name</Label>
+                <Input
+                  id="qk-name"
+                  autoComplete="off"
+                  placeholder="e.g. Gen2 collection nest"
+                  value={quickName}
+                  onChange={(e) => setQuickName(e.target.value)}
+                  className="min-h-[44px] touch-manipulation"
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="qk-coll">Collection address</Label>
+                <Input
+                  id="qk-coll"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Solana collection mint"
+                  value={quickCollection}
+                  onChange={(e) => setQuickCollection(e.target.value)}
+                  className="font-mono text-xs min-h-[44px] touch-manipulation"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Slug is generated from the name plus part of this mint. Rewards: 1 OWL/day/NFT (site policy).
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Locked staking</p>
+                <p className="text-xs text-muted-foreground">
+                  Off means no lock period on this perch. On requires max/min lock days (max is what unstaking waits for).
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                <Switch id="qk-locked" ariaLabel="Locked staking" checked={quickLocked} onCheckedChange={setQuickLocked} />
+                <Label htmlFor="qk-locked" className="text-sm cursor-pointer">
+                  {quickLocked ? 'Lock enabled' : 'No lock'}
+                </Label>
+              </div>
+            </div>
+            {quickLocked ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="qk-max-lock">Maximum lock (days)</Label>
+                  <Input
+                    id="qk-max-lock"
+                    inputMode="numeric"
+                    value={quickMaxLockDays}
+                    onChange={(e) => setQuickMaxLockDays(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">Stored as pool lock; unstaking follows this.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qk-min-lock">Minimum commitment (days)</Label>
+                  <Input
+                    id="qk-min-lock"
+                    inputMode="numeric"
+                    value={quickMinLockDays}
+                    onChange={(e) => setQuickMinLockDays(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">Included in the preset description (defaults 30).</p>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                className="min-h-[44px] bg-green-600 hover:bg-green-700 touch-manipulation"
+                disabled={saving || !quickName.trim() || !quickCollection.trim()}
+                onClick={() => void createQuickPool()}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Create NFT pool
+              </Button>
+            </div>
+
+            <details className="group rounded-xl border border-border/60 bg-background">
+              <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-sm font-medium touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
+                <ChevronDown
+                  className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                  aria-hidden
+                />
+                Advanced — full fields (token pool, custom slug, fees, adapters)
+              </summary>
+              <div className="border-t border-border/60 px-4 pb-4 pt-2">
+                <p className="text-xs text-muted-foreground mb-4">
+                  Use this when you need a token stake pool, a hand-written slug/description, or non-default reward
+                  settings.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="np-name">Name</Label>
               <Input id="np-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="min-h-[44px]" />
@@ -601,14 +793,18 @@ export function AdminNestingClient() {
             <div className="sm:col-span-2">
               <Button
                 type="button"
-                className="min-h-[44px] bg-green-600 hover:bg-green-700"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
                 disabled={saving || !form.name.trim() || !form.slug.trim() || !form.description.trim()}
                 onClick={() => void createPool()}
               >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Create pool
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Create pool (advanced)
               </Button>
             </div>
+                </div>
+              </div>
+            </details>
           </CardContent>
         </Card>
       </section>

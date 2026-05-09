@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { councilEscrowDepositConfirmBody, parseOr400 } from '@/lib/validations'
 import { isCouncilOwlEscrowVotingEnabled } from '@/lib/council/council-owl-escrow-keypair'
+import { councilLegacyEscrowDepositsAreClosed } from '@/lib/council/council-stake-migration'
 import { getCouncilEscrowMinDepositRaw } from '@/lib/council/council-owl-escrow-config'
 import { rpcCreditCouncilEscrowDeposit } from '@/lib/db/owl-council-escrow'
 import { verifyCouncilOwlEscrowDeposit } from '@/lib/solana/verify-council-owl-escrow-deposit'
@@ -20,6 +21,17 @@ export async function POST(request: NextRequest) {
   try {
     if (!isOwlEnabled() || !isCouncilOwlEscrowVotingEnabled()) {
       return NextResponse.json({ error: 'Council OWL escrow is not enabled.' }, { status: 503 })
+    }
+
+    if (councilLegacyEscrowDepositsAreClosed()) {
+      return NextResponse.json(
+        {
+          error:
+            'Council escrow deposits are closed. Stake OWL for voting in Owl Nesting (Council governance pool) instead.',
+          code: 'escrow_deposit_cutoff',
+        },
+        { status: 403 }
+      )
     }
 
     const session = await requireSession(request)

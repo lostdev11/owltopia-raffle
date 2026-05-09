@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
+
+import { forbidUnlessSelfOrAdmin } from '@/lib/api-wallet-auth'
+import { requireSession } from '@/lib/auth-server'
 import { getRaffleBySlug } from '@/lib/db/raffles'
 import { getEntriesByRaffleId } from '@/lib/db/raffles'
-import { isAdmin } from '@/lib/db/admins'
 import { updateEntryStatus } from '@/lib/db/entries'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
 /**
- * Check entry status for a specific wallet and raffle
- * Also attempts to verify pending entries
+ * Check entry status for a specific wallet and raffle; may verify pending on-chain txs.
+ * SIWS required. Callers may only query their own wallet unless they are DB admin.
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const body = await request.json()
-    const { walletAddress, raffleSlug, walletAddress: wallet } = body
+    const { walletAddress, raffleSlug } = body
 
     if (!walletAddress || !raffleSlug) {
       return NextResponse.json(
@@ -23,17 +28,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user is admin (optional - for security)
-    const authHeader = request.headers.get('authorization')
-    let isUserAdmin = false
-    if (authHeader) {
-      try {
-        const walletFromHeader = authHeader.replace('Bearer ', '')
-        isUserAdmin = await isAdmin(walletFromHeader)
-      } catch (e) {
-        // Ignore auth errors
-      }
-    }
+    const authz = await forbidUnlessSelfOrAdmin(session, String(walletAddress))
+    if (authz) return authz
 
     // Get raffle by slug
     const raffle = await getRaffleBySlug(raffleSlug)

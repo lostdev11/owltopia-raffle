@@ -5,15 +5,23 @@
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { getActivePositionByAssetIdentifier, getStakingPositionForWallet } from '@/lib/db/staking-positions'
-import { estimateClaimableRewards } from '@/lib/staking/rewards'
+import { estimateAccruedRewards, meetsMinOwlClaimThreshold, MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import {
   assertNestingSelloutReached,
   assertRewardTreasuryConfigured,
+  isNestingDbOnlyOwlClaimsAllowed,
   validatePoolAgainstNestingEmissionPolicy,
 } from '@/lib/nesting/policy'
+import { getNestingOwlRewardTreasuryKeypair } from '@/lib/nesting/reward-treasury-keypair'
+import {
+  isPastCouncilLegacyEscrowDepositCutoff,
+  getOwlCouncilGovernanceNestingPoolSlug,
+} from '@/lib/council/council-stake-migration'
+import { getOwlCouncilNestingVoteLockedRaw } from '@/lib/council/council-nesting-stake'
+import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
 export async function executeStake(params: {
   wallet: string
@@ -36,7 +44,7 @@ export async function executeStake(params: {
   if (!params.bypassSelloutGate) {
     assertNestingSelloutReached()
   }
-  if (pool.adapter_mode === 'onchain_enabled') {
+  if (pool.adapter_mode === 'onchain_enabled' && pool.asset_type === 'nft') {
     assertRewardTreasuryConfigured()
   }
 
@@ -108,6 +116,23 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
     throw new StakingUserError('Pool not found', 400)
   }
 
+  if (
+    pool.slug === getOwlCouncilGovernanceNestingPoolSlug().toLowerCase() &&
+    isPastCouncilLegacyEscrowDepositCutoff()
+  ) {
+    const owl = getTokenInfo('OWL')
+    if (!owl.mintAddress) {
+      throw new StakingUserError('OWL is not configured.', 503)
+    }
+    const lockedRaw = await getOwlCouncilNestingVoteLockedRaw(params.wallet, owl.decimals)
+    if (lockedRaw > 0n) {
+      throw new StakingUserError(
+        'Some OWL in this pool is committed to open Council votes. Wait until those voting windows end, then unstake.',
+        400
+      )
+    }
+  }
+
   const adapter = resolveMutationAdapter(pool)
   return adapter.unstakePosition({
     wallet: params.wallet,
@@ -138,17 +163,33 @@ export async function executeClaim(params: {
     throw new StakingUserError('Position is not active', 400)
   }
 
-  const claimable = estimateClaimableRewards({
-    amount: Number(row.amount),
-    rewardRateSnapshot: Number(row.reward_rate_snapshot),
-    rewardRateUnitSnapshot: row.reward_rate_unit_snapshot as RewardRateUnit,
-    claimedRewards: Number(row.claimed_rewards),
-    stakedAtMs: new Date(row.staked_at).getTime(),
-    asOfMs: Date.now(),
-  })
+  const stakedAtMs = new Date(row.staked_at).getTime()
+  const asOfMs = Date.now()
+  const stakeAmount = Number(row.amount)
+  const rewardRateSnapshot = Number(row.reward_rate_snapshot)
+  const rewardRateUnitSnapshot = row.reward_rate_unit_snapshot as RewardRateUnit
+  const oldClaimed = Number(row.claimed_rewards)
 
-  if (amount > claimable + 1e-9) {
-    throw new StakingUserError('amount exceeds claimable rewards', 400, { claimable })
+  const accruedNow = estimateAccruedRewards({
+    amount: stakeAmount,
+    rewardRateSnapshot,
+    rewardRateUnitSnapshot,
+    stakedAtMs,
+    asOfMs,
+  })
+  const claimableNow = Math.max(0, accruedNow - oldClaimed)
+  const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
+
+  if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) {
+    throw new StakingUserError(
+      `Claim unlocks once at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL has accrued for this nest.`,
+      400,
+      { claimable: claimableNow, min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM }
+    )
+  }
+
+  if (amount > claimableNow + 1e-9) {
+    throw new StakingUserError('amount exceeds claimable rewards', 400, { claimable: claimableNow })
   }
 
   const pool = await getStakingPoolById(row.pool_id)
@@ -156,10 +197,33 @@ export async function executeClaim(params: {
     throw new StakingUserError('Pool not found', 400)
   }
 
+  const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
+  if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {
+    if (!isOwlEnabled()) {
+      throw new StakingUserError(
+        'OWL mint is not configured, so reward claims cannot be sent to your wallet.',
+        503
+      )
+    }
+    if (!getNestingOwlRewardTreasuryKeypair()) {
+      throw new StakingUserError(
+        'OWL reward treasury is not configured for on-chain payouts. Set NESTING_OWL_REWARD_TREASURY_WALLET and NESTING_OWL_REWARD_TREASURY_SECRET_KEY to the same keypair, fund that wallet’s OWL token account, and ensure SOL for fees. For local testing without chain transfers, set NESTING_ALLOW_DB_ONLY_OWL_CLAIMS=true.',
+        503
+      )
+    }
+  }
+
+  /** Max-claim: align DB with accrued at claim time and transfer exactly what was pending (vs client floor / clock skew). */
+  const FULL_CLAIM_EPS = 1e-5
+  const isFullClaim = claimableNow > 0 && amount >= claimableNow - FULL_CLAIM_EPS
+  const payoutAmount = isFullClaim ? claimableNow : amount
+  const newClaimedTotal = isFullClaim ? accruedNow : oldClaimed + amount
+
   const adapter = resolveMutationAdapter(pool)
   return adapter.claimPositionRewards({
     wallet: params.wallet,
     positionId: position_id,
-    amount,
+    amount: payoutAmount,
+    newClaimedTotal,
   })
 }

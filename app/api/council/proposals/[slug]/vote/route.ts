@@ -76,6 +76,7 @@ export async function POST(
       voteChoice: parsed.data.vote_choice,
       votingPower: powerRes.weightDecimal,
       councilVoteUsedEscrow: powerRes.usedCouncilEscrow,
+      councilVoteUsedNesting: powerRes.usedCouncilNesting,
     })
 
     if (!result.ok) {

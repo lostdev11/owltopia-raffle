@@ -17,10 +17,16 @@ export function useGen2PresaleBalance(wallet: string | null) {
     setLoading(true)
     try {
       const res = await fetch(`/api/gen2-presale/balance?wallet=${encodeURIComponent(wallet)}`, {
+        credentials: 'include',
         cache: 'no-store',
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(
+            'Sign in with Owltopia (Dashboard) to load your presale balance for this wallet.'
+          )
+        }
         throw new Error((data as { error?: string }).error || 'Balance failed')
       }
       setBalance(data as Gen2PresaleBalance)

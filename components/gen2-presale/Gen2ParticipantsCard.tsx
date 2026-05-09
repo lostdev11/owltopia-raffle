@@ -1,35 +1,27 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { cn } from '@/lib/utils'
 
-type Row = { wallet: string; purchased_spots: number }
-
-function shortWallet(addr: string): string {
-  const t = addr.trim()
-  if (t.length <= 12) return t
-  return `${t.slice(0, 4)}…${t.slice(-4)}`
-}
+type Row = { display: string; purchased_spots: number; is_you: boolean }
 
 type Props = {
-  /** Connected wallet base58 — row is highlighted when it matches. */
+  /** @deprecated Kept for callers; row highlight uses SIWS + server `is_you` only (masked labels). */
   highlightWallet?: string | null
   /** Increment or change after a purchase / refresh so the table reloads from the server. */
   listRefreshKey?: number
   className?: string
 }
 
-export function Gen2ParticipantsCard({ highlightWallet, listRefreshKey = 0, className }: Props) {
+export function Gen2ParticipantsCard({
+  highlightWallet: _highlightWallet,
+  listRefreshKey = 0,
+  className,
+}: Props) {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const highlightNorm = useMemo(
-    () => (highlightWallet ? normalizeSolanaWalletAddress(highlightWallet) : null),
-    [highlightWallet]
-  )
 
   useEffect(() => {
     let cancelled = false
@@ -37,7 +29,10 @@ export function Gen2ParticipantsCard({ highlightWallet, listRefreshKey = 0, clas
     setError(null)
     void (async () => {
       try {
-        const res = await fetch('/api/gen2-presale/participants?limit=200', { cache: 'no-store' })
+        const res = await fetch('/api/gen2-presale/participants?limit=200', {
+          cache: 'no-store',
+          credentials: 'include',
+        })
         const j = (await res.json().catch(() => ({}))) as {
           participants?: Row[]
           error?: string
@@ -73,7 +68,8 @@ export function Gen2ParticipantsCard({ highlightWallet, listRefreshKey = 0, clas
         <p className="text-xs font-semibold uppercase tracking-wider text-[#A9CBB9]">Presale buyers</p>
         <h3 className="text-xl font-bold text-[#EAFBF4]">Spots purchased by wallet</h3>
         <p className="text-sm text-[#A9CBB9]">
-          Confirmed presale credits from the server. Connect the wallet you paid with to highlight your row.
+          Confirmed presale credits from the server. Labels are masked for privacy. Sign in with Owltopia on this
+          browser so your row shows You when it matches your connected wallet.
         </p>
       </div>
 
@@ -99,21 +95,18 @@ export function Gen2ParticipantsCard({ highlightWallet, listRefreshKey = 0, clas
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const rowNorm = normalizeSolanaWalletAddress(r.wallet)
-                const isYou = highlightNorm != null && rowNorm === highlightNorm
+              {rows.map((r, idx) => {
+                const isYou = r.is_you === true
                 return (
                   <tr
-                    key={r.wallet}
+                    key={`${r.display}-${r.purchased_spots}-${idx}`}
                     className={cn(
                       'border-b border-[#1F6F54]/35 last:border-0',
                       isYou ? 'bg-[#00E58B]/12' : 'bg-transparent'
                     )}
                   >
                     <td className="max-w-[200px] px-3 py-3 font-mono text-xs text-[#EAFBF4] sm:text-sm">
-                      <span className="break-all sm:break-normal" title={r.wallet}>
-                        {shortWallet(r.wallet)}
-                      </span>
+                      <span className="break-all sm:break-normal">{r.display}</span>
                       {isYou && (
                         <span className="ml-2 inline-flex rounded-md border border-[#00FF9C]/40 bg-[#10161C]/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#00FF9C]">
                           You

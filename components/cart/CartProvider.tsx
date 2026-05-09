@@ -17,6 +17,7 @@ import type { Raffle } from '@/lib/types'
 import {
   buildPurchaseTransactionFromPaymentDetails,
   executeRafflePurchase,
+  formatSplTokenTransferFailure,
   type PurchasePaymentDetails,
 } from '@/lib/client/execute-raffle-purchase'
 import { fireGreenConfetti } from '@/lib/confetti'
@@ -418,7 +419,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 `Transaction ${i + 1} of ${batches.length} was cancelled. Previous successful batches (if any) were kept.`
               )
             } else {
-              setCheckoutError(wm.includes('Insufficient') ? wm : `Payment failed: ${wm}`)
+              const splHelp = formatSplTokenTransferFailure(wm, String(pd.currency || ''))
+              const friendly = splHelp ?? (wm.includes('Insufficient') ? wm : `Payment failed: ${wm}`)
+              setCheckoutError(friendly)
             }
             restoreRemainingLines()
             return

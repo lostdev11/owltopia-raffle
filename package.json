@@ -24,6 +24,7 @@
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "audit:owl-tiers": "npx --yes tsx scripts/audit-owl-holder-fee-tiers.ts",
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
+    "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",
     "notify:council-discord": "npx --yes tsx scripts/notify-recent-council-proposal-discord.ts",
     "postinstall": "node scripts/postinstall-next-global-error.js"
   },

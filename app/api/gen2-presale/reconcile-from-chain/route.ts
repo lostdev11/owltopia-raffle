@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { forbidUnlessSelfOrAdmin } from '@/lib/api-wallet-auth'
+import { requireSession } from '@/lib/auth-server'
 import { reconcileGen2PresaleWalletFromChain } from '@/lib/gen2-presale/reconcile-wallet-from-chain'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -16,6 +18,9 @@ export const maxDuration = 120
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const ip = getClientIp(request)
     const rl = rateLimit(`gen2-reconcile-wallet:${ip}`, 12, 600_000)
     if (!rl.allowed) {
@@ -36,6 +41,9 @@ export async function POST(request: NextRequest) {
     if (!wallet) {
       return NextResponse.json({ error: 'Invalid or missing wallet' }, { status: 400 })
     }
+
+    const authz = await forbidUnlessSelfOrAdmin(session, wallet)
+    if (authz) return authz
 
     const signatureLimit =
       body.signatureLimit != null && Number.isFinite(Number(body.signatureLimit))

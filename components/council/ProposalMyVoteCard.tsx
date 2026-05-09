@@ -76,7 +76,12 @@ export function ProposalMyVoteCard({
               <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                 {record.votingPowerDecimal} {OWL_TICKER}
               </p>
-              {councilEscrowVotingEnabled && record.councilVoteUsedEscrow ? (
+              {record.councilVoteUsedNesting ? (
+                <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+                  Weight came from OWL you staked in the Council governance pool in Owl Nesting; that backing stays locked in
+                  the pool until this proposal&apos;s voting window ends.
+                </p>
+              ) : councilEscrowVotingEnabled && record.councilVoteUsedEscrow ? (
                 <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
                   Weight came from your council voting stake for this ballot; that amount stays non-withdrawable until this
                   proposal&apos;s voting window ends.

@@ -31,7 +31,10 @@ export function MyEntriesList({ walletAddress }: MyEntriesListProps) {
     }
     setLoading(true)
     setError(null)
-    fetch(`/api/entries/my?wallet=${encodeURIComponent(walletAddress)}`)
+    fetch('/api/entries/my', {
+      credentials: 'include',
+      cache: 'no-store',
+    })
       .then((res) => {
         if (!res.ok) throw new Error(res.status === 400 ? 'Wallet required' : 'Failed to load entries')
         return res.json()

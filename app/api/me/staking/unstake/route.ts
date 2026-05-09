@@ -34,7 +34,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       position,
-      execution: { path: 'database_mock' as const },
+      execution: {
+        path: position.unstake_signature ? ('onchain_token_transfer' as const) : ('database_mock' as const),
+      },
     })
   } catch (e) {
     if (isStakingUserError(e)) {

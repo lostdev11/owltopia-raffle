@@ -79,6 +79,17 @@ export async function getStakingPoolById(id: string): Promise<StakingPoolRow | n
   return data as StakingPoolRow | null
 }
 
+/** Lookup by slug (any `is_active` — used for governance vote math). */
+export async function getStakingPoolBySlug(slug: string): Promise<StakingPoolRow | null> {
+  const s = slug.trim().toLowerCase()
+  if (!s) return null
+  const db = getSupabaseAdmin()
+  const { data, error } = await db.from('staking_pools').select('*').eq('slug', s).maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data as StakingPoolRow | null
+}
+
 export interface InsertStakingPoolInput {
   name: string
   slug: string

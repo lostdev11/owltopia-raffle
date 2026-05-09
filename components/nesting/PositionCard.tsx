@@ -5,7 +5,11 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
-import { estimateClaimableRewards } from '@/lib/staking/rewards'
+import {
+  estimateClaimableRewards,
+  meetsMinOwlClaimThreshold,
+  MIN_OWL_CLAIMABLE_TO_CLAIM,
+} from '@/lib/staking/rewards'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { LockTimer } from '@/components/nesting/LockTimer'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
@@ -29,6 +33,8 @@ function nestStatusPhrase(status: StakingPositionRow['status']) {
 type Props = {
   position: StakingPositionRow
   poolName: string
+  /** Wallet scan row for this mint (faster image/name before Helius resolves). */
+  stakedAssetHint?: { name?: string | null; image?: string | null } | null
   onUnstake: (positionId: string) => Promise<void>
   onClaim: (positionId: string, amount: number) => Promise<void>
   claimPhase?: NestingTxPhase
@@ -40,6 +46,7 @@ type Props = {
 export function PositionCard({
   position,
   poolName,
+  stakedAssetHint,
   onUnstake,
   onClaim,
   claimPhase = 'idle',
@@ -47,6 +54,11 @@ export function PositionCard({
   actionsEnabled = true,
 }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [dasNftName, setDasNftName] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDasNftName(null)
+  }, [position.id, position.asset_identifier])
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000)
@@ -66,12 +78,17 @@ export function PositionCard({
     [position, nowMs]
   )
 
+  const paysOwlRewards =
+    (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
+  const canClaimOwl =
+    paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
+
   const canUnstake =
     position.status === 'active' &&
     (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs)
 
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
-  const claimAmountLabel = claimAmountInput.toFixed(6)
+  const claimAmountLabel = claimable.toFixed(6)
 
   const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
   const canAct = actionsEnabled
@@ -79,7 +96,7 @@ export function PositionCard({
     claimPhase !== 'idle' ? claimPhase : unstakePhase !== 'idle' ? unstakePhase : 'idle'
 
   const handleClaimMax = async () => {
-    if (claimAmountInput <= 0) return
+    if (!canClaimOwl || claimAmountInput <= 0) return
     try {
       await onClaim(position.id, claimAmountInput)
     } catch {
@@ -95,11 +112,19 @@ export function PositionCard({
     }
   }
 
+  const headingTitle =
+    (dasNftName ?? stakedAssetHint?.name ?? '').trim() || poolName
+
   return (
     <Card className="rounded-xl border-border/60 bg-card/90">
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <CardTitle className="text-base font-display text-theme-prime">{poolName}</CardTitle>
+          <div className="min-w-0 space-y-0.5">
+            <CardTitle className="text-base font-display text-theme-prime">{headingTitle}</CardTitle>
+            {headingTitle.trim() !== poolName.trim() ? (
+              <p className="text-xs font-normal text-muted-foreground">{poolName}</p>
+            ) : null}
+          </div>
           <span
             className={`text-xs font-medium uppercase tracking-wide ${
               position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
@@ -114,6 +139,11 @@ export function PositionCard({
           {position.asset_identifier ? (
             <NestingStakedAssetThumb
               mint={position.asset_identifier}
+              hintImageUrl={stakedAssetHint?.image}
+              hintName={stakedAssetHint?.name ?? null}
+              onResolvedMintMeta={(meta) => {
+                if (meta.name?.trim()) setDasNftName(meta.name.trim())
+              }}
               size="md"
               className="mx-auto shrink-0 sm:mx-0"
             />
@@ -157,23 +187,28 @@ export function PositionCard({
       </CardContent>
       <CardFooter className="flex flex-col gap-2 border-t border-border/60">
         <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
+        {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
+          <p className="w-full text-xs text-muted-foreground">
+            Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
-          disabled={!canAct || anyTxActive || claimAmountInput <= 0}
+          disabled={!canAct || anyTxActive || !canClaimOwl}
           onClick={() => void handleClaimMax()}
           aria-label={
-            claimAmountInput > 0
+            canClaimOwl
               ? `Claim ${claimAmountLabel} OWL rewards`
               : 'Claim OWL rewards'
           }
         >
           {claimPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           {claimPhase === 'idle' ? (
-            claimAmountInput > 0 ? (
+            canClaimOwl ? (
               <span className="tabular-nums">
                 Claim <span className="font-medium text-theme-prime">{claimAmountLabel}</span> OWL
               </span>

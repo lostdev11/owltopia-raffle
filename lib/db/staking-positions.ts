@@ -98,6 +98,9 @@ export async function insertStakingPosition(row: {
   staked_at: string
   unlock_at: string | null
   status: StakingPositionStatus
+  sync_status?: PositionSyncStatus
+  stake_signature?: string | null
+  external_reference?: string | null
 }): Promise<StakingPositionRow> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
@@ -114,6 +117,9 @@ export async function insertStakingPosition(row: {
       unlock_at: row.unlock_at,
       claimed_rewards: 0,
       status: row.status,
+      sync_status: row.sync_status ?? undefined,
+      stake_signature: row.stake_signature ?? undefined,
+      external_reference: row.external_reference ?? undefined,
     })
     .select()
     .single()
@@ -122,7 +128,27 @@ export async function insertStakingPosition(row: {
   return data as StakingPositionRow
 }
 
-export async function markPositionUnstaked(positionId: string, wallet: string): Promise<StakingPositionRow> {
+export async function getStakingPositionByStakeSignature(
+  signature: string
+): Promise<StakingPositionRow | null> {
+  const sig = signature.trim()
+  if (!sig) return null
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('staking_positions')
+    .select('*')
+    .eq('stake_signature', sig)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data as StakingPositionRow | null
+}
+
+export async function markPositionUnstaked(
+  positionId: string,
+  wallet: string,
+  extraPatch: Partial<StakingPositionSyncPatch> & Record<string, unknown> = {}
+): Promise<StakingPositionRow> {
   const db = getSupabaseAdmin()
   const now = new Date().toISOString()
   const { data, error } = await db
@@ -130,6 +156,7 @@ export async function markPositionUnstaked(positionId: string, wallet: string): 
     .update({
       status: 'unstaked',
       unstaked_at: now,
+      ...extraPatch,
     })
     .eq('id', positionId)
     .eq('wallet_address', wallet.trim())

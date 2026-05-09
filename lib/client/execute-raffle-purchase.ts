@@ -67,6 +67,21 @@ export type ExecuteRafflePurchaseOptions = {
   onVerifyPending?: (ctx: { entryId: string; transactionSignature: string }) => void | Promise<void>
 }
 
+/** SPL Token program: error index 1 isInsufficientFunds (transfer exceeds wallet token balance). */
+export function formatSplTokenTransferFailure(errorMessage: string, currency: string): string | null {
+  const hasCustomOne = /"Custom"\s*:\s*1/.test(errorMessage)
+  if (!hasCustomOne || !errorMessage.includes('InstructionError')) return null
+  if (currency === 'OWL') {
+    return (
+      'Not enough OWL in your wallet for this payment. Staked OWL is separate — add or unwrap OWL so your token balance covers the ticket total, then try again.'
+    )
+  }
+  if (currency === 'USDC') {
+    return 'Not enough USDC in your wallet for this payment. Check your token balance (not just SOL for fees).'
+  }
+  return null
+}
+
 function classifyPurchaseError(err: unknown): {
   message: string
   isUnconfirmedPayment: boolean
@@ -637,6 +652,10 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       }
       if (isMobile && errorMessage.includes('timeout')) {
         throw new Error('Transaction timeout. This can happen on slower mobile connections. Please try again.')
+      }
+      const splMsg = formatSplTokenTransferFailure(errorMessage, String(raffle.currency || ''))
+      if (splMsg) {
+        throw new Error(splMsg)
       }
       throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
     }

@@ -3,12 +3,14 @@
  */
 
 import type { StakingMutationAdapter } from '@/lib/nesting/adapters/types'
+import { getStakingPoolById } from '@/lib/db/staking-pools'
 import {
   insertStakingPosition,
   markPositionUnstaked,
   recordRewardClaim,
   getStakingPositionForWallet,
 } from '@/lib/db/staking-positions'
+import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
 export const mockStakingAdapter: StakingMutationAdapter = {
   async stakeIntoPool(input) {
     const { wallet, pool, amount, asset_identifier } = input
@@ -45,19 +47,36 @@ export const mockStakingAdapter: StakingMutationAdapter = {
       throw new Error('Position not found')
     }
 
-    const newTotal = Number(row.claimed_rewards) + input.amount
+    const pool = await getStakingPoolById(row.pool_id)
+    if (!pool) {
+      throw new Error('Pool not found')
+    }
+
+    const transfer = await tryTransferOwlRewardClaim({
+      pool,
+      recipientWallet: input.wallet,
+      claimAmountUi: input.amount,
+    })
+    if (transfer.kind === 'failed') {
+      throw new Error(transfer.error)
+    }
+
+    const txSig = transfer.kind === 'sent' ? transfer.signature : null
 
     await recordRewardClaim({
       positionId: input.positionId,
       wallet: input.wallet,
       amount: input.amount,
-      newClaimedTotal: newTotal,
-      note: 'mvp_db_claim',
+      newClaimedTotal: input.newClaimedTotal,
+      note: transfer.kind === 'sent' ? 'owl_reward_treasury_transfer' : 'mvp_db_claim',
+      transaction_signature: txSig,
+      last_claim_signature: txSig,
     })
 
     return {
       claimed: input.amount,
-      claimed_rewards_total: newTotal,
+      claimed_rewards_total: input.newClaimedTotal,
+      transaction_signature: txSig,
     }
   },
 }

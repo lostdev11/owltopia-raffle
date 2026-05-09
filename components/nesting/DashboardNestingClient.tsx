@@ -3,8 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { useWalletModal } from '@solana/wallet-adapter-react-ui'
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+} from '@solana/spl-token'
+import { PublicKey, Transaction } from '@solana/web3.js'
 import {
   Loader2,
   Egg,
@@ -32,6 +41,7 @@ import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { runNestingTxAction } from '@/lib/nesting/run-tx-action'
 import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
 import { NESTING_SECURITY_ACK_STORAGE_KEY } from '@/lib/nesting/security-notice-content'
@@ -39,12 +49,17 @@ import { formatRewardRate, perchAssetKindLabel, shortenAddress } from '@/lib/nes
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { cn, isMobileDevice } from '@/lib/utils'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
+import { decimalToRawBigint } from '@/lib/nesting/token-amount'
+import { getTokenInfo } from '@/lib/tokens'
 
 const MOBILE_401_RETRY_MS = 800
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
 
 export function DashboardNestingClient() {
   const { publicKey, connected, signMessage } = useWallet()
+  const { connection } = useConnection()
+  const sendTransaction = useSendTransactionForWallet()
   const { setVisible } = useWalletModal()
   const searchParams = useSearchParams()
   const preselectedPoolId = searchParams.get('pool')
@@ -255,6 +270,17 @@ export function DashboardNestingClient() {
     return m
   }, [pools])
 
+  /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
+  const nestingWalletMintHints = useMemo(() => {
+    const m = new Map<string, { name: string | null; image: string | null }>()
+    for (const row of owlNestMintScan.mints) {
+      const id = row.mint?.trim()
+      if (!id) continue
+      m.set(id, { name: row.name ?? null, image: row.image ?? null })
+    }
+    return m
+  }, [owlNestMintScan.mints])
+
   const stakedNftGalleryItems = useMemo(
     () =>
       positions
@@ -263,11 +289,15 @@ export function DashboardNestingClient() {
             Boolean(p.asset_identifier?.trim()) &&
             (p.status === 'active' || p.status === 'pending')
         )
-        .map((p) => ({
-          position: p,
-          poolName: poolById.get(p.pool_id)?.name ?? `Perch ${p.pool_id.slice(0, 8)}…`,
-        })),
-    [positions, poolById]
+        .map((p) => {
+          const mint = p.asset_identifier!.trim()
+          return {
+            position: p,
+            poolName: poolById.get(p.pool_id)?.name ?? `Perch ${p.pool_id.slice(0, 8)}…`,
+            walletHint: nestingWalletMintHints.get(mint) ?? null,
+          }
+        }),
+    [positions, poolById, nestingWalletMintHints]
   )
 
   const selectedPerch = useMemo(
@@ -445,17 +475,19 @@ export function DashboardNestingClient() {
     } else if (owlNestMintScan.mints.length === 0) {
       setStakeAssetId('')
     }
+    // Intentionally keyed on the stable mint key, not the array instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- owlNestEligibleMintsKey captures owlNestMintScan.mints
   }, [nestMintManual, owlNestMintScan.status, owlNestMintScan.configured, owlNestEligibleMintsKey])
 
   const totals = useMemo(() => {
     let nested = 0
-    let est = 0
+    let estRaw = 0
     let claimed = 0
     for (const pos of positions) {
       nested += Number(pos.amount)
       claimed += Number(pos.claimed_rewards)
       if (pos.status === 'active') {
-        est += estimateClaimableRewards({
+        estRaw += estimateClaimableRewards({
           amount: Number(pos.amount),
           rewardRateSnapshot: Number(pos.reward_rate_snapshot),
           rewardRateUnitSnapshot: pos.reward_rate_unit_snapshot as RewardRateUnit,
@@ -465,6 +497,7 @@ export function DashboardNestingClient() {
         })
       }
     }
+    const est = estRaw
     const activeCount = positions.filter((p) => p.status === 'active').length
     return { nested, est, claimed, activeCount }
   }, [positions, rewardsNowMs])
@@ -517,6 +550,71 @@ export function DashboardNestingClient() {
     }
   }, [publicKey, signMessage, refreshAll])
 
+  const sendOnChainTokenStakeTransfer = useCallback(
+    async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
+      if (!publicKey || !sendTransaction) {
+        throw new Error('Connect your wallet first.')
+      }
+
+      const owl = getTokenInfo('OWL')
+      const mintAddress = pool.stake_mint?.trim() || pool.token_mint?.trim() || owl.mintAddress
+      const vaultAddress = pool.vault_address?.trim()
+      if (!mintAddress || !owl.mintAddress || mintAddress !== owl.mintAddress) {
+        throw new Error('This on-chain perch must use the configured OWL mint.')
+      }
+      if (!vaultAddress) {
+        throw new Error('This on-chain perch is missing a vault address.')
+      }
+
+      const amountRaw = decimalToRawBigint(amountUi, owl.decimals)
+      if (amountRaw <= 0n) throw new Error('Enter a positive amount.')
+
+      const mint = new PublicKey(mintAddress)
+      const vaultOwner = new PublicKey(vaultAddress)
+      const senderAta = await getAssociatedTokenAddress(
+        mint,
+        publicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      const recipientAta = await getAssociatedTokenAddress(
+        mint,
+        vaultOwner,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+      const transaction = new Transaction({ recentBlockhash: blockhash, feePayer: publicKey })
+      try {
+        await getAccount(connection, recipientAta, 'confirmed', TOKEN_PROGRAM_ID)
+      } catch {
+        transaction.add(
+          createAssociatedTokenAccountInstruction(
+            publicKey,
+            recipientAta,
+            vaultOwner,
+            mint,
+            TOKEN_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        )
+      }
+      transaction.add(createTransferInstruction(senderAta, recipientAta, publicKey, amountRaw, [], TOKEN_PROGRAM_ID))
+
+      const signature = await sendTransaction(transaction, connection, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+        maxRetries: 3,
+      })
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+      return signature
+    },
+    [connection, publicKey, sendTransaction]
+  )
+
   const handleStake = async () => {
     if (!publicKey) return
     setActionError(null)
@@ -556,7 +654,11 @@ export function DashboardNestingClient() {
             },
             body: JSON.stringify(body),
           })
-          const json = (await res.json().catch(() => ({}))) as { error?: string }
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            position?: StakingPositionRow
+            execution?: { path?: string }
+          }
           if (!res.ok) {
             const err =
               res.status === 501
@@ -568,6 +670,33 @@ export function DashboardNestingClient() {
                   : 'Stake failed'
             setActionError(err)
             throw new Error('stake')
+          }
+          if (
+            pool.asset_type === 'token' &&
+            json.execution?.path === 'onchain_token_transfer_required'
+          ) {
+            const positionId = json.position?.id
+            if (!positionId) {
+              setActionError('Stake was prepared, but the position id was missing.')
+              throw new Error('stake')
+            }
+            setStakeTxPhase('awaiting_wallet_signature')
+            const signature = await sendOnChainTokenStakeTransfer(pool, stakeAmount)
+            setStakeTxPhase('syncing')
+            const syncRes = await fetch('/api/me/staking/sync', {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+              body: JSON.stringify({ position_id: positionId, signature, kind: 'stake' }),
+            })
+            const syncJson = (await syncRes.json().catch(() => ({}))) as { error?: string }
+            if (!syncRes.ok) {
+              setActionError(typeof syncJson.error === 'string' ? syncJson.error : 'Could not confirm stake on-chain')
+              throw new Error('stake')
+            }
           }
           return json
         },
@@ -633,7 +762,7 @@ export function DashboardNestingClient() {
     if (!publicKey) return
     setActionError(null)
     try {
-      await runNestingTxAction({
+      const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
           const res = await fetch('/api/me/staking/claim', {
@@ -645,7 +774,12 @@ export function DashboardNestingClient() {
             },
             body: JSON.stringify({ position_id: positionId, amount }),
           })
-          const json = (await res.json().catch(() => ({}))) as { error?: string; claimable?: number }
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            claimable?: number
+            claimed_rewards_total?: number
+            transaction_signature?: string | null
+          }
           if (!res.ok) {
             const err =
               res.status === 501
@@ -658,11 +792,30 @@ export function DashboardNestingClient() {
             setActionError(err)
             throw new Error('claim')
           }
+          return json
         },
         afterSuccess: async () => {
           await loadPositions()
         },
       })
+
+      const total = claimJson.claimed_rewards_total
+      if (typeof total === 'number' && Number.isFinite(total)) {
+        setPositions((prev) =>
+          prev.map((p) => (p.id === positionId ? { ...p, claimed_rewards: total } : p))
+        )
+      }
+
+      const sig =
+        typeof claimJson.transaction_signature === 'string' ? claimJson.transaction_signature.trim() : ''
+      if (sig) {
+        const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
+        window.open(
+          `https://solscan.io/tx/${encodeURIComponent(sig)}${dev ? '?cluster=devnet' : ''}`,
+          '_blank',
+          'noopener,noreferrer'
+        )
+      }
     } catch (e) {
       if (e instanceof Error && e.message === 'claim') throw e
       setActionError(e instanceof Error ? e.message : 'Claim failed')
@@ -1245,6 +1398,11 @@ export function DashboardNestingClient() {
                 <PositionCard
                   position={pos}
                   poolName={poolById.get(pos.pool_id)?.name ?? `Perch ${pos.pool_id.slice(0, 8)}…`}
+                  stakedAssetHint={
+                    pos.asset_identifier?.trim()
+                      ? nestingWalletMintHints.get(pos.asset_identifier.trim()) ?? null
+                      : null
+                  }
                   onUnstake={handleUnstake}
                   onClaim={handleClaim}
                   claimPhase={posPhases[pos.id]?.claim ?? 'idle'}

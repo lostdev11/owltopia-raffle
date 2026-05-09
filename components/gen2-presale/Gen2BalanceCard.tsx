@@ -64,6 +64,7 @@ export function Gen2BalanceCard({
       const res = await fetch('/api/gen2-presale/reconcile-from-chain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ wallet: w, pageSize: 100, maxPages: 25 }),
       })
       const j = (await res.json().catch(() => ({}))) as {
@@ -124,6 +125,7 @@ export function Gen2BalanceCard({
       const res = await fetch('/api/gen2-presale/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ buyerWallet: w, quantity: q, txSignature: sig }),
       })
       const j = (await res.json().catch(() => ({}))) as {

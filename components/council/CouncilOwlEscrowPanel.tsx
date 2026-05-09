@@ -49,6 +49,23 @@ type VoteLockBreakdownRow = {
   lockedDecimal: string
 }
 
+type CouncilStakeMigrationApi = {
+  announcementActive?: boolean
+  legacyEscrowDepositsClosed?: boolean
+  legacyEscrowDepositCutoffAtMs?: number | null
+  nestingCouncilPoolSlug?: string
+  nestingDashboardUrl?: string
+}
+
+function formatInstantLocal(ms: number | null): string | null {
+  if (ms == null || !Number.isFinite(ms)) return null
+  try {
+    return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  } catch {
+    return null
+  }
+}
+
 function parseVoteLockBreakdown(raw: unknown): VoteLockBreakdownRow[] {
   if (!Array.isArray(raw)) return []
   const out: VoteLockBreakdownRow[] = []
@@ -93,6 +110,21 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   const [configFetchFailed, setConfigFetchFailed] = useState(false)
   /** Set when HTTP 200 but `enabled: false` — avoids silent empty panel when API disagrees with RSC shell */
   const [escrowUnavailableReason, setEscrowUnavailableReason] = useState<string | null>(null)
+  const [migration, setMigration] = useState<CouncilStakeMigrationApi | null>(null)
+
+  const loadStakeMigrationStatus = useCallback(async () => {
+    try {
+      const r = await fetch('/api/council/stake-migration', { cache: 'no-store' })
+      const data = (await r.json().catch(() => ({}))) as CouncilStakeMigrationApi
+      if (!r.ok) {
+        setMigration(null)
+        return
+      }
+      setMigration(data)
+    } catch {
+      setMigration(null)
+    }
+  }, [])
 
   const loadEscrowConfig = useCallback(async () => {
     setConfigFetchFailed(false)
@@ -146,7 +178,8 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
 
   useEffect(() => {
     void loadEscrowConfig()
-  }, [loadEscrowConfig])
+    void loadStakeMigrationStatus()
+  }, [loadEscrowConfig, loadStakeMigrationStatus])
 
   const sessionMatches = Boolean(sessionWallet && wallet && sessionWallet === wallet)
 
@@ -210,6 +243,12 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         setMsg('Sign in with the same wallet (use the Voting section) so deposits can be credited to your account.')
         return
       }
+      if (migration?.legacyEscrowDepositsClosed) {
+        setMsg(
+          'Council escrow deposits are closed. Stake OWL for voting in Owl Nesting (Council governance pool) instead.'
+        )
+        return
+      }
       const minRaw = owlUiToRawBigint(config.minDepositUi, config.decimals)
       if (amountRaw < minRaw) {
         setMsg(`Deposit at least ${config.minDepositUi} ${OWL_TICKER}.`)
@@ -271,7 +310,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
         setBusy(null)
       }
     },
-    [config, publicKey, connected, sendTransaction, connection, wallet, sessionMatches, refreshBalance]
+    [config, migration, publicKey, connected, sendTransaction, connection, wallet, sessionMatches, refreshBalance]
   )
 
   const depositOwl = useCallback(async () => {
@@ -300,6 +339,12 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
     }
     if (!sessionMatches) {
       setMsg('Sign in with the same wallet (use the Voting section) so deposits can be credited to your account.')
+      return
+    }
+    if (migration?.legacyEscrowDepositsClosed) {
+      setMsg(
+        'Council escrow deposits are closed. Stake OWL for voting in Owl Nesting (Council governance pool) instead.'
+      )
       return
     }
 
@@ -331,7 +376,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Could not read wallet balance')
     }
-  }, [config, publicKey, connected, sendTransaction, connection, sessionMatches, depositAmountRaw])
+  }, [config, migration, publicKey, connected, sendTransaction, connection, sessionMatches, depositAmountRaw])
 
   const withdraw = useCallback(
     async (all: boolean) => {
@@ -460,6 +505,12 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
     )
   }
 
+  const escrowDepositsClosed = migration?.legacyEscrowDepositsClosed === true
+  const nestingHref = migration?.nestingDashboardUrl?.trim() || '/dashboard/nesting'
+  const cutoffDisplay = formatInstantLocal(
+    typeof migration?.legacyEscrowDepositCutoffAtMs === 'number' ? migration.legacyEscrowDepositCutoffAtMs : null
+  )
+
   return (
     <section
       id="council-owl-escrow"
@@ -480,8 +531,20 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
               Council {OWL_TICKER} voting stake
             </h2>
             <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-              Vote weight uses {OWL_TICKER} you move into voting stake (not loose wallet balance). {OWL_TICKER} that backs an open vote
-              you cast stays locked until that proposal closes; then you can withdraw what is not locked.
+              {escrowDepositsClosed ? (
+                <>
+                  New Owl Council votes use {OWL_TICKER} you stake in Owl Nesting (Council governance pool), not loose wallet
+                  balance. Escrow deposits here are{' '}
+                  <span className="font-medium text-foreground/90">closed</span>
+                  ; withdraw any escrow {OWL_TICKER} once it is not vote-locked. On mobile, use your wallet app and a stable network
+                  when moving funds.
+                </>
+              ) : (
+                <>
+                  Vote weight uses {OWL_TICKER} you move into voting stake (not loose wallet balance). {OWL_TICKER} that backs an open vote
+                  you cast stays locked until that proposal closes; then you can withdraw what is not locked.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -491,6 +554,49 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
             Receiving wallet · {config.escrowAddress}
           </span>
         </div>
+
+        {migration?.announcementActive === true && !escrowDepositsClosed ? (
+          <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-950/25 px-3 py-3 text-xs leading-relaxed text-amber-100/95 [&_a]:underline-offset-2">
+            <p className="font-medium text-amber-50">Voting stake is moving to Owl Nesting</p>
+            <p className="mt-2 text-amber-100/90">
+              {cutoffDisplay ? (
+                <>
+                  Escrow deposits will stop after <span className="font-medium">{cutoffDisplay}</span>. Stake{' '}
+                  {OWL_TICKER} for council votes in the{' '}
+                  {migration?.nestingCouncilPoolSlug ? (
+                    <span className="font-mono text-[11px]">{migration.nestingCouncilPoolSlug}</span>
+                  ) : (
+                    'Council governance'
+                  )}{' '}
+                  pool in Owl Nesting.
+                </>
+              ) : (
+                <>
+                  Escrow deposits will stop at the configured cutoff. Stake {OWL_TICKER} for council votes in Owl Nesting (Council governance pool).
+                </>
+              )}
+            </p>
+            <Link
+              href={nestingHref}
+              className="mt-3 inline-flex min-h-[44px] items-center font-semibold text-emerald-200 touch-manipulation hover:underline"
+            >
+              Open Owl Nesting →
+            </Link>
+          </div>
+        ) : null}
+
+        {escrowDepositsClosed ? (
+          <div className="mt-3 rounded-xl border border-emerald-500/35 bg-black/35 px-3 py-3 text-xs leading-relaxed text-muted-foreground [&_a]:underline-offset-2">
+            <p className="font-medium text-emerald-100/95">Escrow deposits are closed</p>
+            <p className="mt-2">
+              Add voting weight in{' '}
+              <Link href={nestingHref} className="font-semibold text-emerald-200 touch-manipulation hover:underline">
+                Owl Nesting
+              </Link>
+              . Withdrawals from escrow below still work when your balance is not vote-locked.
+            </p>
+          </div>
+        ) : null}
 
         {!sessionMatches ? (
           <div className="mt-4 space-y-3 rounded-xl border border-amber-500/35 bg-amber-950/25 px-3 py-3">
@@ -545,14 +651,14 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
             placeholder={`min ${config.minDepositUi}`}
             value={depositUi}
             onChange={(e) => setDepositUi(e.target.value)}
-            disabled={busy !== null || !connected || !sessionMatches}
+            disabled={busy !== null || !connected || !sessionMatches || escrowDepositsClosed}
           />
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:gap-3">
             <Button
               type="button"
               variant="outline"
               className="min-h-[44px] w-full touch-manipulation border-emerald-500/35 sm:flex-1"
-              disabled={busy !== null || !connected || !sessionMatches}
+              disabled={busy !== null || !connected || !sessionMatches || escrowDepositsClosed}
               onClick={() => void stakeAllOwl()}
             >
               {busy === 'depAll' ? (
@@ -567,7 +673,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
             <Button
               type="button"
               className="min-h-[44px] w-full touch-manipulation shadow-[0_0_18px_rgba(0,255,136,0.12)] sm:flex-1"
-              disabled={busy !== null || !connected || !sessionMatches}
+              disabled={busy !== null || !connected || !sessionMatches || escrowDepositsClosed}
               onClick={() => void depositOwl()}
             >
               {busy === 'dep' ? (
