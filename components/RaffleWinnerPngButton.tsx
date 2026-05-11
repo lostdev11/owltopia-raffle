@@ -65,6 +65,19 @@ function watermarkIconUrl(): string {
   return new URL('/icon.png', window.location.origin).href
 }
 
+function downloadBlob(blob: Blob, fileName: string) {
+  const blobUrl = window.URL.createObjectURL(blob)
+  const download = document.createElement('a')
+  download.href = blobUrl
+  download.download = fileName
+  download.rel = 'noopener'
+  download.style.display = 'none'
+  document.body.appendChild(download)
+  download.click()
+  download.remove()
+  window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 15_000)
+}
+
 export function RaffleWinnerPngButton({
   title,
   slug,
@@ -231,21 +244,36 @@ export function RaffleWinnerPngButton({
         }, 'image/png')
       })
 
-      const blobUrl = window.URL.createObjectURL(pngBlob)
-      if (isLikelyMobile()) {
-        window.open(blobUrl, '_blank', 'noopener,noreferrer')
-        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000)
-        setMessage('Image opened - long-press to save')
-      } else {
-        const download = document.createElement('a')
-        download.href = blobUrl
-        download.download = fileName
-        document.body.appendChild(download)
-        download.click()
-        download.remove()
-        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10_000)
-        setMessage('Winner PNG downloaded')
+      const nav = typeof navigator !== 'undefined' ? navigator : null
+      const winnerFile =
+        typeof File !== 'undefined' ? new File([pngBlob], fileName, { type: 'image/png' }) : null
+      const canShareFile =
+        isLikelyMobile() &&
+        !!winnerFile &&
+        !!nav &&
+        typeof nav.share === 'function' &&
+        typeof nav.canShare === 'function' &&
+        nav.canShare({ files: [winnerFile] })
+
+      if (canShareFile && winnerFile) {
+        try {
+          await nav.share({
+            title: safeTitle,
+            text: 'Save this winner PNG',
+            files: [winnerFile],
+          })
+          setMessage('Use Save Image in the share sheet')
+          return
+        } catch (shareErr) {
+          if (shareErr instanceof DOMException && shareErr.name === 'AbortError') {
+            setMessage('Save cancelled')
+            return
+          }
+        }
       }
+
+      downloadBlob(pngBlob, fileName)
+      setMessage('Winner PNG download started')
     } catch {
       setMessage('Could not generate winner PNG')
     } finally {

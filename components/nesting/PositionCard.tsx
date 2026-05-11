@@ -181,12 +181,6 @@ export function PositionCard({
               <LockTimer unlockAtIso={position.unlock_at} />
             </dd>
           </div>
-          {position.asset_identifier ? (
-            <div className="col-span-2">
-              <dt className="text-muted-foreground">Asset tag</dt>
-              <dd className="font-mono text-xs break-all">{position.asset_identifier}</dd>
-            </div>
-          ) : null}
         </dl>
         </div>
       </CardContent>

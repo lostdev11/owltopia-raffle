@@ -55,6 +55,7 @@ export function GiveawayBrowseCarouselSection({
 
   const [stripOverflows, setStripOverflows] = useState(false)
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const [manualScrollMode, setManualScrollMode] = useState(false)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -83,7 +84,7 @@ export function GiveawayBrowseCarouselSection({
     return () => ro.disconnect()
   }, [items])
 
-  const marqueeActive = stripOverflows && !prefersReducedMotion
+  const marqueeActive = stripOverflows && !prefersReducedMotion && !manualScrollMode
 
   useLayoutEffect(() => {
     if (marqueeActive) return
@@ -96,6 +97,26 @@ export function GiveawayBrowseCarouselSection({
     pauseUntilRef.current = Date.now() + 9000
     currentSpeedRef.current = 0
   }, [])
+
+  const handleContainerScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      bumpManualPause()
+      if (Math.abs(e.currentTarget.scrollLeft) > 1) {
+        setManualScrollMode(true)
+      }
+    },
+    [bumpManualPause]
+  )
+
+  const handleContainerWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      bumpManualPause()
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        setManualScrollMode(true)
+      }
+    },
+    [bumpManualPause]
+  )
 
   /** Any vertical scroll or wheel: user is moving the page — stop marquee immediately (can resume after pause window). */
   useEffect(() => {
@@ -193,15 +214,16 @@ export function GiveawayBrowseCarouselSection({
         ref={containerRef}
         className={cn(
           'relative w-full min-w-0 pl-[max(0px,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]',
-          stripOverflows && prefersReducedMotion && 'overflow-x-auto overflow-y-hidden',
-          !(stripOverflows && prefersReducedMotion) && 'overflow-hidden'
+          stripOverflows
+            ? 'overflow-x-auto overflow-y-hidden overscroll-x-contain touch-manipulation [-webkit-overflow-scrolling:touch]'
+            : 'overflow-hidden'
         )}
         tabIndex={0}
         role="region"
         aria-label={
-          stripOverflows && prefersReducedMotion
+          stripOverflows && (prefersReducedMotion || manualScrollMode)
             ? `${title}: scroll horizontally to see all giveaways`
-            : `${title}: swipe or scroll horizontally; pauses on hover`
+            : `${title}: auto-scrolling giveaways; swipe or scroll horizontally to take manual control`
         }
         onMouseEnter={() => {
           mouseInsideRef.current = true
@@ -215,11 +237,15 @@ export function GiveawayBrowseCarouselSection({
         }}
         onPointerUpCapture={releaseHoldSoon}
         onPointerCancelCapture={releaseHoldSoon}
-        onWheel={bumpManualPause}
+        onScroll={handleContainerScroll}
+        onWheel={handleContainerWheel}
       >
         <div
           ref={trackRef}
-          className="flex w-max max-w-none flex-nowrap gap-4 sm:gap-5 will-change-transform"
+          className={cn(
+            'flex w-max max-w-none flex-nowrap gap-4 sm:gap-5',
+            marqueeActive && 'will-change-transform'
+          )}
         >
           <div ref={firstStripRef} role="list" className="flex flex-nowrap gap-4 sm:gap-5">
             {renderCards(false)}

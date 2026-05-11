@@ -78,7 +78,7 @@ export function DashboardNestingClient() {
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [stakeSuccessMessage, setStakeSuccessMessage] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
 
   const [stakePoolId, setStakePoolId] = useState('')
@@ -205,10 +205,10 @@ export function DashboardNestingClient() {
   }, [refreshAll])
 
   useEffect(() => {
-    if (!stakeSuccessMessage) return
-    const t = window.setTimeout(() => setStakeSuccessMessage(null), 12_000)
+    if (!successMessage) return
+    const t = window.setTimeout(() => setSuccessMessage(null), 12_000)
     return () => window.clearTimeout(t)
-  }, [stakeSuccessMessage])
+  }, [successMessage])
 
   const [rewardsNowMs, setRewardsNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -819,7 +819,7 @@ export function DashboardNestingClient() {
   const handleStake = async () => {
     if (!publicKey) return
     setActionError(null)
-    setStakeSuccessMessage(null)
+    setSuccessMessage(null)
     const pool_id = stakePoolId.trim()
     const amountNum = Number(stakeAmount)
     const body: Record<string, unknown> = { pool_id }
@@ -908,7 +908,7 @@ export function DashboardNestingClient() {
           await loadPools()
         },
       })
-      setStakeSuccessMessage(
+      setSuccessMessage(
         pool.asset_type === 'nft'
           ? 'Nest opened successfully — your Owl Nest NFT is on file and OWL rewards will accrue for this perch. Claim anytime from your nests below.'
           : 'Nest opened successfully — your stake is on file for this perch. Claim anytime from your nests below.'
@@ -962,6 +962,7 @@ export function DashboardNestingClient() {
   const handleClaim = async (positionId: string, amount: number) => {
     if (!publicKey) return
     setActionError(null)
+    setSuccessMessage(null)
     setClaimLedgerNotice(null)
     try {
       const claimJson = await runNestingTxAction({
@@ -978,6 +979,7 @@ export function DashboardNestingClient() {
           })
           const json = (await res.json().catch(() => ({}))) as {
             error?: string
+            claimed?: number
             claimable?: number
             claimed_rewards_total?: number
             transaction_signature?: string | null
@@ -1014,6 +1016,17 @@ export function DashboardNestingClient() {
           'This claim was recorded in the app only (no on-chain OWL transfer). Your wallet will not change until the reward treasury sends SPL, or you turn off local-only mode.'
         )
       }
+
+      const claimedAmount =
+        typeof claimJson.claimed === 'number' && Number.isFinite(claimJson.claimed)
+          ? claimJson.claimed
+          : amount
+      const claimedLabel = claimedAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })
+      setSuccessMessage(
+        claimJson.execution?.path === 'database_only'
+          ? `Claim successful — ${claimedLabel} OWL was recorded for this nest.`
+          : `Claim successful — ${claimedLabel} OWL was sent to your wallet.`
+      )
 
       const sig =
         typeof claimJson.transaction_signature === 'string' ? claimJson.transaction_signature.trim() : ''
@@ -1182,7 +1195,7 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
-      {stakeSuccessMessage ? (
+      {successMessage ? (
         <div
           className="rounded-lg border border-emerald-500/40 bg-emerald-500/[0.09] px-4 py-3 text-sm text-foreground shadow-[0_0_20px_rgba(0,255,136,0.08)]"
           role="status"
@@ -1191,14 +1204,14 @@ export function DashboardNestingClient() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
             <div className="flex min-w-0 flex-1 gap-3">
               <CheckCircle2 className="h-5 w-5 shrink-0 text-theme-prime mt-0.5" aria-hidden />
-              <p className="leading-relaxed text-foreground/95">{stakeSuccessMessage}</p>
+              <p className="leading-relaxed text-foreground/95">{successMessage}</p>
             </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="min-h-[44px] shrink-0 touch-manipulation border-emerald-500/35 bg-background/80 sm:self-center"
-              onClick={() => setStakeSuccessMessage(null)}
+              onClick={() => setSuccessMessage(null)}
             >
               Dismiss
             </Button>
