@@ -345,7 +345,6 @@ export function PartnerRafflesCarousel({
                   raffle={raffle}
                   entries={entries}
                   size="small"
-                  layout="showcase"
                   section="active"
                   serverNow={serverNow}
                   priority={i === 0}
