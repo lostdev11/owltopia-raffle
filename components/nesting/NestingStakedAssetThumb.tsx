@@ -29,7 +29,9 @@ export function NestingStakedAssetThumb({
   className,
 }: NestingStakedAssetThumbProps) {
   const onResolvedMintMetaRef = useRef(onResolvedMintMeta)
-  onResolvedMintMetaRef.current = onResolvedMintMeta
+  useEffect(() => {
+    onResolvedMintMetaRef.current = onResolvedMintMeta
+  }, [onResolvedMintMeta])
 
   const dim =
     size === 'sm'

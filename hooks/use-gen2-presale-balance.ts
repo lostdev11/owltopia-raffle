@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { Gen2PresaleBalance } from '@/lib/gen2-presale/types'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+
+async function fetchSiwsWallet(): Promise<string | null> {
+  const res = await fetch('/api/auth/wallet-session', { credentials: 'include', cache: 'no-store' })
+  if (!res.ok) return null
+  const j = (await res.json().catch(() => ({}))) as { wallet?: unknown }
+  return typeof j.wallet === 'string' && j.wallet.trim() ? j.wallet.trim() : null
+}
 
 export function useGen2PresaleBalance(wallet: string | null) {
   const [balance, setBalance] = useState<Gen2PresaleBalance | null>(null)
@@ -12,11 +20,31 @@ export function useGen2PresaleBalance(wallet: string | null) {
   const refresh = useCallback(async () => {
     if (!wallet?.trim()) {
       setBalance(null)
+      setError(null)
+      setLoading(false)
       return
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/gen2-presale/balance?wallet=${encodeURIComponent(wallet)}`, {
+      const siwsWallet = await fetchSiwsWallet()
+      const siwsNorm = siwsWallet ? normalizeSolanaWalletAddress(siwsWallet) : null
+      const walletNorm = normalizeSolanaWalletAddress(wallet)
+      if (!walletNorm) {
+        setBalance(null)
+        setError(null)
+        return
+      }
+      if (!siwsNorm || !walletsEqualSolana(siwsNorm, walletNorm)) {
+        setBalance(null)
+        setError(
+          siwsNorm
+            ? 'Your Owltopia sign-in wallet does not match this connected wallet — sign in again with Owltopia for this address.'
+            : 'Sign in with Owltopia (Dashboard) to load your presale balance for this wallet.'
+        )
+        return
+      }
+
+      const res = await fetch(`/api/gen2-presale/balance?wallet=${encodeURIComponent(walletNorm)}`, {
         credentials: 'include',
         cache: 'no-store',
       })

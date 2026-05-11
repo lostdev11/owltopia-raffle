@@ -11,6 +11,24 @@ export type ActivePartnerCommunityRow = {
 
 let cache: { rows: ActivePartnerCommunityRow[]; fetchedAt: number } | null = null
 
+function isTransientFetchFailure(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes('fetch failed') ||
+    m.includes('failed to fetch') ||
+    m.includes('networkerror') ||
+    m.includes('econnreset') ||
+    m.includes('etimedout') ||
+    m.includes('enotfound') ||
+    m.includes('econnrefused') ||
+    m.includes('socket hang up')
+  )
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function getSupabaseForPartnerRead(): Promise<SupabaseClient | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
   if (!url) return null
@@ -38,20 +56,43 @@ export async function getActivePartnerCommunityCreatorRows(): Promise<ActivePart
     return []
   }
 
-  const { data, error } = await sb
-    .from('partner_community_creators')
-    .select('creator_wallet, display_label')
-    .eq('is_active', true)
-    .order('sort_order', { ascending: true })
+  const attempts = 3
+  let rowsRaw: { creator_wallet: string; display_label: string | null }[] | null = null
+  let lastMessage: string | null = null
 
-  if (error) {
-    console.error('[partner-communities] fetch failed:', error.message)
+  for (let i = 0; i < attempts; i++) {
+    const res = await sb
+      .from('partner_community_creators')
+      .select('creator_wallet, display_label')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+
+    if (!res.error) {
+      rowsRaw = (res.data ?? []) as { creator_wallet: string; display_label: string | null }[]
+      break
+    }
+
+    lastMessage = res.error.message
+    const retry = i < attempts - 1 && isTransientFetchFailure(res.error.message)
+    if (retry) {
+      await sleep(350 * (i + 1))
+      continue
+    }
+    break
+  }
+
+  if (rowsRaw === null) {
+    // Degraded: empty partners list. Avoid console.error — Next dev overlay treats it as a breaking error.
+    console.warn(
+      '[partner-communities] Supabase unreachable; partner spotlight tier skipped:',
+      lastMessage ?? 'unknown error'
+    )
     cache = { rows: [], fetchedAt: Date.now() }
     return []
   }
 
-  const rows: ActivePartnerCommunityRow[] = (data ?? [])
-    .map((r: { creator_wallet: string; display_label: string | null }) => ({
+  const rows: ActivePartnerCommunityRow[] = rowsRaw
+    .map((r) => ({
       creator_wallet: String(r.creator_wallet ?? '').trim(),
       display_label: r.display_label != null && String(r.display_label).trim() ? String(r.display_label).trim() : null,
     }))

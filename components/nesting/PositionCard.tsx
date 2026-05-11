@@ -163,8 +163,13 @@ export function PositionCard({
             <dd className="font-mono tabular-nums text-theme-prime">{claimAmountLabel}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Claimed so far</dt>
+            <dt className="text-muted-foreground">OWL claimed (lifetime)</dt>
             <dd className="font-mono tabular-nums">{Number(position.claimed_rewards).toFixed(6)}</dd>
+            {paysOwlRewards ? (
+              <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                Counts successful claims. On-chain payouts require the reward treasury to send SPL.
+              </p>
+            ) : null}
           </div>
           <div>
             <dt className="text-muted-foreground">Opened</dt>

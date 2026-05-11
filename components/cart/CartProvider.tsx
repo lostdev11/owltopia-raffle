@@ -82,10 +82,10 @@ function sanitizeLines(raw: unknown[]): CartLine[] {
           ? Number(o.addedAt)
           : Date.now()
     const snapshot = o.snapshot && typeof o.snapshot === 'object' ? (o.snapshot as CartLine['snapshot']) : null
-    if (!raffleId || !Number.isFinite(quantity) || quantity < 1 || !snapshot?.title || !snapshot?.slug) {
+    if (!raffleId || !Number.isFinite(quantity) || quantity < 0 || !snapshot?.title || !snapshot?.slug) {
       continue
     }
-    const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(1, quantity))
+    const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(0, Math.floor(quantity)))
     const snap: CartLine['snapshot'] = {
       title: String(snapshot.title),
       slug: String(snapshot.slug),
@@ -193,7 +193,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setLineQuantity = useCallback((raffleId: string, quantity: number) => {
-    const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(1, Math.floor(quantity)))
+    const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(0, Math.floor(quantity)))
     setLines(prev => {
       const next = prev.map(l => (l.raffleId === raffleId ? { ...l, quantity: q } : l))
       return next.some(l => l.raffleId === raffleId) ? next : prev
@@ -202,7 +202,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const addItem = useCallback(
     (raffle: Raffle, quantity: number) => {
-      const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(1, Math.floor(quantity)))
+      const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(0, Math.floor(quantity)))
       const block = raffleCheckoutBlockedReason(raffle)
       if (block) return { ok: false as const, error: block }
 
@@ -264,6 +264,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setCheckoutError(
         `This cart has ${initialSnapshot.length} raffles, but checkout supports up to ${CART_CHECKOUT_MAX_RAFFLES} at once. Split it into smaller checkouts.`
       )
+      setCheckoutBusy(false)
+      checkoutRunLockRef.current = false
+      return
+    }
+
+    if (initialSnapshot.some(l => l.quantity < 1)) {
+      setCheckoutError('Enter at least one ticket for each raffle before checkout.')
       setCheckoutBusy(false)
       checkoutRunLockRef.current = false
       return

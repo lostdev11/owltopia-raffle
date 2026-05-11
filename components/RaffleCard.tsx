@@ -29,6 +29,7 @@ import {
   getThemeAccentClasses,
   getThemeAccentColor,
   getThemeAccentRgbChannels,
+  partnerStripOuterGlowFromChannels,
   softOuterGlowFromChannels,
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
@@ -299,8 +300,8 @@ export function RaffleCard({
     partnerFeaturedStrip && isActive && !isPendingDraft && !isFuture
       ? {
           ...borderStyleBase,
-          borderColor: `rgb(${getThemeAccentRgbChannels(raffle.theme_accent)} / 0.82)`,
-          boxShadow: 'none',
+          borderColor: `rgb(${getThemeAccentRgbChannels(raffle.theme_accent)} / 0.85)`,
+          boxShadow: partnerStripOuterGlowFromChannels(getThemeAccentRgbChannels(raffle.theme_accent)),
         }
       : borderStyleBase
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
@@ -530,6 +531,7 @@ export function RaffleCard({
   // Small size - List format (horizontal)
   if (size === 'small') {
     const smallRaffleHref = `/raffles/${raffle.slug}`
+
     return (
       <div
         className="relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col md:hover:z-50"

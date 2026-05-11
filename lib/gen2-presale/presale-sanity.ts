@@ -21,7 +21,14 @@ export function getGen2PresaleStatsIssues(stats: Gen2PresaleStats): string[] {
     unit_lamports,
     sol_usd_price,
     presale_live,
+    sold_sync_unavailable,
   } = stats
+
+  if (sold_sync_unavailable) {
+    issues.push(
+      'Live sold count could not be loaded (database unreachable). Progress does not reflect real-time sales yet — try Wi‑Fi, VPN off, or on Windows dev: NODE_OPTIONS=--dns-result-order=ipv4first before npm run dev.'
+    )
+  }
 
   if (!Number.isFinite(presale_supply) || presale_supply <= 0) {
     issues.push('Presale supply is missing or invalid.')

@@ -11,6 +11,7 @@ import {
   getStakingPositionForWallet,
 } from '@/lib/db/staking-positions'
 import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
+import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
 export const mockStakingAdapter: StakingMutationAdapter = {
   async stakeIntoPool(input) {
     const { wallet, pool, amount, asset_identifier } = input
@@ -57,18 +58,18 @@ export const mockStakingAdapter: StakingMutationAdapter = {
       recipientWallet: input.wallet,
       claimAmountUi: input.amount,
     })
-    if (transfer.kind === 'failed') {
-      throw new Error(transfer.error)
-    }
-
-    const txSig = transfer.kind === 'sent' ? transfer.signature : null
+    const { txSig, note } = resolveRewardClaimRecording({
+      poolRewardToken: pool.reward_token,
+      transfer,
+      claimAmountUi: input.amount,
+    })
 
     await recordRewardClaim({
       positionId: input.positionId,
       wallet: input.wallet,
       amount: input.amount,
       newClaimedTotal: input.newClaimedTotal,
-      note: transfer.kind === 'sent' ? 'owl_reward_treasury_transfer' : 'mvp_db_claim',
+      note,
       transaction_signature: txSig,
       last_claim_signature: txSig,
     })

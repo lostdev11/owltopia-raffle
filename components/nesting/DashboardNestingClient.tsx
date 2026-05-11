@@ -12,6 +12,7 @@ import {
   createTransferInstruction,
   getAccount,
   getAssociatedTokenAddress,
+  getMint,
 } from '@solana/spl-token'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import {
@@ -56,6 +57,11 @@ import { getTokenInfo } from '@/lib/tokens'
 const MOBILE_401_RETRY_MS = 800
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
 
+function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
+  if (!endpoint?.trim()) return false
+  return /devnet/i.test(endpoint)
+}
+
 export function DashboardNestingClient() {
   const { publicKey, connected, signMessage } = useWallet()
   const { connection } = useConnection()
@@ -73,6 +79,7 @@ export function DashboardNestingClient() {
   const [signInError, setSignInError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [stakeSuccessMessage, setStakeSuccessMessage] = useState<string | null>(null)
+  const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
 
   const [stakePoolId, setStakePoolId] = useState('')
   const [stakeAmount, setStakeAmount] = useState('')
@@ -98,6 +105,25 @@ export function DashboardNestingClient() {
     /** From API when configured — helps verify the NFT matches this collection mint. */
     resolvedCollectionAddress?: string | null
   }>({ status: 'idle', mints: [], configured: true })
+
+  /** On-chain SPL token balance scan for token-type perches (e.g. OWL governance). */
+  const [walletTokenScan, setWalletTokenScan] = useState<{
+    status: 'idle' | 'loading' | 'done'
+    /** UI-friendly token amount (already divided by 10^decimals). */
+    uiAmount: number | null
+    /** Raw on-chain balance, base units. */
+    rawAmount: bigint | null
+    decimals: number | null
+    /** Mint we read against — used to detect stale scans when perch changes. */
+    mintAddress: string | null
+    hint?: string
+  }>({
+    status: 'idle',
+    uiAmount: null,
+    rawAmount: null,
+    decimals: null,
+    mintAddress: null,
+  })
 
   const owlNestFetchAbortRef = useRef<AbortController | null>(null)
   const owlNestScanStatusRef = useRef(owlNestMintScan.status)
@@ -308,7 +334,52 @@ export function DashboardNestingClient() {
   /** Single active staking row (canonical Owl Nest deployment). */
   const solePerch = pools.length === 1 ? pools[0] : null
 
+  /**
+   * Perch the UI should treat as fixed for this session—either the only
+   * perch on the platform (`solePerch`) or one the user navigated to via
+   * `?pool=<id>` (e.g. tapping "Nest here" on a specific perch card).
+   * In either case we hide the perch picker so it can't be swapped out.
+   */
+  const lockedPerch = useMemo(() => {
+    if (solePerch) return solePerch
+    if (preselectedPoolId) {
+      return pools.find((p) => p.id === preselectedPoolId) ?? null
+    }
+    return null
+  }, [solePerch, preselectedPoolId, pools])
+
   const nftMintRequired = selectedPerch?.asset_type === 'nft'
+  const tokenStakeRequired = selectedPerch?.asset_type === 'token'
+
+  /**
+   * Mint address used to fund a token-type perch. Prefers the perch's own
+   * `token_mint`/`stake_mint`, then falls back to the platform-wide OWL mint
+   * (`NEXT_PUBLIC_OWL_MINT_ADDRESS`) so OWL governance perches can read the
+   * wallet balance even before an admin fills in the per-perch mint.
+   */
+  const { tokenStakeMint, tokenStakeMintFallback } = useMemo(() => {
+    if (selectedPerch?.asset_type !== 'token') {
+      return { tokenStakeMint: null as string | null, tokenStakeMintFallback: false }
+    }
+    const direct =
+      selectedPerch.token_mint?.trim() || selectedPerch.stake_mint?.trim() || ''
+    if (direct) return { tokenStakeMint: direct, tokenStakeMintFallback: false }
+    const owl = getTokenInfo('OWL').mintAddress?.trim() || ''
+    if (owl) return { tokenStakeMint: owl, tokenStakeMintFallback: true }
+    return { tokenStakeMint: null as string | null, tokenStakeMintFallback: false }
+  }, [selectedPerch])
+
+  /**
+   * Symbol shown on the "Load X" button. Prefers the perch's `reward_token`,
+   * else assumes "OWL" when we fell back to the platform OWL mint.
+   */
+  const tokenStakeSymbol = useMemo(() => {
+    if (selectedPerch?.asset_type !== 'token') return 'token'
+    const fromPool = selectedPerch.reward_token?.trim()
+    if (fromPool) return fromPool
+    if (tokenStakeMintFallback) return 'OWL'
+    return 'token'
+  }, [selectedPerch, tokenStakeMintFallback])
 
   /** Bump when nested mint set changes so we re-scan eligible NFT list after stake/unstake. */
   const nestedActiveMintKey = useMemo(
@@ -449,6 +520,111 @@ export function DashboardNestingClient() {
   const loadOwlNestNftsRef = useRef(loadOwlNestNftsFromWallet)
   loadOwlNestNftsRef.current = loadOwlNestNftsFromWallet
 
+  /** Reset token balance scan whenever the selected perch / mint changes. */
+  useEffect(() => {
+    setWalletTokenScan({
+      status: 'idle',
+      uiAmount: null,
+      rawAmount: null,
+      decimals: null,
+      mintAddress: null,
+    })
+    // Token perches don't use the NFT mint/memo field — clear any stale value
+    // left over from a previously selected NFT perch.
+    if (tokenStakeRequired) setStakeAssetId('')
+  }, [tokenStakeRequired, tokenStakeMint])
+
+  /**
+   * Loads the user's on-chain SPL balance for the perch's `token_mint`
+   * (e.g. OWL governance token). Only used for token-type perches.
+   * Public on-chain read — does not require backend sign-in.
+   */
+  const loadPerchTokenFromWallet = useCallback(async () => {
+    if (!connected || !publicKey) return
+    if (!tokenStakeRequired || !tokenStakeMint) return
+
+    setWalletTokenScan({
+      status: 'loading',
+      uiAmount: null,
+      rawAmount: null,
+      decimals: null,
+      mintAddress: tokenStakeMint,
+    })
+
+    try {
+      const mint = new PublicKey(tokenStakeMint)
+      // Fast pre-check so we can show a clearer error if the mint isn't on
+      // this cluster (common cause: env points at mainnet OWL mint while RPC
+      // is devnet, or vice versa — `getMint` would otherwise throw a generic
+      // "TokenAccountNotFoundError").
+      const mintAccountInfo = await connection.getAccountInfo(mint, 'confirmed')
+      if (!mintAccountInfo) {
+        const rpc =
+          ((connection as { rpcEndpoint?: string }).rpcEndpoint ?? '').trim() ||
+          ((connection as { _rpcEndpoint?: string })._rpcEndpoint ?? '').trim()
+        const devnetRpc = rpcEndpointLooksDevnet(rpc)
+        const extra =
+          devnetRpc && tokenStakeSymbol === 'OWL'
+            ? ' Your app RPC is devnet, but this OWL mint is almost certainly mainnet-only. Use mainnet in NEXT_PUBLIC_SOLANA_RPC_URL (and restart dev), or set NEXT_PUBLIC_OWL_MINT_ADDRESS to an SPL mint that exists on devnet.'
+            : devnetRpc
+              ? ' Your app RPC looks like devnet; this mint may be issued on mainnet only (or vice versa).'
+              : ''
+        setWalletTokenScan({
+          status: 'done',
+          uiAmount: null,
+          rawAmount: null,
+          decimals: null,
+          mintAddress: tokenStakeMint,
+          hint: `${tokenStakeSymbol} mint ${shortenAddress(tokenStakeMint, 6)} doesn't exist on this cluster. Check that NEXT_PUBLIC_SOLANA_RPC_URL and NEXT_PUBLIC_OWL_MINT_ADDRESS are on the same network (mainnet vs devnet).${extra}`,
+        })
+        return
+      }
+      const mintInfo = await getMint(connection, mint, 'confirmed', TOKEN_PROGRAM_ID)
+      const ata = await getAssociatedTokenAddress(
+        mint,
+        publicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      let raw = 0n
+      try {
+        const acc = await getAccount(connection, ata, 'confirmed', TOKEN_PROGRAM_ID)
+        raw = acc.amount
+      } catch {
+        raw = 0n
+      }
+      const ui = Number(raw) / Math.pow(10, mintInfo.decimals)
+      setWalletTokenScan({
+        status: 'done',
+        uiAmount: ui,
+        rawAmount: raw,
+        decimals: mintInfo.decimals,
+        mintAddress: tokenStakeMint,
+      })
+    } catch (e) {
+      const msg =
+        e instanceof Error && e.message
+          ? e.message
+          : `Could not read your ${tokenStakeSymbol} balance from the network.`
+      setWalletTokenScan({
+        status: 'done',
+        uiAmount: null,
+        rawAmount: null,
+        decimals: null,
+        mintAddress: tokenStakeMint,
+        hint: msg,
+      })
+    }
+  }, [
+    connection,
+    connected,
+    publicKey,
+    tokenStakeRequired,
+    tokenStakeMint,
+    tokenStakeSymbol,
+  ])
+
   /** After stake/unstake, refresh eligible NFTs (only if user already loaded for this perch). */
   useEffect(() => {
     if (!nftMintRequired || !stakePoolId) return
@@ -460,6 +636,31 @@ export function DashboardNestingClient() {
     // Intentionally keyed on nested set + perch only — avoids re-scan when `loading` flips during unrelated dashboard refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
   }, [nestedActiveMintKey, nftMintRequired, stakePoolId])
+
+  const loadPerchTokenRef = useRef(loadPerchTokenFromWallet)
+  loadPerchTokenRef.current = loadPerchTokenFromWallet
+
+  /**
+   * Auto-load the wallet's balance for token-type perches as soon as we know
+   * which mint to read against — like a swap UI showing your balance up-front.
+   * The useEffect above this clears `walletTokenScan` to `idle` whenever
+   * `tokenStakeMint` changes, so this fires once per perch/mint switch.
+   * Public on-chain read — intentionally does not gate on `needsSignIn`.
+   */
+  useEffect(() => {
+    if (!connected || !publicKey) return
+    if (!tokenStakeRequired || !tokenStakeMint) return
+    if (walletTokenScan.status !== 'idle') return
+    if (walletTokenScan.mintAddress === tokenStakeMint) return
+    void loadPerchTokenRef.current()
+  }, [
+    connected,
+    publicKey,
+    tokenStakeRequired,
+    tokenStakeMint,
+    walletTokenScan.status,
+    walletTokenScan.mintAddress,
+  ])
 
   const showManualMintInput =
     nftMintRequired &&
@@ -761,6 +962,7 @@ export function DashboardNestingClient() {
   const handleClaim = async (positionId: string, amount: number) => {
     if (!publicKey) return
     setActionError(null)
+    setClaimLedgerNotice(null)
     try {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
@@ -779,6 +981,7 @@ export function DashboardNestingClient() {
             claimable?: number
             claimed_rewards_total?: number
             transaction_signature?: string | null
+            execution?: { path?: 'onchain_transfer' | 'database_only' }
           }
           if (!res.ok) {
             const err =
@@ -803,6 +1006,12 @@ export function DashboardNestingClient() {
       if (typeof total === 'number' && Number.isFinite(total)) {
         setPositions((prev) =>
           prev.map((p) => (p.id === positionId ? { ...p, claimed_rewards: total } : p))
+        )
+      }
+
+      if (claimJson.execution?.path === 'database_only') {
+        setClaimLedgerNotice(
+          'This claim was recorded in the app only (no on-chain OWL transfer). Your wallet will not change until the reward treasury sends SPL, or you turn off local-only mode.'
         )
       }
 
@@ -911,12 +1120,20 @@ export function DashboardNestingClient() {
     <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-4xl space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
-          <Button variant="ghost" size="sm" asChild className="min-h-[44px] -ml-2 mb-2">
-            <Link href="/dashboard" className="gap-2 text-muted-foreground">
-              <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden />
-              Dashboard
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-x-3 gap-y-2 mb-2">
+            <Button variant="ghost" size="sm" asChild className="min-h-[44px] -ml-2">
+              <Link href="/nesting#perches" className="gap-2 text-muted-foreground">
+                <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+                Back to perch
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild className="min-h-[44px]">
+              <Link href="/dashboard" className="gap-2 text-muted-foreground">
+                <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden />
+                Dashboard
+              </Link>
+            </Button>
+          </div>
           <h1 className="text-2xl sm:text-3xl font-display tracking-wide text-theme-prime">My nest</h1>
           <p className="text-sm text-muted-foreground">
             Rewards quietly stack while you roam—grab OWL whenever you are ready.
@@ -943,6 +1160,27 @@ export function DashboardNestingClient() {
           {actionError}
         </div>
       )}
+
+      {claimLedgerNotice ? (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] px-4 py-3 text-sm text-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <p className="leading-relaxed text-foreground/95 min-w-0">{claimLedgerNotice}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[44px] shrink-0 touch-manipulation self-start sm:self-center"
+              onClick={() => setClaimLedgerNotice(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {stakeSuccessMessage ? (
         <div
@@ -1033,8 +1271,8 @@ export function DashboardNestingClient() {
               <span className="font-medium text-theme-prime/90">
                 {selectedPerch
                   ? perchAssetKindLabel(selectedPerch.asset_type)
-                  : solePerch
-                    ? perchAssetKindLabel(solePerch.asset_type)
+                  : lockedPerch
+                    ? perchAssetKindLabel(lockedPerch.asset_type)
                     : 'Pick a perch below'}
               </span>
             </div>
@@ -1051,15 +1289,83 @@ export function DashboardNestingClient() {
               onChange={(e) => setStakeAmount(e.target.value)}
               className="touch-manipulation mt-2 min-h-[52px] border-0 bg-transparent px-0 text-2xl font-semibold tabular-nums text-foreground placeholder:text-muted-foreground/45 focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-3xl sm:min-h-[56px]"
             />
-            {!stakePoolId && !solePerch ? (
+            {!stakePoolId && !lockedPerch ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 Tip: pick your perch below—the rate and lock apply to whatever you tuck in up here.
               </p>
             ) : null}
-            {solePerch && solePerch.asset_type === 'nft' ? (
+            {lockedPerch && lockedPerch.asset_type === 'nft' ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 One Owl Nest NFT counts as a nest of size 1—you can still type 1 above or leave it blank.
               </p>
+            ) : null}
+            {tokenStakeRequired ? (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {!connected ? (
+                      <>Connect wallet to see your {tokenStakeSymbol} balance.</>
+                    ) : walletTokenScan.status === 'loading' ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                        Reading {tokenStakeSymbol} balance…
+                      </span>
+                    ) : walletTokenScan.status === 'done' && walletTokenScan.uiAmount !== null ? (
+                      <>
+                        Balance{' '}
+                        <span className="font-medium tabular-nums text-foreground/85">
+                          {walletTokenScan.uiAmount.toLocaleString(undefined, {
+                            maximumFractionDigits: walletTokenScan.decimals ?? 6,
+                          })}
+                        </span>{' '}
+                        {tokenStakeSymbol}
+                      </>
+                    ) : walletTokenScan.status === 'done' && walletTokenScan.hint ? (
+                      <span className="text-amber-400/90">Couldn’t read {tokenStakeSymbol}</span>
+                    ) : (
+                      <>Balance —</>
+                    )}
+                  </span>
+                  {connected &&
+                  walletTokenScan.status === 'done' &&
+                  walletTokenScan.uiAmount !== null &&
+                  walletTokenScan.uiAmount > 0 ? (
+                    <button
+                      type="button"
+                      className="touch-manipulation rounded-md border border-emerald-500/40 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-theme-prime/90 hover:bg-emerald-500/10"
+                      onClick={() => {
+                        const ui = walletTokenScan.uiAmount
+                        if (ui === null || ui <= 0) return
+                        setStakeAmount(
+                          ui.toLocaleString('en-US', {
+                            useGrouping: false,
+                            maximumFractionDigits: walletTokenScan.decimals ?? 6,
+                          })
+                        )
+                      }}
+                    >
+                      Max
+                    </button>
+                  ) : connected &&
+                    walletTokenScan.status === 'done' &&
+                    walletTokenScan.uiAmount === null ? (
+                    <button
+                      type="button"
+                      className="touch-manipulation rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-foreground/5"
+                      onClick={() => void loadPerchTokenFromWallet()}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+                {walletTokenScan.status === 'done' &&
+                walletTokenScan.uiAmount === null &&
+                walletTokenScan.hint ? (
+                  <p className="break-words text-[11px] leading-snug text-amber-400/85">
+                    {walletTokenScan.hint}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
@@ -1077,17 +1383,19 @@ export function DashboardNestingClient() {
                 <span className="max-w-[55%] truncate text-right font-medium text-foreground/90">{selectedPerch.name}</span>
               ) : null}
             </div>
-            {solePerch ? (
+            {lockedPerch ? (
               <>
-                <p className="mt-3 text-sm font-medium text-foreground">{solePerch.name}</p>
-                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{solePerch.description}</p>
+                <p className="mt-3 text-sm font-medium text-foreground">{lockedPerch.name}</p>
+                {lockedPerch.description ? (
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{lockedPerch.description}</p>
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-emerald-500/15 pt-3 text-xs text-muted-foreground">
                   <span className="tabular-nums">
-                    Reward {solePerch.reward_token ? `${solePerch.reward_token} · ` : ''}
+                    Reward {lockedPerch.reward_token ? `${lockedPerch.reward_token} · ` : ''}
                     <span className="font-medium text-theme-prime/90">
-                      {formatRewardRate(Number(solePerch.reward_rate), solePerch.reward_rate_unit)}
-                    </span>{' '}
-                    per NFT
+                      {formatRewardRate(Number(lockedPerch.reward_rate), lockedPerch.reward_rate_unit)}
+                    </span>
+                    {lockedPerch.asset_type === 'nft' ? ' per NFT' : ''}
                   </span>
                   <span className="text-border" aria-hidden>
                     ·
@@ -1095,7 +1403,7 @@ export function DashboardNestingClient() {
                   <span>
                     Lock{' '}
                     <span className="font-medium text-foreground/85">
-                      {solePerch.lock_period_days === 0 ? 'none' : `${solePerch.lock_period_days} days`}
+                      {lockedPerch.lock_period_days === 0 ? 'none' : `${lockedPerch.lock_period_days} days`}
                     </span>
                   </span>
                 </div>
@@ -1153,7 +1461,116 @@ export function DashboardNestingClient() {
           </div>
 
           <div className="mt-3 space-y-2 rounded-xl border border-border/50 bg-black/30 px-3 py-3 sm:px-4">
-            {!nftMintRequired ? (
+            {tokenStakeRequired ? (
+              <>
+                <p className="text-sm font-medium text-foreground">
+                  {tokenStakeSymbol} from your wallet
+                </p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Tap below to read just this perch&apos;s {tokenStakeSymbol} balance from your connected
+                  wallet—no other tokens are touched.
+                </p>
+
+                {walletTokenScan.status === 'idle' ? (
+                  <div className="space-y-2">
+                    <Button
+                      type="button"
+                      variant="default"
+                      className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_18px_rgba(0,255,136,0.12)]"
+                      disabled={!connected || !tokenStakeMint}
+                      onClick={() => void loadPerchTokenFromWallet()}
+                    >
+                      Load {tokenStakeSymbol} balance
+                    </Button>
+                    {!connected ? (
+                      <p className="text-xs text-muted-foreground text-center">Connect your wallet first.</p>
+                    ) : !tokenStakeMint ? (
+                      <p className="text-xs text-amber-400/90 text-center">
+                        This perch is missing a token mint—admin needs to set it.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {walletTokenScan.status === 'loading' ? (
+                  <div className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground touch-manipulation">
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                    <span>Reading your {tokenStakeSymbol} balance from the network…</span>
+                  </div>
+                ) : null}
+
+                {walletTokenScan.status === 'done' && walletTokenScan.hint ? (
+                  <p className="text-xs text-amber-400/90 leading-relaxed">{walletTokenScan.hint}</p>
+                ) : null}
+
+                {walletTokenScan.status === 'done' && walletTokenScan.uiAmount !== null ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-black/25 p-3 touch-manipulation">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-muted-foreground">Wallet balance</p>
+                        <p className="truncate text-base font-semibold tabular-nums text-foreground">
+                          {walletTokenScan.uiAmount.toLocaleString(undefined, {
+                            maximumFractionDigits: walletTokenScan.decimals ?? 6,
+                          })}{' '}
+                          <span className="text-sm font-normal text-muted-foreground">
+                            {tokenStakeSymbol}
+                          </span>
+                        </p>
+                        {tokenStakeMint ? (
+                          <p className="truncate font-mono text-[11px] text-muted-foreground">
+                            {shortenAddress(tokenStakeMint, 6)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-[40px] shrink-0 touch-manipulation border-emerald-500/40 text-xs font-semibold"
+                        disabled={!walletTokenScan.uiAmount || walletTokenScan.uiAmount <= 0}
+                        onClick={() => {
+                          const ui = walletTokenScan.uiAmount
+                          if (ui === null || ui <= 0) return
+                          setStakeAmount(
+                            ui.toLocaleString('en-US', {
+                              useGrouping: false,
+                              maximumFractionDigits: walletTokenScan.decimals ?? 6,
+                            })
+                          )
+                        }}
+                      >
+                        Use max
+                      </Button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-[44px] w-full touch-manipulation gap-2 border-border/60 text-sm font-medium"
+                      disabled={!connected}
+                      onClick={() => void loadPerchTokenFromWallet()}
+                    >
+                      <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
+                      Reload {tokenStakeSymbol} balance
+                    </Button>
+                  </div>
+                ) : null}
+
+                {walletTokenScan.status === 'done' &&
+                walletTokenScan.uiAmount === null &&
+                !walletTokenScan.hint ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-[44px] w-full touch-manipulation gap-2 border-border/60 text-sm font-medium"
+                    disabled={!connected}
+                    onClick={() => void loadPerchTokenFromWallet()}
+                  >
+                    <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
+                    Try again
+                  </Button>
+                ) : null}
+              </>
+            ) : !nftMintRequired ? (
               <>
                 <Label htmlFor="stake-asset" className="text-sm text-foreground">
                   NFT mint or memo{' '}

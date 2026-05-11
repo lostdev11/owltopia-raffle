@@ -3884,7 +3884,17 @@ export function RaffleDetailClient({
               )
             })()}
 
-            {connected && (
+            {connected && !publicKey && (
+              <div
+                className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20 flex items-center gap-2 text-sm text-muted-foreground`}
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                <span>Finishing wallet connection… your ticket count appears in a moment.</span>
+              </div>
+            )}
+            {connected && publicKey && (
               <div className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20`}>
                 <div className="flex items-center justify-between">
                   <div>

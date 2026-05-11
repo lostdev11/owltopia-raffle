@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireSession } from '@/lib/auth-server'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -13,7 +13,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()

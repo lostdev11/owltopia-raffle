@@ -8,6 +8,11 @@ export type Gen2PresaleStats = {
   sol_usd_price: number | null
   /** False until admin turns presale on (DB `gen2_presale_settings.is_live`). */
   presale_live: boolean
+  /**
+   * When true, `sold` / `remaining` / `percent_sold` are placeholders — Supabase was unreachable.
+   * Server oversell protection still applies on checkout once DB is back.
+   */
+  sold_sync_unavailable?: boolean
 }
 
 export type Gen2PresaleBalance = {

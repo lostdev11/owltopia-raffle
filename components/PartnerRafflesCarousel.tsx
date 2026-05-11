@@ -1,20 +1,44 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
-import { PARTNER_LOGOS } from '@/lib/partner-logos'
 import {
   PURCHASE_COMPLETED_EVENT,
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
 import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
+import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 
 type Item = { raffle: Raffle; entries: Entry[] }
+
+/** Spotlight strip: quick thumb from raffle row data (matches RaffleCard primary image logic without mint fetch). */
+function partnerSpotlightThumbSrc(raffle: Raffle): string {
+  const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+  const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
+  const isLegacyOwltopiaPlaceholder =
+    typeof raffle.image_url === 'string' &&
+    (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+  const cryptoCurrencyArt =
+    (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
+    (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
+      ? prizeCurrency === 'SOL'
+        ? '/solana-mark.svg'
+        : '/usdc.png'
+      : null
+  if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
+  return fromDb || ''
+}
 
 /** Same idea as RafflesList: SSR sends entries: []; keep fetched rows across router.refresh. */
 function mergeCarouselProps(prev: Item[], next: Item[]): Item[] {
@@ -45,6 +69,9 @@ export function PartnerRafflesCarousel({
   const [displayItems, setDisplayItems] = useState<Item[]>(items)
   const itemsRef = useRef(items)
   const [marqueePaused, setMarqueePaused] = useState(false)
+  const [partnerMarqueeLoop, setPartnerMarqueeLoop] = useState(false)
+  const partnerMarqueeOuterRef = useRef<HTMLDivElement>(null)
+  const partnerMarqueeTrackRef = useRef<HTMLDivElement>(null)
   const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -166,10 +193,43 @@ export function PartnerRafflesCarousel({
     }
   }, [itemsKey])
 
+  useLayoutEffect(() => {
+    const outer = partnerMarqueeOuterRef.current
+    const track = partnerMarqueeTrackRef.current
+    const len = displayItems.length
+    if (!outer || !track || len === 0) {
+      setPartnerMarqueeLoop(false)
+      return
+    }
+    if (len === 1) {
+      setPartnerMarqueeLoop(false)
+      return
+    }
+
+    const decide = () => {
+      const n = displayItems.length
+      if (n <= 1) {
+        setPartnerMarqueeLoop(false)
+        return
+      }
+      setPartnerMarqueeLoop((prevLoop) => {
+        const singleW = prevLoop ? track.scrollWidth / 2 : track.scrollWidth
+        return singleW > outer.clientWidth + 1
+      })
+    }
+
+    decide()
+    const ro = new ResizeObserver(decide)
+    ro.observe(outer)
+    ro.observe(track)
+    return () => ro.disconnect()
+  }, [itemsKey, displayItems.length])
+
   const loopItems = useMemo(() => {
     if (displayItems.length === 0) return []
+    if (displayItems.length === 1 || !partnerMarqueeLoop) return displayItems
     return [...displayItems, ...displayItems]
-  }, [displayItems])
+  }, [displayItems, partnerMarqueeLoop])
 
   const pauseMarquee = () => {
     setMarqueePaused(true)
@@ -188,8 +248,7 @@ export function PartnerRafflesCarousel({
   }
 
   const n = displayItems.length
-  const durationSec = Math.max(20, n * 8)
-  const logoDurationSec = Math.max(20, PARTNER_LOGOS.length * 6)
+  const durationSec = Math.max(24, n * 10)
 
   if (items.length === 0) return null
 
@@ -198,59 +257,65 @@ export function PartnerRafflesCarousel({
       className="w-full min-w-0 mb-6 sm:mb-8"
       aria-labelledby="partner-raffles-carousel-heading"
     >
-      <div className="mb-3 min-w-0 sm:mb-4">
-        <div className="mb-2 flex min-w-0 items-center gap-2">
+      <div className="mb-4 min-w-0 sm:mb-5">
+        <div className="mb-3 flex min-w-0 items-center gap-2">
           <Users className="h-5 w-5 shrink-0 text-violet-400" aria-hidden />
           <h2 id="partner-raffles-carousel-heading" className="truncate text-base font-bold sm:text-lg">
             Partner Spotlight
           </h2>
         </div>
         <div
-          className="partner-logos-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden pb-1"
+          className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 [scrollbar-width:thin]"
           style={{ touchAction: 'manipulation' as const }}
-          onPointerDown={pauseMarquee}
-          onPointerUp={scheduleResume}
-          onPointerCancel={scheduleResume}
-          role="region"
-          aria-label="Partner logos, auto-scrolling. Tap to pause."
+          role="list"
+          aria-label="Featured prize thumbnails from partner raffles"
         >
-          <div
-            className="partner-logos-marquee-track flex w-max flex-nowrap items-center gap-2.5 sm:gap-3"
-            dir="ltr"
-            style={
-              {
-                animationPlayState: marqueePaused ? 'paused' : 'running',
-                '--partner-logos-marquee-duration': `${logoDurationSec}s`,
-              } as CSSProperties
-            }
-          >
-            {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map((logo, idx) => (
-              <div
-                key={`${logo.src}-${idx}`}
-                className="flex h-[78px] w-[126px] shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-[92px] sm:w-[152px]"
+          {displayItems.map(({ raffle }) => {
+            const src = partnerSpotlightThumbSrc(raffle)
+            const label = raffle.title?.trim() || 'Raffle'
+            return (
+              <Link
+                key={raffle.id}
+                href={`/raffles/${raffle.slug}`}
+                className="group relative shrink-0 snap-start touch-manipulation [-webkit-tap-highlight-color:transparent]"
+                role="listitem"
+                title={label}
               >
-                <Image
-                  src={logo.src}
-                  alt={logo.alt}
-                  width={140}
-                  height={84}
-                  className="h-full w-full rounded-xl object-contain"
-                />
-              </div>
-            ))}
-          </div>
+                <div className="relative h-[4.25rem] w-[4.25rem] overflow-hidden rounded-xl border border-white/10 bg-muted ring-1 ring-white/5 transition-transform duration-200 group-active:scale-[0.98] sm:h-[4.75rem] sm:w-[4.75rem]">
+                  {src ? (
+                    /* eslint-disable-next-line @next/next/no-img-element -- IPFS/proxy URLs */
+                    <img
+                      src={src}
+                      alt=""
+                      className={`h-full w-full ${src === '/solana-mark.svg' || src === '/usdc.png' ? 'object-contain p-2' : 'object-cover object-center'}`}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-muted px-1 text-center text-[9px] text-muted-foreground">
+                      NFT
+                    </div>
+                  )}
+                </div>
+              </Link>
+            )
+          })}
         </div>
-        <p className="text-sm text-muted-foreground sm:text-base">
-          <Link
-            href="/partner-program"
-            className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
-          >
-            About the program
-          </Link>
-        </p>
+
+        <div className="mt-5 border-t border-border/60 pt-4">
+          <h3 className="text-base font-bold text-foreground sm:text-lg">About the program</h3>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Verified partner community hosts are highlighted here with a reduced platform fee on tickets.{' '}
+            <Link
+              href="/partner-program"
+              className="font-semibold text-foreground/90 underline-offset-4 hover:underline touch-manipulation"
+            >
+              Partner program details
+            </Link>
+          </p>
+        </div>
       </div>
       <div
-        className="partner-raffles-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden overflow-y-visible pt-4 pb-8 -mx-1 px-3 sm:pt-6 sm:pb-10 sm:px-5"
+        ref={partnerMarqueeOuterRef}
+        className={`partner-raffles-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden overflow-y-visible pt-2 pb-8 -mx-1 px-3 sm:pb-10 sm:px-5 ${!partnerMarqueeLoop ? 'flex justify-center' : ''}`}
         style={{ touchAction: 'manipulation' as const }}
         onPointerDown={pauseMarquee}
         onPointerUp={scheduleResume}
@@ -259,11 +324,13 @@ export function PartnerRafflesCarousel({
         aria-label="Featured partner raffles, auto-scrolling. Tap to pause."
       >
         <div
+          ref={partnerMarqueeTrackRef}
           className="partner-raffles-marquee-track gap-4 sm:gap-5"
           dir="ltr"
           style={
             {
               animationPlayState: marqueePaused ? 'paused' : 'running',
+              animation: partnerMarqueeLoop ? undefined : 'none',
               '--partner-marquee-duration': `${durationSec}s`,
             } as CSSProperties
           }
@@ -271,13 +338,14 @@ export function PartnerRafflesCarousel({
           {loopItems.map(({ raffle, entries }, i) => (
             <div
               key={`${raffle.id}-${i}`}
-              className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
+              className="flex min-h-0 w-[calc(100vw-2rem)] max-w-[min(92vw,36rem)] shrink-0 self-stretch min-w-0 sm:max-w-[34rem]"
             >
               <div className="flex h-full min-h-0 w-full flex-1 flex-col">
                 <RaffleCard
                   raffle={raffle}
                   entries={entries}
                   size="small"
+                  layout="showcase"
                   section="active"
                   serverNow={serverNow}
                   priority={i === 0}

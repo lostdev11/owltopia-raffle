@@ -430,6 +430,34 @@ export function RafflesList({
   const showSort =
     otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1
 
+  const renderRaffleCard = (
+    { raffle, entries, profitInfo }: RaffleWithEntriesItem,
+    flatIndex: number
+  ) => {
+    const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
+    const feeReason = (raffle.fee_tier_reason ?? '').trim()
+    const isPartnerCommunity =
+      raffle.creator_is_partner === true ||
+      Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+      feeReason === 'partner_community' ||
+      (creator ? partnerWalletSet?.has(creator) ?? false : false)
+    return (
+      <RaffleScrollReveal key={raffle.id}>
+        <RaffleCard
+          raffle={raffle}
+          entries={entries}
+          size={size}
+          section={section}
+          profitInfo={profitInfo}
+          onDeleted={handleRaffleDeleted}
+          priority={flatIndex < 6}
+          serverNow={serverNow}
+          isPartnerCommunity={isPartnerCommunity}
+        />
+      </RaffleScrollReveal>
+    )
+  }
+
   return (
     <div className="w-full min-w-0">
       {(title || showSort) && (
@@ -464,28 +492,9 @@ export function RafflesList({
         </div>
       )}
       <div className={`w-full min-w-0 ${gridClasses[size]}`}>
-        {otherRaffles.map(({ raffle, entries, profitInfo }, index) => {
-          const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
-          const isPartnerCommunity =
-            raffle.creator_is_partner === true ||
-            Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
-            (creator ? partnerWalletSet?.has(creator) ?? false : false)
-          return (
-          <RaffleScrollReveal key={raffle.id}>
-            <RaffleCard
-              raffle={raffle}
-              entries={entries}
-              size={size}
-              section={section}
-              profitInfo={profitInfo}
-              onDeleted={handleRaffleDeleted}
-              priority={index < 6}
-              serverNow={serverNow}
-              isPartnerCommunity={isPartnerCommunity}
-            />
-          </RaffleScrollReveal>
-          )
-        })}
+        {otherRaffles.map(({ raffle, entries, profitInfo }, index) =>
+          renderRaffleCard({ raffle, entries, profitInfo }, index)
+        )}
       </div>
     </div>
   )

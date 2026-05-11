@@ -28,6 +28,27 @@ export function Header() {
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   )
+  /** SIWS session wallet is admin — shows Owl Vision even if the wallet adapter is disconnected (common on mobile). */
+  const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/check?session=1', { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (cancelled) return undefined
+        return res.ok ? res.json() : undefined
+      })
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setAdminSessionActive(data?.isAdmin === true)
+      })
+      .catch(() => {
+        /* keep prior session hint on transient errors */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visibilityTick])
 
   // Re-run when connected/publicKey change or when user returns to tab so Owl Vision link appears right away.
   useEffect(() => {
@@ -42,13 +63,15 @@ export function Header() {
     if (cachedAdmin !== null) {
       setIsAdmin(cachedAdmin)
       setAdminRole(cachedRole)
-      return
     }
     let cancelled = false
-    fetch(`/api/admin/check?wallet=${addr}`)
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`, { cache: 'no-store' })
+      .then((res) => {
+        if (cancelled) return undefined
+        return res.ok ? res.json() : undefined
+      })
       .then((data) => {
-        if (cancelled) return
+        if (cancelled || data === undefined) return
         const admin = data?.isAdmin === true
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
@@ -56,16 +79,13 @@ export function Header() {
         setAdminRole(role)
       })
       .catch(() => {
-        if (!cancelled) {
-          setIsAdmin(false)
-          setAdminRole(null)
-        }
+        /* do not clear admin on network errors — keeps cache / SIWS session UX stable */
       })
     return () => { cancelled = true }
   }, [connected, publicKey, visibilityTick])
 
-  // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
-  const showOwlVision = Boolean(isAdmin)
+  // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
+  const showOwlVision = isAdmin === true || adminSessionActive === true
   const [nestingLandingPublic, setNestingLandingPublic] = useState(false)
 
   useEffect(() => {
@@ -85,7 +105,7 @@ export function Header() {
   }, [visibilityTick])
 
   /** Nesting appears for admins always; for everyone when `/nesting` is turned on in Owl Nesting admin. */
-  const showNestingNav = Boolean(isAdmin) || nestingLandingPublic
+  const showNestingNav = isAdmin === true || adminSessionActive === true || nestingLandingPublic
   const nestingNavHref = nestingLandingPublic ? '/nesting' : '/dashboard/nesting'
   const showCreateRaffle = connected
 

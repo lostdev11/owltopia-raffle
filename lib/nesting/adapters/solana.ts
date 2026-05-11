@@ -16,6 +16,7 @@ import {
   transferNestingTokenFromVaultToWallet,
 } from '@/lib/nesting/token-stake-transfer'
 import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
+import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
 
 async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoPool']>[0]) {
   if (input.pool.asset_type === 'token') {
@@ -124,18 +125,18 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       recipientWallet: input.wallet,
       claimAmountUi: input.amount,
     })
-    if (transfer.kind === 'failed') {
-      throw new StakingUserError(transfer.error, 503)
-    }
-
-    const txSig = transfer.kind === 'sent' ? transfer.signature : null
+    const { txSig, note } = resolveRewardClaimRecording({
+      poolRewardToken: pool.reward_token,
+      transfer,
+      claimAmountUi: input.amount,
+    })
 
     await recordRewardClaim({
       positionId: input.positionId,
       wallet: input.wallet,
       amount: input.amount,
       newClaimedTotal: input.newClaimedTotal,
-      note: transfer.kind === 'sent' ? 'owl_reward_treasury_transfer' : 'onchain_reward_distribution_policy',
+      note,
       transaction_signature: txSig,
       last_claim_signature: txSig,
     })

@@ -53,7 +53,12 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
         </div>
         <p className="text-sm leading-relaxed text-[#A9CBB9]">
           Secure your Gen2 allocation before WL and public.{' '}
-          <span className="font-medium text-[#EAFBF4]">{supply} total presale spots</span> — demand is tracked live.
+          <span className="font-medium text-[#EAFBF4]">{supply} total presale spots</span>
+          {stats?.sold_sync_unavailable ? (
+            <> — live demand sync is offline (connection); totals above are not updated yet.</>
+          ) : (
+            <> — demand is tracked live.</>
+          )}
         </p>
       </div>
     </div>
