@@ -467,8 +467,20 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
+.partner-logos-marquee-outer {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
 .partner-logos-marquee-track {
-  --partner-logos-marquee-duration: 30s;
+  --partner-logos-marquee-duration: 45s;
+  display: flex;
+  width: max-content;
+  flex-wrap: nowrap;
+  align-items: center;
   animation: partner-logos-marquee var(--partner-logos-marquee-duration) linear infinite;
   will-change: transform;
 }

@@ -55,6 +55,7 @@ export async function enrichRafflesWithCreatorHolder(
     creator_is_holder: boolean
     creator_is_partner: boolean
     creator_partner_display_name: string | null
+    creator_partner_table_label: string | null
     description_urls_clickable: boolean
   })[]
 > {
@@ -111,11 +112,14 @@ export async function enrichRafflesWithCreatorHolder(
       if (profileName) creator_partner_display_name = profileName
       else if (tableLabel?.trim()) creator_partner_display_name = tableLabel.trim()
     }
+    const creator_partner_table_label =
+      isPartner && tableLabel?.trim() ? tableLabel.trim() : null
     return {
       ...r,
       creator_is_holder: holderByWallet.get(w) ?? false,
       creator_is_partner: isPartner,
       creator_partner_display_name,
+      creator_partner_table_label,
       description_urls_clickable: w ? adminWallets.has(w) : false,
     }
   })

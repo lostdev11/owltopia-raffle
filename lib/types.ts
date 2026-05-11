@@ -192,6 +192,11 @@ export interface Raffle {
    */
   creator_partner_display_name?: string | null
   /**
+   * Enriched at list time: `partner_community_creators.display_label` when set (admin partner brand name).
+   * Used for partner spotlight logo matching — profile display names often omit the brand keyword.
+   */
+  creator_partner_table_label?: string | null
+  /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */

@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   CommunityGiveawayBrowseCard,
   type CommunityGiveawayBrowseItem,
 } from '@/components/CommunityGiveawayBrowseCard'
+import { cn } from '@/lib/utils'
 
 type Props = {
   /** Stable id for aria-labelledby */
@@ -31,7 +32,9 @@ function flexGapPx(parent: HTMLElement | null): number {
 }
 
 /**
- * Duplicated strip + translate3d marquee (works when all cards fit on wide screens).
+ * Horizontal carousel: when the card strip is wider than the viewport, a second copy
+ * of the strip enables a seamless translate marquee. When everything fits, only one
+ * strip is rendered so cards are not duplicated side-by-side.
  */
 export function GiveawayBrowseCarouselSection({
   sectionId,
@@ -40,32 +43,82 @@ export function GiveawayBrowseCarouselSection({
   items,
   eagerFirstImage = false,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const firstStripRef = useRef<HTMLDivElement>(null)
   const mouseInsideRef = useRef(false)
   const interactionHoldRef = useRef(false)
   const pauseUntilRef = useRef(0)
-  const reducedMotionRef = useRef(false)
   const currentSpeedRef = useRef(0)
   const offsetRef = useRef(0)
   const rafIdRef = useRef(0)
 
+  const [stripOverflows, setStripOverflows] = useState(false)
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    reducedMotionRef.current = mq.matches
-    const onChange = () => {
-      reducedMotionRef.current = mq.matches
-    }
+    setPrefersReducedMotion(mq.matches)
+    const onChange = () => setPrefersReducedMotion(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    const strip = firstStripRef.current
+    if (!container || !strip || items.length === 0) {
+      setStripOverflows(false)
+      return
+    }
+    const measure = () => {
+      const cw = container.clientWidth
+      const sw = strip.scrollWidth
+      setStripOverflows(sw > cw + 2)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(container)
+    ro.observe(strip)
+    return () => ro.disconnect()
+  }, [items])
+
+  const marqueeActive = stripOverflows && !prefersReducedMotion
+
+  useLayoutEffect(() => {
+    if (marqueeActive) return
+    offsetRef.current = 0
+    const track = trackRef.current
+    if (track) track.style.transform = ''
+  }, [marqueeActive])
+
   const bumpManualPause = useCallback(() => {
     pauseUntilRef.current = Date.now() + 9000
+    currentSpeedRef.current = 0
   }, [])
 
+  /** Any vertical scroll or wheel: user is moving the page — stop marquee immediately (can resume after pause window). */
   useEffect(() => {
     if (items.length === 0) return
+    let lastScrollY = typeof window !== 'undefined' ? window.scrollY : 0
+    const onScroll = () => {
+      const y = window.scrollY
+      if (Math.abs(y - lastScrollY) >= 1) {
+        lastScrollY = y
+        bumpManualPause()
+      }
+    }
+    const onWheel = () => bumpManualPause()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('wheel', onWheel, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('wheel', onWheel)
+    }
+  }, [items.length, bumpManualPause])
+
+  useEffect(() => {
+    if (items.length === 0 || !marqueeActive) return
 
     const tick = () => {
       const track = trackRef.current
@@ -76,13 +129,19 @@ export function GiveawayBrowseCarouselSection({
       }
 
       let desired = MAX_SPEED_PX_PER_FRAME
-      if (reducedMotionRef.current) desired = 0
-      else if (typeof document !== 'undefined' && document.visibilityState !== 'visible') desired = 0
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') desired = 0
       else if (mouseInsideRef.current) desired = 0
       else if (interactionHoldRef.current) desired = 0
       else if (Date.now() < pauseUntilRef.current) desired = 0
 
-      currentSpeedRef.current += (desired - currentSpeedRef.current) * SPEED_LERP
+      const userInterrupted =
+        interactionHoldRef.current || (typeof document !== 'undefined' && Date.now() < pauseUntilRef.current)
+
+      if (userInterrupted) {
+        currentSpeedRef.current = 0
+      } else {
+        currentSpeedRef.current += (desired - currentSpeedRef.current) * SPEED_LERP
+      }
 
       const loopPoint = strip.offsetWidth + flexGapPx(track)
       if (loopPoint > 8 && currentSpeedRef.current > 0.0001) {
@@ -99,7 +158,7 @@ export function GiveawayBrowseCarouselSection({
 
     rafIdRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafIdRef.current)
-  }, [items])
+  }, [items, marqueeActive])
 
   const releaseHoldSoon = useCallback(() => {
     window.setTimeout(() => {
@@ -131,10 +190,19 @@ export function GiveawayBrowseCarouselSection({
       </div>
 
       <div
-        className="relative w-full min-w-0 overflow-hidden pl-[max(0px,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]"
+        ref={containerRef}
+        className={cn(
+          'relative w-full min-w-0 pl-[max(0px,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]',
+          stripOverflows && prefersReducedMotion && 'overflow-x-auto overflow-y-hidden',
+          !(stripOverflows && prefersReducedMotion) && 'overflow-hidden'
+        )}
         tabIndex={0}
         role="region"
-        aria-label={`${title}: swipe or scroll horizontally; pauses on hover`}
+        aria-label={
+          stripOverflows && prefersReducedMotion
+            ? `${title}: scroll horizontally to see all giveaways`
+            : `${title}: swipe or scroll horizontally; pauses on hover`
+        }
         onMouseEnter={() => {
           mouseInsideRef.current = true
         }}
@@ -143,6 +211,7 @@ export function GiveawayBrowseCarouselSection({
         }}
         onPointerDownCapture={() => {
           interactionHoldRef.current = true
+          currentSpeedRef.current = 0
         }}
         onPointerUpCapture={releaseHoldSoon}
         onPointerCancelCapture={releaseHoldSoon}
@@ -155,9 +224,11 @@ export function GiveawayBrowseCarouselSection({
           <div ref={firstStripRef} role="list" className="flex flex-nowrap gap-4 sm:gap-5">
             {renderCards(false)}
           </div>
-          <div className="flex flex-nowrap gap-4 sm:gap-5" aria-hidden>
-            {renderCards(true)}
-          </div>
+          {marqueeActive ? (
+            <div className="flex flex-nowrap gap-4 sm:gap-5" aria-hidden>
+              {renderCards(true)}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

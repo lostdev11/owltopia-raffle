@@ -119,6 +119,8 @@ export function CommunityGiveawayBrowseCard({
   }, [g.nft_mint_address])
 
   const canEnter = g.status === 'open' && g.prizeDeposited && !g.winnerDrawn
+  /** Past boosts/deadlines are confusing once drawn/cancelled — browse list only shows schedule for active-open flows */
+  const showBoostAndEntrySchedule = g.status === 'open' && !g.winnerDrawn
 
   return (
     <Link
@@ -193,13 +195,17 @@ export function CommunityGiveawayBrowseCard({
                 {g.access_gate === 'holder_only' ? 'Owl NFT holders' : 'Everyone'}
               </span>
             </li>
-            <li className="leading-snug">
-              OWL boost deadline: <span className="text-foreground">{formatWhen(g.starts_at)}</span>
-            </li>
-            {g.ends_at ? (
-              <li className="leading-snug">
-                Entry deadline: <span className="text-foreground">{formatWhen(g.ends_at)}</span>
-              </li>
+            {showBoostAndEntrySchedule ? (
+              <>
+                <li className="leading-snug">
+                  OWL boost deadline: <span className="text-foreground">{formatWhen(g.starts_at)}</span>
+                </li>
+                {g.ends_at ? (
+                  <li className="leading-snug">
+                    Entry deadline: <span className="text-foreground">{formatWhen(g.ends_at)}</span>
+                  </li>
+                ) : null}
+              </>
             ) : null}
           </ul>
           <p className="mt-auto flex min-h-[44px] items-center text-base font-medium text-green-400 sm:min-h-0 sm:text-sm group-hover:underline">

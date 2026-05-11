@@ -833,12 +833,18 @@ export function RafflesPageClient({
       return {
         pending: [] as CommunityGiveawayBrowseItem[],
         main: [] as CommunityGiveawayBrowseItem[],
+        closed: [] as CommunityGiveawayBrowseItem[],
+        claimed: [] as CommunityGiveawayBrowseItem[],
       }
     }
     const pending: CommunityGiveawayBrowseItem[] = []
     const main: CommunityGiveawayBrowseItem[] = []
+    const closed: CommunityGiveawayBrowseItem[] = []
+    const claimed: CommunityGiveawayBrowseItem[] = []
     for (const g of giveawaysList) {
       if (isPendingFutureCommunityGiveaway(g, serverTime)) pending.push(g)
+      else if (g.claimed) claimed.push(g)
+      else if (g.status !== 'open') closed.push(g)
       else main.push(g)
     }
     pending.sort((a, b) => {
@@ -849,7 +855,13 @@ export function RafflesPageClient({
       if (dr !== 0) return dr
       return new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
     })
-    return { pending, main }
+    closed.sort(
+      (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    )
+    claimed.sort(
+      (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    )
+    return { pending, main, closed, claimed }
   }, [giveawaysList, serverTime])
 
   const { giveawaysMainEveryone, giveawaysMainHolders } = useMemo(() => {
@@ -1095,6 +1107,31 @@ export function RafflesPageClient({
                       giveawaysBuckets.pending.length === 0 &&
                       giveawaysMainEveryone.length === 0 &&
                       giveawaysMainHolders.length > 0
+                    }
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-closed"
+                    title="Closed giveaways"
+                    description="Winner drawn or cancelled — entries are closed. View details for results or claim instructions."
+                    items={giveawaysBuckets.closed}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 &&
+                      giveawaysMainEveryone.length === 0 &&
+                      giveawaysMainHolders.length === 0 &&
+                      giveawaysBuckets.closed.length > 0
+                    }
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-prize-claimed"
+                    title="Prize claimed"
+                    description="Giveaways where the winner has claimed the prize from escrow."
+                    items={giveawaysBuckets.claimed}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 &&
+                      giveawaysMainEveryone.length === 0 &&
+                      giveawaysMainHolders.length === 0 &&
+                      giveawaysBuckets.closed.length === 0 &&
+                      giveawaysBuckets.claimed.length > 0
                     }
                   />
                 </div>
