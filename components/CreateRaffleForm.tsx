@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { PublicKey, Transaction } from '@solana/web3.js'
@@ -123,7 +123,9 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
 
 export function CreateRaffleForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const createSubmitInFlightRef = useRef(false)
+  const partnerModeDefaultAppliedRef = useRef(false)
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
@@ -169,9 +171,14 @@ export function CreateRaffleForm() {
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
+  const partnerCreateMode = searchParams.get('mode') === 'partner'
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
+
+  useEffect(() => {
+    partnerModeDefaultAppliedRef.current = false
+  }, [publicKey, partnerCreateMode])
 
   useEffect(() => {
     if (prizeMode === 'token') {
@@ -253,6 +260,10 @@ export function CreateRaffleForm() {
         setCanSetLinkOnlyVisibility(ok)
         setPartnerDiscordLinked(d.partnerDiscordLinked === true)
         if (!ok) setHideFromPublicBrowse(false)
+        if (ok && partnerCreateMode && !partnerModeDefaultAppliedRef.current) {
+          setHideFromPublicBrowse(true)
+          partnerModeDefaultAppliedRef.current = true
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -264,7 +275,7 @@ export function CreateRaffleForm() {
     return () => {
       cancelled = true
     }
-  }, [connected, publicKey])
+  }, [connected, publicKey, partnerCreateMode])
 
   /**
    * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
@@ -1719,6 +1730,11 @@ export function CreateRaffleForm() {
 
           {canSetLinkOnlyVisibility && (
             <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+              {partnerCreateMode && (
+                <p className="text-xs font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  Partner raffle setup
+                </p>
+              )}
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
                 <input
                   type="checkbox"

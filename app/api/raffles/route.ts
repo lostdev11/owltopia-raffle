@@ -6,6 +6,7 @@ import {
   findNonTerminalPartnerCryptoRaffleByCreator,
   generateUniqueSlug,
   getRaffleCreationCountForCreatorToday,
+  getRaffles,
   getRafflesViaRest,
   promoteDraftRafflesToLive,
 } from '@/lib/db/raffles'
@@ -95,12 +96,14 @@ export async function GET(request: NextRequest) {
 
     await promoteDraftRafflesToLive()
 
-    const { data: raffles, error } = await getRafflesViaRest(activeOnly, {
-      includeDraft: true,
-      timeoutMs: 12_000,
-      maxRetries: 1,
-      perAttemptMs: 8_000,
-    })
+    const { data: raffles, error } = viewerIsAdmin
+      ? await getRaffles(activeOnly, activeOnly ? undefined : { includeDraft: true })
+      : await getRafflesViaRest(activeOnly, {
+          includeDraft: true,
+          timeoutMs: 12_000,
+          maxRetries: 1,
+          perAttemptMs: 8_000,
+        })
 
     if (error) {
       const isConfig = error.code === 'CONFIG'

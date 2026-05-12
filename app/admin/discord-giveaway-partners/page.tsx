@@ -28,6 +28,7 @@ export default function AdminDiscordGiveawayPartnersPage() {
   const [rotatingId, setRotatingId] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [savingWebhookId, setSavingWebhookId] = useState<string | null>(null)
+  const [testingWebhookKey, setTestingWebhookKey] = useState<string | null>(null)
   const [webhookMessage, setWebhookMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [webhookEdits, setWebhookEdits] = useState<
     Record<string, { raffle_webhook_url_created: string; raffle_webhook_url_winner: string }>
@@ -218,6 +219,39 @@ export default function AdminDiscordGiveawayPartnersPage() {
       setWebhookMessage({ type: 'error', text: e instanceof Error ? e.message : 'Could not save raffle webhooks' })
     } finally {
       setSavingWebhookId(null)
+    }
+  }
+
+  const sendTestRaffleWebhook = async (id: string, target: 'created' | 'winner') => {
+    const key = `${id}:${target}`
+    setTestingWebhookKey(key)
+    setWebhookMessage(null)
+    try {
+      const res = await fetch(`/api/admin/discord-giveaway-partners/${id}/test-raffle-webhook`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setWebhookMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : `Could not send ${target} test webhook`,
+        })
+        return
+      }
+      setWebhookMessage({
+        type: 'success',
+        text: `Sent ${target === 'winner' ? 'winner' : 'created'} test webhook.`,
+      })
+    } catch (e) {
+      setWebhookMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : `Could not send ${target} test webhook`,
+      })
+    } finally {
+      setTestingWebhookKey(null)
     }
   }
 
@@ -476,16 +510,50 @@ export default function AdminDiscordGiveawayPartnersPage() {
                         className="min-h-[44px] font-mono text-xs"
                       />
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="touch-manipulation min-h-[44px]"
-                      disabled={savingWebhookId === p.id}
-                      onClick={() => void saveRaffleWebhooks(p.id)}
-                    >
-                      {savingWebhookId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save raffle webhooks'}
-                    </Button>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={savingWebhookId === p.id}
+                        onClick={() => void saveRaffleWebhooks(p.id)}
+                      >
+                        {savingWebhookId === p.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Save raffle webhooks'
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={!p.raffle_webhook_url_created || testingWebhookKey === `${p.id}:created`}
+                        onClick={() => void sendTestRaffleWebhook(p.id, 'created')}
+                      >
+                        {testingWebhookKey === `${p.id}:created` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Send created test'
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={!p.raffle_webhook_url_winner || testingWebhookKey === `${p.id}:winner`}
+                        onClick={() => void sendTestRaffleWebhook(p.id, 'winner')}
+                      >
+                        {testingWebhookKey === `${p.id}:winner` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Send winner test'
+                        )}
+                      </Button>
+                    </div>
                   </div>
                   <Button
                     type="button"

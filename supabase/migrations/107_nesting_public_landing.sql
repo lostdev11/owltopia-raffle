@@ -3,14 +3,14 @@
 
 CREATE TABLE IF NOT EXISTS public.nesting_public_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
-  landing_public BOOLEAN NOT NULL DEFAULT FALSE,
+  landing_public BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_by_wallet TEXT,
   CONSTRAINT nesting_public_settings_single_row CHECK (id = 'default')
 );
 
 INSERT INTO public.nesting_public_settings (id, landing_public, updated_at, updated_by_wallet)
-VALUES ('default', FALSE, NOW(), NULL)
+VALUES ('default', TRUE, NOW(), NULL)
 ON CONFLICT (id) DO NOTHING;
 
 DROP TRIGGER IF EXISTS update_nesting_public_settings_updated_at ON public.nesting_public_settings;
