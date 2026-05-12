@@ -1,4 +1,5 @@
 import type { StakingMutationAdapter } from '@/lib/nesting/adapters/types'
+import { PublicKey } from '@solana/web3.js'
 import { StakingUserError } from '@/lib/nesting/errors'
 import {
   insertStakingPosition,
@@ -6,7 +7,8 @@ import {
   recordRewardClaim,
   getStakingPositionForWallet,
 } from '@/lib/db/staking-positions'
-import { assertMetaplexCoreAssetInEscrow } from '@/lib/nesting/metaplex-core'
+import { transferMetaplexCoreAssetFromNestingEscrow } from '@/lib/nesting/metaplex-core'
+import { getNestingEscrowWalletAddress } from '@/lib/nesting/escrow-keypair'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { getTokenInfo } from '@/lib/tokens'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
@@ -54,11 +56,11 @@ async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoP
   if (!input.asset_identifier) {
     throw new StakingUserError('asset_identifier is required for on-chain NFT staking.', 400)
   }
-
-  await assertMetaplexCoreAssetInEscrow({
-    assetId: input.asset_identifier,
-    collectionMint: input.pool.collection_key,
-  })
+  try {
+    new PublicKey(getNestingEscrowWalletAddress())
+  } catch {
+    throw new StakingUserError('NESTING_ESCROW_WALLET_ADDRESS is required for on-chain NFT staking.', 503)
+  }
 
   const stakedAt = new Date()
   const unlockAt =
@@ -76,7 +78,9 @@ async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoP
     reward_token_snapshot: input.pool.reward_token,
     staked_at: stakedAt.toISOString(),
     unlock_at: unlockAt?.toISOString() ?? null,
-    status: 'active',
+      status: 'pending',
+      sync_status: 'pending',
+      external_reference: 'awaiting_nft_stake_transfer',
   })
 
   return { position }
@@ -111,7 +115,21 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       return { position }
     }
 
-    const position = await markPositionUnstaked(input.positionId, input.wallet)
+    if (!row.asset_identifier?.trim()) {
+      throw new StakingUserError('NFT asset id is missing for this nest.', 400)
+    }
+    const transfer = await transferMetaplexCoreAssetFromNestingEscrow({
+      assetId: row.asset_identifier,
+      recipientWallet: input.wallet,
+      collectionMint: pool.collection_key,
+    })
+    if (!transfer.ok) throw new StakingUserError(transfer.error, 503)
+    const position = await markPositionUnstaked(input.positionId, input.wallet, {
+      unstake_signature: transfer.signature,
+      sync_status: 'confirmed',
+      last_synced_at: new Date().toISOString(),
+      last_transaction_error: null,
+    })
     return { position }
   },
   async claimPositionRewards(input) {

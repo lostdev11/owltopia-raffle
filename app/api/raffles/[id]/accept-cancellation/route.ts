@@ -38,7 +38,7 @@ export async function POST(
       return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
     }
 
-    if (!raffle.cancellation_requested_at) {
+    if (!raffle.cancellation_requested_at && !raffle.cancellation_fee_paid_at) {
       return NextResponse.json(
         { error: 'No cancellation request pending for this raffle' },
         { status: 400 }
@@ -64,6 +64,8 @@ export async function POST(
     await updateRaffle(id, {
       status: 'cancelled',
       cancelled_at: now.toISOString(),
+      cancellation_requested_at:
+        raffle.cancellation_requested_at ?? raffle.cancellation_fee_paid_at ?? now.toISOString(),
       cancellation_refund_policy: refundPolicy,
       cancellation_fee_amount: cancellationFeeAmount,
       cancellation_fee_currency: cancellationFeeCurrency,

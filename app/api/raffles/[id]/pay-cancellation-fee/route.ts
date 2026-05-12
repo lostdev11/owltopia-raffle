@@ -24,8 +24,8 @@ async function isFeeTxUsedElsewhere(signature: string, excludeRaffleId: string):
 /**
  * POST /api/raffles/[id]/pay-cancellation-fee
  * If a raffle was cancelled (including legacy admin accepts) and the start time had already passed, the
- * creator may still need to pay the 0.1 SOL fee to unlock "claim prize back" and align with policy.
- * Does not change cancellation status; only records the fee on the raffle row.
+ * creator may still need to pay the SOL fee to unlock "claim prize back" and align with policy.
+ * For live / ready-to-draw raffles, a verified fee is also treated as a cancellation request so admins see it.
  */
 export async function POST(
   request: NextRequest,
@@ -68,7 +68,16 @@ export async function POST(
       )
     }
 
+    const status = (raffle.status ?? '').toLowerCase()
+    const isOpenCancellationStatus = status === 'live' || status === 'ready_to_draw'
+
     if (raffle.cancellation_fee_paid_at) {
+      if (!raffle.cancellation_requested_at && isOpenCancellationStatus) {
+        await updateRaffle(id, {
+          cancellation_requested_at: raffle.cancellation_fee_paid_at,
+        })
+        return NextResponse.json({ success: true, alreadyPaid: true, cancellationRequested: true })
+      }
       return NextResponse.json({ success: true, alreadyPaid: true })
     }
 
@@ -100,12 +109,18 @@ export async function POST(
     }
 
     const nowIso = new Date().toISOString()
-    await updateRaffle(id, {
+    const shouldOpenCancellationRequest =
+      !raffle.cancellation_requested_at && isOpenCancellationStatus
+    const patch: Parameters<typeof updateRaffle>[1] = {
       cancellation_fee_paid_at: nowIso,
       cancellation_fee_payment_tx: raw,
-    })
+    }
+    if (shouldOpenCancellationRequest) {
+      patch.cancellation_requested_at = nowIso
+    }
+    await updateRaffle(id, patch)
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, cancellationRequested: shouldOpenCancellationRequest })
   } catch (e) {
     console.error('[pay-cancellation-fee]', e)
     return NextResponse.json({ error: 'Failed to record payment' }, { status: 500 })

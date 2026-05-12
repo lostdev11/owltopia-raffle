@@ -80,7 +80,7 @@ export async function getActivePositionByAssetIdentifier(
     .select('*')
     .eq('pool_id', poolId)
     .eq('asset_identifier', assetIdentifier.trim())
-    .eq('status', 'active')
+    .in('status', ['active', 'pending'])
     .maybeSingle()
 
   if (error) throw new Error(error.message)

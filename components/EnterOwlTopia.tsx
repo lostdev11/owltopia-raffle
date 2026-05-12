@@ -179,7 +179,7 @@ export function EnterOwlTopia() {
         </p>
         <div className="w-full max-w-sm flex flex-col sm:flex-row gap-3 items-stretch justify-center animate-enter-fade-in" style={fadeIn('0.55s')}>
           <Link
-            href="/raffles"
+            href="/raffles?tab=all"
             className="flex-1 min-h-[44px] inline-flex items-center justify-center rounded-lg px-6 py-4 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 animate-button-glow-pulse transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
           >
             Enter Raffles

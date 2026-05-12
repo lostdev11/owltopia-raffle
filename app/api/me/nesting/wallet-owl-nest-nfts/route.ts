@@ -74,7 +74,12 @@ export async function GET(request: NextRequest) {
     const positions = await listStakingPositionsByWallet(wallet)
     const alreadyNested = new Set<string>(
       positions
-        .filter((p) => p.status === 'active' && typeof p.asset_identifier === 'string' && p.asset_identifier.trim())
+        .filter(
+          (p) =>
+            (p.status === 'active' || p.status === 'pending') &&
+            typeof p.asset_identifier === 'string' &&
+            p.asset_identifier.trim()
+        )
         .map((p) => p.asset_identifier!.trim()),
     )
 

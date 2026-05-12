@@ -1,6 +1,11 @@
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { resolveWalletOwlNestCollectionAddress } from '@/lib/nesting/owl-nest-collection'
+import { getNestingEscrowKeypair, getNestingEscrowWalletAddress } from '@/lib/nesting/escrow-keypair'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
+import { createSignerFromKeypair, publicKey as umiPublicKey, signerIdentity } from '@metaplex-foundation/umi'
+import { fetchAsset, transferV1 } from '@metaplex-foundation/mpl-core'
 
 type HeliusAssetResult = {
   id?: string
@@ -20,7 +25,7 @@ function resolveCollectionForCustodyCheck(collectionMint?: string | null): strin
 }
 
 function getRequiredEscrowWalletAddress(): string {
-  return process.env.NESTING_ESCROW_WALLET_ADDRESS?.trim() || ''
+  return getNestingEscrowWalletAddress()
 }
 
 /**
@@ -100,5 +105,61 @@ export async function assertMetaplexCoreAssetInEscrow(params: {
       'NFT is not part of the configured Owltopia Coin collection.',
       400
     )
+  }
+}
+
+export async function transferMetaplexCoreAssetFromNestingEscrow(params: {
+  assetId: string
+  recipientWallet: string
+  collectionMint?: string | null
+}): Promise<{ ok: true; signature: string } | { ok: false; error: string }> {
+  const assetId = params.assetId.trim()
+  const recipientWallet = params.recipientWallet.trim()
+  if (!assetId) return { ok: false, error: 'NFT asset id is missing.' }
+  if (!recipientWallet) return { ok: false, error: 'Recipient wallet is missing.' }
+
+  const keypair = getNestingEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'NESTING_ESCROW_SECRET_KEY is required for NFT unstake release.' }
+  }
+
+  const expectedEscrow = getRequiredEscrowWalletAddress()
+  if (!expectedEscrow || keypair.publicKey.toBase58() !== expectedEscrow) {
+    return { ok: false, error: 'Configured nesting escrow signer does not match NESTING_ESCROW_WALLET_ADDRESS.' }
+  }
+
+  try {
+    await assertMetaplexCoreAssetInEscrow({ assetId, collectionMint: params.collectionMint })
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'NFT is not currently held in nesting escrow.',
+    }
+  }
+
+  try {
+    const endpoint = resolveServerSolanaRpcUrl()
+    const umi: any = (createUmi as any)(endpoint as any)
+    const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
+    const signer = createSignerFromKeypair(umi, umiKeypair)
+    umi.use(signerIdentity(signer))
+
+    const asset = umiPublicKey(assetId)
+    const newOwner = umiPublicKey(recipientWallet)
+    const assetAccount: any = await fetchAsset(umi as any, asset)
+    const maybeCollection: any =
+      assetAccount?.updateAuthority?.type === 'Collection'
+        ? assetAccount.updateAuthority.address
+        : undefined
+
+    const builder: any = transferV1(umi as any, {
+      asset,
+      newOwner,
+      ...(maybeCollection ? { collection: maybeCollection } : {}),
+    } as any)
+    const result: any = await builder.sendAndConfirm(umi as any)
+    return { ok: true, signature: String(result.signature ?? result) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'NFT release transfer failed.' }
   }
 }

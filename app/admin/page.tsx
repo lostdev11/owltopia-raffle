@@ -443,8 +443,10 @@ export default function AdminDashboardPage() {
         })
         .filter((row) => row.id && row.slug)
         .sort((a, b) => {
-          const aTs = a.cancellation_requested_at ? new Date(a.cancellation_requested_at).getTime() : 0
-          const bTs = b.cancellation_requested_at ? new Date(b.cancellation_requested_at).getTime() : 0
+          const aStamp = a.cancellation_requested_at ?? a.cancellation_fee_paid_at
+          const bStamp = b.cancellation_requested_at ?? b.cancellation_fee_paid_at
+          const aTs = aStamp ? new Date(aStamp).getTime() : 0
+          const bTs = bStamp ? new Date(bStamp).getTime() : 0
           return bTs - aTs
         })
       setPendingCancellationRaffles(next)
@@ -1359,6 +1361,8 @@ export default function AdminDashboardPage() {
                         <td className="px-3 py-2 text-muted-foreground">
                           {row.cancellation_requested_at
                             ? new Date(row.cancellation_requested_at).toLocaleString()
+                            : row.cancellation_fee_paid_at
+                              ? `Fee paid ${new Date(row.cancellation_fee_paid_at).toLocaleString()}`
                             : '-'}
                         </td>
                         <td className="px-3 py-2">

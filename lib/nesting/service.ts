@@ -68,7 +68,7 @@ export async function executeStake(params: {
   if (pool.asset_type === 'nft' && asset_identifier) {
     const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
     if (existing) {
-      throw new StakingUserError('This NFT is already in an active staking position.', 400)
+      throw new StakingUserError('This NFT is already in an open staking position.', 400)
     }
   }
 
@@ -80,12 +80,13 @@ export async function executeStake(params: {
   }
 
   const adapter = resolveMutationAdapter(pool)
-  return adapter.stakeIntoPool({
+  const result = await adapter.stakeIntoPool({
     wallet: params.wallet,
     pool,
     amount,
     asset_identifier,
   })
+  return { ...result, pool }
 }
 
 export async function executeUnstake(params: { wallet: string; position_id: string }) {

@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth-server'
 import { executeStake } from '@/lib/nesting/service'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { getNestingEscrowWalletAddress } from '@/lib/nesting/escrow-keypair'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     const bypassSelloutGate = body?.bypass_nesting_sellout_gate === true
 
-    const { position } = await executeStake({
+    const { position, pool } = await executeStake({
       wallet: session.wallet,
       pool_id: typeof body?.pool_id === 'string' ? body.pool_id.trim() : '',
       rawAmount: body?.amount,
@@ -40,7 +41,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       position,
       execution: {
-        path: position.sync_status === 'pending' ? ('onchain_token_transfer_required' as const) : ('database_mock' as const),
+        path:
+          position.sync_status === 'pending' && pool.asset_type === 'nft'
+            ? ('onchain_nft_transfer_required' as const)
+            : position.sync_status === 'pending'
+              ? ('onchain_token_transfer_required' as const)
+              : ('database_mock' as const),
+        escrow_wallet:
+          position.sync_status === 'pending' && pool.asset_type === 'nft'
+            ? getNestingEscrowWalletAddress()
+            : null,
       },
     })
   } catch (e) {

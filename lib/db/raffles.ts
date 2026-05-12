@@ -588,8 +588,8 @@ export async function getRaffles(
 }
 
 /**
- * Raffles where the creator requested cancellation and an admin must still finish the flow in Owl Vision.
- * Matches GET /api/admin/pending-cancellations (cancellation_requested_at set, status not cancelled).
+ * Raffles where the creator requested cancellation or paid the cancellation fee and an admin must still finish the flow in Owl Vision.
+ * Matches GET /api/admin/pending-cancellations (request or fee recorded, status not cancelled).
  * Unlike {@link getRaffles}, this does **not** filter by `RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT`, so legacy or
  * unexpected `status` values still appear — otherwise Manage Raffles can show an empty queue while Owl Vision lists many.
  */
@@ -601,7 +601,7 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
       const { data, error } = await client
         .from('raffles')
         .select(columns)
-        .not('cancellation_requested_at', 'is', null)
+        .or('cancellation_requested_at.not.is.null,cancellation_fee_paid_at.not.is.null')
         .neq('status', 'cancelled')
         .order('cancellation_requested_at', { ascending: false })
 

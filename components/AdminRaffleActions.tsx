@@ -381,11 +381,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   }
 
   const cancellationRequested = !!raffle.cancellation_requested_at
+  const cancellationFeePaid = !!raffle.cancellation_fee_paid_at
+  const cancellationPendingAdmin = cancellationRequested || cancellationFeePaid
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
   const feeApplies = raffleRequiresCancellationFee(raffle)
   /** Treasury fee not recorded; admin can still accept (support override). */
-  const postStartFeeMissing = feeApplies && !raffle.cancellation_fee_paid_at
+  const postStartFeeMissing = feeApplies && !cancellationFeePaid
   const feeSol = getCancellationFeeSol()
 
   const canAdminSendPrizeFromEscrow =
@@ -1364,15 +1366,21 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Cancellation request: creator requested; admin can accept */}
-            {cancellationRequested && !isCancelled && (
+            {cancellationPendingAdmin && !isCancelled && (
               <>
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                   <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                    Cancellation requested by creator
+                    {cancellationRequested ? 'Cancellation requested by creator' : 'Cancellation fee paid by creator'}
                     {raffle.cancellation_requested_at && (
                       <span className="font-normal text-muted-foreground">
                         {' '}
                         at {new Date(raffle.cancellation_requested_at).toLocaleString()}
+                      </span>
+                    )}
+                    {!raffle.cancellation_requested_at && raffle.cancellation_fee_paid_at && (
+                      <span className="font-normal text-muted-foreground">
+                        {' '}
+                        at {new Date(raffle.cancellation_fee_paid_at).toLocaleString()}
                       </span>
                     )}
                   </p>

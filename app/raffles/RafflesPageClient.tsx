@@ -286,9 +286,14 @@ type RafflesPageTab =
 
 /** URL ?tab=… for deep links; must stay in sync with tab buttons below. */
 function tabFromSearchParams(sp: { get(name: string): string | null }): RafflesPageTab {
-  const t = sp.get('tab')
+  const t = (sp.get('tab') ?? '').trim().toLowerCase()
+  if (t === 'all' || t === 'main' || t === 'raffles') return 'all'
   if (t === 'giveaways' || t === 'giveaway') return 'giveaways'
   if (t === 'partners' || t === 'partner' || t === 'partner-raffles') return 'partner-raffles'
+  if (t === 'my-entries' || t === 'entries' || t === 'raffles-entered') return 'my-entries'
+  if (t === 'owl-vision' || t === 'owlvision') return 'owl-vision'
+  if (t === 'announcements' || t === 'announcement') return 'announcements'
+  if (t === 'leaderboard') return 'leaderboard'
   return 'all'
 }
 
@@ -723,12 +728,12 @@ export function RafflesPageClient({
   const futureView = useMemo(() => filterPartnerBucket(future), [future, filterPartnerBucket])
   const pastView = useMemo(() => filterPartnerBucket(past), [past, filterPartnerBucket])
 
-  const selectRafflesBrowseTab = useCallback(
-    (next: 'all' | 'partner-raffles') => {
+  const selectRafflesPageTab = useCallback(
+    (next: RafflesPageTab) => {
       setTab(next)
       const params = new URLSearchParams(searchParams.toString())
       if (next === 'all') params.delete('tab')
-      else params.set('tab', 'partner-raffles')
+      else params.set('tab', next)
       const qs = params.toString()
       router.replace(qs ? `/raffles?${qs}` : '/raffles', { scroll: false })
     },
@@ -936,37 +941,37 @@ export function RafflesPageClient({
           <div className="flex flex-wrap gap-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] pb-0.5 sm:gap-1.5">
             {(
               [
-                { id: 'all' as const, label: 'Main', onSelect: () => selectRafflesBrowseTab('all') },
+                { id: 'all' as const, label: 'Main', onSelect: () => selectRafflesPageTab('all') },
                 {
                   id: 'partner-raffles' as const,
                   label: 'Partner raffles',
                   icon: Users,
-                  onSelect: () => selectRafflesBrowseTab('partner-raffles'),
+                  onSelect: () => selectRafflesPageTab('partner-raffles'),
                 },
                 {
                   id: 'giveaways' as const,
                   label: 'Giveaways',
                   icon: Gift,
-                  onSelect: () => setTab('giveaways'),
+                  onSelect: () => selectRafflesPageTab('giveaways'),
                 },
-                { id: 'my-entries' as const, label: 'Raffles entered', onSelect: () => setTab('my-entries') },
+                { id: 'my-entries' as const, label: 'Raffles entered', onSelect: () => selectRafflesPageTab('my-entries') },
                 {
                   id: 'owl-vision' as const,
                   label: 'Owl Vision',
                   icon: Eye,
-                  onSelect: () => setTab('owl-vision'),
+                  onSelect: () => selectRafflesPageTab('owl-vision'),
                 },
                 {
                   id: 'announcements' as const,
                   label: 'Announcements',
                   icon: Megaphone,
-                  onSelect: () => setTab('announcements'),
+                  onSelect: () => selectRafflesPageTab('announcements'),
                 },
                 {
                   id: 'leaderboard' as const,
                   label: 'Leaderboard',
                   icon: Trophy,
-                  onSelect: () => setTab('leaderboard'),
+                  onSelect: () => selectRafflesPageTab('leaderboard'),
                 },
               ] as const
             ).map((item) => {
@@ -1392,7 +1397,7 @@ export function RafflesPageClient({
                       {' '}or switch to{' '}
                       <button
                         type="button"
-                        onClick={() => selectRafflesBrowseTab('all')}
+                        onClick={() => selectRafflesPageTab('all')}
                         className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
                       >
                         Main
@@ -1400,7 +1405,7 @@ export function RafflesPageClient({
                       to see non-partner listings, or the{' '}
                       <button
                         type="button"
-                        onClick={() => selectRafflesBrowseTab('partner-raffles')}
+                        onClick={() => selectRafflesPageTab('partner-raffles')}
                         className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
                       >
                         Partner raffles

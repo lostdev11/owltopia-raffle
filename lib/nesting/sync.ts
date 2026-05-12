@@ -19,6 +19,7 @@ import {
 import { getTokenInfo } from '@/lib/tokens'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
 import { verifyNestingTokenStakeTransfer } from '@/lib/nesting/token-stake-transfer'
+import { assertMetaplexCoreAssetInEscrow } from '@/lib/nesting/metaplex-core'
 
 export type StakingSyncKind = 'stake' | 'unstake' | 'claim'
 
@@ -131,6 +132,37 @@ export async function syncStakingPositionBySignature(params: {
       last_synced_at: now,
       last_transaction_error: null,
       external_reference: 'token_stake_transfer_confirmed',
+    })
+    return { position: updated }
+  }
+
+  if (params.kind === 'stake' && pool.asset_type === 'nft' && pool.adapter_mode === 'onchain_enabled') {
+    const assetId = position.asset_identifier?.trim()
+    if (!assetId) {
+      throw new StakingUserError('NFT asset id is missing for this nest.', 400)
+    }
+    try {
+      await assertMetaplexCoreAssetInEscrow({
+        assetId,
+        collectionMint: pool.collection_key,
+      })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'NFT is not currently held in staking escrow.'
+      await patchStakingPosition(params.positionId, {
+        sync_status: 'failed',
+        last_synced_at: now,
+        last_transaction_error: message,
+      })
+      throw new StakingUserError(message, 400)
+    }
+
+    const updated = await patchStakingPosition(params.positionId, {
+      stake_signature: sig,
+      status: 'active',
+      sync_status: 'confirmed',
+      last_synced_at: now,
+      last_transaction_error: null,
+      external_reference: 'nft_stake_transfer_confirmed',
     })
     return { position: updated }
   }

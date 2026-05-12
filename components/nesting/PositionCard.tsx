@@ -37,8 +37,11 @@ type Props = {
   stakedAssetHint?: { name?: string | null; image?: string | null } | null
   onUnstake: (positionId: string) => Promise<void>
   onClaim: (positionId: string, amount: number) => Promise<void>
+  onSecureNftCustody?: (positionId: string) => Promise<void>
   claimPhase?: NestingTxPhase
   unstakePhase?: NestingTxPhase
+  securePhase?: NestingTxPhase
+  custodyRequired?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
 }
@@ -49,8 +52,11 @@ export function PositionCard({
   stakedAssetHint,
   onUnstake,
   onClaim,
+  onSecureNftCustody,
   claimPhase = 'idle',
   unstakePhase = 'idle',
+  securePhase = 'idle',
+  custodyRequired = false,
   actionsEnabled = true,
 }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -90,10 +96,21 @@ export function PositionCard({
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
   const claimAmountLabel = claimable.toFixed(6)
 
-  const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
+  const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle' || securePhase !== 'idle'
   const canAct = actionsEnabled
   const showLinePhase: NestingTxPhase =
-    claimPhase !== 'idle' ? claimPhase : unstakePhase !== 'idle' ? unstakePhase : 'idle'
+    securePhase !== 'idle'
+      ? securePhase
+      : claimPhase !== 'idle'
+        ? claimPhase
+        : unstakePhase !== 'idle'
+          ? unstakePhase
+          : 'idle'
+  const needsCustody =
+    custodyRequired &&
+    Boolean(position.asset_identifier?.trim()) &&
+    position.status !== 'unstaked' &&
+    !position.stake_signature?.trim()
 
   const handleClaimMax = async () => {
     if (!canClaimOwl || claimAmountInput <= 0) return
@@ -107,6 +124,15 @@ export function PositionCard({
   const handleUnstake = async () => {
     try {
       await onUnstake(position.id)
+    } catch {
+      /* errors shown on dashboard */
+    }
+  }
+
+  const handleSecureNftCustody = async () => {
+    if (!onSecureNftCustody) return
+    try {
+      await onSecureNftCustody(position.id)
     } catch {
       /* errors shown on dashboard */
     }
@@ -191,7 +217,25 @@ export function PositionCard({
             Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
           </p>
         ) : null}
+        {needsCustody ? (
+          <p className="w-full text-xs text-amber-300">
+            Custody is not confirmed yet. Secure this NFT in nesting escrow so it cannot trade while nested.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
+        {needsCustody ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="min-h-[44px] touch-manipulation"
+            disabled={!canAct || anyTxActive || !onSecureNftCustody}
+            onClick={() => void handleSecureNftCustody()}
+          >
+            {securePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {securePhase === 'idle' ? 'Secure NFT custody' : nestingTxPhaseLabel(securePhase)}
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="outline"
