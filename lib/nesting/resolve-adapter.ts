@@ -5,8 +5,8 @@ import { solanaStakingAdapterStub } from '@/lib/nesting/adapters/solana'
 
 /**
  * Chooses execution path per pool. `mock` and `solana_ready` keep the DB-backed mock path so
- * production behavior stays stable until real transactions are wired. `onchain_enabled` uses
- * the Solana stub (explicit error until the program client exists).
+ * production behavior stays stable. `onchain_enabled` uses Solana token vaults for token pools
+ * and freeze/thaw locks for NFT pools.
  */
 export function resolveMutationAdapter(pool: StakingPoolRow): StakingMutationAdapter {
   const mode = pool.adapter_mode ?? 'mock'

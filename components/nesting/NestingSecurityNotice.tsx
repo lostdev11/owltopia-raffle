@@ -45,7 +45,7 @@ export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, clas
         />
         <span className="text-xs text-muted-foreground leading-snug font-normal">
           I have read this. I know some perches record my nest inside Owltopia until that perch upgrades to fuller
-          wallet-backed custody.
+          wallet-held on-chain locks.
         </span>
       </label>
       <p className="text-[11px] text-muted-foreground/90">

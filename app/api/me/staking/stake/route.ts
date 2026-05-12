@@ -3,7 +3,7 @@ import { requireSession } from '@/lib/auth-server'
 import { executeStake } from '@/lib/nesting/service'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
-import { getNestingEscrowWalletAddress } from '@/lib/nesting/escrow-keypair'
+import { getNestingNftFreezeDelegateAddress } from '@/lib/nesting/nft-freeze'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +11,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 /**
  * POST /api/me/staking/stake
- * Delegates to nesting service + staking adapter (mock until on-chain ships).
+ * Delegates to nesting service + staking adapter (DB, token vault, or NFT freeze lock).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -43,13 +43,13 @@ export async function POST(request: NextRequest) {
       execution: {
         path:
           position.sync_status === 'pending' && pool.asset_type === 'nft'
-            ? ('onchain_nft_transfer_required' as const)
+            ? ('onchain_nft_freeze_required' as const)
             : position.sync_status === 'pending'
               ? ('onchain_token_transfer_required' as const)
               : ('database_mock' as const),
-        escrow_wallet:
+        freeze_delegate:
           position.sync_status === 'pending' && pool.asset_type === 'nft'
-            ? getNestingEscrowWalletAddress()
+            ? getNestingNftFreezeDelegateAddress()
             : null,
       },
     })

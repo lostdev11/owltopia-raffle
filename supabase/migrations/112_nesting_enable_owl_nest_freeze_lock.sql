@@ -1,11 +1,11 @@
--- Owl Nesting: make the canonical 365-day NFT perch custody-backed.
--- New stakes require a wallet-signed Metaplex Core transfer into NESTING_ESCROW_WALLET_ADDRESS.
+-- Owl Nesting: make the canonical 365-day NFT perch freeze-backed.
+-- New stakes freeze the holder's NFT token account in place; unstake thaws it.
 
 UPDATE public.staking_pools
 SET
   adapter_mode = 'onchain_enabled',
   is_onchain_enabled = TRUE,
-  requires_onchain_sync = TRUE,
+  requires_onchain_sync = FALSE,
   lock_enforcement_source = 'hybrid',
   updated_at = NOW()
 WHERE slug = 'owl-nest-365';
@@ -16,4 +16,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS staking_positions_open_asset_unique
     AND status IN ('active', 'pending');
 
 COMMENT ON INDEX public.staking_positions_open_asset_unique IS
-  'An NFT asset may have only one open Owl Nesting position per pool, including pending custody transfer rows.';
+  'An NFT asset may have only one open Owl Nesting position per pool, including pending freeze rows.';

@@ -37,11 +37,11 @@ type Props = {
   stakedAssetHint?: { name?: string | null; image?: string | null } | null
   onUnstake: (positionId: string) => Promise<void>
   onClaim: (positionId: string, amount: number) => Promise<void>
-  onSecureNftCustody?: (positionId: string) => Promise<void>
+  onFreezeNft?: (positionId: string) => Promise<void>
   claimPhase?: NestingTxPhase
   unstakePhase?: NestingTxPhase
   securePhase?: NestingTxPhase
-  custodyRequired?: boolean
+  freezeRequired?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
 }
@@ -52,11 +52,11 @@ export function PositionCard({
   stakedAssetHint,
   onUnstake,
   onClaim,
-  onSecureNftCustody,
+  onFreezeNft,
   claimPhase = 'idle',
   unstakePhase = 'idle',
   securePhase = 'idle',
-  custodyRequired = false,
+  freezeRequired = false,
   actionsEnabled = true,
 }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -106,11 +106,11 @@ export function PositionCard({
         : unstakePhase !== 'idle'
           ? unstakePhase
           : 'idle'
-  const needsCustody =
-    custodyRequired &&
+  const needsFreeze =
+    freezeRequired &&
     Boolean(position.asset_identifier?.trim()) &&
     position.status !== 'unstaked' &&
-    !position.stake_signature?.trim()
+    !position.external_reference?.startsWith('nft_freeze_confirmed:')
 
   const handleClaimMax = async () => {
     if (!canClaimOwl || claimAmountInput <= 0) return
@@ -129,10 +129,10 @@ export function PositionCard({
     }
   }
 
-  const handleSecureNftCustody = async () => {
-    if (!onSecureNftCustody) return
+  const handleFreezeNft = async () => {
+    if (!onFreezeNft) return
     try {
-      await onSecureNftCustody(position.id)
+      await onFreezeNft(position.id)
     } catch {
       /* errors shown on dashboard */
     }
@@ -217,23 +217,23 @@ export function PositionCard({
             Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
           </p>
         ) : null}
-        {needsCustody ? (
+        {needsFreeze ? (
           <p className="w-full text-xs text-amber-300">
-            Custody is not confirmed yet. Secure this NFT in nesting escrow so it cannot trade while nested.
+            Freeze lock is not confirmed yet. Freeze this NFT in your wallet so it cannot trade while nested.
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-        {needsCustody ? (
+        {needsFreeze ? (
           <Button
             type="button"
             variant="default"
             size="sm"
             className="min-h-[44px] touch-manipulation"
-            disabled={!canAct || anyTxActive || !onSecureNftCustody}
-            onClick={() => void handleSecureNftCustody()}
+            disabled={!canAct || anyTxActive || !onFreezeNft}
+            onClick={() => void handleFreezeNft()}
           >
             {securePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            {securePhase === 'idle' ? 'Secure NFT custody' : nestingTxPhaseLabel(securePhase)}
+            {securePhase === 'idle' ? 'Freeze NFT lock' : nestingTxPhaseLabel(securePhase)}
           </Button>
         ) : null}
         <Button

@@ -53,11 +53,7 @@ import { cn, isMobileDevice } from '@/lib/utils'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
 import { getTokenInfo } from '@/lib/tokens'
-import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
-import {
-  isMplCoreNoApprovalsError,
-  mplCoreNoApprovalsEscrowMessage,
-} from '@/lib/solana/mpl-core-transfer-errors'
+import { addMplCoreFreezeDelegate } from '@/lib/solana/mpl-core-freeze'
 
 const MOBILE_401_RETRY_MS = 800
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
@@ -76,7 +72,7 @@ export function DashboardNestingClient() {
   const preselectedPoolId = searchParams.get('pool')
 
   const [pools, setPools] = useState<StakingPoolRow[]>([])
-  const [nestingEscrowWallet, setNestingEscrowWallet] = useState('')
+  const [nestingNftFreezeDelegate, setNestingNftFreezeDelegate] = useState('')
   const [positions, setPositions] = useState<StakingPositionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -157,7 +153,9 @@ export function DashboardNestingClient() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) return
       setPools(Array.isArray(json.pools) ? json.pools : [])
-      setNestingEscrowWallet(typeof json.nesting_escrow_wallet === 'string' ? json.nesting_escrow_wallet : '')
+      setNestingNftFreezeDelegate(
+        typeof json.nesting_nft_freeze_delegate === 'string' ? json.nesting_nft_freeze_delegate : ''
+      )
     } catch {
       /* ignore */
     }
@@ -858,31 +856,18 @@ export function DashboardNestingClient() {
     [connection, publicKey, sendTransaction]
   )
 
-  const sendOnChainNftStakeTransfer = useCallback(
-    async (assetId: string, escrowWallet: string): Promise<string> => {
+  const sendMplCoreFreezeDelegateApproval = useCallback(
+    async (assetId: string, delegateAddress: string): Promise<string> => {
       const adapter = wallet?.adapter
       if (!adapter || !publicKey) {
         throw new Error('Connect your wallet first.')
       }
-      const destination = escrowWallet.trim()
-      if (!destination) {
-        throw new Error('This perch is missing its nesting escrow wallet.')
-      }
-
-      try {
-        return await transferMplCoreToEscrow({
-          connection,
-          wallet: adapter,
-          assetId,
-          escrowAddress: destination,
-        })
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        if (isMplCoreNoApprovalsError(message)) {
-          throw new Error(mplCoreNoApprovalsEscrowMessage(shortenAddress(assetId, 6), { fullAssetId: assetId }))
-        }
-        throw new Error(message)
-      }
+      return addMplCoreFreezeDelegate({
+        connection,
+        wallet: adapter,
+        assetId,
+        delegateAddress,
+      })
     },
     [connection, publicKey, wallet]
   )
@@ -940,7 +925,7 @@ export function DashboardNestingClient() {
             const json = (await res.json().catch(() => ({}))) as {
               error?: string
               position?: StakingPositionRow
-              execution?: { path?: string; escrow_wallet?: string | null }
+              execution?: { path?: string; freeze_delegate?: string | null }
             }
             if (!res.ok) {
               const err =
@@ -983,30 +968,30 @@ export function DashboardNestingClient() {
             }
             if (
               pool.asset_type === 'nft' &&
-              json.execution?.path === 'onchain_nft_transfer_required'
+              json.execution?.path === 'onchain_nft_freeze_required'
             ) {
               const positionId = json.position?.id
               const positionAssetId = json.position?.asset_identifier?.trim() || assetId
-              const escrowWallet = json.execution.escrow_wallet?.trim() || ''
+              const delegateAddress = json.execution.freeze_delegate?.trim() || ''
               if (!positionId || !positionAssetId) {
                 setActionError('Stake was prepared, but the NFT position was missing.')
                 throw new Error('stake')
               }
               setStakeTxPhase('awaiting_wallet_signature')
-              const signature = await sendOnChainNftStakeTransfer(positionAssetId, escrowWallet)
+              const signature = await sendMplCoreFreezeDelegateApproval(positionAssetId, delegateAddress)
               setStakeTxPhase('syncing')
-              const syncRes = await fetch('/api/me/staking/sync', {
+              const freezeRes = await fetch('/api/me/staking/freeze', {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
                   'Content-Type': 'application/json',
                   'X-Connected-Wallet': publicKey.toBase58(),
                 },
-                body: JSON.stringify({ position_id: positionId, signature, kind: 'stake' }),
+                body: JSON.stringify({ position_id: positionId, signature }),
               })
-              const syncJson = (await syncRes.json().catch(() => ({}))) as { error?: string }
-              if (!syncRes.ok) {
-                setActionError(typeof syncJson.error === 'string' ? syncJson.error : 'Could not confirm NFT custody')
+              const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
+              if (!freezeRes.ok) {
+                setActionError(typeof freezeJson.error === 'string' ? freezeJson.error : 'Could not confirm NFT freeze')
                 throw new Error('stake')
               }
             }
@@ -1044,8 +1029,8 @@ export function DashboardNestingClient() {
       setSuccessMessage(
         pool.asset_type === 'nft'
           ? nestedCount === 1
-            ? 'Nest opened successfully — your Owl Nest NFT is held in nesting escrow and OWL rewards will accrue for this perch. Claim anytime from your nests below.'
-            : `${nestedCount} Owl Nest NFTs nested successfully — they are held in nesting escrow and OWL rewards will accrue for each perch.`
+            ? 'Nest opened successfully — your Owl Nest NFT is frozen in your wallet and OWL rewards will accrue for this perch. Claim anytime from your nests below.'
+            : `${nestedCount} Owl Nest NFTs nested successfully — they are frozen in your wallet and OWL rewards will accrue for each perch.`
           : 'Nest opened successfully — your stake is on file for this perch. Claim anytime from your nests below.'
       )
     } catch (e) {
@@ -1054,7 +1039,7 @@ export function DashboardNestingClient() {
     }
   }
 
-  const handleSecureNftCustody = async (positionId: string) => {
+  const handleFreezeExistingNft = async (positionId: string) => {
     if (!publicKey) return
     setActionError(null)
     const position = positions.find((p) => p.id === positionId)
@@ -1064,7 +1049,7 @@ export function DashboardNestingClient() {
     }
     const pool = pools.find((p) => p.id === position.pool_id)
     if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') {
-      setActionError('This nest is not configured for NFT custody.')
+      setActionError('This nest is not configured for NFT freeze locks.')
       return
     }
 
@@ -1073,20 +1058,23 @@ export function DashboardNestingClient() {
         onPhase: (p) => setPosSubPhase(positionId, 'secure', p),
         async execute() {
           setPosSubPhase(positionId, 'secure', 'awaiting_wallet_signature')
-          const signature = await sendOnChainNftStakeTransfer(position.asset_identifier!.trim(), nestingEscrowWallet)
+          const signature = await sendMplCoreFreezeDelegateApproval(
+            position.asset_identifier!.trim(),
+            nestingNftFreezeDelegate
+          )
           setPosSubPhase(positionId, 'secure', 'syncing')
-          const syncRes = await fetch('/api/me/staking/sync', {
+          const freezeRes = await fetch('/api/me/staking/freeze', {
             method: 'POST',
             credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
-            body: JSON.stringify({ position_id: positionId, signature, kind: 'stake' }),
+            body: JSON.stringify({ position_id: positionId, signature }),
           })
-          const syncJson = (await syncRes.json().catch(() => ({}))) as { error?: string }
-          if (!syncRes.ok) {
-            setActionError(typeof syncJson.error === 'string' ? syncJson.error : 'Could not confirm NFT custody')
+          const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
+          if (!freezeRes.ok) {
+            setActionError(typeof freezeJson.error === 'string' ? freezeJson.error : 'Could not freeze NFT')
             throw new Error('secure')
           }
         },
@@ -1095,10 +1083,10 @@ export function DashboardNestingClient() {
           await loadPools()
         },
       })
-      setSuccessMessage('NFT custody confirmed — this Owl Nest NFT is now held in nesting escrow.')
+      setSuccessMessage('NFT lock confirmed — this Owl Nest NFT is frozen in the holder wallet.')
     } catch (e) {
       if (e instanceof Error && e.message === 'secure') return
-      setActionError(e instanceof Error ? e.message : 'Could not secure NFT custody')
+      setActionError(e instanceof Error ? e.message : 'Could not freeze NFT')
     }
   }
 
@@ -1455,7 +1443,7 @@ export function DashboardNestingClient() {
           title="Open a nest"
           description={
             solePerch
-              ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet, pick the Owl Nest NFT we find in your wallet, then approve the escrow transfer that keeps it from trading while nested.'
+              ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet and pick one or more Owl Nest NFTs; each one is frozen in your wallet while it earns.'
               : 'Like a swap: you tuck in an amount, pick where it earns, then confirm. Owl Nest NFT perches load eligible NFTs from your wallet automatically; mint entry is only a fallback.'
           }
         />
@@ -2073,11 +2061,11 @@ export function DashboardNestingClient() {
                   }
                   onUnstake={handleUnstake}
                   onClaim={handleClaim}
-                  onSecureNftCustody={handleSecureNftCustody}
+                  onFreezeNft={handleFreezeExistingNft}
                   claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
                   unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}
                   securePhase={posPhases[pos.id]?.secure ?? 'idle'}
-                  custodyRequired={
+                  freezeRequired={
                     poolById.get(pos.pool_id)?.asset_type === 'nft' &&
                     poolById.get(pos.pool_id)?.adapter_mode === 'onchain_enabled'
                   }

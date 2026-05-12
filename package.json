@@ -8,7 +8,7 @@
     "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
     "check:funds-escrow": "node scripts/check-funds-escrow-api.mjs",
     "generate:escrow-key": "node scripts/generate-escrow-keypair.mjs",
-    "generate:nesting-escrow-key": "node scripts/generate-nesting-escrow-keypair.mjs",
+    "generate:nesting-freeze-authority-key": "node scripts/generate-nesting-freeze-authority-keypair.mjs",
     "generate:nesting-reward-treasury-key": "node scripts/generate-nesting-reward-treasury-keypair.mjs",
     "generate:funds-escrow-key": "node scripts/generate-funds-escrow-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
