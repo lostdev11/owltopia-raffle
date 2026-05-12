@@ -593,74 +593,30 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
-@keyframes owl-entered-glitch {
-  0%, 90%, 100% {
-    transform: translate(0, 0) skew(0deg);
-    filter: none;
-  }
-  92% {
-    transform: translate(-1px, 1px) skew(0.2deg);
-    filter: hue-rotate(-3deg);
-  }
-  94% {
-    transform: translate(1px, -1px) skew(-0.2deg);
-    filter: hue-rotate(2deg);
-  }
-  96% {
-    transform: translate(-1px, -1px) skew(0.1deg);
-    filter: hue-rotate(-1deg);
-  }
-  98% {
-    transform: translate(1px, 1px) skew(0deg);
-    filter: none;
-  }
-}
-
-/* Mobile / touch: visible nudge without filter (hue-rotate is costly; 1px is easy to miss on small screens) */
-@keyframes owl-entered-shake-touch {
-  0%, 90%, 100% {
-    transform: translate3d(0, 0, 0);
-  }
-  92% {
-    transform: translate3d(-2px, 1px, 0);
-  }
-  94% {
-    transform: translate3d(2px, -1px, 0);
-  }
-  96% {
-    transform: translate3d(-2px, -1px, 0);
-  }
-  98% {
-    transform: translate3d(2px, 1px, 0);
-  }
-}
-
 @keyframes owl-sparkle-shimmer {
   0% {
-    background-position: 0% 0%, 100% 100%;
-    opacity: 0.5;
+    background-position: 0% 0%, 100% 100%, 0% 0%;
+    opacity: 0.45;
   }
   50% {
-    background-position: 100% 100%, 0% 0%;
-    opacity: 0.8;
+    background-position: 100% 100%, 0% 0%, 100% 100%;
+    opacity: 0.75;
   }
   100% {
-    background-position: 0% 0%, 100% 100%;
-    opacity: 0.5;
+    background-position: 0% 0%, 100% 100%, 0% 0%;
+    opacity: 0.45;
   }
 }
 
 .raffle-entered-card {
-  animation: owl-entered-glow 2.5s ease-in-out infinite, owl-entered-glitch 4s ease-in-out infinite;
+  animation: owl-entered-glow 2.8s ease-in-out infinite;
   border-color: rgb(var(--entered-rgb, 34 197 94) / 0.55) !important;
 }
 
-/* Touch / small viewports: tighter glow + transform-only shake (no filter glitch) */
+/* Touch / small viewports: tighter glow without moving stacked cards. */
 @media (hover: none) and (pointer: coarse), (max-width: 768px) {
   .raffle-entered-card {
-    animation:
-      owl-entered-glow-touch 3s ease-in-out infinite,
-      owl-entered-shake-touch 4s ease-in-out infinite;
+    animation: owl-entered-glow-touch 3s ease-in-out infinite;
   }
 
   .winner-golden-card {
@@ -681,7 +637,7 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
-/* Respect reduced motion: no glitch, subtle glow */
+/* Respect reduced motion: no animated shimmer, subtle glow */
 @media (prefers-reduced-motion: reduce) {
   .raffle-entered-card {
     animation: none;
@@ -696,16 +652,21 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
 }
 
 .raffle-entered-overlay {
-  background: linear-gradient(
-    135deg,
-    rgb(var(--entered-rgb, 34 197 94) / 0.08) 0%,
-    rgb(var(--entered-rgb, 34 197 94) / 0.12) 25%,
-    rgb(var(--entered-rgb, 34 197 94) / 0.14) 50%,
-    rgb(var(--entered-rgb, 34 197 94) / 0.12) 75%,
-    rgb(var(--entered-rgb, 34 197 94) / 0.08) 100%
-  );
-  background-size: 200% 200%;
-  animation: golden-pulse 3s ease-in-out infinite, golden-shimmer 5s ease-in-out infinite;
+  background:
+    radial-gradient(circle at 18% 24%, rgb(var(--entered-rgb, 34 197 94) / 0.26) 0 2px, transparent 3px),
+    radial-gradient(circle at 78% 36%, rgb(var(--entered-rgb, 34 197 94) / 0.2) 0 1.5px, transparent 3px),
+    linear-gradient(
+      135deg,
+      rgb(var(--entered-rgb, 34 197 94) / 0.08) 0%,
+      rgb(var(--entered-rgb, 34 197 94) / 0.12) 25%,
+      rgb(var(--entered-rgb, 34 197 94) / 0.14) 50%,
+      rgb(var(--entered-rgb, 34 197 94) / 0.12) 75%,
+      rgb(var(--entered-rgb, 34 197 94) / 0.08) 100%
+    );
+  background-size: 180px 180px, 220px 220px, 200% 200%;
+  animation:
+    golden-pulse 3s ease-in-out infinite,
+    owl-sparkle-shimmer 5s ease-in-out infinite;
   pointer-events: none;
 }
 

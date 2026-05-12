@@ -1491,8 +1491,29 @@ export function RaffleDetailClient({
           setDepositEscrowError(`This raffle has an invalid ${prizeCur || 'token'} prize amount.`)
           return
         }
-        const mintPk = new PublicKey(mintStr)
         const escrowPubkey = new PublicKey(escrowAddress)
+        if (prizeCur === 'SOL') {
+          if (!connected) {
+            setDepositEscrowError('Connect a wallet that can sign SOL transfers.')
+            return
+          }
+          if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
+            setDepositEscrowError('This SOL prize amount is too large for a wallet transfer.')
+            return
+          }
+          logEscrowDepositPath(depositLogCtx, 'spl_transfer', { note: 'partner_SOL_native' })
+          const tx = new Transaction().add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: escrowPubkey,
+              lamports: Number(rawNeed),
+            })
+          )
+          const sig = await sendTransaction(tx, connection)
+          await afterWalletSignature(sig, 'spl_transfer')
+          return
+        }
+        const mintPk = new PublicKey(mintStr)
         logEscrowDepositPath(depositLogCtx, 'spl_transfer', { note: `partner_${prizeCur}` })
         let resolvedHolder = await getFungibleHolderInWallet(
           connection,

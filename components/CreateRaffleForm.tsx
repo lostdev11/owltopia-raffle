@@ -4,7 +4,7 @@ import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
-import { PublicKey, Transaction } from '@solana/web3.js'
+import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -1063,7 +1063,6 @@ export function CreateRaffleForm() {
                 phase: 'loading',
                 persistUntilDismiss: false,
               })
-              const mintPk = new PublicKey(prizeMint)
               const rawNeed = humanPartnerPrizeToRawUnits(prizeCur, raffle.prize_amount)
               if (rawNeed == null) {
                 alert(`Invalid ${prizeCur} prize amount from server. Open your raffle to try deposit again.`)
@@ -1083,81 +1082,106 @@ export function CreateRaffleForm() {
                 return
               }
               const escrowPubkey = new PublicKey(escrowAddress)
-              setEscrowProgress((p) => ({
-                ...p,
-                phase: 'loading',
-                persistUntilDismiss: false,
-                description: `Checking your ${prizeCur} balance — please wait.`,
-              }))
-              let resolvedHolder = await getFungibleHolderInWallet(
-                connection,
-                mintPk,
-                publicKey,
-                rawNeed,
-                'processed'
-              )
-              for (
-                let attempt = 0;
-                attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
-                attempt++
-              ) {
-                await new Promise((r) => setTimeout(r, 700))
-                resolvedHolder = await getFungibleHolderInWallet(
+              let depositSig: string
+              if (prizeCur === 'SOL') {
+                if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
+                  alert('This SOL prize amount is too large for a wallet transfer.')
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: 'When your wallet opens, approve the transaction to send SOL to escrow.',
+                }))
+                const tx = new Transaction().add(
+                  SystemProgram.transfer({
+                    fromPubkey: publicKey,
+                    toPubkey: escrowPubkey,
+                    lamports: Number(rawNeed),
+                  })
+                )
+                depositSig = await sendTransaction(tx, connection)
+                await confirmSignatureSuccessOnChain(connection, depositSig)
+              } else {
+                const mintPk = new PublicKey(prizeMint)
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: `Checking your ${prizeCur} balance — please wait.`,
+                }))
+                let resolvedHolder = await getFungibleHolderInWallet(
                   connection,
                   mintPk,
                   publicKey,
                   rawNeed,
                   'processed'
                 )
-              }
-              if (!resolvedHolder) {
-                alert(
-                  `Your wallet does not show enough ${prizeCur} for this prize yet (or the account is delegated). Top up ${prizeCur}, then open your raffle to deposit.`
-                )
-                router.push(`/raffles/${raffle.slug}?deposit=1`)
-                return
-              }
-              const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
-              const escrowAta = await getAssociatedTokenAddress(
-                mintPk,
-                escrowPubkey,
-                false,
-                tokenProgram,
-                ASSOCIATED_TOKEN_PROGRAM_ID
-              )
-              const tx = new Transaction()
-              try {
-                await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
-              } catch {
-                tx.add(
-                  createAssociatedTokenAccountInstruction(
-                    publicKey,
-                    escrowAta,
-                    escrowPubkey,
+                for (
+                  let attempt = 0;
+                  attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+                  attempt++
+                ) {
+                  await new Promise((r) => setTimeout(r, 700))
+                  resolvedHolder = await getFungibleHolderInWallet(
+                    connection,
                     mintPk,
-                    tokenProgram,
-                    ASSOCIATED_TOKEN_PROGRAM_ID
+                    publicKey,
+                    rawNeed,
+                    'processed'
+                  )
+                }
+                if (!resolvedHolder) {
+                  alert(
+                    `Your wallet does not show enough ${prizeCur} for this prize yet (or the account is delegated). Top up ${prizeCur}, then open your raffle to deposit.`
+                  )
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
+                const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
+                const escrowAta = await getAssociatedTokenAddress(
+                  mintPk,
+                  escrowPubkey,
+                  false,
+                  tokenProgram,
+                  ASSOCIATED_TOKEN_PROGRAM_ID
+                )
+                const tx = new Transaction()
+                try {
+                  await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
+                } catch {
+                  tx.add(
+                    createAssociatedTokenAccountInstruction(
+                      publicKey,
+                      escrowAta,
+                      escrowPubkey,
+                      mintPk,
+                      tokenProgram,
+                      ASSOCIATED_TOKEN_PROGRAM_ID
+                    )
+                  )
+                }
+                tx.add(
+                  createTransferInstruction(
+                    sourceTokenAccount,
+                    escrowAta,
+                    publicKey,
+                    rawNeed,
+                    [],
+                    tokenProgram
                   )
                 )
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
+                }))
+                depositSig = await sendTransaction(tx, connection)
+                await confirmSignatureSuccessOnChain(connection, depositSig)
               }
-              tx.add(
-                createTransferInstruction(
-                  sourceTokenAccount,
-                  escrowAta,
-                  publicKey,
-                  rawNeed,
-                  [],
-                  tokenProgram
-                )
-              )
-              setEscrowProgress((p) => ({
-                ...p,
-                phase: 'loading',
-                persistUntilDismiss: false,
-                description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
-              }))
-              const depositSig = await sendTransaction(tx, connection)
-              await confirmSignatureSuccessOnChain(connection, depositSig)
               setEscrowProgress((p) => ({
                 ...p,
                 phase: 'loading',

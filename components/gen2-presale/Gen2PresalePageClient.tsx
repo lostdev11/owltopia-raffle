@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { HeroVideoBackground } from '@/components/HeroVideoBackground'
 import { Gen2BalanceCard } from '@/components/gen2-presale/Gen2BalanceCard'
@@ -20,6 +20,46 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { getGen2PresaleBalanceIssues, getGen2PresaleStatsIssues } from '@/lib/gen2-presale/presale-sanity'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
+
+type Gen2ArtworkSlide = {
+  src: string
+  alt: string
+  fit?: 'contain' | 'cover'
+}
+
+const GEN2_ARTWORK_SLIDES: Gen2ArtworkSlide[] = [
+  // Add new artwork files under /public/images/gen2-carousel/ and list them here.
+  {
+    src: '/images/gen2-carousel/monster-owl.png',
+    alt: 'Owltopia Gen2 monster owl artwork',
+    fit: 'contain',
+  },
+  {
+    src: '/images/gen2-carousel/golden-owl.png',
+    alt: 'Owltopia Gen2 golden owl artwork',
+    fit: 'contain',
+  },
+  {
+    src: '/images/gen2-carousel/nest-punk-owl.png',
+    alt: 'Owltopia Gen2 owl with nest and leather jacket artwork',
+    fit: 'contain',
+  },
+  {
+    src: '/images/gen2-carousel/jersey-owl.png',
+    alt: 'Owltopia Gen2 owl in a black jersey artwork',
+    fit: 'contain',
+  },
+  {
+    src: '/images/gen2-carousel/blindfold-tux-owl.png',
+    alt: 'Owltopia Gen2 blindfolded owl in a white tuxedo artwork',
+    fit: 'contain',
+  },
+  {
+    src: '/images/gen2-carousel/armored-purple-owl.png',
+    alt: 'Owltopia Gen2 purple armored owl artwork',
+    fit: 'contain',
+  },
+]
 
 function Gen2Countdown() {
   const iso = process.env.NEXT_PUBLIC_GEN2_COUNTDOWN_ISO?.trim()
@@ -49,6 +89,125 @@ function Gen2Countdown() {
       <p className="text-xs font-semibold uppercase tracking-widest text-[#A9CBB9]">Countdown</p>
       <p className="mt-1 font-mono text-lg font-bold tabular-nums text-[#00FF9C]">{label}</p>
       {!iso && <p className="mt-1 text-xs text-[#A9CBB9]">Set NEXT_PUBLIC_GEN2_COUNTDOWN_ISO for a live timer.</p>}
+    </div>
+  )
+}
+
+function Gen2ArtworkCarousel() {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const touchStartXRef = useRef<number | null>(null)
+  const slideCount = GEN2_ARTWORK_SLIDES.length
+  const activeSlide = GEN2_ARTWORK_SLIDES[activeIndex] ?? GEN2_ARTWORK_SLIDES[0]
+  const canCycle = slideCount > 1
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    setPrefersReducedMotion(mq.matches)
+    const onChange = () => setPrefersReducedMotion(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  const goToSlide = useCallback(
+    (nextIndex: number) => {
+      if (slideCount === 0) return
+      setActiveIndex(((nextIndex % slideCount) + slideCount) % slideCount)
+    },
+    [slideCount]
+  )
+
+  const showPrev = useCallback(() => goToSlide(activeIndex - 1), [activeIndex, goToSlide])
+  const showNext = useCallback(() => goToSlide(activeIndex + 1), [activeIndex, goToSlide])
+
+  useEffect(() => {
+    if (!canCycle || prefersReducedMotion) return
+    const id = window.setInterval(() => {
+      setActiveIndex((i) => (i + 1) % slideCount)
+    }, 5500)
+    return () => window.clearInterval(id)
+  }, [canCycle, prefersReducedMotion, slideCount])
+
+  if (!activeSlide) return null
+
+  return (
+    <div
+      className="relative overflow-hidden bg-[#151D24]/95 shadow-[0_0_40px_rgba(0,229,139,0.15)]"
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Gen2 artwork previews"
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(0,255,156,0.12),transparent_50%)]" />
+      <div
+        className="relative aspect-square w-full overflow-hidden bg-black ring-1 ring-[#00E58B]/20 [touch-action:pan-y]"
+        onTouchStart={(e) => {
+          touchStartXRef.current = e.touches[0]?.clientX ?? null
+        }}
+        onTouchEnd={(e) => {
+          if (!canCycle || touchStartXRef.current == null) return
+          const dx = e.changedTouches[0]?.clientX ? e.changedTouches[0].clientX - touchStartXRef.current : 0
+          touchStartXRef.current = null
+          if (Math.abs(dx) < 40) return
+          if (dx < 0) showNext()
+          else showPrev()
+        }}
+      >
+        <Image
+          key={activeSlide.src}
+          src={activeSlide.src}
+          alt={activeSlide.alt}
+          fill
+          className={cn(
+            'object-center transition-opacity duration-300',
+            activeSlide.fit === 'cover' ? 'object-cover' : 'object-contain'
+          )}
+          sizes="(max-width: 768px) 100vw, 448px"
+          priority={activeIndex === 0}
+        />
+
+        {canCycle && (
+          <>
+            <button
+              type="button"
+              onClick={showPrev}
+              className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-[#00FF9C]/35 bg-black/65 text-[#EAFBF4] shadow-[0_0_20px_rgba(0,255,156,0.18)] backdrop-blur touch-manipulation transition hover:bg-[#00E58B]/25"
+              aria-label="Show previous Gen2 artwork"
+            >
+              <ChevronLeft className="h-5 w-5" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={showNext}
+              className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-[#00FF9C]/35 bg-black/65 text-[#EAFBF4] shadow-[0_0_20px_rgba(0,255,156,0.18)] backdrop-blur touch-manipulation transition hover:bg-[#00E58B]/25"
+              aria-label="Show next Gen2 artwork"
+            >
+              <ChevronRight className="h-5 w-5" aria-hidden />
+            </button>
+          </>
+        )}
+      </div>
+      {canCycle && (
+        <div className="relative flex justify-center gap-2 px-4 py-4" aria-label="Choose Gen2 artwork slide">
+          {GEN2_ARTWORK_SLIDES.map((slide, i) => (
+            <button
+              key={slide.src}
+              type="button"
+              onClick={() => goToSlide(i)}
+              className="flex h-11 w-11 items-center justify-center rounded-full touch-manipulation"
+              aria-label={`Show artwork slide ${i + 1}`}
+              aria-current={i === activeIndex}
+            >
+              <span
+                className={cn(
+                  'h-2.5 w-8 rounded-full transition',
+                  i === activeIndex ? 'bg-[#00FF9C] shadow-[0_0_14px_rgba(0,255,156,0.55)]' : 'bg-[#1F6F54]/70'
+                )}
+                aria-hidden
+              />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -192,24 +351,7 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
             </div>
             <div className="flex w-full max-w-md flex-col gap-4">
               <Gen2ElectricBorder>
-                <div className="relative overflow-hidden bg-[#151D24]/95 p-6 shadow-[0_0_40px_rgba(0,229,139,0.15)]">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(0,255,156,0.12),transparent_50%)]" />
-                  <div className="relative aspect-square w-full max-h-[220px] overflow-hidden rounded-xl bg-black ring-1 ring-[#00E58B]/20">
-                    <div className="absolute inset-3 sm:inset-4">
-                      <div className="relative h-full w-full">
-                        <Image
-                          src="/images/gen2-logo-mark.png"
-                          alt="Owltopia Gen2 logo — neon cube with owl and GEN 2 mark"
-                          fill
-                          className="object-contain object-center"
-                          sizes="(max-width: 768px) 100vw, 448px"
-                          priority
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="relative mt-3 text-center text-sm text-[#A9CBB9]">Gen2 artwork reveal coming soon</p>
-                </div>
+                <Gen2ArtworkCarousel />
               </Gen2ElectricBorder>
               <Gen2Countdown />
             </div>
