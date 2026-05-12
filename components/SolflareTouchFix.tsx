@@ -40,7 +40,7 @@ export function SolflareTouchFix() {
         tracking: false,
         movedPastThreshold: false,
       }
-      let fallbackClickTimer: ReturnType<typeof window.setTimeout> | null = null
+      let fallbackClickTimer: number | null = null
       let dispatchingFallbackClick = false
 
       const clearFallbackClick = () => {
