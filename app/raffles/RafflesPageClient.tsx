@@ -58,17 +58,11 @@ import { cn } from '@/lib/utils'
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
 /**
- * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: rows that are listed on-platform,
- * owned by `wallet`, or unlisted crypto/SPL/USDC prizes (not unlisted NFT link-only rows).
+ * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: public browse only includes
+ * rows explicitly listed on-platform. Partner raffle only rows stay direct-link / Discord-only.
  */
-function supabaseBrowseListOr(wallet: string | null): string {
-  const w = wallet?.trim() || ''
-  const parts = ['list_on_platform.eq.true']
-  if (w) {
-    parts.push(`created_by.eq.${w}`, `creator_wallet.eq.${w}`)
-  }
-  parts.push('and(list_on_platform.eq.false,or(prize_type.is.null,prize_type.neq.nft))')
-  return parts.join(',')
+function supabaseBrowseListOr(): string {
+  return 'list_on_platform.eq.true'
 }
 
 interface RafflesPageClientProps {
@@ -388,11 +382,11 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        // Parity with server REST browse rules (include unlisted partner SPL/crypto, not link-only NFT).
+        // Parity with server REST browse rules: partner-only raffles are not shown on /raffles.
         const listWithVisibility =
           viewerIsAdmin
             ? listQ
-            : listQ.or(supabaseBrowseListOr(wallet || null))
+            : listQ.or(supabaseBrowseListOr())
         const { data, error } = await listWithVisibility.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
@@ -583,7 +577,7 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr(wallet || null))
+        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr())
         const { data, error } = await q.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)

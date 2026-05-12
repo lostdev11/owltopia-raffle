@@ -20,8 +20,8 @@ import {
 
 type Item = { raffle: Raffle; entries: Entry[] }
 
-/** Horizontal speed for Partner Spotlight (single DOM row, seamless wrap — no duplicate tiles). */
-const SPOTLIGHT_MARQUEE_PX_PER_SEC = 34
+/** Horizontal speed for Partner Spotlight without rendering duplicate logos. */
+const SPOTLIGHT_MARQUEE_PX_PER_SEC = 28
 
 /** One row per partner host — used to link each brand logo to a live raffle when possible. */
 function spotlightStripDedupeKey(r: Raffle): string {
@@ -99,9 +99,12 @@ export function PartnerRafflesCarousel({
 
   const [spotlightMarqueePaused, setSpotlightMarqueePaused] = useState(false)
   const spotlightResumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const spotlightOuterRef = useRef<HTMLDivElement>(null)
   const spotlightTrackRef = useRef<HTMLDivElement>(null)
   const spotlightPosRef = useRef(0)
+  const spotlightDirRef = useRef(1)
   const spotlightRafRef = useRef(0)
+  const [spotlightShouldMarquee, setSpotlightShouldMarquee] = useState(false)
 
   useEffect(() => {
     itemsRef.current = items
@@ -236,7 +239,7 @@ export function PartnerRafflesCarousel({
         ? match.raffle.creator_partner_display_name?.trim() ||
           match.raffle.title?.trim() ||
           'Partner raffle'
-        : `${logo.alt} — Partner program`
+        : `${logo.alt} - Partner program`
       return { logo, href, title }
     })
   }, [spotlightHrefPool])
@@ -255,44 +258,72 @@ export function PartnerRafflesCarousel({
     }
   }, [spotlightStripKey])
 
-  /** Always animate when 2+ brands — wide viewports used to fit all tiles and skipped the marquee. */
-  const spotlightShouldMarquee = spotlightMarqueeRows.length > 1
+  useLayoutEffect(() => {
+    const outer = spotlightOuterRef.current
+    const track = spotlightTrackRef.current
+    if (!outer || !track || spotlightMarqueeRows.length <= 1) {
+      setSpotlightShouldMarquee(false)
+      spotlightPosRef.current = 0
+      spotlightDirRef.current = 1
+      if (track) track.style.transform = ''
+      return
+    }
 
-  useEffect(() => {
-    spotlightPosRef.current = 0
-    const el = spotlightTrackRef.current
-    if (el) el.style.transform = 'translate3d(0,0,0)'
-  }, [spotlightStripKey])
+    const decide = () => {
+      const travel = Math.abs(track.scrollWidth - outer.clientWidth)
+      const canMarquee = travel > 1
+      setSpotlightShouldMarquee(canMarquee)
+      if (!canMarquee) {
+        spotlightPosRef.current = 0
+        spotlightDirRef.current = 1
+        track.style.transform = ''
+      }
+    }
+
+    decide()
+    const ro = new ResizeObserver(decide)
+    ro.observe(outer)
+    ro.observe(track)
+    return () => ro.disconnect()
+  }, [spotlightStripKey, spotlightMarqueeRows.length])
 
   useEffect(() => {
     if (!spotlightShouldMarquee || spotlightMarqueePaused) return
     if (typeof window === 'undefined') return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
+    const outer = spotlightOuterRef.current
     const track = spotlightTrackRef.current
-    if (!track) return
+    if (!outer || !track) return
 
     let last = performance.now()
     const step = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.064)
       last = now
-      const w = track.scrollWidth
-      if (w <= 1) {
-        spotlightRafRef.current = requestAnimationFrame(step)
+      const rowOverflows = track.scrollWidth > outer.clientWidth
+      const maxOffset = Math.abs(track.scrollWidth - outer.clientWidth)
+      if (maxOffset <= 1) {
+        spotlightPosRef.current = 0
+        track.style.transform = ''
         return
       }
-      spotlightPosRef.current -= SPOTLIGHT_MARQUEE_PX_PER_SEC * dt
-      while (spotlightPosRef.current <= -w) {
-        spotlightPosRef.current += w
+
+      spotlightPosRef.current += spotlightDirRef.current * SPOTLIGHT_MARQUEE_PX_PER_SEC * dt
+      if (spotlightPosRef.current >= maxOffset) {
+        spotlightPosRef.current = maxOffset
+        spotlightDirRef.current = -1
+      } else if (spotlightPosRef.current <= 0) {
+        spotlightPosRef.current = 0
+        spotlightDirRef.current = 1
       }
-      track.style.transform = `translate3d(${spotlightPosRef.current}px,0,0)`
+
+      const x = rowOverflows ? -spotlightPosRef.current : spotlightPosRef.current
+      track.style.transform = `translate3d(${x}px,0,0)`
       spotlightRafRef.current = requestAnimationFrame(step)
     }
 
     spotlightRafRef.current = requestAnimationFrame(step)
-    return () => {
-      cancelAnimationFrame(spotlightRafRef.current)
-    }
+    return () => cancelAnimationFrame(spotlightRafRef.current)
   }, [spotlightShouldMarquee, spotlightMarqueePaused, spotlightStripKey])
 
   useLayoutEffect(() => {
@@ -370,6 +401,20 @@ export function PartnerRafflesCarousel({
 
   if (items.length === 0) return null
 
+  const renderSpotlightLogos = () =>
+    spotlightMarqueeRows.map(({ logo, href, title }, i) => (
+      <Link
+        key={`${logo.src}-${i}`}
+        href={href}
+        className="group relative shrink-0 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+        title={title}
+      >
+        <div className="relative h-[4.25rem] w-[4.25rem] overflow-hidden rounded-xl border border-white/10 bg-muted ring-1 ring-white/5 transition-transform duration-200 group-active:scale-[0.98] sm:h-[4.75rem] sm:w-[4.75rem]">
+          <PartnerSpotlightLogoImg logo={logo} />
+        </div>
+      </Link>
+    ))
+
   return (
     <section
       className="w-full min-w-0 mb-6 sm:mb-8"
@@ -382,34 +427,26 @@ export function PartnerRafflesCarousel({
             Partner Spotlight
           </h2>
         </div>
-        <div
-          className={`partner-logos-marquee-outer -mx-1 px-1 pb-2 ${!spotlightShouldMarquee ? 'flex justify-center' : ''}`}
-          style={{ touchAction: 'manipulation' as const }}
-          onPointerDown={pauseSpotlightMarquee}
-          onPointerUp={scheduleSpotlightResume}
-          onPointerCancel={scheduleSpotlightResume}
-          role="region"
-          aria-label="Partner logos, auto-scrolling. Tap to pause."
-        >
+        {spotlightMarqueeRows.length > 0 ? (
           <div
-            ref={spotlightTrackRef}
-            className={`flex w-max flex-nowrap items-center gap-3 sm:gap-4 ${spotlightShouldMarquee ? 'will-change-transform' : ''}`}
-            dir="ltr"
+            ref={spotlightOuterRef}
+            className={`partner-logos-marquee-outer -mx-1 px-1 pb-2 ${!spotlightShouldMarquee ? 'flex justify-center' : ''}`}
+            style={{ touchAction: 'manipulation' as const }}
+            onPointerDown={pauseSpotlightMarquee}
+            onPointerUp={scheduleSpotlightResume}
+            onPointerCancel={scheduleSpotlightResume}
+            role="region"
+            aria-label="Partner logos, auto-scrolling. Tap to pause."
           >
-            {spotlightMarqueeRows.map(({ logo, href, title }, i) => (
-              <Link
-                key={`${logo.src}-${i}`}
-                href={href}
-                className="group relative shrink-0 touch-manipulation [-webkit-tap-highlight-color:transparent]"
-                title={title}
-              >
-                <div className="relative h-[4.25rem] w-[4.25rem] overflow-hidden rounded-xl border border-white/10 bg-muted ring-1 ring-white/5 transition-transform duration-200 group-active:scale-[0.98] sm:h-[4.75rem] sm:w-[4.75rem]">
-                  <PartnerSpotlightLogoImg logo={logo} />
-                </div>
-              </Link>
-            ))}
+            <div
+              ref={spotlightTrackRef}
+              className={`flex w-max flex-nowrap items-center gap-3 sm:gap-4 ${spotlightShouldMarquee ? 'will-change-transform' : ''}`}
+              dir="ltr"
+            >
+              {renderSpotlightLogos()}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div className="mt-5 border-t border-border/60 pt-4">
           <h3 className="text-base font-bold text-foreground sm:text-lg">About the program</h3>

@@ -234,7 +234,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }
 
-    const tokenInfo = getTokenInfo(raffle.currency as 'SOL' | 'USDC' | 'OWL')
+    const tokenInfo = getTokenInfo(raffle.currency)
+    if (raffle.currency !== 'SOL' && !tokenInfo.mintAddress) {
+      return NextResponse.json(ERROR_BODY, { status: 500 })
+    }
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
     const payToFundsEscrow = raffleUsesFundsEscrow(raffle)
     const fundsEscrowAddr =
@@ -249,6 +252,7 @@ export async function POST(request: NextRequest) {
       currency: string
       usdcMint: string
       owlMint: string | null
+      tokenMint: string | null
       tokenDecimals: number
       split?: { recipient: string; amount: number }[]
     }
@@ -260,6 +264,7 @@ export async function POST(request: NextRequest) {
         currency: raffle.currency,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
+        tokenMint: tokenInfo.mintAddress,
         tokenDecimals: tokenInfo.decimals,
       }
     } else if (creatorWallet) {
@@ -270,6 +275,7 @@ export async function POST(request: NextRequest) {
         currency: raffle.currency,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
+        tokenMint: tokenInfo.mintAddress,
         tokenDecimals: tokenInfo.decimals,
         split: [
           { recipient: creatorWallet, amount: toCreator },
@@ -283,6 +289,7 @@ export async function POST(request: NextRequest) {
         currency: raffle.currency,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
+        tokenMint: tokenInfo.mintAddress,
         tokenDecimals: tokenInfo.decimals,
       }
     }

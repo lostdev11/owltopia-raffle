@@ -43,7 +43,8 @@ import {
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
-import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
+import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
+import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -253,12 +254,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ticket currency: SOL, USDC; OWL when mint is configured
-    const validCurrencies: string[] = isOwlEnabled() ? ['USDC', 'SOL', 'OWL'] : ['USDC', 'SOL']
     const requestedCurrency =
       typeof body.currency === 'string' && body.currency.trim()
         ? body.currency.trim().toUpperCase()
         : ''
+    const adminRole = await getAdminRole(walletAddress)
+    const canCreateBambooTicketRaffle =
+      adminRole !== null || canWalletUseBambooTicketCurrency(walletAddress)
+
+    // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo is supported but permission-gated below.
+    const validCurrencies: string[] = ['USDC', 'SOL']
+    if (isOwlEnabled()) validCurrencies.push('OWL')
+    validCurrencies.push(BAMBOO_TICKET_CURRENCY)
     if (requestedCurrency && !validCurrencies.includes(requestedCurrency)) {
       return NextResponse.json(
         { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
@@ -300,14 +307,21 @@ export async function POST(request: NextRequest) {
       maxTickets = parsed
     }
 
-    const adminRole = await getAdminRole(walletAddress)
-
     const effectiveTicketCurrency = requestedCurrency || 'SOL'
     if (effectiveTicketCurrency === 'OWL' && adminRole === null) {
       return NextResponse.json(
         {
           error:
             'OWL ticket currency is only available to platform admins. Choose SOL or USDC for public raffles.',
+        },
+        { status: 403 }
+      )
+    }
+    if (effectiveTicketCurrency === BAMBOO_TICKET_CURRENCY && !canCreateBambooTicketRaffle) {
+      return NextResponse.json(
+        {
+          error:
+            'Bamboo ticket currency is only available to the PNDA Partner Pro creator wallet and platform admins.',
         },
         { status: 403 }
       )
@@ -323,23 +337,27 @@ export async function POST(request: NextRequest) {
     }
 
     let discordPartnerTenantId: string | null = null
+    let canSetPartnerOnly = false
     try {
-      discordPartnerTenantId = await withTimeout(
-        getDiscordPartnerTenantIdForCreatorWallet(walletAddress),
+      const entitlement = await withTimeout(
+        getPartnerRaffleVisibilityEntitlementForCreatorWallet(walletAddress),
         SUPABASE_TIMEOUT_MS,
         'supabase error'
       )
+      discordPartnerTenantId = entitlement.discordPartnerTenantId
+      canSetPartnerOnly = entitlement.canSetPartnerOnly
     } catch {
       discordPartnerTenantId = null
+      canSetPartnerOnly = false
     }
 
     const requestUnlisted = body.list_on_platform === false || body.listOnPlatform === false
     if (requestUnlisted) {
-      if (adminRole === null && (discordPartnerTenantId == null || !String(discordPartnerTenantId).trim())) {
+      if (adminRole === null && !canSetPartnerOnly) {
         return NextResponse.json(
           {
             error:
-              'Hiding a raffle from public browse is only available for partners with a linked Discord (partner program) or for admins. Leave list_on_platform unset to list the raffle for everyone.',
+              'Partner raffle only visibility is available for active Partner Pro / white-label wallets or admins. Leave list_on_platform unset to list the raffle for everyone.',
           },
           { status: 400 }
         )

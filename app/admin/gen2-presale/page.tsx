@@ -219,7 +219,10 @@ export default function AdminGen2PresalePage() {
         msg += ` ${def} signature(s) not processed yet — run again (max ${cap} deep checks per run).`
       }
       setBackfillMsg(msg)
-      void load()
+      await load()
+      if (searchWallet.trim()) {
+        await searchBalance()
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setBackfillMsg('Backfill timed out — lower max pages or page size and try again.')
@@ -254,15 +257,21 @@ export default function AdminGen2PresalePage() {
       }
       setRepairResult(j)
       const unchanged = j.unchanged === true
+      const balanceReconciled = j.balance_reconciled === true
       const rpc = j.rpc as { previous_quantity?: number; quantity?: number; delta?: number } | undefined
       setRepairMsg(
         unchanged
           ? 'Already correct — no database changes.'
-          : `Updated quantity ${rpc?.previous_quantity ?? '?'} → ${rpc?.quantity ?? j.resolved_quantity ?? '?'}` +
-              (rpc?.delta != null ? ` (Δ ${rpc.delta > 0 ? '+' : ''}${rpc.delta})` : '') +
-              '.'
+          : balanceReconciled
+            ? 'Purchase row already matched chain; wallet balance was reconciled from confirmed purchase rows.'
+            : `Updated quantity ${rpc?.previous_quantity ?? '?'} → ${rpc?.quantity ?? j.resolved_quantity ?? '?'}` +
+                (rpc?.delta != null ? ` (Δ ${rpc.delta > 0 ? '+' : ''}${rpc.delta})` : '') +
+                '.'
       )
-      void load()
+      await load()
+      if (searchWallet.trim()) {
+        await searchBalance()
+      }
     } catch (e) {
       setRepairMsg(e instanceof Error ? e.message : 'Repair failed')
     } finally {

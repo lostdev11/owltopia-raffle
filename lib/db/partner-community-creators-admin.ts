@@ -12,6 +12,16 @@ export type PartnerCommunityCreatorRow = {
   updated_at: string
 }
 
+export type PartnerRaffleVisibilityEntitlement = {
+  partnerTier: string | null
+  discordPartnerTenantId: string | null
+  canSetPartnerOnly: boolean
+}
+
+function isPartnerOnlyVisibilityTier(partnerTier: string | null | undefined): boolean {
+  return partnerTier === 'partner_pro' || partnerTier === 'white_label'
+}
+
 /**
  * All rows (active and inactive). Service role only — used by Owl Vision admin.
  */
@@ -118,6 +128,48 @@ export async function getDiscordPartnerTenantIdForCreatorWallet(
   const id = (data as { discord_partner_tenant_id?: string | null } | null)?.discord_partner_tenant_id
   if (id == null || !String(id).trim()) return null
   return String(id).trim()
+}
+
+/**
+ * Partner Pro+ wallets can create direct-link / Discord-only raffles.
+ * Discord tenant linkage is returned separately so creation can stamp webhooks when configured.
+ */
+export async function getPartnerRaffleVisibilityEntitlementForCreatorWallet(
+  creatorWallet: string
+): Promise<PartnerRaffleVisibilityEntitlement> {
+  const fallback: PartnerRaffleVisibilityEntitlement = {
+    partnerTier: null,
+    discordPartnerTenantId: null,
+    canSetPartnerOnly: false,
+  }
+  const w = typeof creatorWallet === 'string' ? creatorWallet.trim() : ''
+  if (!w) return fallback
+
+  const sb = getSupabaseAdmin()
+  const { data, error } = await sb
+    .from('partner_community_creators')
+    .select('partner_tier, discord_partner_tenant_id')
+    .eq('creator_wallet', w)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (error) {
+    const msg = (error.message ?? '').toLowerCase()
+    if (msg.includes('partner_tier') || msg.includes('discord_partner_tenant_id') || msg.includes('column') || msg.includes('42703')) {
+      return fallback
+    }
+    console.error('getPartnerRaffleVisibilityEntitlementForCreatorWallet:', error.message)
+    return fallback
+  }
+
+  const row = data as { partner_tier?: string | null; discord_partner_tenant_id?: string | null } | null
+  const partnerTier = row?.partner_tier?.trim() || null
+  const discordPartnerTenantId = row?.discord_partner_tenant_id?.trim() || null
+  return {
+    partnerTier,
+    discordPartnerTenantId,
+    canSetPartnerOnly: isPartnerOnlyVisibilityTier(partnerTier),
+  }
 }
 
 export async function deletePartnerCommunityCreator(creator_wallet: string): Promise<void> {

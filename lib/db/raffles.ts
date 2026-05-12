@@ -377,19 +377,12 @@ async function fetchRafflesViaRestRaw(
     }
   }
 
-  // Always fetch without server-side list_on_platform filter so we can apply nuanced
-  // in-memory visibility rules (e.g., keep legacy SOL crypto raffles visible publicly).
+  // Always fetch without server-side list_on_platform filter so older schemas that return
+  // undefined still behave as listed, while explicit Partner raffle only rows are hidden.
   const data = await fetchOnce('off')
 
   const rows: Record<string, unknown>[] = Array.isArray(data) ? (data as Record<string, unknown>[]) : []
-  const publicRows = rows.filter((row) => {
-    if ((row as { list_on_platform?: boolean }).list_on_platform !== false) return true
-
-    // When unlisted, hide only NFT (link-only NFT raffles); keep SOL, USDC, and partner SPL token
-    // prize raffles visible with the same parity as stale list_on_platform=false legacy rows.
-    const prizeType = typeof row.prize_type === 'string' ? row.prize_type.trim().toLowerCase() : 'crypto'
-    return prizeType !== 'nft'
-  })
+  const publicRows = rows.filter((row) => (row as { list_on_platform?: boolean }).list_on_platform !== false)
 
   if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
     return publicRows.map((row) => normalizeBaseRowToRaffle(row))

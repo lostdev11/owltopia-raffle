@@ -1,10 +1,11 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { Loader2, RefreshCw, ScanLine } from 'lucide-react'
+import { Loader2, LogIn, RefreshCw, ScanLine } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import {
   GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
   gen2PresaleCreditsRemainingForWallet,
@@ -14,6 +15,8 @@ import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/ty
 
 type Props = {
   balance: Gen2PresaleBalance | null
+  /** Auth/session/API error from the balance lookup. Without this, blocked reads look like 0 credits. */
+  balanceError?: string | null
   loading?: boolean
   connected: boolean
   /** Refetch balance + stats from the server (e.g. after an on-chain purchase or returning to the tab). */
@@ -33,6 +36,7 @@ type Props = {
 
 export function Gen2BalanceCard({
   balance,
+  balanceError,
   loading,
   connected,
   onRefresh,
@@ -48,11 +52,17 @@ export function Gen2BalanceCard({
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncErr, setSyncErr] = useState<string | null>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const { signIn, signingIn, error: signInError } = useSiwsSignIn()
 
   const recordQtyMax = useMemo(
     () => Math.min(GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE, gen2PresaleCreditsRemainingForWallet(balance)),
     [balance]
   )
+
+  const signInAndRefresh = useCallback(async () => {
+    await signIn()
+    onRefresh?.()
+  }, [signIn, onRefresh])
 
   const syncFromChain = useCallback(async () => {
     const w = walletAddress?.trim()
@@ -218,12 +228,38 @@ export function Gen2BalanceCard({
           </div>
         )}
       </div>
+      {!loading && balanceError ? (
+        <div
+          className="mt-5 rounded-xl border border-amber-400/35 bg-amber-950/35 p-4 text-sm text-amber-50"
+          role="alert"
+        >
+          <p className="font-semibold">Balance needs wallet sign-in</p>
+          <p className="mt-1 text-amber-50/90">{balanceError}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3 min-h-[44px] touch-manipulation border-amber-300/45 bg-[#10161C] text-amber-50 hover:bg-[#151D24]"
+            onClick={() => void signInAndRefresh()}
+            disabled={signingIn}
+          >
+            {signingIn ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <LogIn className="mr-2 h-4 w-4" aria-hidden />
+            )}
+            Sign in with this wallet
+          </Button>
+          {signInError && <p className="mt-2 text-sm text-red-300">{signInError}</p>}
+        </div>
+      ) : null}
+
       {loading ? (
         <div className="mt-6 flex items-center gap-2 text-[#A9CBB9]">
           <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
           Loading balance…
         </div>
-      ) : (
+      ) : balanceError ? null : (
         <>
         {(syncErr || syncMsg) && (
           <div className="mt-4 space-y-2">
@@ -260,7 +296,7 @@ export function Gen2BalanceCard({
         </>
       )}
 
-      {!loading && walletAddress && (
+      {!loading && !balanceError && walletAddress && (
         <details className="mt-6 rounded-xl border border-[#1F6F54]/50 bg-[#10161C]/50 p-4 text-left">
           <summary className="cursor-pointer text-sm font-semibold text-[#A9CBB9] touch-manipulation">
             Paid on-chain but credits look wrong?

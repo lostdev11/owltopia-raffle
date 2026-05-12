@@ -64,7 +64,13 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
   const [participantsListKey, setParticipantsListKey] = useState(0)
   const { stats, loading: statsLoading, error: statsError, refresh: refreshStats, applyStatsPatch } =
     useGen2PresaleStats(20_000)
-  const { balance, loading: balLoading, refresh: refreshBal, applySnapshot } = useGen2PresaleBalance(wallet)
+  const {
+    balance,
+    error: balError,
+    loading: balLoading,
+    refresh: refreshBal,
+    applySnapshot,
+  } = useGen2PresaleBalance(wallet)
 
   const presaleLive = stats?.presale_live === true
   const statsStatusLoading = statsLoading && stats == null
@@ -241,6 +247,7 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
             <Gen2ElectricBorder>
               <Gen2BalanceCard
                 balance={balance}
+                balanceError={balError}
                 loading={balLoading}
                 connected={connected}
                 onRefresh={refreshPresaleData}

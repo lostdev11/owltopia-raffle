@@ -3465,7 +3465,7 @@ export function RaffleDetailClient({
                 <div className="min-w-0 space-y-1">
                   <p className="text-sm font-medium text-foreground">Show on public /raffles list</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    When off, link-only NFT raffles are hidden from the browse grid. Admins only — connect an admin
+                    When off, partner-only raffles are hidden from the browse grid. Admins only — connect an admin
                     wallet, or disconnect to use admin sign-in alone.
                   </p>
                   {browseListError && (

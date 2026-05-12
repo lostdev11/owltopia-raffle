@@ -34,6 +34,7 @@ export type PurchasePaymentDetails = {
   currency?: string
   usdcMint: string
   owlMint: string | null
+  tokenMint?: string | null
   tokenDecimals: number
   split?: { recipient: string; amount: number }[]
 }
@@ -71,6 +72,9 @@ export type ExecuteRafflePurchaseOptions = {
 export function formatSplTokenTransferFailure(errorMessage: string, currency: string): string | null {
   const hasCustomOne = /"Custom"\s*:\s*1/.test(errorMessage)
   if (!hasCustomOne || !errorMessage.includes('InstructionError')) return null
+  if (currency === 'BAMBOO') {
+    return 'Not enough BAMBOO in your wallet for this payment. Check your token balance and try again.'
+  }
   if (currency === 'OWL') {
     return (
       'Not enough OWL in your wallet for this payment. Staked OWL is separate — add or unwrap OWL so your token balance covers the ticket total, then try again.'
@@ -375,6 +379,13 @@ function resolvePaymentsFromPurchaseDetails(details: PurchasePaymentDetails): {
   throw new Error('Invalid payment instructions')
 }
 
+function resolveSplPaymentMint(raffleCurrency: string, paymentDetails: PurchasePaymentDetails): string | null {
+  if (raffleCurrency === 'USDC') return paymentDetails.usdcMint
+  if (raffleCurrency === 'OWL') return paymentDetails.tokenMint ?? paymentDetails.owlMint
+  if (raffleCurrency === 'BAMBOO') return paymentDetails.tokenMint ?? null
+  return null
+}
+
 /**
  * Build legacy `Transaction` (wallet sign) from server payment details — single or merged cart splits.
  */
@@ -405,26 +416,16 @@ export async function buildPurchaseTransactionFromPaymentDetails(
         })
       )
     }
-  } else if (raffleCurrency === 'USDC') {
-    const usdcMint = new PublicKey(paymentDetails.usdcMint)
-    const mintInfo = await getMintRetries(connection, usdcMint)
+  } else if (raffleCurrency === 'USDC' || raffleCurrency === 'OWL' || raffleCurrency === 'BAMBOO') {
+    const mint = resolveSplPaymentMint(raffleCurrency, paymentDetails)
+    if (!mint) throw new Error(`${raffleCurrency} mint address not configured in payment details`)
+    const mintPk = new PublicKey(mint)
+    const mintInfo = await getMintRetries(connection, mintPk)
     await appendSplTransfersForPayments(
       connection,
       transaction,
       publicKey,
-      usdcMint,
-      payments,
-      mintInfo.decimals
-    )
-  } else if (raffleCurrency === 'OWL') {
-    if (!paymentDetails.owlMint) throw new Error('OWL mint address not configured in payment details')
-    const owlMint = new PublicKey(paymentDetails.owlMint)
-    const mintInfo = await getMintRetries(connection, owlMint)
-    await appendSplTransfersForPayments(
-      connection,
-      transaction,
-      publicKey,
-      owlMint,
+      mintPk,
       payments,
       mintInfo.decimals
     )

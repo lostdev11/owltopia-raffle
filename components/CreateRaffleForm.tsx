@@ -74,6 +74,10 @@ import {
   previewCreateRaffleThreshold,
 } from '@/lib/raffle-profit'
 import { isOwlEnabled } from '@/lib/tokens'
+import {
+  BAMBOO_TICKET_CURRENCY,
+  canWalletUseBambooTicketCurrency,
+} from '@/lib/raffles/bamboo-ticket-currency'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -165,6 +169,9 @@ export function CreateRaffleForm() {
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
+  const canUseBambooTicketCurrency =
+    viewerIsAdmin === true ||
+    (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
 
   useEffect(() => {
     if (prizeMode === 'token') {
@@ -185,6 +192,13 @@ export function CreateRaffleForm() {
       setRaffleCurrency('SOL')
     }
   }, [raffleCurrency, viewerIsAdmin])
+
+  useEffect(() => {
+    if (raffleCurrency !== BAMBOO_TICKET_CURRENCY) return
+    if (!canUseBambooTicketCurrency) {
+      setRaffleCurrency('SOL')
+    }
+  }, [raffleCurrency, canUseBambooTicketCurrency])
 
   useEffect(() => {
     if (tokenPrizeCurrency !== 'OWL') return
@@ -1578,6 +1592,7 @@ export function CreateRaffleForm() {
                 {isOwlEnabled() && viewerIsAdmin === true ? (
                   <option value="OWL">OWL</option>
                 ) : null}
+                {canUseBambooTicketCurrency ? <option value={BAMBOO_TICKET_CURRENCY}>Bamboo (BAMBOO)</option> : null}
               </select>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1707,18 +1722,16 @@ export function CreateRaffleForm() {
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
                 <input
                   type="checkbox"
-                  className="mt-1 h-4 w-4 shrink-0"
+                  className="mt-1 h-5 w-5 shrink-0"
                   checked={hideFromPublicBrowse}
                   onChange={(e) => setHideFromPublicBrowse(e.target.checked)}
                   id="hide-from-public-browse"
                 />
                 <span className="min-w-0 text-sm sm:text-base leading-relaxed text-foreground/95">
-                  <span className="font-medium">
-                    {partnerDiscordLinked ? 'Hide from public raffles list' : 'Discord / direct link only'}
-                  </span>
+                  <span className="font-medium">Partner raffle only</span>
                   {': '}
-                  do not show this raffle on the public raffles list. People can still enter using the
-                  page link (e.g. from your partner Discord or a shared link).
+                  hide this raffle from the public raffles list. People can still enter using the direct
+                  page link{partnerDiscordLinked ? ' from your partner Discord webhook or a shared link' : ' you share'}.
                 </span>
               </label>
             </div>

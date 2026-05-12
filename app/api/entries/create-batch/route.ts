@@ -199,7 +199,10 @@ export async function POST(request: NextRequest) {
 
     if (!unifiedCurrency) return NextResponse.json(ERROR_BODY, { status: 400 })
 
-    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL')
+    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO')
+    if (unifiedCurrency !== 'SOL' && !tokenInfo.mintAddress) {
+      return NextResponse.json(ERROR_BODY, { status: 500 })
+    }
 
     const mergedSplit = await mergeBatchPayoutLines({
       treasuryWallet,
@@ -223,6 +226,7 @@ export async function POST(request: NextRequest) {
       currency: unifiedCurrency,
       usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       owlMint: tokenInfo.mintAddress,
+      tokenMint: tokenInfo.mintAddress,
       tokenDecimals: tokenInfo.decimals,
       split: mergedSplit,
     }

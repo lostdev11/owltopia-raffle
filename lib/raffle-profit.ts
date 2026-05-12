@@ -5,7 +5,7 @@ import {
   parseNftFloorPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
-export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
 
 /**
  * Canonical ticket currency for comparisons and revenue display.
@@ -13,7 +13,7 @@ export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
  */
 export function normalizeRaffleTicketCurrency(input: string | null | undefined): RaffleCurrency {
   const c = String(input ?? 'SOL').trim().toUpperCase()
-  if (c === 'SOL' || c === 'USDC' || c === 'OWL') return c
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO') return c
   return 'SOL'
 }
 
@@ -21,6 +21,7 @@ export interface RaffleRevenue {
   usdc: number
   sol: number
   owl: number
+  bamboo: number
 }
 
 export interface RaffleProfitInfo {
@@ -122,14 +123,16 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
   let usdc = 0
   let sol = 0
   let owl = 0
+  let bamboo = 0
   for (const e of confirmed) {
     const amount = Number(e.amount_paid) || 0
     const c = (e.currency || '').toUpperCase()
     if (c === 'USDC') usdc += amount
     else if (c === 'SOL') sol += amount
     else if (c === 'OWL') owl += amount
+    else if (c === 'BAMBOO') bamboo += amount
   }
-  return { usdc, sol, owl }
+  return { usdc, sol, owl, bamboo }
 }
 
 /**
@@ -150,13 +153,17 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
   if ((raffle.prize_type || '').toLowerCase() !== 'nft') {
     const amount = raffle.prize_amount != null ? Number(raffle.prize_amount) : NaN
     const currency = (raffle.prize_currency || raffle.currency || '').toUpperCase()
-    if (Number.isFinite(amount) && amount > 0 && (currency === 'SOL' || currency === 'USDC' || currency === 'OWL')) {
+    if (
+      Number.isFinite(amount) &&
+      amount > 0 &&
+      (currency === 'SOL' || currency === 'USDC' || currency === 'OWL' || currency === 'BAMBOO')
+    ) {
       return { value: amount, currency: currency as RaffleCurrency }
     }
   }
 
   const cur = (raffle.currency || 'SOL').toUpperCase()
-  const currencyOk = cur === 'SOL' || cur === 'USDC' || cur === 'OWL'
+  const currencyOk = cur === 'SOL' || cur === 'USDC' || cur === 'OWL' || cur === 'BAMBOO'
   if (!currencyOk) return null
 
   // 2) NFT: revenue bar tracks draw goal (effective min tickets × ticket) and floor, whichever is higher.
@@ -261,6 +268,7 @@ export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurren
     case 'USDC': return revenue.usdc
     case 'SOL': return revenue.sol
     case 'OWL': return revenue.owl
+    case 'BAMBOO': return revenue.bamboo
     default: return 0
   }
 }
@@ -318,7 +326,7 @@ export function getRevShareAmounts(raffle: Raffle, entries: Entry[]): RevShareAm
   const revenue = getRaffleRevenue(entries)
   const th = getRaffleThreshold(raffle)
   const out: RevShareAmounts = { founderSol: 0, founderUsdc: 0, communitySol: 0, communityUsdc: 0 }
-  if (!th || th.currency === 'OWL') return out
+  if (!th || th.currency === 'OWL' || th.currency === 'BAMBOO') return out
   const revInCur = revenueInCurrency(revenue, th.currency)
   const rRounded = roundForProfitDisplay(revInCur, th.currency)
   const tRounded = roundForProfitDisplay(th.value, th.currency)
