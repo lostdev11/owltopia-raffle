@@ -33,6 +33,7 @@ export default function AdminPartnerCreatorsPage() {
   const [deletingWallet, setDeletingWallet] = useState<string | null>(null)
   const [savingWallet, setSavingWallet] = useState<string | null>(null)
   const [savedWallet, setSavedWallet] = useState<string | null>(null)
+  const [tenantEdits, setTenantEdits] = useState<Record<string, string>>({})
 
   const [form, setForm] = useState({
     creator_wallet: '',
@@ -84,7 +85,13 @@ export default function AdminPartnerCreatorsPage() {
       const res = await fetch('/api/admin/partner-community-creators', { credentials: 'include' })
       const data = await res.json().catch(() => ({}))
       if (res.ok && Array.isArray(data.creators)) {
-        setRows(data.creators)
+        const creators = data.creators as PartnerCreatorAdminRow[]
+        setRows(creators)
+        setTenantEdits(
+          Object.fromEntries(
+            creators.map((c) => [c.creator_wallet, c.discord_partner_tenant_id ?? ''])
+          )
+        )
       } else {
         setListError(typeof data.error === 'string' ? data.error : 'Could not load partner creators')
       }
@@ -460,26 +467,41 @@ export default function AdminPartnerCreatorsPage() {
                       >
                         Set label
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="min-h-[44px] touch-manipulation"
-                        disabled={savingWallet === r.creator_wallet}
-                        onClick={() => {
-                          const raw = window.prompt(
-                            'Discord partner tenant UUID (empty to clear) — from Owl Vision → Discord partners',
-                            r.discord_partner_tenant_id ?? ''
-                          )
-                          if (raw === null) return
-                          const t = raw.trim()
-                          void patchRow(r.creator_wallet, {
-                            discord_partner_tenant_id: t === '' ? null : t,
-                          })
-                        }}
-                      >
-                        Set tenant
-                      </Button>
+                      <div className="flex min-w-[min(100%,22rem)] flex-1 flex-col gap-1">
+                        <Label htmlFor={`tenant-${r.creator_wallet}`} className="text-xs text-muted-foreground">
+                          Discord partner tenant UUID
+                        </Label>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            id={`tenant-${r.creator_wallet}`}
+                            value={tenantEdits[r.creator_wallet] ?? ''}
+                            onChange={(e) =>
+                              setTenantEdits((prev) => ({
+                                ...prev,
+                                [r.creator_wallet]: e.target.value,
+                              }))
+                            }
+                            placeholder="Paste tenant UUID from Discord partners"
+                            className="min-h-[44px] flex-1 font-mono text-xs touch-manipulation"
+                            autoComplete="off"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="min-h-[44px] touch-manipulation"
+                            disabled={savingWallet === r.creator_wallet}
+                            onClick={() => {
+                              const t = (tenantEdits[r.creator_wallet] ?? '').trim()
+                              void patchRow(r.creator_wallet, {
+                                discord_partner_tenant_id: t === '' ? null : t,
+                              })
+                            }}
+                          >
+                            Save tenant
+                          </Button>
+                        </div>
+                      </div>
                       <Button
                         type="button"
                         variant="destructive"
