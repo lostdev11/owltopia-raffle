@@ -33,6 +33,7 @@ import {
   ShoppingCart,
   Gift,
   Users,
+  Globe,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,6 +47,7 @@ import { RAFFLES_PAGE_SERVER_REFRESH_MS } from '@/lib/dev-budget'
 import { type CommunityGiveawayBrowseItem } from '@/components/CommunityGiveawayBrowseCard'
 import { GiveawayBrowseCarouselSection } from '@/components/giveaways/GiveawayBrowseCarouselSection'
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
+import { SolDomainsHubIntro } from '@/components/SolDomainsHubIntro'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
 import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
@@ -278,6 +280,7 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
 type RafflesPageTab =
   | 'all'
   | 'partner-raffles'
+  | 'sol-domains'
   | 'giveaways'
   | 'my-entries'
   | 'owl-vision'
@@ -290,6 +293,7 @@ function tabFromSearchParams(sp: { get(name: string): string | null }): RafflesP
   if (t === 'all' || t === 'main' || t === 'raffles') return 'all'
   if (t === 'giveaways' || t === 'giveaway') return 'giveaways'
   if (t === 'partners' || t === 'partner' || t === 'partner-raffles') return 'partner-raffles'
+  if (t === 'sol-domains' || t === 'sol' || t === 'sns' || t === 'domains') return 'sol-domains'
   if (t === 'my-entries' || t === 'entries' || t === 'raffles-entered') return 'my-entries'
   if (t === 'owl-vision' || t === 'owlvision') return 'owl-vision'
   if (t === 'announcements' || t === 'announcement') return 'announcements'
@@ -404,6 +408,7 @@ export function RafflesPageClient({
           nft_collection_name: r.nft_collection_name ?? null,
           nft_token_id: r.nft_token_id ?? null,
           nft_metadata_uri: r.nft_metadata_uri ?? null,
+          sol_domains_hub: r.sol_domains_hub === true,
         })) as Raffle[]
         const filtered = filterRafflesByPendingVisibility(normalized, wallet, viewerIsAdmin)
         if (cancelled) return
@@ -595,6 +600,7 @@ export function RafflesPageClient({
             nft_collection_name: r.nft_collection_name ?? null,
             nft_token_id: r.nft_token_id ?? null,
             nft_metadata_uri: r.nft_metadata_uri ?? null,
+            sol_domains_hub: r.sol_domains_hub === true,
             })) as Raffle[]
             const filtered = filterRafflesByPendingVisibility(normalized, wallet || null, viewerIsAdmin)
             setClientBuckets(bucketRaffles(filtered, serverTime))
@@ -693,6 +699,7 @@ export function RafflesPageClient({
   )
 
   const partnerOnly = tab === 'partner-raffles'
+  const solDomainsOnly = tab === 'sol-domains'
   /** Match RafflesList / RaffleCard: DB flag or allowlisted partner wallet. */
   const isPartnerCommunityRaffle = useCallback(
     (raffle: Raffle) => {
@@ -707,26 +714,37 @@ export function RafflesPageClient({
     },
     [partnerWalletSet]
   )
-  /** Partner tab: only community partner raffles. Main tab: show all raffles. */
-  const filterPartnerBucket = useCallback(
+  /** Main: exclude .sol hub. Partner: partner hosts only, exclude .sol hub. .sol tab: hub rows only. */
+  const filterRafflesForCurrentTab = useCallback(
     (items: RaffleWithEntries[]) => {
-      if (partnerOnly) {
-        return items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle))
+      if (tab === 'sol-domains') {
+        return items.filter(({ raffle }) => raffle.sol_domains_hub === true)
       }
-      return items
+      if (tab === 'partner-raffles') {
+        return items.filter(
+          ({ raffle }) => isPartnerCommunityRaffle(raffle) && !raffle.sol_domains_hub
+        )
+      }
+      return items.filter(({ raffle }) => !raffle.sol_domains_hub)
     },
-    [partnerOnly, isPartnerCommunityRaffle]
+    [tab, isPartnerCommunityRaffle]
   )
 
   const partnerFeaturedActive = useMemo(
-    () => active.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)),
+    () =>
+      active.filter(
+        ({ raffle }) => isPartnerCommunityRaffle(raffle) && !raffle.sol_domains_hub
+      ),
     [active, isPartnerCommunityRaffle]
   )
 
-  const activeView = useMemo(() => filterPartnerBucket(active), [active, filterPartnerBucket])
-  const pausedPendingView = useMemo(() => filterPartnerBucket(pausedPending), [pausedPending, filterPartnerBucket])
-  const futureView = useMemo(() => filterPartnerBucket(future), [future, filterPartnerBucket])
-  const pastView = useMemo(() => filterPartnerBucket(past), [past, filterPartnerBucket])
+  const activeView = useMemo(() => filterRafflesForCurrentTab(active), [active, filterRafflesForCurrentTab])
+  const pausedPendingView = useMemo(
+    () => filterRafflesForCurrentTab(pausedPending),
+    [pausedPending, filterRafflesForCurrentTab]
+  )
+  const futureView = useMemo(() => filterRafflesForCurrentTab(future), [future, filterRafflesForCurrentTab])
+  const pastView = useMemo(() => filterRafflesForCurrentTab(past), [past, filterRafflesForCurrentTab])
 
   const selectRafflesPageTab = useCallback(
     (next: RafflesPageTab) => {
@@ -740,7 +758,14 @@ export function RafflesPageClient({
     [router, searchParams]
   )
 
-  const isEmptyPartnerView =
+  const isEmptyCurrentTabView =
+    activeView.length === 0 &&
+    pausedPendingView.length === 0 &&
+    futureView.length === 0 &&
+    pastView.length === 0
+
+  const isEmptyFilteredMainView =
+    tab === 'all' &&
     activeView.length === 0 &&
     pausedPendingView.length === 0 &&
     futureView.length === 0 &&
@@ -764,7 +789,7 @@ export function RafflesPageClient({
 
   // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
   useEffect(() => {
-    if (tab !== 'all' && tab !== 'partner-raffles') return
+    if (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains') return
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -775,7 +800,7 @@ export function RafflesPageClient({
 
   // Refresh when user returns to the tab so threshold/raffle edits are visible
   useEffect(() => {
-    if (tab !== 'all' && tab !== 'partner-raffles') return
+    if (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains') return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const handler = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -949,6 +974,12 @@ export function RafflesPageClient({
                   onSelect: () => selectRafflesPageTab('partner-raffles'),
                 },
                 {
+                  id: 'sol-domains' as const,
+                  label: '.sol domains',
+                  icon: Globe,
+                  onSelect: () => selectRafflesPageTab('sol-domains'),
+                },
+                {
                   id: 'giveaways' as const,
                   label: 'Giveaways',
                   icon: Gift,
@@ -1005,7 +1036,7 @@ export function RafflesPageClient({
       </div>
 
       {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
-      {hasError && (tab === 'all' || tab === 'partner-raffles') && (
+      {hasError && (tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showPausedMessage ? (
@@ -1047,7 +1078,7 @@ export function RafflesPageClient({
       )}
 
       {/* Main content: All raffles tab hidden on fetch error; other tabs still render. */}
-      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles')) && (
+      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains')) && (
         <>
           {tab === 'giveaways' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -1378,8 +1409,39 @@ export function RafflesPageClient({
                 </div>
               )}
             </div>
-          ) : (tab === 'all' || tab === 'partner-raffles') ? (
-            partnerOnly && isEmptyPartnerView ? (
+          ) : (tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') ? (
+            solDomainsOnly && isEmptyCurrentTabView ? (
+              <div className="mb-8 sm:mb-12 w-full min-w-0">
+                <SolDomainsHubIntro />
+                <div className="text-center py-12 px-2">
+                  {clientFetchStarted && !clientBuckets && !clientFetchError ? (
+                    <p className="text-xl text-muted-foreground">Loading raffles…</p>
+                  ) : (
+                    <>
+                      <p className="text-xl text-muted-foreground mb-4">No .sol hub raffles yet</p>
+                      <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                        When a host marks an NFT raffle for this hub, it appears here — not on Main or Partner.{' '}
+                        <button
+                          type="button"
+                          onClick={() => selectRafflesPageTab('all')}
+                          className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                        >
+                          Main
+                        </button>{' '}
+                        tab lists everything else.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleRefresh}
+                        className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
+                      >
+                        Refresh
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : partnerOnly && isEmptyCurrentTabView ? (
               <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
                 {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                   <p className="text-xl text-muted-foreground">Loading raffles…</p>
@@ -1424,6 +1486,7 @@ export function RafflesPageClient({
               </div>
             ) : (
             <>
+              {solDomainsOnly && <SolDomainsHubIntro />}
               {partnerOnly && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
               )}
@@ -1447,20 +1510,24 @@ export function RafflesPageClient({
             {activeView.length > 0 ? (
                 <RafflesList
                   rafflesWithEntries={activeView}
-                  title={partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
+                  title={
+                    solDomainsOnly ? 'Live .sol raffles' : partnerOnly ? 'Active partner raffles' : 'Active Raffles'
+                  }
                   section="active"
                   serverNow={serverTime}
-                  onTopProfitableChange={partnerOnly ? undefined : setTopProfitableActive}
+                  onTopProfitableChange={tab === 'all' ? setTopProfitableActive : undefined}
                   partnerWalletSet={partnerWalletSet}
                 />
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
+                  {solDomainsOnly ? 'Live .sol raffles' : partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
                 </h2>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly
+                    {solDomainsOnly
+                      ? 'No live .sol hub raffles right now.'
+                      : partnerOnly
                       ? 'No active raffles from partner communities right now.'
                       : 'No active raffles at the moment. Check back soon!'}
                   </p>
@@ -1473,7 +1540,9 @@ export function RafflesPageClient({
             {futureView.length > 0 ? (
                 <RafflesList
                   rafflesWithEntries={futureView}
-                  title={partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
+                  title={
+                    solDomainsOnly ? 'Upcoming .sol raffles' : partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'
+                  }
                   section="future"
                   serverNow={serverTime}
                   partnerWalletSet={partnerWalletSet}
@@ -1481,11 +1550,13 @@ export function RafflesPageClient({
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
+                  {solDomainsOnly ? 'Upcoming .sol raffles' : partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
                 </h2>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly
+                    {solDomainsOnly
+                      ? 'No upcoming .sol hub raffles scheduled.'
+                      : partnerOnly
                       ? 'No upcoming partner raffles scheduled.'
                       : 'No upcoming raffles scheduled at this time'}
                   </p>
@@ -1498,7 +1569,13 @@ export function RafflesPageClient({
             {pausedPendingView.length > 0 ? (
                 <RafflesList
                   rafflesWithEntries={pausedPendingView}
-                  title={partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
+                  title={
+                    solDomainsOnly
+                      ? 'Pending .sol raffles'
+                      : partnerOnly
+                        ? 'Pending partner raffles'
+                        : 'Pending / Paused Raffles'
+                  }
                   titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
                   section="future"
                   serverNow={serverTime}
@@ -1507,14 +1584,22 @@ export function RafflesPageClient({
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
+                  {solDomainsOnly
+                    ? 'Pending .sol raffles'
+                    : partnerOnly
+                      ? 'Pending partner raffles'
+                      : 'Pending / Paused Raffles'}
                 </h2>
                 <p className="text-sm text-muted-foreground mb-4">
                   NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
                 </p>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly ? 'No pending partner raffles right now.' : 'No pending or paused raffles right now.'}
+                    {solDomainsOnly
+                      ? 'No pending .sol hub raffles right now.'
+                      : partnerOnly
+                      ? 'No pending partner raffles right now.'
+                      : 'No pending or paused raffles right now.'}
                   </p>
                 </div>
               </>
@@ -1524,7 +1609,7 @@ export function RafflesPageClient({
           {pastView.length > 0 && (
             <div id="browse-past" className="scroll-mt-28 mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                {partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
+                {solDomainsOnly ? 'Past .sol raffles' : partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
               </h2>
               {pastView.length > 3 ? (
                 <PastRafflesCarousel items={pastView} partnerWalletSet={partnerWalletSet} />
@@ -1540,8 +1625,8 @@ export function RafflesPageClient({
             </div>
           )}
 
-          {/* Empty state on All tab only (partner empty uses consolidated block above). */}
-          {tab === 'all' && isEmpty && (
+          {/* Empty state on Main tab when this tab’s filtered buckets are all empty. */}
+          {isEmptyFilteredMainView && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>

@@ -211,6 +211,11 @@ export interface Raffle {
    * When false, it is for partner Discord / direct link only: still at `/raffles/{slug}` for entry.
    */
   list_on_platform: boolean
+  /**
+   * When true, raffle is shown only under the ".sol domains" hub tab (`?tab=sol-domains`), not Main or Partner.
+   * NFT raffles only; use `floor_price` for the listed reference value (no automated SNS/market calls).
+   */
+  sol_domains_hub: boolean
   /** When creator requested cancellation (pending admin approval). */
   cancellation_requested_at: string | null
   /** When admin accepted cancellation. */

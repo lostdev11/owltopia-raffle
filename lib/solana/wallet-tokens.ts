@@ -212,6 +212,10 @@ export interface WalletNft {
   name: string | null
   image: string | null
   collectionName: string | null
+  /** Metaplex verified-collection mint when known (e.g. Helius DAS grouping). */
+  collectionMint?: string | null
+  /** Token-metadata symbol when resolved (e.g. client RPC path). */
+  symbol?: string | null
 }
 
 /**
@@ -229,6 +233,8 @@ export function minimalWalletNftForEscrowTransfer(mint: string): WalletNft {
     name: null,
     image: null,
     collectionName: null,
+    collectionMint: null,
+    symbol: null,
   }
 }
 
@@ -302,11 +308,19 @@ async function fetchMetaplexMetadataBatch(
 }
 
 /** Fetch JSON from metadata URI and return name + image (with basic CORS-safe handling). */
-async function fetchMetadataJson(uri: string): Promise<{ name?: string; image?: string; collection?: { name?: string } } | null> {
+async function fetchMetadataJson(uri: string): Promise<{
+  name?: string
+  image?: string
+  collection?: { name?: string; key?: string }
+} | null> {
   try {
     const res = await fetch(uri, { cache: 'force-cache' })
     if (!res.ok) return null
-    const json = (await res.json()) as { name?: string; image?: string; collection?: { name?: string } }
+    const json = (await res.json()) as {
+      name?: string
+      image?: string
+      collection?: { name?: string; key?: string }
+    }
     return json
   } catch {
     return null
@@ -381,6 +395,8 @@ export async function getWalletNfts(
       name: null,
       image: null,
       collectionName: null,
+      collectionMint: null,
+      symbol: null,
     }))
   }
 
@@ -392,15 +408,19 @@ export async function getWalletNfts(
     let name: string | null = null
     let image: string | null = null
     let collectionName: string | null = null
+    let collectionMint: string | null = null
+    let symbol: string | null = null
     const meta = onChainMeta[i] ?? null
     if (meta) {
       metadataUri = meta.uri || null
       name = meta.name || null
+      symbol = meta.symbol ? meta.symbol.replace(/\0/g, '').trim() || null : null
       const json = meta.uri ? await fetchMetadataJson(meta.uri) : null
       if (json) {
         if (json.name) name = json.name
         if (json.image) image = json.image
         if (json.collection?.name) collectionName = json.collection.name
+        if (json.collection?.key?.trim()) collectionMint = json.collection.key.trim()
       }
     }
     return {
@@ -409,6 +429,8 @@ export async function getWalletNfts(
       name,
       image,
       collectionName,
+      collectionMint,
+      symbol,
     }
   })
 

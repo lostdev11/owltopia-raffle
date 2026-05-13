@@ -237,6 +237,8 @@ export function previewCreateRaffleThreshold(draft: CreateRaffleThresholdDraft):
       min_tickets: null,
       prize_amount: null,
       prize_currency: null,
+      list_on_platform: true,
+      sol_domains_hub: false,
     } as Raffle
     return getRaffleThreshold(synthetic)
   }
@@ -254,6 +256,8 @@ export function previewCreateRaffleThreshold(draft: CreateRaffleThresholdDraft):
     min_tickets: draft.partnerMinTickets,
     prize_amount: prizeAmt,
     prize_currency: prizeCur,
+    list_on_platform: true,
+    sol_domains_hub: false,
   } as Raffle
   return getRaffleThreshold(synthetic)
 }

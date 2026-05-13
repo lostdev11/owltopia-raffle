@@ -33,6 +33,7 @@ import {
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
 import { isEscrowSplPrizeFrozenVerifyError } from '@/lib/raffles/verify-prize-deposit-client'
+import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -61,6 +62,7 @@ import {
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
+  canWalletUsePartnerPrizeTokenForCreate,
   getPartnerPrizeListingImageUrl,
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
@@ -121,7 +123,7 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
   persistUntilDismiss: false,
 }
 
-export function CreateRaffleForm() {
+export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlow?: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const createSubmitInFlightRef = useRef(false)
@@ -172,6 +174,9 @@ export function CreateRaffleForm() {
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
   const partnerCreateMode = searchParams.get('mode') === 'partner'
+  useEffect(() => {
+    if (snsDomainHubFlow) setPrizeMode('nft')
+  }, [snsDomainHubFlow])
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
@@ -214,6 +219,16 @@ export function CreateRaffleForm() {
       if (fallback) setTokenPrizeCurrency(fallback)
     }
   }, [tokenPrizeCurrency, viewerIsAdmin])
+
+  useEffect(() => {
+    if (!isPartnerPrizeCurrency(tokenPrizeCurrency)) return
+    if (viewerIsAdmin === true) return
+    const w = publicKey?.toBase58() ?? null
+    if (canWalletUsePartnerPrizeTokenForCreate(w, tokenPrizeCurrency)) return
+    const fallback = listPartnerPrizeTokens().find((t) => canWalletUsePartnerPrizeTokenForCreate(w, t.currencyCode))
+      ?.currencyCode
+    if (fallback) setTokenPrizeCurrency(fallback)
+  }, [tokenPrizeCurrency, publicKey, viewerIsAdmin])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -260,7 +275,7 @@ export function CreateRaffleForm() {
         setCanSetLinkOnlyVisibility(ok)
         setPartnerDiscordLinked(d.partnerDiscordLinked === true)
         if (!ok) setHideFromPublicBrowse(false)
-        if (ok && partnerCreateMode && !partnerModeDefaultAppliedRef.current) {
+        if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
           setHideFromPublicBrowse(true)
           partnerModeDefaultAppliedRef.current = true
         }
@@ -275,7 +290,7 @@ export function CreateRaffleForm() {
     return () => {
       cancelled = true
     }
-  }, [connected, publicKey, partnerCreateMode])
+  }, [connected, publicKey, partnerCreateMode, snsDomainHubFlow])
 
   /**
    * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
@@ -366,10 +381,17 @@ export function CreateRaffleForm() {
 
   const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
 
-  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
+  const allowedPartnerPrizeList = useMemo(() => {
+    const all = listPartnerPrizeTokens()
+    const w = publicKey?.toBase58() ?? null
+    return all.filter(
+      (t) => viewerIsAdmin === true || canWalletUsePartnerPrizeTokenForCreate(w, t.currencyCode)
+    )
+  }, [publicKey, viewerIsAdmin])
 
   const partnerPrizeAmountPlaceholder = useMemo(() => {
     const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
+    if (dec === 0) return 'e.g. 1 or 10 (whole tokens only)'
     return dec <= 6 ? 'e.g. 100 or 50.25' : 'e.g. 1000 or 250.5'
   }, [tokenPrizeCurrency])
 
@@ -409,6 +431,9 @@ export function CreateRaffleForm() {
         } catch {
           // ignore
         }
+      }
+      if (snsDomainHubFlow) {
+        nfts = nfts.filter(walletNftLooksLikeSnsDomain)
       }
       setWalletNfts(nfts)
       setNftSearchQuery('')
@@ -638,7 +663,8 @@ export function CreateRaffleForm() {
       data.list_on_platform = false
     }
     try {
-      const response = await fetch('/api/raffles', {
+      const createUrl = snsDomainHubFlow ? '/api/raffles/sns-domain' : '/api/raffles'
+      const response = await fetch(createUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1354,10 +1380,11 @@ export function CreateRaffleForm() {
     return (
       <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
         <CardHeader>
-          <CardTitle>Create a raffle</CardTitle>
+          <CardTitle>{snsDomainHubFlow ? 'Create a .sol domain raffle' : 'Create a raffle'}</CardTitle>
           <CardDescription>
-            Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your
-            dashboard first so we can save your listing.
+            {snsDomainHubFlow
+              ? 'Connect your wallet to host a .sol domain raffle for the domains hub. Sign in from your dashboard first so we can save your listing.'
+              : 'Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your dashboard first so we can save your listing.'}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -1402,6 +1429,7 @@ export function CreateRaffleForm() {
             />
           </div>
 
+          {!snsDomainHubFlow ? (
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
             <Label className="text-base">Prize type</Label>
             <div
@@ -1459,6 +1487,15 @@ export function CreateRaffleForm() {
               </div>
             )}
           </div>
+          ) : (
+            <div className="space-y-2 rounded-md border border-teal-500/25 bg-teal-500/5 p-4">
+              <p className="text-sm font-medium text-foreground">.sol domain prize (SNS)</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Only wallet NFTs that look like SNS .sol domains are listed. This path creates a raffle for the .sol
+                domains hub only (hidden from Main and Partner). The server verifies on-chain metadata before saving.
+              </p>
+            </div>
+          )}
 
           {prizeMode === 'token' && (
             <div
@@ -1501,7 +1538,7 @@ export function CreateRaffleForm() {
           <div id="nft-prize-section" tabIndex={-1} className="space-y-3 rounded-md border bg-muted/30 p-4">
               {prizeMode === 'nft' ? (
                 <>
-              <Label>NFT prize (from your wallet)</Label>
+              <Label>{snsDomainHubFlow ? '.sol domain prize (from your wallet)' : 'NFT prize (from your wallet)'}</Label>
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
@@ -1514,21 +1551,36 @@ export function CreateRaffleForm() {
                 onClick={loadWalletAssets}
                 disabled={loadingWalletAssets || !publicKey}
               >
-                {loadingWalletAssets ? 'Loading…' : 'Load NFTs from wallet'}
+                {loadingWalletAssets ? 'Loading…' : snsDomainHubFlow ? 'Load .sol domains from wallet' : 'Load NFTs from wallet'}
               </Button>
               {walletAssetsError && (
                 <p className="text-sm text-destructive">{walletAssetsError}</p>
               )}
               {walletNfts && walletNfts.length === 0 && !loadingWalletAssets && (
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <p>No NFTs found in this wallet.</p>
-                  <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                <div className="text-sm text-muted-foreground space-y-2">
+                  {snsDomainHubFlow ? (
+                    <>
+                      <p>No tokenized .sol domains matched in this wallet.</p>
+                      <p>
+                        Only wrapped SNS domains are listed (verified collection,{' '}
+                        <span className="font-mono">.sol</span> name, or SNS/Bonfida metadata). Domains must be in this
+                        wallet, not only set as your primary name elsewhere.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>No NFTs found in this wallet.</p>
+                      <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                    </>
+                  )}
                 </div>
               )}
               {walletNfts && walletNfts.length > 0 && (
                 <>
                   <div className="space-y-1">
-                    <Label htmlFor="nft-search" className="text-xs">Search NFTs</Label>
+                    <Label htmlFor="nft-search" className="text-xs">
+                      {snsDomainHubFlow ? 'Search domains' : 'Search NFTs'}
+                    </Label>
                     <Input
                       id="nft-search"
                       type="text"
@@ -1546,12 +1598,20 @@ export function CreateRaffleForm() {
                           (nft) =>
                             (nft.name?.toLowerCase().includes(q)) ||
                             (nft.collectionName?.toLowerCase().includes(q)) ||
+                            (nft.symbol?.toLowerCase().includes(q)) ||
+                            (nft.collectionMint?.toLowerCase().includes(q)) ||
                             nft.mint.toLowerCase().includes(q)
                         )
                       : walletNfts
                     return filtered.length === 0 ? (
                       <p className="col-span-full text-sm text-muted-foreground py-2">
-                        {q ? 'No NFTs match your search.' : 'No NFTs to show.'}
+                        {q
+                          ? snsDomainHubFlow
+                            ? 'No domains match your search.'
+                            : 'No NFTs match your search.'
+                          : snsDomainHubFlow
+                            ? 'No domains to show.'
+                            : 'No NFTs to show.'}
                       </p>
                     ) : (
                       filtered.map((nft) => (

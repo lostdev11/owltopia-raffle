@@ -4,6 +4,8 @@
  */
 
 import type { Raffle } from '@/lib/types'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { BAMBOO_TICKET_CREATOR_WALLET } from '@/lib/raffles/bamboo-ticket-currency'
 
 /** Mainnet TRQ (Token-2022). */
 export const TRQ_MINT_MAINNET = 'TRQK2buch9Ht11wfxLDE4FmfCKbSz6rME1vTDbmNGLX'
@@ -32,6 +34,10 @@ export interface PartnerPrizeTokenDefinition {
    * override with NEXT_PUBLIC_TRQ_PRIZE_IMAGE_URL when you have a CDN URL.
    */
   defaultImagePath: string
+  /**
+   * When set, only this creator wallet (plus platform admins) may choose this token as the raffle prize.
+   */
+  prizeCreatorWallet?: string
 }
 
 const TRQ_DEFINITION: PartnerPrizeTokenDefinition = {
@@ -82,12 +88,26 @@ const BAMBOO_DEFINITION: PartnerPrizeTokenDefinition = {
   defaultImagePath: '/icon.png',
 }
 
+/** Pandarianz Gen 1 mint token (mainnet SPL, 0 decimals). PNDA partner prize. */
+const PG1MT_MINT_MAINNET = 'bViqre2oMVP3nqgo11ktnZyew5MhvEBoCv5NJQx5KXP'
+
+const PG1MT_DEFINITION: PartnerPrizeTokenDefinition = {
+  currencyCode: 'PG1MT',
+  displayLabel: 'Pandarianz Gen 1 Mint',
+  mint: PG1MT_MINT_MAINNET,
+  tokenProgram: 'spl',
+  decimals: 0,
+  defaultImagePath: '/icon.png',
+  prizeCreatorWallet: BAMBOO_TICKET_CREATOR_WALLET,
+}
+
 const PARTNERS: PartnerPrizeTokenDefinition[] = [
   TRQ_DEFINITION,
   USDC_DEFINITION,
   SOL_DEFINITION,
   CANE_DEFINITION,
   BAMBOO_DEFINITION,
+  PG1MT_DEFINITION,
 ]
 
 /**
@@ -108,6 +128,18 @@ export function getPartnerPrizeTokenByCurrency(currency: string | null | undefin
 
 export function isPartnerPrizeCurrency(currency: string | null | undefined): boolean {
   return getPartnerPrizeTokenByCurrency(currency) != null
+}
+
+/** False only when the token defines `prizeCreatorWallet` and the wallet does not match. Admins bypass in the API layer. */
+export function canWalletUsePartnerPrizeTokenForCreate(
+  wallet: string | null | undefined,
+  prizeCurrency: string | null | undefined
+): boolean {
+  const def = getPartnerPrizeTokenByCurrency(prizeCurrency)
+  if (!def?.prizeCreatorWallet) return true
+  const w = wallet?.trim()
+  if (!w) return false
+  return walletsEqualSolana(w, def.prizeCreatorWallet)
 }
 
 /** Crypto raffle whose prize is a partner SPL (not legacy SOL/USDC on-chain prize). */

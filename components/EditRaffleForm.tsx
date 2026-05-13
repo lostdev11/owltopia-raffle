@@ -113,10 +113,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [nftDraftTicket, setNftDraftTicket] = useState(
     raffle.ticket_price != null ? String(raffle.ticket_price) : ''
   )
+  const [solDomainsHubDraft, setSolDomainsHubDraft] = useState(raffle.sol_domains_hub === true)
   useEffect(() => {
     setNftDraftFloor(raffle.floor_price ?? '')
     setNftDraftTicket(raffle.ticket_price != null ? String(raffle.ticket_price) : '')
-  }, [raffle.id, raffle.floor_price, raffle.ticket_price])
+    setSolDomainsHubDraft(raffle.sol_domains_hub === true)
+  }, [raffle.id, raffle.floor_price, raffle.ticket_price, raffle.sol_domains_hub])
   useEffect(() => {
     setFallbackInputValue(raffle.image_fallback_url ?? '')
     setFallbackUploadFile(null)
@@ -347,6 +349,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       data.currency = formData.get('currency') as string
       data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
       data.floor_price = fp.string
+      data.sol_domains_hub = solDomainsHubDraft
     } else if (isNonDraftNft) {
       if (adminRole === 'full' && canOverrideNftEconomics) {
         if (!nftLiveEconomicsConfirm) {
@@ -1572,6 +1575,21 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         </p>
                       </div>
                     </div>
+                  </div>
+                  <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-muted/20 px-3 py-3 touch-manipulation">
+                    <input
+                      id="sol_domains_hub_edit"
+                      type="checkbox"
+                      checked={solDomainsHubDraft}
+                      onChange={(e) => setSolDomainsHubDraft(e.target.checked)}
+                      className="mt-1 h-[18px] w-[18px] shrink-0 rounded border-input"
+                    />
+                    <label htmlFor="sol_domains_hub_edit" className="text-sm leading-snug cursor-pointer">
+                      <span className="font-medium text-foreground">List in .sol domains hub only</span>
+                      <span className="block text-muted-foreground mt-1">
+                        Shown under Raffles → .sol domains; hidden from Main and Partner tabs. Floor stays manual.
+                      </span>
+                    </label>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="max_tickets">Max tickets (optional)</Label>

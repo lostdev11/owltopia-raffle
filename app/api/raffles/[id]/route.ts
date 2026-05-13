@@ -852,6 +852,29 @@ export async function PATCH(
       }
     }
 
+    if ((body as Record<string, unknown>).sol_domains_hub !== undefined) {
+      const raw = (body as Record<string, unknown>).sol_domains_hub
+      const next = raw === true || raw === 'true'
+      if (!isNft) {
+        return NextResponse.json(
+          { error: 'sol_domains_hub applies only to NFT prize raffles.' },
+          { status: 400 }
+        )
+      }
+      ;(updates as Record<string, unknown>).sol_domains_hub = next
+    }
+    if ((body as Record<string, unknown>).solDomainsHub !== undefined && (body as Record<string, unknown>).sol_domains_hub === undefined) {
+      const raw = (body as Record<string, unknown>).solDomainsHub
+      const next = raw === true || raw === 'true'
+      if (!isNft) {
+        return NextResponse.json(
+          { error: 'sol_domains_hub applies only to NFT prize raffles.' },
+          { status: 400 }
+        )
+      }
+      ;(updates as Record<string, unknown>).sol_domains_hub = next
+    }
+
     let raffle: Raffle
     try {
       raffle = await updateRaffle(

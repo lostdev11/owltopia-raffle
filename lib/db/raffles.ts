@@ -102,7 +102,7 @@ const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 /** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,buyout_closed_at'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,sol_domains_hub,buyout_closed_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -298,6 +298,7 @@ function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
     nft_token_id: null,
     nft_metadata_uri: null,
     list_on_platform: true,
+    sol_domains_hub: false,
     discord_partner_tenant_id: null,
   } as Raffle
 }
@@ -821,6 +822,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
     list_on_platform: (row as { list_on_platform?: unknown }).list_on_platform === false ? false : true,
+    sol_domains_hub: (row as { sol_domains_hub?: unknown }).sol_domains_hub === true,
     discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
     buyout_closed_at: (row.buyout_closed_at as string | null) ?? null,
     time_extension_count,
@@ -1446,6 +1448,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.discord_partner_tenant_id = null
   }
   insertData.list_on_platform = raffle.list_on_platform === false ? false : true
+  insertData.sol_domains_hub = raffle.sol_domains_hub === true
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
