@@ -1718,11 +1718,11 @@ export async function deleteRaffle(id: string) {
 }
 
 /**
- * Select a winner for a raffle by uniform random choice among wallets with at least one confirmed ticket.
- * Total tickets per wallet do not change win probability (equal luck per participant).
+ * Select a winner for a raffle by weighted random choice: each confirmed ticket is one draw weight unit
+ * for its wallet (wallets with more tickets have higher win probability; the outcome is still random).
  * Only considers confirmed entries.
  * Checks if raffle meets minimum requirements before drawing.
- * 
+ *
  * @param raffleId - The ID of the raffle
  * @param forceOverride - If true, bypass minimum check (for admin override)
  * @returns The winner's wallet address, or null if no valid entries or minimum not met
@@ -1765,89 +1765,32 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     walletTickets.set(entry.wallet_address, current + Number(entry.ticket_quantity ?? 0))
   }
 
-  // One chance per wallet (ticket totals are ignored for the draw)
-  const wallets = Array.from(walletTickets.keys()).filter(
-    (w) => Math.max(0, Math.floor(Number(walletTickets.get(w)) || 0)) > 0,
-  )
-  const totalDrawWeight = wallets.length
+  const drawRows = Array.from(walletTickets.entries())
+    .map(([wallet, qty]) => ({
+      wallet,
+      tickets: Math.max(0, Math.floor(Number(qty) || 0)),
+    }))
+    .filter((r) => r.tickets > 0)
 
-  if (totalDrawWeight <= 0) {
+  const totalTicketWeight = drawRows.reduce((s, r) => s + r.tickets, 0)
+  if (totalTicketWeight <= 0) {
     console.warn(`No wallets with positive ticket totals for raffle ${raffleId}`)
     return null
   }
 
-  let random = Math.random() * totalDrawWeight
-
-  // Uniform pick: each wallet with tickets has weight 1
-  for (let i = 0; i < wallets.length; i++) {
-    random -= 1
-    if (random <= 0) {
-      const winnerWallet = wallets[i]
-      
-      // Compute settlement amounts (fee + creator payout) at settlement time
-      const revenue = getRaffleRevenue(entries)
-      const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
-      const grossRevenue =
-        revenueCurrency === 'USDC'
-          ? revenue.usdc
-          : revenueCurrency === 'SOL'
-          ? revenue.sol
-          : revenue.owl
-
-      const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-      const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
-      const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
-
-      const drawStatus = raffleUsesFundsEscrow(raffle)
-        ? 'successful_pending_claims'
-        : 'completed'
-
-      // Update the raffle with the winner and settlement info.
-      // Guard on winner fields so concurrent draws cannot both commit + fire webhooks.
-      const now = new Date().toISOString()
-      const { data: updatedRaffle, error } = await getSupabaseAdmin()
-        .from('raffles')
-        .update({
-          winner_wallet: winnerWallet,
-          winner_selected_at: now,
-          status: drawStatus,
-          creator_wallet: creatorWallet || null,
-          fee_bps_applied: feeBps,
-          fee_tier_reason: reason,
-          platform_fee_amount: platformFee,
-          creator_payout_amount: creatorPayout,
-          settled_at: now,
-        })
-        .eq('id', raffleId)
-        .is('winner_wallet', null)
-        .is('winner_selected_at', null)
-        .select('id')
-        .maybeSingle()
-
-      if (error) {
-        console.error('Error updating raffle with winner:', error)
-        throw new Error(`Failed to update raffle with winner: ${error.message}`)
-      }
-
-      // Another request already selected a winner first; do not send webhook again.
-      if (!updatedRaffle) {
-        const latest = await getRaffleById(raffleId)
-        return latest?.winner_wallet ?? null
-      }
-
-      const rawTickets = walletTickets.get(winnerWallet) ?? 0
-      console.log(
-        `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets held; equal odds among ${totalDrawWeight} wallets)`,
-      )
-      const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
-      await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
-      return winnerWallet
+  // Integer index in [0, totalTicketWeight): each ticket is one equally likely outcome.
+  const pick = Math.floor(Math.random() * totalTicketWeight)
+  let cumulative = 0
+  let winnerWallet = drawRows[0].wallet
+  for (const row of drawRows) {
+    cumulative += row.tickets
+    if (pick < cumulative) {
+      winnerWallet = row.wallet
+      break
     }
   }
 
-  // Fallback to last wallet (should not happen due to random <= 0 check)
-  const winnerWallet = wallets[wallets.length - 1]
-  // Compute settlement amounts for fallback path
+  // Compute settlement amounts (fee + creator payout) at settlement time
   const revenue = getRaffleRevenue(entries)
   const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
   const grossRevenue =
@@ -1894,6 +1837,12 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     const latest = await getRaffleById(raffleId)
     return latest?.winner_wallet ?? null
   }
+
+  const rawTickets = walletTickets.get(winnerWallet) ?? 0
+  console.log(
+    `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets for winner; ` +
+      `${totalTicketWeight} total ticket weights across ${drawRows.length} wallets)`,
+  )
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
   await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)

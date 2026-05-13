@@ -46,12 +46,12 @@ Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffl
   - When someone visits a raffle’s detail page after it has ended and no winner has been selected yet (auto-draw).
 - **Algorithm:**
   1. Only **confirmed** entries count (entries whose payment was verified).
-  2. Tickets are aggregated **per wallet** (for display / revenue only).
-  3. **Uniform random among participants:** each wallet that has at least one confirmed ticket (positive total quantity) has an **equal** chance to win; buying more tickets does not increase win probability.
-  4. Implemented as: build the list of such wallets, then `Math.floor(Math.random() * n)`–style selection (equivalent weighted walk with weight 1 each).
+  2. Tickets are summed **per wallet** from those entries (same totals used for display and revenue).
+  3. **Weighted random by ticket count:** each **confirmed ticket** is one equally likely outcome; the winning **wallet** is whichever wallet owns the ticket index that was drawn. More tickets ⇒ higher win probability; the result is still **random** (a large holder is not guaranteed to win).
+  4. Implemented as: total weight = sum of confirmed ticket counts across wallets, draw `Math.floor(Math.random() * total)`, then walk cumulative ticket counts to pick the winner wallet (`selectWinner` in `lib/db/raffles.ts`).
   5. The chosen `winner_wallet` and `winner_selected_at` are stored in the `raffles` table in Supabase.
 
-So there is **no proof-of-work or on-chain verifiable randomness**; the draw is uniform random among qualifying wallets in our server code. For full on-chain transparency you’d need a future design (e.g. commit–reveal, or a verifiable random function / oracle used by a smart contract).
+So there is **no proof-of-work or on-chain verifiable randomness**; the draw uses pseudorandom selection in our server code. For full on-chain transparency you’d need a future design (e.g. commit–reveal, or a verifiable random function / oracle used by a smart contract).
 
 ---
 
@@ -83,7 +83,7 @@ Recommendation: Confirm that understanding in a short partner agreement or email
 
 - **Whitepaper:** The “Whitepaper” link currently points to `https://tinyurl.com/owltopia`. If it doesn’t show raffle details, we’ll add a dedicated raffle FAQ or update the link.
 - **Smart contract for winner?** No. We don’t use a smart contract to determine the winner.
-- **Proof of work / detailed winner logic?** Yes, but only in backend code: uniform random among wallets with confirmed tickets, in `lib/db/raffles.ts`. No on-chain proof.
+- **Proof of work / detailed winner logic?** Yes, but only in backend code: random draw where each **confirmed ticket** is one chance (win probability proportional to ticket count per wallet), in `lib/db/raffles.ts`. No on-chain proof.
 - **Where does the draw happen?** In our backend (API + DB). Ticket purchases are on-chain; the draw itself is off-chain.
 - **Business model (NFT, 100% value, profits)?** That’s a commercial/legal point; the founder should confirm and optionally publish a short, clear statement on the site.
 
