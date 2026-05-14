@@ -1448,15 +1448,16 @@ export function RafflesPageClient({
                 ) : (
                   <>
                     <p className="text-xl text-muted-foreground mb-4">No partner raffles to show yet</p>
-                    <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
-                      Raffles from verified partner communities (2% platform fee on tickets). See the{' '}
-                      <Link
-                        href="/partner-program"
-                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
-                      >
-                        Owltopia Partner Program
-                      </Link>
-                      {' '}or switch to{' '}
+                <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                  Raffles from verified partner communities (2% platform fee on tickets). Some hosts may sell tickets
+                  in their project SPL after Partner Pro onboarding — only their raffles, not site-wide. See the{' '}
+                  <Link
+                    href="/partner-program"
+                    className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
+                  >
+                    Owltopia Partner Program
+                  </Link>
+                  {' '}or switch to{' '}
                       <button
                         type="button"
                         onClick={() => selectRafflesPageTab('all')}
@@ -1492,7 +1493,9 @@ export function RafflesPageClient({
               )}
               {partnerOnly && (
                 <p className="text-sm text-muted-foreground mb-4 max-w-2xl leading-relaxed">
-                  Only raffles from verified partner community hosts (2% platform fee on tickets).{' '}
+                  Only raffles from verified partner community hosts (2% platform fee on tickets). Partner Pro projects
+                  may also price tickets in their own SPL — only on their listings, not as a global option for every
+                  creator.{' '}
                   <Link href="/partner-program" className="font-semibold text-foreground underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
                     Partner program
                   </Link>

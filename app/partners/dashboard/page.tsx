@@ -526,7 +526,15 @@ export default function PartnerHostDashboardPage() {
                 Starts the normal raffle creator with Partner raffle only pre-selected for eligible partner wallets.
                 {tenantId
                   ? ' Your linked Discord webhooks will handle partner raffle posts.'
-                  : ' Link a Discord tenant when you want automatic partner webhook posts.'}
+                  : ' Link a Discord tenant when you want automatic partner webhook posts.'}{' '}
+                <span className="text-foreground/85">
+                  Partner Pro can add a custom SPL as <strong className="font-medium">ticket</strong> payment on your
+                  raffles only (allowlisted wallet); see the{' '}
+                  <Link href="/partner-program" className="font-medium text-primary underline-offset-2 hover:underline">
+                    partner program
+                  </Link>{' '}
+                  page to apply.
+                </span>
               </p>
             </div>
           </div>

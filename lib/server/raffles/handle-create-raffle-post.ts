@@ -31,7 +31,6 @@ import {
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
-  canWalletUsePartnerPrizeTokenForCreate,
   getPartnerPrizeListingImageUrl,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
@@ -235,6 +234,19 @@ export async function handleCreateRafflePost(
       )
     }
 
+    if (isPartnerCryptoCreate && adminRole === null) {
+      const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
+      if (feeTier.reason !== 'partner_community') {
+        return NextResponse.json(
+          {
+            error:
+              'Partner token (SPL) prizes are only available to Owltopia partner community wallets. Use an NFT prize, or apply via the partner program.',
+          },
+          { status: 403 }
+        )
+      }
+    }
+
     if (snsDomainHubOnly) {
       if (String(body.prize_type || 'nft').toLowerCase() !== 'nft') {
         return NextResponse.json(
@@ -283,20 +295,6 @@ export async function handleCreateRafflePost(
         {
           error:
             'OWL partner-token prizes are only available to platform admins. Choose a different partner token.',
-        },
-        { status: 403 }
-      )
-    }
-    if (
-      partnerCurrencyRaw &&
-      isPartnerPrizeCurrency(partnerCurrencyRaw) &&
-      adminRole === null &&
-      !canWalletUsePartnerPrizeTokenForCreate(walletAddress, partnerCurrencyRaw)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            'This prize token is reserved for the Pandarianz (PNDA) Partner Pro creator wallet. Choose a different partner token or connect the correct wallet.',
         },
         { status: 403 }
       )
@@ -534,14 +532,7 @@ export async function handleCreateRafflePost(
             getSolanaReadConnection(),
             new PublicKey(nftMintAddress)
           )
-          if (
-            !meta ||
-            !onchainMetadataLooksLikeSnsDomain(
-              meta.name,
-              meta.symbol,
-              typeof body.nft_collection_name === 'string' ? body.nft_collection_name.trim() || null : null
-            )
-          ) {
+          if (!meta || !onchainMetadataLooksLikeSnsDomain(meta.name, meta.symbol, null)) {
             return NextResponse.json(
               {
                 error:

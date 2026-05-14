@@ -529,7 +529,8 @@ export default function AdminPartnerCreatorsPage() {
       </Card>
 
       <p className="mt-8 text-xs text-muted-foreground">
-        Marketing copy for partners: <Link href="/partner-program" className="underline-offset-2 hover:underline">Partner program</Link>.
+        Marketing copy for partners: <Link href="/partner-program" className="underline-offset-2 hover:underline">Partner program</Link>{' '}
+        (tiers, fees, Partner Pro SPL ticket currency gated per creator wallet).
       </p>
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
@@ -62,7 +63,6 @@ import {
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
-  canWalletUsePartnerPrizeTokenForCreate,
   getPartnerPrizeListingImageUrl,
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
@@ -170,6 +170,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
   /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
+  /** Active `partner_community_creators` wallet — gates SPL partner-token prizes (same as 2% fee tier). */
+  const [isPartnerCommunityCreator, setIsPartnerCommunityCreator] = useState(false)
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
@@ -180,6 +182,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
+
+  const canOfferPartnerTokenPrize = viewerIsAdmin === true || isPartnerCommunityCreator
+
+  useEffect(() => {
+    if (prizeMode !== 'token') return
+    if (!canOfferPartnerTokenPrize) {
+      setPrizeMode('nft')
+    }
+  }, [prizeMode, canOfferPartnerTokenPrize])
 
   useEffect(() => {
     partnerModeDefaultAppliedRef.current = false
@@ -221,16 +232,6 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [tokenPrizeCurrency, viewerIsAdmin])
 
   useEffect(() => {
-    if (!isPartnerPrizeCurrency(tokenPrizeCurrency)) return
-    if (viewerIsAdmin === true) return
-    const w = publicKey?.toBase58() ?? null
-    if (canWalletUsePartnerPrizeTokenForCreate(w, tokenPrizeCurrency)) return
-    const fallback = listPartnerPrizeTokens().find((t) => canWalletUsePartnerPrizeTokenForCreate(w, t.currencyCode))
-      ?.currencyCode
-    if (fallback) setTokenPrizeCurrency(fallback)
-  }, [tokenPrizeCurrency, publicKey, viewerIsAdmin])
-
-  useEffect(() => {
     if (!connected || !publicKey) {
       setViewerIsAdmin(null)
       return
@@ -263,27 +264,38 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     if (typeof window === 'undefined' || !connected) {
       setCanSetLinkOnlyVisibility(false)
       setPartnerDiscordLinked(false)
+      setIsPartnerCommunityCreator(false)
       setHideFromPublicBrowse(false)
       return
     }
     let cancelled = false
     fetch('/api/raffles/visibility-options', { credentials: 'include' })
       .then((r) => (cancelled || !r.ok ? null : r.json()))
-      .then((d: { canSetLinkOnly?: boolean; partnerDiscordLinked?: boolean } | null) => {
-        if (cancelled || !d) return
-        const ok = d.canSetLinkOnly === true
-        setCanSetLinkOnlyVisibility(ok)
-        setPartnerDiscordLinked(d.partnerDiscordLinked === true)
-        if (!ok) setHideFromPublicBrowse(false)
-        if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
-          setHideFromPublicBrowse(true)
-          partnerModeDefaultAppliedRef.current = true
+      .then(
+        (
+          d: {
+            canSetLinkOnly?: boolean
+            partnerDiscordLinked?: boolean
+            isPartnerCommunityCreator?: boolean
+          } | null
+        ) => {
+          if (cancelled || !d) return
+          const ok = d.canSetLinkOnly === true
+          setCanSetLinkOnlyVisibility(ok)
+          setPartnerDiscordLinked(d.partnerDiscordLinked === true)
+          setIsPartnerCommunityCreator(d.isPartnerCommunityCreator === true)
+          if (!ok) setHideFromPublicBrowse(false)
+          if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
+            setHideFromPublicBrowse(true)
+            partnerModeDefaultAppliedRef.current = true
+          }
         }
-      })
+      )
       .catch(() => {
         if (!cancelled) {
           setCanSetLinkOnlyVisibility(false)
           setPartnerDiscordLinked(false)
+          setIsPartnerCommunityCreator(false)
           setHideFromPublicBrowse(false)
         }
       })
@@ -381,13 +393,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
   const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
 
-  const allowedPartnerPrizeList = useMemo(() => {
-    const all = listPartnerPrizeTokens()
-    const w = publicKey?.toBase58() ?? null
-    return all.filter(
-      (t) => viewerIsAdmin === true || canWalletUsePartnerPrizeTokenForCreate(w, t.currencyCode)
-    )
-  }, [publicKey, viewerIsAdmin])
+  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
 
   const partnerPrizeAmountPlaceholder = useMemo(() => {
     const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
@@ -1449,13 +1455,31 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               <Button
                 type="button"
                 variant={prizeMode === 'token' ? 'default' : 'outline'}
-                className="min-h-[44px] w-full touch-manipulation"
+                className="min-h-[44px] w-full touch-manipulation disabled:opacity-50"
                 onClick={() => setPrizeMode('token')}
                 aria-pressed={prizeMode === 'token'}
+                disabled={!canOfferPartnerTokenPrize}
+                title={
+                  canOfferPartnerTokenPrize
+                    ? undefined
+                    : 'SPL partner-token prizes are available to Owltopia partner community wallets (and admins).'
+                }
               >
                 Partner token
               </Button>
             </div>
+            {!canOfferPartnerTokenPrize ? (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Ticket sales stay in <span className="font-medium text-foreground/90">SOL</span> or{' '}
+                <span className="font-medium text-foreground/90">USDC</span> unless you are a platform admin or have an
+                allowlisted partner wallet (e.g. Partner Pro SPL tickets). SPL <span className="font-medium">prizes</span>{' '}
+                use Partner token here —{' '}
+                <Link href="/partner-program" className="text-primary underline-offset-2 hover:underline">
+                  partner program
+                </Link>
+                .
+              </p>
+            ) : null}
             {prizeMode === 'token' && (
               <div className="space-y-1.5">
                 <Label htmlFor="token_prize_select" className="text-sm">
@@ -1557,14 +1581,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 <p className="text-sm text-destructive">{walletAssetsError}</p>
               )}
               {walletNfts && walletNfts.length === 0 && !loadingWalletAssets && (
-                <div className="text-sm text-muted-foreground space-y-2">
+                <div className="text-sm text-muted-foreground space-y-1">
                   {snsDomainHubFlow ? (
                     <>
-                      <p>No tokenized .sol domains matched in this wallet.</p>
+                      <p>No SNS-looking .sol domain NFTs found in this wallet.</p>
                       <p>
-                        Only wrapped SNS domains are listed (verified collection,{' '}
-                        <span className="font-mono">.sol</span> name, or SNS/Bonfida metadata). Domains must be in this
-                        wallet, not only set as your primary name elsewhere.
+                        We filter by metadata (for example a name ending in <span className="font-mono">.sol</span> or
+                        known SNS/Bonfida collection hints). Transfer a domain NFT here, then load again.
                       </p>
                     </>
                   ) : (
@@ -1578,9 +1601,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               {walletNfts && walletNfts.length > 0 && (
                 <>
                   <div className="space-y-1">
-                    <Label htmlFor="nft-search" className="text-xs">
-                      {snsDomainHubFlow ? 'Search domains' : 'Search NFTs'}
-                    </Label>
+                    <Label htmlFor="nft-search" className="text-xs">Search NFTs</Label>
                     <Input
                       id="nft-search"
                       type="text"
@@ -1598,20 +1619,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                           (nft) =>
                             (nft.name?.toLowerCase().includes(q)) ||
                             (nft.collectionName?.toLowerCase().includes(q)) ||
-                            (nft.symbol?.toLowerCase().includes(q)) ||
-                            (nft.collectionMint?.toLowerCase().includes(q)) ||
                             nft.mint.toLowerCase().includes(q)
                         )
                       : walletNfts
                     return filtered.length === 0 ? (
                       <p className="col-span-full text-sm text-muted-foreground py-2">
-                        {q
-                          ? snsDomainHubFlow
-                            ? 'No domains match your search.'
-                            : 'No NFTs match your search.'
-                          : snsDomainHubFlow
-                            ? 'No domains to show.'
-                            : 'No NFTs to show.'}
+                        {q ? 'No NFTs match your search.' : 'No NFTs to show.'}
                       </p>
                     ) : (
                       filtered.map((nft) => (
@@ -1684,11 +1697,41 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
-                {isOwlEnabled() && viewerIsAdmin === true ? (
-                  <option value="OWL">OWL</option>
+                {isOwlEnabled() && viewerIsAdmin === true ? <option value="OWL">OWL</option> : null}
+                {isOwlEnabled() && viewerIsAdmin !== true ? (
+                  <option value="OWL" disabled>
+                    OWL (platform admins only)
+                  </option>
                 ) : null}
-                {canUseBambooTicketCurrency ? <option value={BAMBOO_TICKET_CURRENCY}>Bamboo (BAMBOO)</option> : null}
+                {canUseBambooTicketCurrency ? (
+                  <option value={BAMBOO_TICKET_CURRENCY}>Bamboo (BAMBOO)</option>
+                ) : (
+                  <option value={BAMBOO_TICKET_CURRENCY} disabled>
+                    Bamboo (BAMBOO) — Partner Pro allowlisted wallet
+                  </option>
+                )}
               </select>
+              {(canUseBambooTicketCurrency || (partnerDiscordLinked && partnerCreateMode)) && (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {canUseBambooTicketCurrency ? (
+                    <>
+                      Extra ticket currencies in this menu are allowlisted to approved partner creator wallets only —
+                      other hosts do not see them.
+                    </>
+                  ) : (
+                    <>
+                      Want your project&apos;s SPL as ticket payment?{' '}
+                      <Link
+                        href="/partner-program"
+                        className="font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
+                      >
+                        Partner Pro
+                      </Link>{' '}
+                      adds custom ticket mints for your wallet&apos;s raffles only (not site-wide).
+                    </>
+                  )}
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">

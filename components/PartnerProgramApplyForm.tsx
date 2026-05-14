@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -122,6 +123,18 @@ export function PartnerProgramApplyForm() {
               </option>
             ))}
           </select>
+          {form.interested_tier === 'partner_pro' ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Partner Pro can add your project&apos;s SPL mint as a <strong className="text-foreground/90">ticket</strong>{' '}
+              payment option on <strong className="text-foreground/90">your</strong> raffles only (allowlisted creator
+              wallet; not shown to other hosts). Mention the mint, symbol, and decimals in Notes if you want that
+              scoped in onboarding. Details on the{' '}
+              <Link href="/partner-program" className="font-medium text-primary underline-offset-2 hover:underline">
+                partner program
+              </Link>{' '}
+              page.
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="partner-details">Notes (optional)</Label>
