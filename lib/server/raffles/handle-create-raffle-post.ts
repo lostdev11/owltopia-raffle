@@ -13,7 +13,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import type { Raffle, ThemeAccent } from '@/lib/types'
+import type { Raffle, RaffleCurrency, ThemeAccent } from '@/lib/types'
 import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -34,6 +34,7 @@ import {
   getPartnerPrizeListingImageUrl,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
+  isPublicSplPrizeCurrency,
   listPartnerPrizeTokens,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -48,6 +49,99 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 // POST create path: stay under ~10s of work so Hobby (10s cap) still returns JSON; Pro allows 60s wall clock.
 const SUPABASE_TIMEOUT_MS = 7_000
+
+/**
+ * Partner Pro: optional second ticket line (SOL↔BAMBOO only) so one listing accepts both payments
+ * without a second raffle (duplicate partner SPL prize rule).
+ */
+function parseOptionalSolBambooAlternateTickets(
+  body: Record<string, unknown>,
+  primaryCurrency: string,
+  canConfigureDualSolBamboo: boolean
+):
+  | { ok: true; alternate_ticket_currency: RaffleCurrency | null; alternate_ticket_price: number | null }
+  | { ok: false; response: NextResponse } {
+  const prim = (primaryCurrency || 'SOL').trim().toUpperCase()
+  const rawBamboo =
+    body.alternate_bamboo_ticket_price !== undefined && body.alternate_bamboo_ticket_price !== null
+      ? String(body.alternate_bamboo_ticket_price).trim()
+      : ''
+  const rawSol =
+    body.alternate_sol_ticket_price !== undefined && body.alternate_sol_ticket_price !== null
+      ? String(body.alternate_sol_ticket_price).trim()
+      : ''
+
+  if (rawBamboo && rawSol) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error:
+            'Use only one optional alternate price: alternate_bamboo_ticket_price (SOL tickets) or alternate_sol_ticket_price (BAMBOO tickets), not both.',
+        },
+        { status: 400 }
+      ),
+    }
+  }
+
+  if (!canConfigureDualSolBamboo) {
+    if (rawBamboo || rawSol) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error:
+              'SOL + BAMBOO dual ticket options are only available to the PNDA Partner Pro wallet and platform admins.',
+          },
+          { status: 403 }
+        ),
+      }
+    }
+    return { ok: true, alternate_ticket_currency: null, alternate_ticket_price: null }
+  }
+
+  if (prim === 'SOL') {
+    if (!rawBamboo) {
+      return { ok: true, alternate_ticket_currency: null, alternate_ticket_price: null }
+    }
+    const p = parseNftTicketPrice(rawBamboo)
+    if (!p.ok) {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: `alternate_bamboo_ticket_price: ${p.error}` }, { status: 400 }),
+      }
+    }
+    return { ok: true, alternate_ticket_currency: 'BAMBOO', alternate_ticket_price: p.value }
+  }
+
+  if (prim === 'BAMBOO') {
+    if (!rawSol) {
+      return { ok: true, alternate_ticket_currency: null, alternate_ticket_price: null }
+    }
+    const p = parseNftTicketPrice(rawSol)
+    if (!p.ok) {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: `alternate_sol_ticket_price: ${p.error}` }, { status: 400 }),
+      }
+    }
+    return { ok: true, alternate_ticket_currency: 'SOL', alternate_ticket_price: p.value }
+  }
+
+  if (rawBamboo || rawSol) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error:
+            'Dual SOL + BAMBOO tickets are only when the primary ticket currency is SOL or BAMBOO. For USDC, pick a single ticket currency.',
+        },
+        { status: 400 }
+      ),
+    }
+  }
+  return { ok: true, alternate_ticket_currency: null, alternate_ticket_price: null }
+}
 
 function coerceThemeAccent(raw: unknown): ThemeAccent {
   const s = typeof raw === 'string' ? raw.trim() : ''
@@ -218,7 +312,7 @@ export async function handleCreateRafflePost(
       return NextResponse.json(
         {
           error:
-            'SNS domain hub is for .sol name NFTs only. Use the regular Create raffle page for partner token prizes.',
+            'SNS domain hub is for .sol name NFTs only. Use the regular Create raffle page for SPL token (SOL/USDC) prizes.',
         },
         { status: 400 }
       )
@@ -229,18 +323,18 @@ export async function handleCreateRafflePost(
         .map((t) => t.currencyCode)
         .join(', ')
       return NextResponse.json(
-        { error: `Only partner token prizes (${supported}) are supported for crypto prize raffles right now.` },
+        { error: `Only allowlisted SPL token prizes (${supported}) are supported for crypto prize raffles right now.` },
         { status: 400 }
       )
     }
 
-    if (isPartnerCryptoCreate && adminRole === null) {
+    if (isPartnerCryptoCreate && adminRole === null && !isPublicSplPrizeCurrency(partnerCurrencyRaw)) {
       const feeTier = await getCreatorFeeTier(walletAddress, { skipCache: true })
       if (feeTier.reason !== 'partner_community') {
         return NextResponse.json(
           {
             error:
-              'Partner token (SPL) prizes are only available to Owltopia partner community wallets. Use an NFT prize, or apply via the partner program.',
+              'This SPL prize token is only available to Owltopia partner community wallets. Use SOL or USDC as the prize, an NFT prize, or apply via the partner program.',
           },
           { status: 403 }
         )
@@ -256,7 +350,7 @@ export async function handleCreateRafflePost(
       }
     } else if (!isPartnerCryptoCreate && body.prize_type && body.prize_type !== 'nft') {
       return NextResponse.json(
-        { error: 'Only NFT raffles or partner token prize raffles can be created right now.' },
+        { error: 'Only NFT raffles or SPL token prize raffles can be created right now.' },
         { status: 400 }
       )
     }
@@ -294,11 +388,19 @@ export async function handleCreateRafflePost(
       return NextResponse.json(
         {
           error:
-            'OWL partner-token prizes are only available to platform admins. Choose a different partner token.',
+            'OWL SPL prizes are only available to platform admins. Choose a different prize token.',
         },
         { status: 403 }
       )
     }
+
+    const dualTicketParts = parseOptionalSolBambooAlternateTickets(
+      body as Record<string, unknown>,
+      effectiveTicketCurrency,
+      canCreateBambooTicketRaffle
+    )
+    if (!dualTicketParts.ok) return dualTicketParts.response
+    const { alternate_ticket_currency, alternate_ticket_price } = dualTicketParts
 
     let discordPartnerTenantId: string | null = null
     let canSetPartnerOnly = false
@@ -338,7 +440,7 @@ export async function handleCreateRafflePost(
         return NextResponse.json(
           {
             error:
-              'prize_amount must be a positive decimal compatible with the partner token (no scientific notation).',
+              'prize_amount must be a positive decimal compatible with the prize token (no scientific notation).',
           },
           { status: 400 }
         )
@@ -347,7 +449,7 @@ export async function handleCreateRafflePost(
         typeof body.min_tickets === 'number' ? body.min_tickets : parseInt(String(body.min_tickets ?? ''), 10)
       if (!Number.isFinite(minTicketsParsed) || minTicketsParsed < 1) {
         return NextResponse.json(
-          { error: 'min_tickets is required for partner token raffles and must be a positive integer.' },
+          { error: 'min_tickets is required for SPL token prize raffles and must be a positive integer.' },
           { status: 400 }
         )
       }
@@ -386,7 +488,7 @@ export async function handleCreateRafflePost(
           return NextResponse.json(
             {
               error:
-                'You already have an active partner-token raffle. Finish or cancel it before starting another with the same prize token.',
+                'You already have an active SPL token prize raffle. Finish or cancel it before starting another with the same prize token.',
               existing_slug: existingPartner.slug,
             },
             { status: 409 }
@@ -420,6 +522,8 @@ export async function handleCreateRafflePost(
           (typeof body.currency === 'string' && body.currency.trim()
             ? body.currency.trim().toUpperCase()
             : null) || 'SOL',
+        alternate_ticket_currency,
+        alternate_ticket_price,
         max_tickets: maxTickets,
         min_tickets: minTickets,
         start_time: startTime,
@@ -610,6 +714,8 @@ export async function handleCreateRafflePost(
           (typeof body.currency === 'string' && body.currency.trim()
             ? body.currency.trim().toUpperCase()
             : null) || 'SOL',
+        alternate_ticket_currency,
+        alternate_ticket_price,
         max_tickets: maxTickets,
         min_tickets: minTickets,
         start_time: startTime,

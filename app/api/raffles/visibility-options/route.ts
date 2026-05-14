@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * Whether the connected session wallet may set list_on_platform=false (partner raffle only).
  * Partner Pro+ gets the visibility control; `partnerDiscordLinked` tells the UI whether
  * create/winner webhooks can target that server's channels.
- * `isPartnerCommunityCreator` gates SPL partner-token prize creation (same allowlist as 2% fee tier).
+ * `isPartnerCommunityCreator` unlocks extra SPL prize tokens in the create form (beyond SOL/USDC for all creators).
  */
 export async function GET(request: NextRequest) {
   try {

@@ -11,6 +11,7 @@ import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-
 import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
 import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 import { getPartnerPrizeListingImageUrl, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import { urlChainIncludesSolanaMark } from '@/lib/promo-png-art-draw'
 
 export const runtime = 'nodejs'
@@ -136,7 +137,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
       if (abs) absolutized.push(abs)
     }
 
-    const line1 = `Ticket: ${raffle.ticket_price} ${raffle.currency}`
+    const line1 = `Ticket: ${formatRaffleTicketPriceSummary(raffle)}`
     const line2 = `Ends ${endStr}`
     const insetBrandArt = urlChainIncludesSolanaMark(absolutized)
 

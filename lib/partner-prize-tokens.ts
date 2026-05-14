@@ -123,6 +123,12 @@ export function isPartnerPrizeCurrency(currency: string | null | undefined): boo
   return getPartnerPrizeTokenByCurrency(currency) != null
 }
 
+/** SOL/USDC SPL prizes (wrapped SOL in escrow) — any creator may use; other `PARTNERS` tickers stay partner-gated. */
+export function isPublicSplPrizeCurrency(currency: string | null | undefined): boolean {
+  const c = (currency || '').trim().toUpperCase()
+  return c === 'SOL' || c === 'USDC'
+}
+
 /** Crypto raffle whose prize is a partner SPL (not legacy SOL/USDC on-chain prize). */
 export function isPartnerSplPrizeRaffle(
   raffle: Pick<Raffle, 'prize_type' | 'prize_currency'> | { prize_type?: string | null; prize_currency?: string | null }

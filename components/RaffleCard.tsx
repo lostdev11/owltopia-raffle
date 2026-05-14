@@ -17,6 +17,7 @@ import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import type { Raffle, Entry } from '@/lib/types'
+import { formatRaffleTicketPriceSummary, raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
 import {
   type RaffleProfitInfo,
   revenueFlexPromoChipUppercase,
@@ -703,12 +704,18 @@ export function RaffleCard({
               <span className="flex items-center gap-1">
                 <span className="text-muted-foreground">Price: </span>
                 <span className="font-semibold flex items-center gap-1">
-                  {raffle.ticket_price} {raffle.currency}
-                  <CurrencyIcon
-                    currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
-                    size={12}
-                    className="inline-block"
-                  />
+                  {raffleAcceptsSolAndBambooTickets(raffle) ? (
+                    formatRaffleTicketPriceSummary(raffle)
+                  ) : (
+                    <>
+                      {raffle.ticket_price} {raffle.currency}
+                      <CurrencyIcon
+                        currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                        size={12}
+                        className="inline-block"
+                      />
+                    </>
+                  )}
                 </span>
               </span>
               {totalTicketsSold > 0 && (
@@ -963,8 +970,18 @@ export function RaffleCard({
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex-1 min-w-0">
                     <div className={`${classes.content} font-semibold text-white flex items-center gap-1.5 truncate`}>
-                      {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={16} className="inline-block flex-shrink-0" />
+                      {raffleAcceptsSolAndBambooTickets(raffle) ? (
+                        formatRaffleTicketPriceSummary(raffle)
+                      ) : (
+                        <>
+                          {raffle.ticket_price} {raffle.currency}
+                          <CurrencyIcon
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            size={16}
+                            className="inline-block flex-shrink-0"
+                          />
+                        </>
+                      )}
                     </div>
                     <div className={`${classes.footer} text-white/80`}>
                       {totalTicketsSold} entries
@@ -1072,9 +1089,19 @@ export function RaffleCard({
                   )}
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Ticket Price</span>
-                    <span className="font-semibold flex items-center gap-1.5">
-                      {raffle.ticket_price} {raffle.currency}
-                      <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={16} className="inline-block" />
+                    <span className="font-semibold flex items-center gap-1.5 text-right">
+                      {raffleAcceptsSolAndBambooTickets(raffle) ? (
+                        formatRaffleTicketPriceSummary(raffle)
+                      ) : (
+                        <>
+                          {raffle.ticket_price} {raffle.currency}
+                          <CurrencyIcon
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            size={16}
+                            className="inline-block"
+                          />
+                        </>
+                      )}
                     </span>
                   </div>
                   {totalTicketsSold > 0 && (

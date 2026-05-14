@@ -142,6 +142,13 @@ export interface Raffle {
   nft_metadata_uri: string | null
   ticket_price: number
   currency: RaffleCurrency
+  /**
+   * Optional second ticket asset paired with {@link currency} — only SOL↔BAMBOO (see migration 114).
+   * When set, {@link alternate_ticket_price} is the per-ticket price in this asset.
+   */
+  alternate_ticket_currency: RaffleCurrency | null
+  /** Per-ticket price in `alternate_ticket_currency` (null when single-currency tickets). */
+  alternate_ticket_price: number | null
   max_tickets: number | null
   min_tickets: number | null
   start_time: string

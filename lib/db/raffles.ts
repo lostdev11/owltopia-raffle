@@ -91,7 +91,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_CORE =
-  ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 /** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
 const RAFFLE_TAIL_FUNDS_ESCROW =
@@ -825,6 +825,13 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     sol_domains_hub: (row as { sol_domains_hub?: unknown }).sol_domains_hub === true,
     discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
     buyout_closed_at: (row.buyout_closed_at as string | null) ?? null,
+    alternate_ticket_currency:
+      (row.alternate_ticket_currency as Raffle['alternate_ticket_currency'] | null | undefined) ?? null,
+    alternate_ticket_price: (() => {
+      if (row.alternate_ticket_price == null || row.alternate_ticket_price === '') return null
+      const n = Number(row.alternate_ticket_price)
+      return Number.isFinite(n) && n > 0 ? n : null
+    })(),
     time_extension_count,
   } as Raffle
 }
@@ -1378,6 +1385,8 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     prize_currency: raffle.prize_currency,
     ticket_price: raffle.ticket_price,
     currency: raffle.currency,
+    alternate_ticket_currency: raffle.alternate_ticket_currency ?? null,
+    alternate_ticket_price: raffle.alternate_ticket_price ?? null,
     max_tickets: raffle.max_tickets,
     min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,

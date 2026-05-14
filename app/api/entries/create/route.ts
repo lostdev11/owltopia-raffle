@@ -9,6 +9,7 @@ import {
 import { getRaffleById, getEntriesByRaffleId, upgradeRaffleToFundsEscrowIfEligible } from '@/lib/db/raffles'
 import { hasAnyInVerification } from '@/lib/verify-in-flight'
 import { isOwlEnabled, getTokenInfo } from '@/lib/tokens'
+import { resolveTicketPaymentCurrency, ticketUnitPriceForCurrency } from '@/lib/raffles/dual-ticket-payment'
 import { entriesCreateBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest) {
     if (!parsed.ok) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
-    const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum } = parsed.data
+    const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum, paymentCurrency } =
+      parsed.data
 
     // Attribution uses httpOnly cookie only (set by GET /api/referrals/capture); never trust JSON body.
     let referralRaw: string | undefined
@@ -112,15 +114,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
-    if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+    const resolvedPayCur = resolveTicketPaymentCurrency(raffle, paymentCurrency)
+    if (!resolvedPayCur) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    if (resolvedPayCur === 'OWL' && !isOwlEnabled()) {
       if (process.env.NODE_ENV === 'development') {
-        console.log('[entries/create] OWL raffle checkout blocked: NEXT_PUBLIC_OWL_MINT_ADDRESS not set')
+        console.log('[entries/create] OWL entry blocked: NEXT_PUBLIC_OWL_MINT_ADDRESS not set')
       }
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
+    const unitPrice = ticketUnitPriceForCurrency(raffle, resolvedPayCur)
+    if (unitPrice == null) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
     // Coerce DB numerics (can be string from Supabase) so logic works for all clients (desktop + mobile)
-    const ticketPrice = Number(raffle.ticket_price)
+    const ticketPrice = unitPrice
     if (!Number.isFinite(ticketPrice) || ticketPrice <= 0) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
@@ -163,11 +175,12 @@ export async function POST(request: NextRequest) {
       ticketQuantityNum === 1 &&
       Boolean(referralRaw) &&
       !hadConfirmed &&
-      !alreadyUsedGlobalFreeTicket
+      !alreadyUsedGlobalFreeTicket &&
+      resolvedPayCur === raffle.currency
 
     const referralResolution = await resolveReferralForPurchase(referralRaw, walletAddressStr, {
       amountPaid: fullPrice,
-      currency: String(raffle.currency || 'SOL'),
+      currency: String(resolvedPayCur),
       complimentary: eligibleComplimentary,
     })
 
@@ -200,7 +213,7 @@ export async function POST(request: NextRequest) {
       transaction_signature: null,
       status: 'pending',
       amount_paid: finalAmountPaid,
-      currency: raffle.currency,
+      currency: resolvedPayCur,
       ...(referralResolution
         ? {
             referrer_wallet: referralResolution.referrerWallet,
@@ -234,8 +247,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }
 
-    const tokenInfo = getTokenInfo(raffle.currency)
-    if (raffle.currency !== 'SOL' && !tokenInfo.mintAddress) {
+    const tokenInfo = getTokenInfo(resolvedPayCur)
+    if (resolvedPayCur !== 'SOL' && !tokenInfo.mintAddress) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }
     const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
@@ -261,7 +274,7 @@ export async function POST(request: NextRequest) {
       paymentDetails = {
         recipient: fundsEscrowAddr,
         amount: finalAmountPaid,
-        currency: raffle.currency,
+        currency: resolvedPayCur,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
         tokenMint: tokenInfo.mintAddress,
@@ -272,7 +285,7 @@ export async function POST(request: NextRequest) {
       paymentDetails = {
         recipient: creatorWallet,
         amount: finalAmountPaid,
-        currency: raffle.currency,
+        currency: resolvedPayCur,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
         tokenMint: tokenInfo.mintAddress,
@@ -286,7 +299,7 @@ export async function POST(request: NextRequest) {
       paymentDetails = {
         recipient: treasuryWallet,
         amount: finalAmountPaid,
-        currency: raffle.currency,
+        currency: resolvedPayCur,
         usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         owlMint: tokenInfo.mintAddress,
         tokenMint: tokenInfo.mintAddress,

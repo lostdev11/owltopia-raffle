@@ -15,6 +15,7 @@ import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
+import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -310,7 +311,7 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
       { name: 'Prize', value: prizeSummary(raffle), inline: true },
       {
         name: 'Ticket price',
-        value: `${raffle.ticket_price} ${raffle.currency}`,
+        value: formatRaffleTicketPriceSummary(raffle),
         inline: true,
       },
       { name: 'Ends', value: endLine, inline: false },
@@ -579,7 +580,7 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
     fields: [
       { name: 'Enter here', value: pageUrl, inline: false },
       { name: 'Prize', value: prizeSummary(raffle), inline: true },
-      { name: 'Ticket price', value: `${raffle.ticket_price} ${raffle.currency}`, inline: true },
+      { name: 'Ticket price', value: formatRaffleTicketPriceSummary(raffle), inline: true },
       { name: 'Ends', value: endLine, inline: false },
     ],
     image: image ? { url: image } : undefined,

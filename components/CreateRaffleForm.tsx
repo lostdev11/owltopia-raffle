@@ -67,6 +67,7 @@ import {
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
+  isPublicSplPrizeCurrency,
   listPartnerPrizeTokens,
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
@@ -152,7 +153,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [prizeMode, setPrizeMode] = useState<'nft' | 'token'>('nft')
-  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('TRQ')
+  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('SOL')
   const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
@@ -164,13 +165,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
+  const [alternateBambooTicketPrice, setAlternateBambooTicketPrice] = useState('')
+  const [alternateSolTicketPrice, setAlternateSolTicketPrice] = useState('')
   const [ticketPrice, setTicketPrice] = useState('')
   /** When non-null, ticket was last set by floor autofill; floor edits re-suggest only if ticket still matches. */
   const lastAutofillTicketRef = useRef<string | null>(null)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
   /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
-  /** Active `partner_community_creators` wallet — gates SPL partner-token prizes (same as 2% fee tier). */
+  /** Active `partner_community_creators` wallet — unlocks extra SPL prize tickers beyond SOL/USDC. */
   const [isPartnerCommunityCreator, setIsPartnerCommunityCreator] = useState(false)
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
@@ -182,15 +185,6 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
-
-  const canOfferPartnerTokenPrize = viewerIsAdmin === true || isPartnerCommunityCreator
-
-  useEffect(() => {
-    if (prizeMode !== 'token') return
-    if (!canOfferPartnerTokenPrize) {
-      setPrizeMode('nft')
-    }
-  }, [prizeMode, canOfferPartnerTokenPrize])
 
   useEffect(() => {
     partnerModeDefaultAppliedRef.current = false
@@ -210,6 +204,14 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [prizeMode])
 
   useEffect(() => {
+    if (raffleCurrency !== 'SOL') setAlternateBambooTicketPrice('')
+  }, [raffleCurrency])
+
+  useEffect(() => {
+    if (raffleCurrency !== BAMBOO_TICKET_CURRENCY) setAlternateSolTicketPrice('')
+  }, [raffleCurrency])
+
+  useEffect(() => {
     if (raffleCurrency !== 'OWL') return
     if (!isOwlEnabled() || viewerIsAdmin === false) {
       setRaffleCurrency('SOL')
@@ -226,7 +228,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   useEffect(() => {
     if (tokenPrizeCurrency !== 'OWL') return
     if (!PARTNER_OWL_PRIZE_UI_ENABLED || viewerIsAdmin !== true) {
-      const fallback = listPartnerPrizeTokens()[0]?.currencyCode
+      const fallback =
+        listPartnerPrizeTokens().find((t) => isPublicSplPrizeCurrency(t.currencyCode))?.currencyCode ??
+        listPartnerPrizeTokens()[0]?.currencyCode
       if (fallback) setTokenPrizeCurrency(fallback)
     }
   }, [tokenPrizeCurrency, viewerIsAdmin])
@@ -393,7 +397,16 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
   const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
 
-  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
+  /** TRQ, CANE, etc. — only admins + partner-community wallets; SOL/USDC stay open to all creators. */
+  const canSelectPartnerPrizeTokens = viewerIsAdmin === true || isPartnerCommunityCreator
+
+  const allPartnerPrizeTokens = useMemo(() => [...listPartnerPrizeTokens()], [])
+
+  useEffect(() => {
+    if (canSelectPartnerPrizeTokens) return
+    if (isPublicSplPrizeCurrency(tokenPrizeCurrency)) return
+    setTokenPrizeCurrency('SOL')
+  }, [canSelectPartnerPrizeTokens, tokenPrizeCurrency])
 
   const partnerPrizeAmountPlaceholder = useMemo(() => {
     const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
@@ -492,6 +505,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
 
     if (isPartner) {
+      if (!isPublicSplPrizeCurrency(tokenPrizeCurrency) && viewerIsAdmin !== true && !isPartnerCommunityCreator) {
+        alert('That prize token is only for partner communities and admins. Choose SOL or USDC, or apply via the partner program.')
+        focusFormField('token_prize_select')
+        return
+      }
       const tokenMeta = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)
       const amt = partnerPrizeAmount.trim()
       if (!amt || !tokenMeta || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
@@ -667,6 +685,30 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
+    }
+    if (canUseBambooTicketCurrency) {
+      if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
+        const ap = parseNftTicketPrice(alternateBambooTicketPrice.trim())
+        if (!ap.ok) {
+          alert(`Optional Bamboo ticket price: ${ap.error}`)
+          setLoading(false)
+          setCreateStep('idle')
+          createSubmitInFlightRef.current = false
+          return
+        }
+        data.alternate_bamboo_ticket_price = ap.value
+      }
+      if (currency === BAMBOO_TICKET_CURRENCY && alternateSolTicketPrice.trim()) {
+        const ap = parseNftTicketPrice(alternateSolTicketPrice.trim())
+        if (!ap.ok) {
+          alert(`Optional SOL ticket price: ${ap.error}`)
+          setLoading(false)
+          setCreateStep('idle')
+          createSubmitInFlightRef.current = false
+          return
+        }
+        data.alternate_sol_ticket_price = ap.value
+      }
     }
     try {
       const createUrl = snsDomainHubFlow ? '/api/raffles/sns-domain' : '/api/raffles'
@@ -1320,7 +1362,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               }
               router.push(`/raffles/${raffle.slug}`)
             } catch (transferErr) {
-              console.error('Partner token transfer to escrow failed:', transferErr)
+              console.error('SPL prize token transfer to escrow failed:', transferErr)
               alert(
                 transferErr instanceof Error
                   ? transferErr.message
@@ -1390,7 +1432,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           <CardDescription>
             {snsDomainHubFlow
               ? 'Connect your wallet to host a .sol domain raffle for the domains hub. Sign in from your dashboard first so we can save your listing.'
-              : 'Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your dashboard first so we can save your listing.'}
+              : 'Connect your wallet to create a raffle (NFT or SPL token prize such as SOL or USDC). Sign in from your dashboard first so we can save your listing.'}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -1455,25 +1497,18 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               <Button
                 type="button"
                 variant={prizeMode === 'token' ? 'default' : 'outline'}
-                className="min-h-[44px] w-full touch-manipulation disabled:opacity-50"
+                className="min-h-[44px] w-full touch-manipulation"
                 onClick={() => setPrizeMode('token')}
                 aria-pressed={prizeMode === 'token'}
-                disabled={!canOfferPartnerTokenPrize}
-                title={
-                  canOfferPartnerTokenPrize
-                    ? undefined
-                    : 'SPL partner-token prizes are available to Owltopia partner community wallets (and admins).'
-                }
               >
-                Partner token
+                SPL Token
               </Button>
             </div>
-            {!canOfferPartnerTokenPrize ? (
+            {viewerIsAdmin !== true && !isPartnerCommunityCreator ? (
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Ticket sales stay in <span className="font-medium text-foreground/90">SOL</span> or{' '}
-                <span className="font-medium text-foreground/90">USDC</span> unless you are a platform admin or have an
-                allowlisted partner wallet (e.g. Partner Pro SPL tickets). SPL <span className="font-medium">prizes</span>{' '}
-                use Partner token here —{' '}
+                <span className="font-medium text-foreground/90">SOL</span> and{' '}
+                <span className="font-medium text-foreground/90">USDC</span> are selectable below. Other SPL prize tokens
+                appear grayed out until you are on a partner allowlist —{' '}
                 <Link href="/partner-program" className="text-primary underline-offset-2 hover:underline">
                   partner program
                 </Link>
@@ -1498,10 +1533,21 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   aria-label="Prize token"
                 >
-                  {allowedPartnerPrizeList.map((t) => {
+                  {allPartnerPrizeTokens.map((t) => {
                     const label = t.displayLabel ? `${t.displayLabel} (${t.currencyCode})` : t.currencyCode
+                    const disabled =
+                      !isPublicSplPrizeCurrency(t.currencyCode) && !canSelectPartnerPrizeTokens
                     return (
-                      <option key={t.currencyCode} value={t.currencyCode}>
+                      <option
+                        key={t.currencyCode}
+                        value={t.currencyCode}
+                        disabled={disabled}
+                        title={
+                          disabled
+                            ? 'Partner prize token — available to Owltopia admins and allowlisted partner wallets'
+                            : undefined
+                        }
+                      >
                         {label}
                       </option>
                     )
@@ -1733,6 +1779,38 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 </p>
               )}
             </div>
+            {canUseBambooTicketCurrency && raffleCurrency === 'SOL' && (
+              <div className="space-y-2">
+                <Label htmlFor="alternate_bamboo_ticket_price">Bamboo ticket price (optional)</Label>
+                <Input
+                  id="alternate_bamboo_ticket_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={alternateBambooTicketPrice}
+                  onChange={(e) => setAlternateBambooTicketPrice(e.target.value)}
+                  placeholder="e.g. 100 — same raffle, buyers may pay SOL or BAMBOO"
+                />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Leave blank for SOL-only tickets. When set, one raffle accepts both SOL (ticket price above) and BAMBOO
+                  at this price — no second listing for the same SPL prize.
+                </p>
+              </div>
+            )}
+            {canUseBambooTicketCurrency && raffleCurrency === BAMBOO_TICKET_CURRENCY && (
+              <div className="space-y-2">
+                <Label htmlFor="alternate_sol_ticket_price">SOL ticket price (optional)</Label>
+                <Input
+                  id="alternate_sol_ticket_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={alternateSolTicketPrice}
+                  onChange={(e) => setAlternateSolTicketPrice(e.target.value)}
+                  placeholder="e.g. 0.05 — buyers may pay BAMBOO or SOL"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="ticket_price">Ticket price *</Label>

@@ -17,7 +17,7 @@ import {
   createAssociatedTokenAccountInstruction,
   type Mint,
 } from '@solana/spl-token'
-import type { Raffle } from '@/lib/types'
+import type { Raffle, RaffleCurrency } from '@/lib/types'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isOwlEnabled } from '@/lib/tokens'
 import { fireGreenConfetti } from '@/lib/confetti'
@@ -44,6 +44,8 @@ type PaymentDetails = PurchasePaymentDetails
 export type ExecuteRafflePurchaseOptions = {
   raffle: Raffle
   ticketQuantity: number
+  /** When raffle offers SOL + BAMBOO, which asset the buyer pays in (defaults to `raffle.currency`). */
+  paymentCurrency?: RaffleCurrency
   publicKey: PublicKey
   connection: Connection
   sendTransaction: (
@@ -447,6 +449,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
   const {
     raffle,
     ticketQuantity,
+    paymentCurrency: paymentCurrencyOpt,
     publicKey,
     connection,
     sendTransaction,
@@ -459,7 +462,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     onVerifyPending,
   } = opts
 
-  if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+  const payCurrency = (paymentCurrencyOpt ?? raffle.currency) as RaffleCurrency
+
+  if (payCurrency === 'OWL' && !isOwlEnabled()) {
     return { ok: false, error: 'OWL entry is not enabled yet — mint address pending.' }
   }
 
@@ -480,6 +485,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
             raffleId: raffle.id,
             walletAddress: publicKey.toBase58(),
             ticketQuantity,
+            ...(paymentCurrencyOpt ? { paymentCurrency: paymentCurrencyOpt } : {}),
           }),
           signal: controller.signal,
         })
@@ -582,7 +588,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     const transaction = await buildPurchaseTransactionFromPaymentDetails(
       connection,
       publicKey,
-      String(raffle.currency || 'SOL'),
+      String(payCurrency),
       paymentDetails
     )
 
@@ -654,7 +660,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       if (isMobile && errorMessage.includes('timeout')) {
         throw new Error('Transaction timeout. This can happen on slower mobile connections. Please try again.')
       }
-      const splMsg = formatSplTokenTransferFailure(errorMessage, String(raffle.currency || ''))
+      const splMsg = formatSplTokenTransferFailure(errorMessage, String(payCurrency || ''))
       if (splMsg) {
         throw new Error(splMsg)
       }

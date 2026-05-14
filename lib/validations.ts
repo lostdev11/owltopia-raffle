@@ -9,6 +9,8 @@ export const entriesCreateBody = z.object({
   raffleId: z.string().uuid(),
   walletAddress: solanaAddress,
   ticketQuantity: z.coerce.number().int().min(1).max(MAX_TICKET_QUANTITY_PER_ENTRY),
+  /** When raffle offers SOL + BAMBOO tickets, buyer must pick one (omit = primary `raffle.currency`). */
+  paymentCurrency: z.enum(['SOL', 'USDC', 'OWL', 'BAMBOO']).optional(),
 })
 
 export const referralVanityBody = z.object({
