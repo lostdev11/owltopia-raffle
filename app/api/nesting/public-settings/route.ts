@@ -13,7 +13,7 @@ export async function GET() {
     const row = await getNestingPublicSettings()
     const landingPublic = !row || row.landing_public === true
     return NextResponse.json(
-      { landingPublic, nestingDisabled: isNestingGloballyDisabled() },
+      { landingPublic, nestingDisabled: await isNestingGloballyDisabled() },
       {
         headers: {
           'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
@@ -23,7 +23,7 @@ export async function GET() {
   } catch (e) {
     console.error('[nesting/public-settings]', e)
     return NextResponse.json(
-      { landingPublic: false, nestingDisabled: isNestingGloballyDisabled() },
+      { landingPublic: false, nestingDisabled: await isNestingGloballyDisabled() },
       { status: 200 }
     )
   }

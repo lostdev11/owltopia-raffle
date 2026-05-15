@@ -1,3 +1,4 @@
+import { isNestingOperationsPausedInDb } from '@/lib/db/nesting-public-settings'
 import { StakingUserError } from '@/lib/nesting/errors'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 
@@ -21,14 +22,24 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
 
 /**
  * When true (via `NESTING_DISABLED=true`), stake / claim / unstake are rejected server-side.
- * Use for maintenance or incident response. Mid-stake NFT freeze confirmation stays available in the UI.
+ * Use for maintenance or incident response that must override admin UI. Mid-flight MPL Core freeze completion still uses
+ * `POST /api/me/staking/stake` with the same NFT (resume path in `executeStake`) and `POST /api/me/staking/freeze`.
  */
-export function isNestingGloballyDisabled(): boolean {
+export function isNestingEnvKillSwitchEnabled(): boolean {
   return readBoolean(process.env.NESTING_DISABLED, false)
 }
 
-export function assertNestingOperationsAllowed(): void {
-  if (isNestingGloballyDisabled()) {
+/**
+ * True when nesting stake / claim / voluntary unstake should be blocked (UI banner + APIs).
+ * Uses `NESTING_DISABLED` **or** admin-controlled `nesting_public_settings.nesting_operations_paused`.
+ */
+export async function isNestingGloballyDisabled(): Promise<boolean> {
+  if (isNestingEnvKillSwitchEnabled()) return true
+  return isNestingOperationsPausedInDb()
+}
+
+export async function assertNestingOperationsAllowed(): Promise<void> {
+  if (await isNestingGloballyDisabled()) {
     throw new StakingUserError(
       'Nesting is paused right now. New nests, claims, and leaving a nest are temporarily unavailable—please try again later.',
       503

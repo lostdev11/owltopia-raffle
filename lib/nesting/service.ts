@@ -36,7 +36,6 @@ export async function executeStake(params: {
   /** Admin-only QA: stake before `NESTING_SELL_OUT_*` gate is cleared. */
   bypassSelloutGate?: boolean
 }) {
-  assertNestingOperationsAllowed()
   const pool_id = params.pool_id.trim()
   if (!STAKING_UUID_RE.test(pool_id)) {
     throw new StakingUserError('Invalid pool_id', 400)
@@ -47,12 +46,6 @@ export async function executeStake(params: {
     throw new StakingUserError('Pool not found or inactive', 400)
   }
   validatePoolAgainstNestingEmissionPolicy(pool)
-  if (!params.bypassSelloutGate) {
-    assertNestingSelloutReached()
-  }
-  if (pool.adapter_mode === 'onchain_enabled' && pool.asset_type === 'nft') {
-    assertRewardTreasuryConfigured()
-  }
 
   let amount =
     params.rawAmount !== undefined && params.rawAmount !== null ? Number(params.rawAmount) : NaN
@@ -76,8 +69,26 @@ export async function executeStake(params: {
   if (pool.asset_type === 'nft' && asset_identifier) {
     const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
     if (existing) {
+      const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
+      const resumeNftFreezeLock =
+        existing.status === 'pending' &&
+        pool.adapter_mode === 'onchain_enabled' &&
+        !nftFreezeConfirmed &&
+        existing.wallet_address.trim() === params.wallet.trim()
+
+      if (resumeNftFreezeLock) {
+        return { position: existing, pool }
+      }
       throw new StakingUserError('This NFT is already in an open staking position.', 400)
     }
+  }
+
+  await assertNestingOperationsAllowed()
+  if (!params.bypassSelloutGate) {
+    assertNestingSelloutReached()
+  }
+  if (pool.adapter_mode === 'onchain_enabled' && pool.asset_type === 'nft') {
+    assertRewardTreasuryConfigured()
   }
 
   if (pool.minimum_stake != null && amount < Number(pool.minimum_stake)) {
@@ -98,7 +109,7 @@ export async function executeStake(params: {
 }
 
 export async function executeUnstake(params: { wallet: string; position_id: string }) {
-  assertNestingOperationsAllowed()
+  await assertNestingOperationsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -204,7 +215,7 @@ export async function executeClaim(params: {
   position_id: string
   rawAmount: unknown
 }) {
-  assertNestingOperationsAllowed()
+  await assertNestingOperationsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)

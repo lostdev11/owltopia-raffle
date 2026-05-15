@@ -89,9 +89,7 @@ export function DashboardNestingClient() {
   const [stakeAssetId, setStakeAssetId] = useState('')
   const [stakeAssetIds, setStakeAssetIds] = useState<string[]>([])
   const [stakeTxPhase, setStakeTxPhase] = useState<NestingTxPhase>('idle')
-  const [posPhases, setPosPhases] = useState<
-    Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase; secure: NestingTxPhase }>
-  >({})
+  const [posPhases, setPosPhases] = useState<Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase }>>({})
   const [securityAck, setSecurityAck] = useState(false)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(() =>
     typeof window !== 'undefined' && publicKey ? getCachedAdmin(publicKey.toBase58()) : null
@@ -131,12 +129,11 @@ export function DashboardNestingClient() {
   /** Pool id for which we last finished a wallet scan (`done`). Cleared when perch changes so auto-refresh cannot run against stale “done”. */
   const owlNestLastLoadedPoolIdRef = useRef<string | null>(null)
 
-  const setPosSubPhase = useCallback((id: string, key: 'claim' | 'unstake' | 'secure', phase: NestingTxPhase) => {
+  const setPosSubPhase = useCallback((id: string, key: 'claim' | 'unstake', phase: NestingTxPhase) => {
     setPosPhases((m) => {
       const cur = m[id] ?? {
         claim: 'idle' as NestingTxPhase,
         unstake: 'idle' as NestingTxPhase,
-        secure: 'idle' as NestingTxPhase,
       }
       return { ...m, [id]: { ...cur, [key]: phase } }
     })
@@ -677,6 +674,26 @@ export function DashboardNestingClient() {
     return single ? [single] : []
   }, [nftMintRequired, stakeAssetId, stakeAssetIds])
 
+  /** While nesting is globally paused, still allow Confirm nest when every selected NFT is mid-open (pending, freeze not confirmed). */
+  const canOnlyResumeFreeze = useMemo(() => {
+    if (!nestingDisabled || !stakePoolId.trim()) return false
+    const pool = poolById.get(stakePoolId.trim())
+    if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') return false
+    if (selectedNftStakeAssetIds.length === 0) return false
+    const pid = stakePoolId.trim()
+    return selectedNftStakeAssetIds.every((assetId) => {
+      const id = assetId.trim()
+      if (!id) return false
+      return positions.some(
+        (p) =>
+          p.pool_id === pid &&
+          p.asset_identifier?.trim() === id &&
+          p.status === 'pending' &&
+          !(p.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+      )
+    })
+  }, [nestingDisabled, stakePoolId, poolById, selectedNftStakeAssetIds, positions])
+
   const toggleSelectedOwlNestMint = useCallback((mint: string) => {
     const exists = stakeAssetIds.includes(mint)
     const next = exists ? stakeAssetIds.filter((id) => id !== mint) : [...stakeAssetIds, mint]
@@ -1019,57 +1036,6 @@ export function DashboardNestingClient() {
     }
   }
 
-  const handleFreezeExistingNft = async (positionId: string) => {
-    if (!publicKey) return
-    setActionError(null)
-    const position = positions.find((p) => p.id === positionId)
-    if (!position?.asset_identifier?.trim()) {
-      setActionError('This nest is missing its NFT asset id.')
-      return
-    }
-    const pool = pools.find((p) => p.id === position.pool_id)
-    if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') {
-      setActionError('This nest is not configured for NFT freeze locks.')
-      return
-    }
-
-    try {
-      await runNestingTxAction({
-        onPhase: (p) => setPosSubPhase(positionId, 'secure', p),
-        async execute() {
-          setPosSubPhase(positionId, 'secure', 'awaiting_wallet_signature')
-          const signature = await sendMplCoreFreezeDelegateApproval(
-            position.asset_identifier!.trim(),
-            nestingNftFreezeDelegate
-          )
-          setPosSubPhase(positionId, 'secure', 'syncing')
-          const freezeRes = await fetch('/api/me/staking/freeze', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-            body: JSON.stringify({ position_id: positionId, signature }),
-          })
-          const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
-          if (!freezeRes.ok) {
-            setActionError(typeof freezeJson.error === 'string' ? freezeJson.error : 'Could not freeze NFT')
-            throw new Error('secure')
-          }
-        },
-        afterSuccess: async () => {
-          await loadPositions()
-          await loadPools()
-        },
-      })
-      setSuccessMessage('NFT lock confirmed — this Owl Nest NFT is frozen in the holder wallet.')
-    } catch (e) {
-      if (e instanceof Error && e.message === 'secure') return
-      setActionError(e instanceof Error ? e.message : 'Could not freeze NFT')
-    }
-  }
-
   const handleUnstake = async (positionId: string) => {
     if (!publicKey) return
     setActionError(null)
@@ -1379,7 +1345,8 @@ export function DashboardNestingClient() {
           <p className="font-medium text-foreground">Nesting is paused</p>
           <p className="mt-1 text-muted-foreground leading-relaxed">
             New nests, claims, and leaving a nest are off for the moment. If you were partway through opening a nest,
-            you can still confirm the NFT freeze lock below when the dashboard asks for it.
+            select the same Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for
+            nests that are still opening).
           </p>
         </div>
       ) : null}
@@ -1964,7 +1931,7 @@ export function DashboardNestingClient() {
               className="min-h-[48px] w-full font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)] hover:shadow-[0_0_28px_rgba(0,255,136,0.24)]"
               disabled={
                 !securityAck ||
-                nestingDisabled ||
+                (nestingDisabled && !canOnlyResumeFreeze) ||
                 stakeTxPhase !== 'idle' ||
                 !stakePoolId ||
                 (nftMintRequired && selectedNftStakeAssetIds.length === 0)
@@ -2008,10 +1975,8 @@ export function DashboardNestingClient() {
                   }
                   onUnstake={handleUnstake}
                   onClaim={handleClaim}
-                  onFreezeNft={handleFreezeExistingNft}
                   claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
                   unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}
-                  securePhase={posPhases[pos.id]?.secure ?? 'idle'}
                   freezeRequired={
                     poolById.get(pos.pool_id)?.asset_type === 'nft' &&
                     poolById.get(pos.pool_id)?.adapter_mode === 'onchain_enabled'

@@ -37,14 +37,12 @@ type Props = {
   stakedAssetHint?: { name?: string | null; image?: string | null } | null
   onUnstake: (positionId: string) => Promise<void>
   onClaim: (positionId: string, amount: number) => Promise<void>
-  onFreezeNft?: (positionId: string) => Promise<void>
   claimPhase?: NestingTxPhase
   unstakePhase?: NestingTxPhase
-  securePhase?: NestingTxPhase
+  /** On-chain NFT perch: show guidance when the wallet lock step still needs finishing via Confirm nest. */
   freezeRequired?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
-  /** Kill switch: claim / leave nest off; freeze lock still allowed when a stake is mid-flight. */
   nestingPaused?: boolean
 }
 
@@ -54,10 +52,8 @@ export function PositionCard({
   stakedAssetHint,
   onUnstake,
   onClaim,
-  onFreezeNft,
   claimPhase = 'idle',
   unstakePhase = 'idle',
-  securePhase = 'idle',
   freezeRequired = false,
   actionsEnabled = true,
   nestingPaused = false,
@@ -105,15 +101,9 @@ export function PositionCard({
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
   const claimAmountLabel = claimable.toFixed(6)
 
-  const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle' || securePhase !== 'idle'
+  const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
   const showLinePhase: NestingTxPhase =
-    securePhase !== 'idle'
-      ? securePhase
-      : claimPhase !== 'idle'
-        ? claimPhase
-        : unstakePhase !== 'idle'
-          ? unstakePhase
-          : 'idle'
+    claimPhase !== 'idle' ? claimPhase : unstakePhase !== 'idle' ? unstakePhase : 'idle'
   const needsFreeze =
     freezeRequired &&
     Boolean(position.asset_identifier?.trim()) &&
@@ -132,15 +122,6 @@ export function PositionCard({
   const handleUnstake = async () => {
     try {
       await onUnstake(position.id)
-    } catch {
-      /* errors shown on dashboard */
-    }
-  }
-
-  const handleFreezeNft = async () => {
-    if (!onFreezeNft) return
-    try {
-      await onFreezeNft(position.id)
     } catch {
       /* errors shown on dashboard */
     }
@@ -227,36 +208,19 @@ export function PositionCard({
         ) : null}
         {needsFreeze ? (
           <p className="w-full text-xs text-amber-300">
-            Freeze lock is not confirmed yet. Freeze this NFT in your wallet so it cannot trade while nested.
+            This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
+            <span className="font-medium text-foreground/90">Confirm nest</span> to finish the wallet lock so the NFT
+            cannot trade while nested.
             {openingNftNestAbortable ? (
               <>
                 {' '}
-                If this is the wrong owl, use{' '}
-                <span className="font-medium text-foreground/90">Cancel opening nest</span> below—only
-                available before you confirm the freeze.
+                Wrong owl? Use <span className="font-medium text-foreground/90">Cancel opening nest</span> below before
+                you complete that step.
               </>
             ) : null}
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-        {needsFreeze ? (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className="min-h-[44px] touch-manipulation"
-            disabled={
-              !actionsEnabled ||
-              anyTxActive ||
-              !onFreezeNft ||
-              (nestingPaused && !needsFreeze)
-            }
-            onClick={() => void handleFreezeNft()}
-          >
-            {securePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            {securePhase === 'idle' ? 'Freeze NFT lock' : nestingTxPhaseLabel(securePhase)}
-          </Button>
-        ) : null}
         <Button
           type="button"
           variant="outline"

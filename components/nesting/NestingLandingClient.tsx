@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   initialPools: StakingPoolRow[]
-  /** Server: env kill switch — landing shows a notice and perch CTAs pause. */
+  /** Server: global pause (deployment env and/or admin “pause holder actions” in Owl Nesting admin). */
   nestingDisabled?: boolean
 }
 

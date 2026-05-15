@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, ChevronDown, Globe, Loader2, Plus, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Globe, Loader2, PauseCircle, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -89,6 +89,10 @@ export function AdminNestingClient() {
   const [landingPublicUpdatedAt, setLandingPublicUpdatedAt] = useState<string | null>(null)
   const [landingPublicUpdatedBy, setLandingPublicUpdatedBy] = useState<string | null>(null)
 
+  const [nestingOpsPaused, setNestingOpsPaused] = useState(false)
+  const [nestingOpsSaving, setNestingOpsSaving] = useState(false)
+  const [nestingEnvKillSwitch, setNestingEnvKillSwitch] = useState(false)
+
   useEffect(() => {
     if (!connected || !publicKey) {
       setIsAdmin(false)
@@ -173,12 +177,16 @@ export function AdminNestingClient() {
         setLandingPublicUpdatedBy(
           typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
         )
+        setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+        setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
       })
       .catch(() => {
         if (!cancelled) {
           setLandingPublic(false)
           setLandingPublicUpdatedAt(null)
           setLandingPublicUpdatedBy(null)
+          setNestingOpsPaused(false)
+          setNestingEnvKillSwitch(false)
         }
       })
       .finally(() => {
@@ -209,8 +217,37 @@ export function AdminNestingClient() {
       setLandingPublicUpdatedBy(
         typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
       )
+      setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+      setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
     } finally {
       setLandingPublicSaving(false)
+    }
+  }, [])
+
+  const patchNestingOpsPaused = useCallback(async (nextPaused: boolean) => {
+    setNestingOpsSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/nesting/public-landing', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nesting_operations_paused: nextPaused }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Could not update nesting pause')
+        return
+      }
+      setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+      setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
+      setLandingPublic(Boolean(json.landing_public))
+      setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+      setLandingPublicUpdatedBy(
+        typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+      )
+    } finally {
+      setNestingOpsSaving(false)
     }
   }, [])
 
@@ -539,7 +576,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Public staking page"
-          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on."
+          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
         />
         <Card className="rounded-xl border-green-500/20">
           <CardHeader>
@@ -576,6 +613,54 @@ export function AdminNestingClient() {
                 {landingPublicUpdatedBy ? ` · ${landingPublicUpdatedBy}` : ''}
               </p>
             ) : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Live nesting actions"
+          description="Controls the “Nesting is paused” banner and server blocks for new nests, claims, and leaving a nest. This is not the same as showing the public /nesting page."
+        />
+        <Card className="rounded-xl border-amber-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <PauseCircle className="h-5 w-5 shrink-0" aria-hidden />
+              Pause holder actions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {nestingEnvKillSwitch ? (
+              <div className="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <span className="font-medium">Env kill switch is on.</span>{' '}
+                <span className="text-destructive/95">
+                  This deployment has <span className="font-mono">NESTING_DISABLED=true</span>. Nesting stays paused for
+                  everyone until you remove that variable in Vercel (or .env locally). The switch below cannot override
+                  it.
+                </span>
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Pause new nests, claims, and leaving</p>
+                <p className="text-xs text-muted-foreground">
+                  Turn off when you want holders to use the nest dashboard again. Existing nests stay as they are on
+                  chain / in the database.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                {landingPublicLoading || nestingOpsSaving ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+                <Switch
+                  id="nesting-ops-paused"
+                  ariaLabel="Pause nesting holder actions"
+                  checked={nestingOpsPaused}
+                  disabled={landingPublicLoading || nestingOpsSaving}
+                  onCheckedChange={(v) => void patchNestingOpsPaused(v)}
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
       </section>

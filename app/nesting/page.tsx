@@ -45,6 +45,6 @@ export default async function NestingPage() {
   }
 
   const pools = await listActiveStakingPools()
-  const nestingDisabled = isNestingGloballyDisabled()
+  const nestingDisabled = await isNestingGloballyDisabled()
   return <NestingLandingClient initialPools={pools} nestingDisabled={nestingDisabled} />
 }

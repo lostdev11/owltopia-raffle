@@ -16,7 +16,7 @@ export async function GET() {
     return NextResponse.json({
       pools,
       nesting_nft_freeze_delegate: getNestingNftFreezeDelegateAddress() || null,
-      nesting_disabled: isNestingGloballyDisabled(),
+      nesting_disabled: await isNestingGloballyDisabled(),
     })
   } catch (e) {
     console.error('[staking/pools]', e)
