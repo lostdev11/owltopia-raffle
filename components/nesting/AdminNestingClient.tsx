@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, ChevronDown, Globe, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Globe, Loader2, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -78,6 +78,10 @@ export function AdminNestingClient() {
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
+
+  const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
+  const [forceUnstaking, setForceUnstaking] = useState(false)
+  const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
   const [landingPublic, setLandingPublic] = useState(false)
   const [landingPublicLoading, setLandingPublicLoading] = useState(false)
@@ -420,6 +424,40 @@ export function AdminNestingClient() {
       await fetchPools()
     } finally {
       setReconciling(false)
+    }
+  }
+
+  const runForceUnstake = async () => {
+    const id = forceUnstakePositionId.trim()
+    setForceUnstakeMsg(null)
+    setSaveError(null)
+    if (!id) {
+      setSaveError('Paste a staking position id (UUID from Supabase or support ticket).')
+      return
+    }
+    setForceUnstaking(true)
+    try {
+      const res = await fetch('/api/admin/staking/unstake-override', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position_id: id }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Force unstake failed')
+        return
+      }
+      const holder =
+        typeof json?.holder_wallet === 'string' ? json.holder_wallet : (json?.position?.wallet_address as string) ?? ''
+      setForceUnstakeMsg(
+        holder
+          ? `Closed nest for holder ${holder}. Position status is now unstaked.`
+          : 'Nest closed successfully.'
+      )
+      setForceUnstakePositionId('')
+    } finally {
+      setForceUnstaking(false)
     }
   }
 
@@ -827,6 +865,55 @@ export function AdminNestingClient() {
               Reconcile pending positions
             </Button>
             {reconcileMsg ? <p className="text-sm text-muted-foreground">{reconcileMsg}</p> : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Support: force leave nest"
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. Use the staking_positions.id UUID."
+        />
+        <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base text-amber-200">
+              <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden />
+              Admin unstake override
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
+              vaults, tokens return to the holder wallet on record. Confirm the position id matches the user’s open nest
+              before continuing.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="force-unstake-pos">Position id</Label>
+              <Input
+                id="force-unstake-pos"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. 8f3c2a1b-…"
+                value={forceUnstakePositionId}
+                onChange={(e) => setForceUnstakePositionId(e.target.value)}
+                className="font-mono text-xs min-h-[44px] touch-manipulation"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="destructive"
+                className="min-h-[44px] touch-manipulation"
+                disabled={forceUnstaking || !forceUnstakePositionId.trim()}
+                onClick={() => void runForceUnstake()}
+              >
+                {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Force leave nest
+              </Button>
+              {forceUnstakeMsg ? (
+                <p className="text-sm text-muted-foreground max-w-xl">{forceUnstakeMsg}</p>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       </section>

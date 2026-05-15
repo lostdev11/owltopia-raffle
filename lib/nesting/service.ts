@@ -4,7 +4,11 @@
 
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
-import { getActivePositionByAssetIdentifier, getStakingPositionForWallet } from '@/lib/db/staking-positions'
+import {
+  getActivePositionByAssetIdentifier,
+  getStakingPositionById,
+  getStakingPositionForWallet,
+} from '@/lib/db/staking-positions'
 import { estimateAccruedRewards, meetsMinOwlClaimThreshold, MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
@@ -151,6 +155,46 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
   const adapter = resolveMutationAdapter(pool)
   return adapter.unstakePosition({
     wallet: params.wallet,
+    positionId: position_id,
+  })
+}
+
+/**
+ * Full-admin support: close any open nest by `staking_positions.id` for the holder wallet on that row.
+ * Skips lock timer, council vote lock, and {@link assertNestingOperationsAllowed} so ops can recover users
+ * during incidents or `NESTING_DISABLED` (on-chain thaw / vault return still runs when configured).
+ */
+export async function executeUnstakeAdminOverride(params: { position_id: string }) {
+  const position_id = params.position_id.trim()
+  if (!STAKING_UUID_RE.test(position_id)) {
+    throw new StakingUserError('Invalid position_id', 400)
+  }
+
+  const existing = await getStakingPositionById(position_id)
+  if (!existing) {
+    throw new StakingUserError('Position not found', 404)
+  }
+
+  const pool = await getStakingPoolById(existing.pool_id)
+  if (!pool) {
+    throw new StakingUserError('Pool not found', 400)
+  }
+
+  const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
+  const openingNftNestAbortable =
+    existing.status === 'pending' &&
+    pool.asset_type === 'nft' &&
+    pool.adapter_mode === 'onchain_enabled' &&
+    !nftFreezeConfirmed
+
+  if (existing.status !== 'active' && !openingNftNestAbortable) {
+    throw new StakingUserError('Position is not active', 400)
+  }
+
+  const holderWallet = existing.wallet_address.trim()
+  const adapter = resolveMutationAdapter(pool)
+  return adapter.unstakePosition({
+    wallet: holderWallet,
     positionId: position_id,
   })
 }
