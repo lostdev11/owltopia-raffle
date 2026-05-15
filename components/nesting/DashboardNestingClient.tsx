@@ -901,12 +901,7 @@ export function DashboardNestingClient() {
           const stakeOne = async (assetId?: string) => {
             const body: Record<string, unknown> = {
               pool_id,
-              amount:
-                pool.asset_type === 'token'
-                  ? amountNum
-                  : Number.isFinite(amountNum) && amountNum > 0
-                    ? amountNum
-                    : 1,
+              amount: pool.asset_type === 'token' ? amountNum : 1,
             }
             if (assetId) body.asset_identifier = assetId
             if (viewerIsAdmin === true && adminBypassSellout) {
@@ -1444,7 +1439,7 @@ export function DashboardNestingClient() {
           description={
             solePerch
               ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet and pick one or more Owl Nest NFTs; each one is frozen in your wallet while it earns.'
-              : 'Like a swap: you tuck in an amount, pick where it earns, then confirm. Owl Nest NFT perches load eligible NFTs from your wallet automatically; mint entry is only a fallback.'
+              : 'Token perches use an amount up top; Owl Nest NFT perches use the checklist below (one nest per NFT—use Select all when you want the whole flock). Then pick the perch and confirm.'
           }
         />
         <div className="relative rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-card/90 via-card/60 to-black/50 p-2 sm:p-3 shadow-[0_0_48px_rgba(0,255,136,0.07)]">
@@ -1460,19 +1455,33 @@ export function DashboardNestingClient() {
                     : 'Pick a perch below'}
               </span>
             </div>
-            <Label htmlFor="stake-amt" className="sr-only">
-              Amount to nest
-            </Label>
-            <Input
-              id="stake-amt"
-              inputMode="decimal"
-              placeholder={
-                selectedPerch?.asset_type === 'nft' ? '1 — usual for NFTs' : '0.0'
-              }
-              value={stakeAmount}
-              onChange={(e) => setStakeAmount(e.target.value)}
-              className="touch-manipulation mt-2 min-h-[52px] border-0 bg-transparent px-0 text-2xl font-semibold tabular-nums text-foreground placeholder:text-muted-foreground/45 focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-3xl sm:min-h-[56px]"
-            />
+            {nftMintRequired ? (
+              <>
+                <p className="mt-2 min-h-[52px] text-2xl font-semibold tabular-nums text-foreground sm:min-h-[56px] sm:text-3xl">
+                  {selectedNftStakeAssetIds.length > 0
+                    ? `${selectedNftStakeAssetIds.length} nest${selectedNftStakeAssetIds.length === 1 ? '' : 's'}`
+                    : 'Pick NFTs below'}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+                  Owl Nest perches open <span className="font-medium text-foreground/90">one nest per NFT</span> you
+                  select (or use Select all). This is not a number you type here—that field is only for token perches.
+                </p>
+              </>
+            ) : (
+              <>
+                <Label htmlFor="stake-amt" className="sr-only">
+                  Amount to nest
+                </Label>
+                <Input
+                  id="stake-amt"
+                  inputMode="decimal"
+                  placeholder="0.0"
+                  value={stakeAmount}
+                  onChange={(e) => setStakeAmount(e.target.value)}
+                  className="touch-manipulation mt-2 min-h-[52px] border-0 bg-transparent px-0 text-2xl font-semibold tabular-nums text-foreground placeholder:text-muted-foreground/45 focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-3xl sm:min-h-[56px]"
+                />
+              </>
+            )}
             {!stakePoolId && !lockedPerch ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 Tip: pick your perch below—the rate and lock apply to whatever you tuck in up here.
@@ -1480,7 +1489,7 @@ export function DashboardNestingClient() {
             ) : null}
             {lockedPerch && lockedPerch.asset_type === 'nft' ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                One Owl Nest NFT counts as a nest of size 1—you can still type 1 above or leave it blank.
+                One Owl Nest NFT = one nest. Choose every NFT you want below, then confirm once.
               </p>
             ) : null}
             {tokenStakeRequired ? (

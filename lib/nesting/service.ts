@@ -51,7 +51,9 @@ export async function executeStake(params: {
   let amount =
     params.rawAmount !== undefined && params.rawAmount !== null ? Number(params.rawAmount) : NaN
   if (pool.asset_type === 'nft') {
-    if (Number.isNaN(amount) || amount <= 0) amount = 1
+    // One DB position per NFT; reward math is `rate × amount × time` — amount must stay 1 per NFT.
+    // Multiple nests come from multiple `asset_identifier` stakes (UI loops), not from this field.
+    amount = 1
   } else {
     if (Number.isNaN(amount) || amount <= 0) {
       throw new StakingUserError('amount must be a positive number', 400)
