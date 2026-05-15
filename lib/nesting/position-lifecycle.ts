@@ -32,3 +32,25 @@ export function isOpeningNftNestAbortable(
     !(position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
   )
 }
+
+/**
+ * True when this mint cannot open another nest for `pool`: same rules as duplicate-stake rejection,
+ * except a pending perch before NFT freeze confirms may still resume via the stake endpoint.
+ */
+export function nftMintBlocksDuplicateStakeExceptResume(
+  mint: string,
+  pool: Pick<StakingPoolRow, 'id' | 'asset_type' | 'adapter_mode'>,
+  positions: Pick<StakingPositionRow, 'pool_id' | 'asset_identifier' | 'status' | 'external_reference'>[]
+): boolean {
+  const trimmed = mint.trim()
+  if (!trimmed) return false
+  for (const p of positions) {
+    if (p.pool_id !== pool.id) continue
+    const aid = p.asset_identifier?.trim()
+    if (!aid || aid !== trimmed) continue
+    if (!isOpenStakingPosition(p)) continue
+    if (isOpeningNftNestAbortable(p, pool)) continue
+    return true
+  }
+  return false
+}
