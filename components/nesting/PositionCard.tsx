@@ -30,7 +30,7 @@ function nestStatusPhrase(status: StakingPositionRow['status']) {
   }
 }
 
-type Props = {
+export type PositionNestRowProps = {
   position: StakingPositionRow
   poolName: string
   /** Wallet scan row for this mint (faster image/name before Helius resolves). */
@@ -48,7 +48,11 @@ type Props = {
   nestingPaused?: boolean
 }
 
-export function PositionCard({
+type PositionNestRowVariant = 'standalone' | 'embedded'
+
+/** One nest row — full card chrome, or compact block for {@link NftPerchGroupedNestCard}. */
+export function PositionNestRow({
+  variant = 'standalone',
   position,
   poolName,
   stakedAssetHint,
@@ -60,7 +64,7 @@ export function PositionCard({
   cancelOpeningAllowed = false,
   actionsEnabled = true,
   nestingPaused = false,
-}: Props) {
+}: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [dasNftName, setDasNftName] = useState<string | null>(null)
 
@@ -86,10 +90,8 @@ export function PositionCard({
     })
   }, [position, nowMs])
 
-  const paysOwlRewards =
-    (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  const canClaimOwl =
-    paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
+  const paysOwlRewards = (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
+  const canClaimOwl = paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
 
   const canUnstake =
     cancelOpeningAllowed ||
@@ -125,104 +127,136 @@ export function PositionCard({
     }
   }
 
-  const headingTitle =
-    (dasNftName ?? stakedAssetHint?.name ?? '').trim() || poolName
+  const headingTitle = (dasNftName ?? stakedAssetHint?.name ?? '').trim() || poolName
+  const embedded = variant === 'embedded'
 
-  return (
-    <Card className="rounded-xl border-border/60 bg-card/90">
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0 space-y-0.5">
-            <CardTitle className="text-base font-display text-theme-prime">{headingTitle}</CardTitle>
-            {headingTitle.trim() !== poolName.trim() ? (
-              <p className="text-xs font-normal text-muted-foreground">{poolName}</p>
-            ) : null}
-          </div>
-          <span
-            className={`text-xs font-medium uppercase tracking-wide ${
-              position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
-            }`}
-          >
-            {nestStatusPhrase(position.status)}
-          </span>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-          {position.asset_identifier ? (
-            <NestingStakedAssetThumb
-              mint={position.asset_identifier}
-              hintImageUrl={stakedAssetHint?.image}
-              hintName={stakedAssetHint?.name ?? null}
-              onResolvedMintMeta={(meta) => {
-                if (meta.name?.trim()) setDasNftName(meta.name.trim())
-              }}
-              size="md"
-              className="mx-auto shrink-0 sm:mx-0"
-            />
+  const header = embedded ? (
+    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border/40 pb-2">
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-sm font-semibold leading-snug text-theme-prime/95">{headingTitle}</p>
+        {headingTitle.trim() !== poolName.trim() ? (
+          <p className="text-[11px] font-normal text-muted-foreground">{poolName}</p>
+        ) : null}
+      </div>
+      <span
+        className={cn(
+          'text-[10px] font-medium uppercase tracking-wide shrink-0',
+          position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
+        )}
+      >
+        {nestStatusPhrase(position.status)}
+      </span>
+    </div>
+  ) : (
+    <CardHeader className="pb-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-0.5">
+          <CardTitle className="text-base font-display text-theme-prime">{headingTitle}</CardTitle>
+          {headingTitle.trim() !== poolName.trim() ? (
+            <p className="text-xs font-normal text-muted-foreground">{poolName}</p>
           ) : null}
-          <dl
-            className={cn(
-              'grid min-w-0 flex-1 grid-cols-2 gap-2 text-xs sm:text-sm',
-              !position.asset_identifier && 'w-full flex-none'
-            )}
-          >
-          <div>
-            <dt className="text-muted-foreground">Nest size</dt>
-            <dd className="font-mono tabular-nums">{Number(position.amount).toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Ready to claim</dt>
-            <dd className="font-mono tabular-nums text-theme-prime">{claimAmountLabel}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">OWL claimed (lifetime)</dt>
-            <dd className="font-mono tabular-nums">{Number(position.claimed_rewards).toFixed(6)}</dd>
-            {paysOwlRewards ? (
-              <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                Counts successful claims. On-chain payouts require the reward treasury to send SPL.
-              </p>
-            ) : null}
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Opened</dt>
-            <dd className="text-xs">{new Date(position.staked_at).toLocaleString()}</dd>
-          </div>
-          <div className="col-span-2">
-            <dt className="text-muted-foreground mb-1">Countdown</dt>
-            <dd>
-              {position.status === 'unstaked' ? (
-                <span className="text-xs text-muted-foreground">Ended when nest closed</span>
-              ) : (
-                <LockTimer unlockAtIso={position.unlock_at} />
-              )}
-            </dd>
-          </div>
-        </dl>
         </div>
-      </CardContent>
-      <CardFooter className="flex flex-col gap-2 border-t border-border/60">
-        <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
-        {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
-          <p className="w-full text-xs text-muted-foreground">
-            Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
-          </p>
-        ) : null}
-        {needsFreeze ? (
-          <p className="w-full text-xs text-amber-300">
-            This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
-            <span className="font-medium text-foreground/90">Confirm nest</span> to finish the wallet lock so the NFT
-            cannot trade while nested.
-            {cancelOpeningAllowed ? (
-              <>
-                {' '}
-                Wrong owl? Use <span className="font-medium text-foreground/90">Cancel opening nest</span> below before
-                you complete that step.
-              </>
-            ) : null}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
+        <span
+          className={`text-xs font-medium uppercase tracking-wide ${
+            position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
+          }`}
+        >
+          {nestStatusPhrase(position.status)}
+        </span>
+      </div>
+    </CardHeader>
+  )
+
+  const main = (
+    <div className={cn('flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4', embedded ? 'pt-3' : '')}>
+      {position.asset_identifier ? (
+        <NestingStakedAssetThumb
+          mint={position.asset_identifier}
+          hintImageUrl={stakedAssetHint?.image}
+          hintName={stakedAssetHint?.name ?? null}
+          onResolvedMintMeta={(meta) => {
+            if (meta.name?.trim()) setDasNftName(meta.name.trim())
+          }}
+          size={embedded ? 'sm' : 'md'}
+          className="mx-auto shrink-0 sm:mx-0"
+        />
+      ) : null}
+      <dl
+        className={cn(
+          'grid min-w-0 flex-1 grid-cols-2 gap-2 text-xs sm:text-sm',
+          !position.asset_identifier && 'w-full flex-none'
+        )}
+      >
+        <div>
+          <dt className="text-muted-foreground">Nest size</dt>
+          <dd className="font-mono tabular-nums">{Number(position.amount).toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Ready to claim</dt>
+          <dd className="font-mono tabular-nums text-theme-prime">{claimAmountLabel}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">OWL claimed (lifetime)</dt>
+          <dd className="font-mono tabular-nums">{Number(position.claimed_rewards).toFixed(6)}</dd>
+          {paysOwlRewards ? (
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+              Counts successful claims. On-chain payouts require the reward treasury to send SPL.
+            </p>
+          ) : null}
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Opened</dt>
+          <dd className="text-xs">{new Date(position.staked_at).toLocaleString()}</dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-muted-foreground mb-1">Countdown</dt>
+          <dd>
+            {position.status === 'unstaked' ? (
+              <span className="text-xs text-muted-foreground">Ended when nest closed</span>
+            ) : (
+              <LockTimer unlockAtIso={position.unlock_at} />
+            )}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  )
+
+  const footerInner = (
+    <>
+      <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
+      {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
+        <p className="w-full text-xs text-muted-foreground">
+          Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
+        </p>
+      ) : null}
+      {!embedded && needsFreeze ? (
+        <p className="w-full text-xs text-amber-300">
+          This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
+          <span className="font-medium text-foreground/90">Confirm nest</span> to finish the wallet lock so the NFT
+          cannot trade while nested.
+          {cancelOpeningAllowed ? (
+            <>
+              {' '}
+              Wrong owl? Use <span className="font-medium text-foreground/90">Cancel opening nest</span> below before you
+              complete that step.
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {embedded && needsFreeze ? (
+        <p className="w-full text-xs text-amber-300/95 leading-relaxed">
+          Still opening — finish the wallet lock from the perch form (<span className="font-medium">Confirm nest</span>
+          ){cancelOpeningAllowed ? (
+            <>
+              {' '}
+              or <span className="font-medium">Cancel opening nest</span> below
+            </>
+          ) : null}
+          .
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
@@ -230,11 +264,7 @@ export function PositionCard({
           className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
           disabled={!actionsEnabled || nestingPaused || anyTxActive || !canClaimOwl}
           onClick={() => void handleClaimMax()}
-          aria-label={
-            canClaimOwl
-              ? `Claim ${claimAmountLabel} OWL rewards`
-              : 'Claim OWL rewards'
-          }
+          aria-label={canClaimOwl ? `Claim ${claimAmountLabel} OWL rewards` : 'Claim OWL rewards'}
         >
           {claimPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           {claimPhase === 'idle' ? (
@@ -255,10 +285,7 @@ export function PositionCard({
           size="sm"
           className="min-h-[44px] touch-manipulation bg-muted/50 text-muted-foreground border border-border shadow-none hover:bg-muted/80 disabled:opacity-40"
           disabled={
-            !actionsEnabled ||
-            (nestingPaused && !cancelOpeningAllowed) ||
-            anyTxActive ||
-            !canUnstake
+            !actionsEnabled || (nestingPaused && !cancelOpeningAllowed) || anyTxActive || !canUnstake
           }
           onClick={() => void handleUnstake()}
         >
@@ -269,8 +296,44 @@ export function PositionCard({
               : 'Leave nest'
             : nestingTxPhaseLabel(unstakePhase)}
         </Button>
-        </div>
-      </CardFooter>
+      </div>
+    </>
+  )
+
+  const footer = embedded ? (
+    <div className="flex flex-col gap-2 border-t border-border/50 pt-3 mt-3">{footerInner}</div>
+  ) : (
+    <CardFooter className="flex flex-col gap-2 border-t border-border/60">{footerInner}</CardFooter>
+  )
+
+  const contentWrapper = embedded ? (
+    <div>{main}</div>
+  ) : (
+    <CardContent className="space-y-3 text-sm">{main}</CardContent>
+  )
+
+  if (embedded) {
+    return (
+      <div className="space-y-0">
+        {header}
+        {contentWrapper}
+        {footer}
+      </div>
+    )
+  }
+
+  return (
+    <Card className="rounded-xl border-border/60 bg-card/90">
+      {header}
+      {contentWrapper}
+      {footer}
     </Card>
   )
+}
+
+type PositionCardLegacyProps = PositionNestRowProps
+
+/** Single nest wrapped in a full card (default dashboard layout). */
+export function PositionCard(props: PositionCardLegacyProps) {
+  return <PositionNestRow {...props} variant="standalone" />
 }

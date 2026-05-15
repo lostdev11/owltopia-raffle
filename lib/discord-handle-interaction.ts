@@ -19,6 +19,7 @@ import {
 } from '@/lib/solana/verify-discord-partner-usdc'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-community-creators-admin'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -32,10 +33,25 @@ function ephemeral(content: string) {
   }
 }
 
-function discordPartnerPriceUsdc(): number {
+/** Catalog Discord Partner Pro renewal (USDC); new guilds without a linked partner quote use this. */
+function discordPartnerStandardPriceUsdc(): number {
   const raw = process.env.DISCORD_PARTNER_USDC_PRICE?.trim()
   const n = raw ? parseFloat(raw) : 50
   return Number.isFinite(n) && n > 0 ? n : 50
+}
+
+async function discordPartnerSubscribePriceUsdc(guildId: string): Promise<number> {
+  const standard = discordPartnerStandardPriceUsdc()
+  const g = guildId.trim()
+  if (!g) return standard
+
+  const tenant = await getDiscordGiveawayPartnerByGuildId(g)
+  if (!tenant) return standard
+
+  const quoted = await getPartnerProMonthlyQuoteUsdcForDiscordTenant(tenant.id)
+  if (quoted != null && quoted > 0) return quoted
+
+  return standard
 }
 
 function discordPartnerSubscriptionDays(): number {
@@ -118,7 +134,7 @@ export async function handleDiscordApplicationCommand(
   const { sub, strOptions } = getSubcommandAndOptions(interaction.data)
 
   if (sub === 'subscribe') {
-    const price = discordPartnerPriceUsdc()
+    const price = await discordPartnerSubscribePriceUsdc(guildId)
     const days = discordPartnerSubscriptionDays()
     const ttl = discordPaymentIntentTtlHours()
     let intent

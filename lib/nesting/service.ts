@@ -8,8 +8,11 @@ import {
   getActivePositionByAssetIdentifier,
   getStakingPositionById,
   getStakingPositionForWallet,
+  listStakingPositionsByWallet,
 } from '@/lib/db/staking-positions'
 import { estimateAccruedRewards, meetsMinOwlClaimThreshold, MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
+import { buildFullPositionClaimPlan, minOwlClaimThresholdMessage } from '@/lib/nesting/claim-plan'
+import { executeBatchOwlClaims } from '@/lib/nesting/batch-claim'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
@@ -291,5 +294,53 @@ export async function executeClaim(params: {
     positionId: position_id,
     amount: payoutAmount,
     newClaimedTotal,
+  })
+}
+
+/** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
+export async function executeClaimAll(params: { wallet: string }) {
+  await assertNestingOperationsAllowed()
+
+  const rows = await listStakingPositionsByWallet(params.wallet)
+  const owlRows = rows.filter(
+    (r) => r.status === 'active' && (r.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
+  )
+  const plans = owlRows
+    .map((r) => buildFullPositionClaimPlan(r))
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+
+  if (plans.length === 0) {
+    throw new StakingUserError(
+      `No nests have claimable OWL right now. ${minOwlClaimThresholdMessage()}`,
+      400,
+      { claimable_count: 0 }
+    )
+  }
+
+  const pool = await getStakingPoolById(owlRows[0]!.pool_id)
+  if (!pool) {
+    throw new StakingUserError('Pool not found', 400)
+  }
+
+  const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
+  if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {
+    if (!isOwlEnabled()) {
+      throw new StakingUserError(
+        'OWL mint is not configured, so reward claims cannot be sent to your wallet.',
+        503
+      )
+    }
+    if (!getNestingOwlRewardTreasuryKeypair()) {
+      throw new StakingUserError(
+        'OWL reward treasury is not configured for on-chain payouts. Set NESTING_OWL_REWARD_TREASURY_WALLET and NESTING_OWL_REWARD_TREASURY_SECRET_KEY to the same keypair, fund that wallet’s OWL token account, and ensure SOL for fees. For local testing without chain transfers, set NESTING_ALLOW_DB_ONLY_OWL_CLAIMS=true.',
+        503
+      )
+    }
+  }
+
+  return executeBatchOwlClaims({
+    wallet: params.wallet,
+    pool,
+    plans,
   })
 }

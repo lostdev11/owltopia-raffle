@@ -39,8 +39,10 @@ import {
   isOpeningNftNestAbortable,
 } from '@/lib/nesting/position-lifecycle'
 import { estimateClaimableRewards } from '@/lib/staking/rewards'
+import { buildFullPositionClaimPlan } from '@/lib/nesting/claim-plan'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { PositionCard } from '@/components/nesting/PositionCard'
+import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
 import { nestGalleryAnchorId, StakedNftNestGallery } from '@/components/nesting/StakedNftNestGallery'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
@@ -61,6 +63,7 @@ import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWa
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
 import { getTokenInfo } from '@/lib/tokens'
 import { addMplCoreFreezeDelegate } from '@/lib/solana/mpl-core-freeze'
+import { formatNestingWalletError } from '@/lib/nesting/wallet-error'
 
 const MOBILE_401_RETRY_MS = 800
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
@@ -103,6 +106,9 @@ export function DashboardNestingClient() {
   const [stakeAssetId, setStakeAssetId] = useState('')
   const [stakeAssetIds, setStakeAssetIds] = useState<string[]>([])
   const [stakeTxPhase, setStakeTxPhase] = useState<NestingTxPhase>('idle')
+  const [claimAllTxPhase, setClaimAllTxPhase] = useState<NestingTxPhase>('idle')
+  /** Multi NFT confirm: show which coin the wallet is locking so the flow does not look frozen. */
+  const [nftStakeBatchHint, setNftStakeBatchHint] = useState<string | null>(null)
   const [posPhases, setPosPhases] = useState<Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase }>>({})
   const [securityAck, setSecurityAck] = useState(false)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(() =>
@@ -353,6 +359,55 @@ export function DashboardNestingClient() {
     () => positions.filter((p) => isOpenStakingPosition(p)),
     [positions]
   )
+
+  /** NFT perches with 2+ open positions render as one grouped card (same pool). */
+  const { nftNestGroups, ungroupedOpenPositions } = useMemo(() => {
+    const byPool = new Map<string, StakingPositionRow[]>()
+    for (const pos of openPositions) {
+      const poolRow = poolById.get(pos.pool_id)
+      if (!poolRow || poolRow.asset_type !== 'nft') continue
+      const prev = byPool.get(pos.pool_id)
+      if (prev) prev.push(pos)
+      else byPool.set(pos.pool_id, [pos])
+    }
+
+    const groupedPoolIds = new Set<string>()
+    const groups: { poolId: string; pool: StakingPoolRow; positions: StakingPositionRow[] }[] = []
+    for (const [poolId, plist] of byPool) {
+      if (plist.length < 2) continue
+      const poolRow = poolById.get(poolId)
+      if (!poolRow) continue
+      groupedPoolIds.add(poolId)
+      groups.push({
+        poolId,
+        pool: poolRow,
+        positions: [...plist].sort(
+          (a, b) => new Date(a.staked_at).getTime() - new Date(b.staked_at).getTime()
+        ),
+      })
+    }
+
+    const ungroupedOpenPositions = openPositions.filter((pos) => {
+      const poolRow = poolById.get(pos.pool_id)
+      if (poolRow?.asset_type === 'nft' && groupedPoolIds.has(pos.pool_id)) return false
+      return true
+    })
+
+    groups.sort((a, b) => (a.pool.name ?? a.poolId).localeCompare(b.pool.name ?? b.poolId))
+    return { nftNestGroups: groups, ungroupedOpenPositions }
+  }, [openPositions, poolById])
+
+  const claimableNestCount = useMemo(
+    () =>
+      openPositions.filter((p) => {
+        if (p.status !== 'active') return false
+        if ((p.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') return false
+        return buildFullPositionClaimPlan(p) !== null
+      }).length,
+    [openPositions]
+  )
+
+  const claimAllBusy = claimAllTxPhase !== 'idle'
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -867,11 +922,11 @@ export function DashboardNestingClient() {
 
       await refreshAll()
     } catch (e) {
-      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+      setSignInError(formatNestingWalletError(e, wallet?.adapter?.name))
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, refreshAll])
+  }, [publicKey, signMessage, refreshAll, wallet?.adapter?.name])
 
   const sendOnChainTokenStakeTransfer = useCallback(
     async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
@@ -1093,8 +1148,15 @@ export function DashboardNestingClient() {
 
           if (pool.asset_type === 'nft') {
             let completed = 0
-            for (const assetId of nftAssetIds) {
+            const totalNests = nftAssetIds.length
+            for (let idx = 0; idx < nftAssetIds.length; idx++) {
+              const assetId = nftAssetIds[idx]!
               throwIfNestingAborted(signal)
+              if (totalNests > 1) {
+                setNftStakeBatchHint(
+                  `Nest ${idx + 1} of ${totalNests} — approve this coin in your wallet (${shortenAddress(assetId, 6)}).`
+                )
+              }
               try {
                 await stakeOne(assetId)
                 completed += 1
@@ -1140,12 +1202,14 @@ export function DashboardNestingClient() {
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setActionError(null)
+        setNftStakeBatchHint(null)
         void loadPositions()
         return
       }
       if (e instanceof Error && e.message === 'stake') return
-      setActionError(e instanceof Error ? e.message : 'Stake failed')
+      setActionError(formatNestingWalletError(e, wallet?.adapter?.name))
     } finally {
+      setNftStakeBatchHint(null)
       if (stakeTxAbortRef.current === stakeFlowAbort) {
         stakeTxAbortRef.current = null
       }
@@ -1277,6 +1341,82 @@ export function DashboardNestingClient() {
     } catch (e) {
       if (e instanceof Error && e.message === 'claim') throw e
       setActionError(e instanceof Error ? e.message : 'Claim failed')
+    }
+  }
+
+  const handleClaimAll = async () => {
+    if (!publicKey || claimableNestCount < 2) return
+    setActionError(null)
+    setSuccessNotice(null)
+    setClaimLedgerNotice(null)
+    try {
+      const claimJson = await runNestingTxAction({
+        onPhase: setClaimAllTxPhase,
+        async execute() {
+          const res = await fetch('/api/me/staking/claim-all', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+          })
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            total_claimed?: number
+            claim_count?: number
+            execution?: { path?: 'onchain_transfer' | 'database_only' }
+            transaction_signature?: string | null
+          }
+          if (!res.ok) {
+            const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
+            setActionError(err)
+            throw new Error('claim-all')
+          }
+          return json
+        },
+        afterSuccess: async () => {
+          await loadPositions()
+          await loadClaimLedger()
+        },
+      })
+
+      if (claimJson.execution?.path === 'database_only') {
+        setClaimLedgerNotice(
+          'These claims were recorded in the app only (no on-chain OWL transfer). Your wallet will not change until the reward treasury sends SPL, or you turn off local-only mode.'
+        )
+      }
+
+      const total =
+        typeof claimJson.total_claimed === 'number' && Number.isFinite(claimJson.total_claimed)
+          ? claimJson.total_claimed
+          : 0
+      const count =
+        typeof claimJson.claim_count === 'number' && Number.isFinite(claimJson.claim_count)
+          ? claimJson.claim_count
+          : claimableNestCount
+      const totalLabel = total.toLocaleString(undefined, { maximumFractionDigits: 6 })
+      setSuccessNotice({
+        placement: 'page',
+        message:
+          claimJson.execution?.path === 'database_only'
+            ? `Claimed ${totalLabel} OWL from ${count} nests (recorded in the app).`
+            : `Claimed ${totalLabel} OWL from ${count} nests — sent to your wallet in one transfer.`,
+      })
+
+      const sig =
+        typeof claimJson.transaction_signature === 'string' ? claimJson.transaction_signature.trim() : ''
+      if (sig) {
+        const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
+        window.open(
+          `https://solscan.io/tx/${encodeURIComponent(sig)}${dev ? '?cluster=devnet' : ''}`,
+          '_blank',
+          'noopener,noreferrer'
+        )
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === 'claim-all') throw e
+      setActionError(e instanceof Error ? e.message : 'Claim all failed')
     }
   }
 
@@ -2062,6 +2202,11 @@ export function DashboardNestingClient() {
               </div>
             ) : null}
             <NestingActionStatusLine phase={stakeTxPhase} className="min-h-[1.25rem] text-center sm:text-left" />
+            {nftStakeBatchHint ? (
+              <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="status">
+                {nftStakeBatchHint}
+              </p>
+            ) : null}
             <Button
               type="button"
               variant="default"
@@ -2090,8 +2235,36 @@ export function DashboardNestingClient() {
       <section>
         <SectionHeader
           title="Your nests"
-          description="Claim OWL anytime—use it in raffles right away or let it stack. Finish the countdown before you leave a nest."
+          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card; use Claim all when you can for one payout."
         />
+        {claimableNestCount >= 2 ? (
+          <div className="mb-4 space-y-2">
+            <Button
+              type="button"
+              variant="default"
+              className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)]"
+              disabled={
+                !securityAck ||
+                nestingDisabled ||
+                claimAllBusy ||
+                stakeTxPhase !== 'idle' ||
+                openPositions.some((p) => {
+                  const phases = posPhases[p.id]
+                  return phases?.claim !== 'idle' || phases?.unstake !== 'idle'
+                })
+              }
+              onClick={() => void handleClaimAll()}
+            >
+              {claimAllBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+              ) : null}
+              {claimAllBusy
+                ? nestingTxPhaseLabel(claimAllTxPhase)
+                : `Claim all (${claimableNestCount} nests)`}
+            </Button>
+            <NestingActionStatusLine phase={claimAllTxPhase} className="min-h-[1.25rem] text-center" />
+          </div>
+        ) : null}
         {stakedNftGalleryItems.length > 0 ? (
           <div className="mb-6">
             <StakedNftNestGallery items={stakedNftGalleryItems} />
@@ -2101,30 +2274,46 @@ export function DashboardNestingClient() {
           <EmptyState title="No nests yet." body="Open one above or skim the public perches on the nesting page." />
         ) : (
           <ul className="grid gap-4">
-            {openPositions.map((pos) => {
-              const pool = poolById.get(pos.pool_id)
-              return (
-              <li key={pos.id} id={nestGalleryAnchorId(pos.id)} className="scroll-mt-24">
-                <PositionCard
-                  position={pos}
-                  poolName={pool?.name ?? `Perch ${pos.pool_id.slice(0, 8)}…`}
-                  stakedAssetHint={
-                    pos.asset_identifier?.trim()
-                      ? nestingWalletMintHints.get(pos.asset_identifier.trim()) ?? null
-                      : null
-                  }
+            {nftNestGroups.map((g) => (
+              <li key={`nft-group-${g.poolId}`} className="scroll-mt-24">
+                <NftPerchGroupedNestCard
+                  pool={g.pool}
+                  poolName={g.pool.name ?? `Perch ${g.poolId.slice(0, 8)}…`}
+                  positions={g.positions}
+                  nestingWalletMintHints={nestingWalletMintHints}
                   onUnstake={handleUnstake}
                   onClaim={handleClaim}
-                  claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
-                  unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}
-                  freezeRequired={
-                    pool?.asset_type === 'nft' && pool?.adapter_mode === 'onchain_enabled'
-                  }
-                  cancelOpeningAllowed={pool ? isOpeningNftNestAbortable(pos, pool) : false}
-                  actionsEnabled={securityAck}
+                  posPhases={posPhases}
+                  freezeRequired={g.pool.asset_type === 'nft' && g.pool.adapter_mode === 'onchain_enabled'}
+                  actionsEnabled={securityAck && !claimAllBusy}
                   nestingPaused={nestingDisabled}
                 />
               </li>
+            ))}
+            {ungroupedOpenPositions.map((pos) => {
+              const pool = poolById.get(pos.pool_id)
+              return (
+                <li key={pos.id} id={nestGalleryAnchorId(pos.id)} className="scroll-mt-24">
+                  <PositionCard
+                    position={pos}
+                    poolName={pool?.name ?? `Perch ${pos.pool_id.slice(0, 8)}…`}
+                    stakedAssetHint={
+                      pos.asset_identifier?.trim()
+                        ? nestingWalletMintHints.get(pos.asset_identifier.trim()) ?? null
+                        : null
+                    }
+                    onUnstake={handleUnstake}
+                    onClaim={handleClaim}
+                    claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
+                    unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}
+                    freezeRequired={
+                      pool?.asset_type === 'nft' && pool?.adapter_mode === 'onchain_enabled'
+                    }
+                    cancelOpeningAllowed={pool ? isOpeningNftNestAbortable(pos, pool) : false}
+                    actionsEnabled={securityAck && !claimAllBusy}
+                    nestingPaused={nestingDisabled}
+                  />
+                </li>
               )
             })}
           </ul>

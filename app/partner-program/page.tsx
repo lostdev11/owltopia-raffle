@@ -26,6 +26,11 @@ import {
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import {
+  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
+  PARTNER_PRO_SETUP_USD,
+  PARTNER_PRO_STANDARD_MONTHLY_USD,
+} from '@/lib/config/partner-program-pricing'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -115,7 +120,7 @@ const tiers = [
   },
   {
     name: 'Partner Pro',
-    price: '$100 setup + $20/month',
+    price: `$${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/month`,
     bullets: [
       'Everything in $0 Partner, plus custom onboarding and partner server setup.',
       'Discord partner tenant linking for raffle create/winner webhooks.',
@@ -184,6 +189,13 @@ export default function PartnerProgramPage() {
           <h2 className="text-2xl font-semibold">Program tiers</h2>
           <p className="text-muted-foreground mb-4">
             To keep partnerships clear, we scope every partner into one tier before payment and onboarding.
+          </p>
+          <p className="text-muted-foreground mb-4 text-sm leading-relaxed">
+            <strong className="text-foreground/90">Grandfathered Partner Pro rate:</strong> active partners who were on the
+            program before this pricing update — including current Partner Pro accounts and existing $0 Partner accounts
+            that upgrade to Partner Pro — keep <strong className="text-foreground/90">${PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/month</strong>{' '}
+            after the one-time setup (billing is confirmed in onboarding). New Partner Pro subscriptions are{' '}
+            <strong className="text-foreground/90">${PARTNER_PRO_STANDARD_MONTHLY_USD}/month</strong>.
           </p>
           <div className="not-prose grid gap-4 md:grid-cols-3">
             {tiers.map((tier) => (

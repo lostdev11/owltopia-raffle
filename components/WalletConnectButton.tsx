@@ -206,7 +206,7 @@ export function WalletConnectButton() {
         if (isBlankPage) {
           // Check for stored redirect URL from any mobile wallet
           // Try wallet-specific keys first, then generic key
-          const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+          const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
           let storedUrl: string | null = null
           let walletName: string | null = null
           
@@ -304,7 +304,7 @@ export function WalletConnectButton() {
           if (isBlankPage) {
             // If we're on blank page but have callback params, redirect to stored URL
             // Check for stored URLs from any mobile wallet
-            const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+            const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
             let storedUrl: string | null = null
             let walletName: string | null = null
             
@@ -394,7 +394,7 @@ export function WalletConnectButton() {
     if (!mounted || !isMobileDevice() || !isAndroidDevice()) return
 
     // List of mobile wallets that use deep links on Android
-    const mobileWalletNames = ['Solflare', 'Phantom', 'Coinbase', 'Trust', 'Solana Mobile']
+    const mobileWalletNames = ['Solflare', 'Phantom', 'Backpack', 'Coinbase', 'Trust', 'Solana Mobile']
     
     // Store the original URL before any mobile wallet connection on Android
     if (connecting && wallet?.adapter?.name) {
@@ -576,7 +576,7 @@ export function WalletConnectButton() {
     // Without this, reconnecting often fails on subpages until user navigates away and back.
     setRemountKey((k) => k + 1)
     // Clear mobile wallet redirect URLs so they don't interfere with reconnect.
-    const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+    const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
     walletNames.forEach((name) => sessionStorage.removeItem(`${name}_redirect_url`))
     sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect, clearWalletSelectionStorage])
@@ -634,7 +634,7 @@ export function WalletConnectButton() {
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
         if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
         }
@@ -664,7 +664,7 @@ export function WalletConnectButton() {
       if (!isMobileDevice()) return
       const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
       if (currentUrl) {
-        const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+        const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
         keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
         sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
       }
@@ -689,7 +689,7 @@ export function WalletConnectButton() {
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
         if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
         }

@@ -11,6 +11,19 @@ import { safeErrorMessage } from '@/lib/safe-error'
 export const dynamic = 'force-dynamic'
 const VALID_PARTNER_TIERS = new Set(['$0_partner', 'partner_pro', 'white_label'])
 
+function parseOptionalPartnerProMonthlyQuoteUsdc(body: Record<string, unknown>):
+  | { ok: true; value: number | null | undefined }
+  | { ok: false; error: string } {
+  if (!('partner_pro_monthly_quote_usdc' in body)) return { ok: true, value: undefined }
+  const raw = body.partner_pro_monthly_quote_usdc
+  if (raw === null) return { ok: true, value: null }
+  const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 500) {
+    return { ok: false, error: 'partner_pro_monthly_quote_usdc must be null or an integer 1–500' }
+  }
+  return { ok: true, value: n }
+}
+
 function walletFromParams(params: { wallet: string }): string | null {
   const decoded = decodeURIComponent(params.wallet ?? '').trim()
   return normalizeSolanaWalletAddress(decoded)
@@ -38,6 +51,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
       sort_order?: number
       is_active?: boolean
       discord_partner_tenant_id?: string | null
+      partner_pro_monthly_quote_usdc?: number | null
     } = {}
 
     if ('display_label' in body) {
@@ -84,6 +98,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
           { status: 400 }
         )
       }
+    }
+
+    if ('partner_pro_monthly_quote_usdc' in body) {
+      const parsed = parseOptionalPartnerProMonthlyQuoteUsdc(body as Record<string, unknown>)
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 })
+      }
+      patch.partner_pro_monthly_quote_usdc = parsed.value as number | null
     }
 
     if (Object.keys(patch).length === 0) {

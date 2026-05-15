@@ -8,6 +8,11 @@ export type PartnerCommunityCreatorRow = {
   is_active: boolean
   /** When set, new raffles from this wallet use that partner tenant for Discord raffle webhooks. */
   discord_partner_tenant_id: string | null
+  /**
+   * Whole USDC charged per `/owltopia-partner subscribe` cycle when `discord_partner_tenant_id` matches that tenant.
+   * Null means catalog standard (`DISCORD_PARTNER_USDC_PRICE`).
+   */
+  partner_pro_monthly_quote_usdc: number | null
   created_at: string
   updated_at: string
 }
@@ -29,7 +34,9 @@ export async function listPartnerCommunityCreatorsAdmin(): Promise<PartnerCommun
   const sb = getSupabaseAdmin()
   const { data, error } = await sb
     .from('partner_community_creators')
-    .select('creator_wallet, display_label, partner_tier, sort_order, is_active, discord_partner_tenant_id, created_at, updated_at')
+    .select(
+      'creator_wallet, display_label, partner_tier, sort_order, is_active, discord_partner_tenant_id, partner_pro_monthly_quote_usdc, created_at, updated_at'
+    )
     .order('sort_order', { ascending: true })
     .order('creator_wallet', { ascending: true })
 
@@ -44,6 +51,7 @@ export async function insertPartnerCommunityCreator(input: {
   sort_order?: number
   is_active?: boolean
   discord_partner_tenant_id?: string | null
+  partner_pro_monthly_quote_usdc?: number | null
 }): Promise<PartnerCommunityCreatorRow> {
   const sb = getSupabaseAdmin()
   const row: Record<string, unknown> = {
@@ -56,6 +64,9 @@ export async function insertPartnerCommunityCreator(input: {
   if (input.discord_partner_tenant_id !== undefined) {
     const t = input.discord_partner_tenant_id?.trim()
     row.discord_partner_tenant_id = t || null
+  }
+  if (input.partner_pro_monthly_quote_usdc !== undefined) {
+    row.partner_pro_monthly_quote_usdc = input.partner_pro_monthly_quote_usdc
   }
   const { data, error } = await sb.from('partner_community_creators').insert(row).select().single()
 
@@ -71,6 +82,7 @@ export async function updatePartnerCommunityCreator(
     sort_order?: number
     is_active?: boolean
     discord_partner_tenant_id?: string | null
+    partner_pro_monthly_quote_usdc?: number | null
   }
 ): Promise<PartnerCommunityCreatorRow> {
   const sb = getSupabaseAdmin()
@@ -87,6 +99,9 @@ export async function updatePartnerCommunityCreator(
   if (patch.discord_partner_tenant_id !== undefined) {
     const t = patch.discord_partner_tenant_id?.trim()
     updates.discord_partner_tenant_id = t || null
+  }
+  if (patch.partner_pro_monthly_quote_usdc !== undefined) {
+    updates.partner_pro_monthly_quote_usdc = patch.partner_pro_monthly_quote_usdc
   }
 
   const { data, error } = await sb
@@ -170,6 +185,43 @@ export async function getPartnerRaffleVisibilityEntitlementForCreatorWallet(
     discordPartnerTenantId,
     canSetPartnerOnly: isPartnerOnlyVisibilityTier(partnerTier),
   }
+}
+
+/**
+ * When a Discord guild already has a partner tenant row, use the lowest active linked USDC quote, or null for catalog pricing.
+ */
+export async function getPartnerProMonthlyQuoteUsdcForDiscordTenant(
+  discordTenantId: string
+): Promise<number | null> {
+  const id = typeof discordTenantId === 'string' ? discordTenantId.trim() : ''
+  if (!id) return null
+
+  const sb = getSupabaseAdmin()
+  const { data, error } = await sb
+    .from('partner_community_creators')
+    .select('partner_pro_monthly_quote_usdc')
+    .eq('discord_partner_tenant_id', id)
+    .eq('is_active', true)
+
+  if (error) {
+    const msg = (error.message ?? '').toLowerCase()
+    if (
+      msg.includes('partner_pro_monthly_quote_usdc') ||
+      msg.includes('column') ||
+      msg.includes('42703')
+    ) {
+      return null
+    }
+    console.error('getPartnerProMonthlyQuoteUsdcForDiscordTenant:', error.message)
+    throw new Error(error.message)
+  }
+
+  const quotes = (data ?? [])
+    .map((r) => (r as { partner_pro_monthly_quote_usdc?: unknown }).partner_pro_monthly_quote_usdc)
+    .filter((q): q is number => typeof q === 'number' && Number.isFinite(q) && q > 0)
+
+  if (quotes.length === 0) return null
+  return Math.min(...quotes)
 }
 
 export async function deletePartnerCommunityCreator(creator_wallet: string): Promise<void> {

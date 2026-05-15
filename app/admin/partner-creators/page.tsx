@@ -11,11 +11,19 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Loader2, ArrowLeft, HeartHandshake, Trash2 } from 'lucide-react'
 import type { PartnerCommunityCreatorRow } from '@/lib/db/partner-community-creators-admin'
+import {
+  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
+  PARTNER_PRO_SETUP_USD,
+  PARTNER_PRO_STANDARD_MONTHLY_USD,
+} from '@/lib/config/partner-program-pricing'
 
 type PartnerCreatorAdminRow = PartnerCommunityCreatorRow & { profile_display_name: string | null }
 const TIER_OPTIONS = [
   { value: '$0_partner', label: '$0 Partner (2% fee + Discord support)' },
-  { value: 'partner_pro', label: 'Partner Pro ($100 setup + $20/mo)' },
+  {
+    value: 'partner_pro',
+    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/mo)`,
+  },
   { value: 'white_label', label: 'White-label (custom)' },
 ] as const
 
@@ -247,7 +255,11 @@ export default function AdminPartnerCreatorsPage() {
           Discord partners
         </Link>
         ), new ticket raffles from that wallet can mirror Owltopia-style announcements in their server (created + winner
-        webhooks they configure; claims stay on the user dashboard). On raffle cards we show the creator&apos;s{' '}
+        webhooks they configure; claims stay on the user dashboard).{' '}
+        <strong className="text-foreground">Discord Partner Pro renewal</strong> uses{' '}
+        <span className="font-mono text-xs">partner_pro_monthly_quote_usdc</span> when linked (grandfathered partners{' '}
+        {PARTNER_PRO_GRANDFATHER_MONTHLY_USD} USDC); otherwise the catalog standard ({PARTNER_PRO_STANDARD_MONTHLY_USD}{' '}
+        USDC, <span className="font-mono text-xs">DISCORD_PARTNER_USDC_PRICE</span>). On raffle cards we show the creator&apos;s{' '}
         <strong className="text-foreground">dashboard display name</strong> from{' '}
         <Link href="/dashboard" className="text-primary underline-offset-4 hover:underline">wallet profile</Link> when set;
         otherwise the optional allowlist label below. Public site reads active rows only; you can deactivate without
@@ -391,6 +403,19 @@ export default function AdminPartnerCreatorsPage() {
                     Discord partner tenant:{' '}
                     <span className="font-mono text-xs text-foreground break-all">
                       {r.discord_partner_tenant_id ?? '— (not linked)'}
+                    </span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Discord Partner Pro renewal quote:{' '}
+                    <span className="font-medium text-foreground">
+                      {r.partner_pro_monthly_quote_usdc != null
+                        ? `${r.partner_pro_monthly_quote_usdc} USDC`
+                        : `standard ${PARTNER_PRO_STANDARD_MONTHLY_USD} USDC`}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {' '}
+                      (per <span className="font-mono text-xs">/owltopia-partner subscribe</span> when this wallet links the tenant above;
+                      grandfathered partners typically {PARTNER_PRO_GRANDFATHER_MONTHLY_USD} USDC)
                     </span>
                   </p>
                   <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
