@@ -4,7 +4,10 @@ import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-i
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
-import { resolveWalletOwlNestCollectionAddress } from '@/lib/nesting/owl-nest-collection'
+import {
+  resolvePrimaryWalletOwlNestCollectionAddress,
+  resolveWalletOwlNestCollectionCandidates,
+} from '@/lib/nesting/owl-nest-collection'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveImageUriFromDasAssetPayload } from '@/lib/nft-helius-image'
@@ -44,8 +47,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Pool not found or not an NFT perch.' }, { status: 404 })
     }
 
-    const collectionAddress = (pool.collection_key?.trim() || resolveWalletOwlNestCollectionAddress()).trim()
-    if (!collectionAddress) {
+    const collectionCandidates = resolveWalletOwlNestCollectionCandidates(pool)
+    const collectionAddress = resolvePrimaryWalletOwlNestCollectionAddress(pool)
+    if (collectionCandidates.length === 0) {
       return NextResponse.json({
         configured: false,
         collectionAddress: null,
@@ -65,12 +69,19 @@ export async function GET(request: NextRequest) {
 
     const wallet = session.wallet
 
-    let allItems: Awaited<ReturnType<typeof fetchWalletNftsInCollectionDas>>
+    const itemsByMint = new Map<string, Awaited<ReturnType<typeof fetchWalletNftsInCollectionDas>>[number]>()
     try {
-      allItems = await fetchWalletNftsInCollectionDas(heliusRpcUrl, wallet, collectionAddress)
+      for (const candidate of collectionCandidates) {
+        const batch = await fetchWalletNftsInCollectionDas(heliusRpcUrl, wallet, candidate)
+        for (const item of batch) {
+          const id = item.id?.trim()
+          if (id) itemsByMint.set(id, item)
+        }
+      }
     } catch {
       return NextResponse.json({ error: 'Failed to fetch wallet NFTs from indexer.' }, { status: 502 })
     }
+    const allItems = [...itemsByMint.values()]
 
     const positions = await listStakingPositionsByWallet(wallet)
     const alreadyNested = new Set<string>(

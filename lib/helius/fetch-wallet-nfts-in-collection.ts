@@ -65,6 +65,9 @@ export async function fetchWalletNftsInCollectionDas(
             limit,
             burnt: false,
             grouping: ['collection', collectionAddress],
+            options: {
+              showUnverifiedCollections: true,
+            },
           },
         }),
         cache: 'no-store',

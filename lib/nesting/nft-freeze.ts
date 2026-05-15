@@ -8,7 +8,12 @@ import {
 import { fetchAsset, fetchCollection, freezeAsset, thawAsset } from '@metaplex-foundation/mpl-core'
 import bs58 from 'bs58'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
-import { resolveWalletOwlNestCollectionAddress } from '@/lib/nesting/owl-nest-collection'
+import { dasAssetBelongsToCollection } from '@/lib/helius/das-asset-collection'
+import {
+  CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS,
+  LEGACY_OWL_NEST_COLLECTION_ADDRESS,
+  resolveWalletOwlNestCollectionAddress,
+} from '@/lib/nesting/owl-nest-collection'
 import { StakingUserError } from '@/lib/nesting/errors'
 import {
   getNestingNftFreezeAuthorityKeypair,
@@ -27,10 +32,17 @@ type HeliusAssetResult = {
   }>
 }
 
-function resolveCollectionForFreezeCheck(collectionMint?: string | null): string {
-  const fromPool = collectionMint?.trim()
-  if (fromPool) return fromPool
-  return resolveWalletOwlNestCollectionAddress()
+function resolveCollectionCandidatesForFreezeCheck(collectionMint?: string | null): string[] {
+  const out: string[] = []
+  const add = (addr: string | null | undefined) => {
+    const t = addr?.trim()
+    if (t && !out.includes(t)) out.push(t)
+  }
+  add(collectionMint)
+  add(resolveWalletOwlNestCollectionAddress())
+  add(CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS)
+  add(LEGACY_OWL_NEST_COLLECTION_ADDRESS)
+  return out
 }
 
 async function assertAssetOwnedByWalletInCollection(params: {
@@ -43,8 +55,8 @@ async function assertAssetOwnedByWalletInCollection(params: {
     throw new StakingUserError('HELIUS_API_KEY is required for Owl Nest NFT checks.', 503)
   }
 
-  const requiredCollection = resolveCollectionForFreezeCheck(params.collectionMint)
-  if (!requiredCollection) {
+  const collectionCandidates = resolveCollectionCandidatesForFreezeCheck(params.collectionMint)
+  if (collectionCandidates.length === 0) {
     throw new StakingUserError(
       'NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS (or OWLTOPIA_COLLECTION_ADDRESS) is required.',
       503
@@ -52,8 +64,7 @@ async function assertAssetOwnedByWalletInCollection(params: {
   }
 
   const assetId = params.assetId.trim()
-  const collectionKey = requiredCollection.trim()
-  if (assetId === collectionKey) {
+  if (collectionCandidates.some((key) => assetId === key)) {
     throw new StakingUserError(
       'That address is the collection (contract) mint, not an individual NFT. Open your wallet’s NFT list and paste the asset mint for the Owl Nest you want to nest.',
       400
@@ -95,11 +106,9 @@ async function assertAssetOwnedByWalletInCollection(params: {
     throw new StakingUserError('NFT is not currently in the staking wallet.', 400)
   }
 
-  const inCollection =
-    Array.isArray(json.result.grouping) &&
-    json.result.grouping.some(
-      (g) => typeof g?.group_value === 'string' && g.group_value === collectionKey
-    )
+  const inCollection = collectionCandidates.some((key) =>
+    dasAssetBelongsToCollection(json.result, key)
+  )
   if (!inCollection) {
     throw new StakingUserError('NFT is not part of the configured Owltopia Coin collection.', 400)
   }
