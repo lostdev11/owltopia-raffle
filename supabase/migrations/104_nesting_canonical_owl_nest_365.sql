@@ -25,7 +25,7 @@ INSERT INTO public.staking_pools (
   lock_enforcement_source
 )
 VALUES (
-  'Owl Nest NFT — 365',
+  'Owltopia Coins NFT',
   'owl-nest-365',
   'One shared nest for everyone: stake an Owl Nest NFT for 365 days and earn 1 OWL per day per NFT (claim anytime from your dashboard).',
   'nft',

@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
+import type { StakingRewardExecutionPath } from '@/lib/db/staking-reward-events'
 
 export type StakingPositionStatus = 'active' | 'unstaked' | 'pending'
 
@@ -31,6 +32,22 @@ export interface StakingPositionRow {
   last_synced_at?: string | null
   last_transaction_error?: string | null
   external_reference?: string | null
+}
+
+/** Active + pending nests for a pool (one row per NFT / stake unit). Server-only aggregate. */
+export async function countOpenStakingPositionsForPool(poolId: string): Promise<number> {
+  const db = getSupabaseAdmin()
+  const { count, error } = await db
+    .from('staking_positions')
+    .select('id', { count: 'exact', head: true })
+    .eq('pool_id', poolId.trim())
+    .in('status', ['active', 'pending'])
+
+  if (error) {
+    console.error('[staking-positions] countOpenForPool:', error.message)
+    return 0
+  }
+  return count ?? 0
 }
 
 export async function listStakingPositionsByWallet(wallet: string): Promise<StakingPositionRow[]> {
@@ -174,32 +191,33 @@ export async function recordRewardClaim(params: {
   newClaimedTotal: number
   note?: string | null
   transaction_signature?: string | null
-  last_claim_signature?: string | null
+  execution_path?: StakingRewardExecutionPath | null
 }): Promise<void> {
   const db = getSupabaseAdmin()
-  const posUpdate: Record<string, unknown> = { claimed_rewards: params.newClaimedTotal }
-  if (params.last_claim_signature !== undefined) {
-    posUpdate.last_claim_signature = params.last_claim_signature
-  }
+  const txSig = params.transaction_signature?.trim() || null
+  const executionPath: StakingRewardExecutionPath | null =
+    params.execution_path ?? (txSig ? 'onchain_transfer' : params.note === 'db_only_owl_claim' ? 'database_only' : null)
 
-  const { error: uErr } = await db
-    .from('staking_positions')
-    .update(posUpdate)
-    .eq('id', params.positionId)
-    .eq('wallet_address', params.wallet.trim())
-
-  if (uErr) throw new Error(uErr.message)
-
-  const { error: eErr } = await db.from('staking_reward_events').insert({
-    position_id: params.positionId,
-    wallet_address: params.wallet.trim(),
-    event_type: 'claim',
-    amount: params.amount,
-    note: params.note ?? null,
-    transaction_signature: params.transaction_signature ?? null,
+  const { error } = await db.rpc('staking_record_reward_claim', {
+    p_position_id: params.positionId,
+    p_wallet: params.wallet.trim(),
+    p_amount: params.amount,
+    p_new_claimed_total: params.newClaimedTotal,
+    p_note: params.note ?? null,
+    p_transaction_signature: txSig,
+    p_execution_path: executionPath,
   })
 
-  if (eErr) throw new Error(eErr.message)
+  if (error) {
+    const msg = error.message ?? ''
+    if (msg.includes('duplicate_tx')) {
+      throw new Error('This claim transaction was already recorded.')
+    }
+    if (msg.includes('position_not_found')) {
+      throw new Error('Position not found')
+    }
+    throw new Error(msg || 'Failed to record reward claim')
+  }
 }
 
 /** Positions that may need a one-off `getTransaction` re-check (bounded batch; no polling). */

@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { NestingHero } from '@/components/nesting/NestingHero'
+import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
+import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
@@ -16,6 +18,7 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   initialPools: StakingPoolRow[]
+  initialOwlNest365Stats?: OwlNest365PublicStats | null
   /** Server: global pause (deployment env and/or admin “pause holder actions” in Owl Nesting admin). */
   nestingDisabled?: boolean
   nestingPausedByDeployEnv?: boolean
@@ -24,6 +27,7 @@ type Props = {
 
 export function NestingLandingClient({
   initialPools,
+  initialOwlNest365Stats = null,
   nestingDisabled = false,
   nestingPausedByDeployEnv = false,
   nestingPausedByAdmin = false,
@@ -106,6 +110,8 @@ export function NestingLandingClient({
       ) : null}
       <NestingHero />
 
+      <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
+
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           {
@@ -151,7 +157,7 @@ export function NestingLandingClient({
                   ? 'Head to your dashboard and say hi with one wallet message—we will load your spots.'
                   : positionPreview === 0
                     ? 'No nests open yet—open your dashboard and pick a perch to start.'
-                    : `${positionPreview} nest${positionPreview === 1 ? '' : 's'} humming along.`}
+                    : `${positionPreview} nest${positionPreview === 1 ? '' : 's'} whooing along.`}
               </CardDescription>
             </div>
             <Button asChild variant="outline" className={cn(nestingMutedActionButtonClass)}>

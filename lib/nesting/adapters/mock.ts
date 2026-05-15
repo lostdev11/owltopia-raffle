@@ -71,7 +71,7 @@ export const mockStakingAdapter: StakingMutationAdapter = {
       newClaimedTotal: input.newClaimedTotal,
       note,
       transaction_signature: txSig,
-      last_claim_signature: txSig,
+      execution_path: txSig ? 'onchain_transfer' : note === 'db_only_owl_claim' ? 'database_only' : null,
     })
 
     return {

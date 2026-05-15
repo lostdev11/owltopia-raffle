@@ -44,6 +44,9 @@ export interface StakingPoolRow {
 }
 
 export async function listActiveStakingPools(): Promise<StakingPoolRow[]> {
+  const { ensureOwlCouncilGovernancePoolReady } = await import('@/lib/nesting/ensure-council-governance-pool')
+  await ensureOwlCouncilGovernancePoolReady()
+
   const db = getSupabaseForServerRead(supabase)
   const { data, error } = await db
     .from('staking_pools')

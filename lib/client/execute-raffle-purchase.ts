@@ -23,6 +23,7 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { clearReferralComplimentarySessionCache } from '@/lib/referrals/complimentary-session-client'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { isMobileDevice, isAndroidDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export type ExecuteRafflePurchaseResult =
   | { ok: true }
@@ -619,12 +620,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
         throw new Error('Transaction was cancelled. Please try again if you want to continue.')
       }
 
-      const isMobile =
-        typeof navigator !== 'undefined' &&
-        /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-          navigator.userAgent || (navigator as { vendor?: string }).vendor || ''
-        )
-      const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '')
+      const isMobile = isMobileDevice()
+      const isAndroid = isAndroidDevice()
+      const isSeekerOrMobileShell = isSolanaMobileEnvironment()
 
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('Insufficient')) {
         throw new Error(
@@ -641,7 +639,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
         (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))
       ) {
         throw new Error(
-          'Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.'
+          isSeekerOrMobileShell
+            ? 'Transaction validation failed on Seeker. Refresh this page, reconnect with Solana Mobile, and install any pending system or Seed Vault updates.'
+            : 'Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.'
         )
       }
       if (errorMessage.toLowerCase().includes('solflare')) {
@@ -651,7 +651,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       }
       if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
         throw new Error(
-          'Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.'
+          isSeekerOrMobileShell
+            ? 'Wallet error on Seeker. Refresh the page, choose Solana Mobile in the wallet list, and check for system or Seed Vault updates.'
+            : 'Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.'
         )
       }
       if (errorMessage.includes('Network') || errorMessage.includes('connection')) {

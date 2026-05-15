@@ -27,6 +27,7 @@ import {
 } from '@/lib/council/council-stake-migration'
 import { getOwlCouncilNestingVoteLockedRaw } from '@/lib/council/council-nesting-stake'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
+import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
 
 export async function executeStake(params: {
   wallet: string
@@ -109,7 +110,6 @@ export async function executeStake(params: {
 }
 
 export async function executeUnstake(params: { wallet: string; position_id: string }) {
-  await assertNestingOperationsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -125,15 +125,14 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
     throw new StakingUserError('Pool not found', 400)
   }
 
-  const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
-  const openingNftNestAbortable =
-    existing.status === 'pending' &&
-    pool.asset_type === 'nft' &&
-    pool.adapter_mode === 'onchain_enabled' &&
-    !nftFreezeConfirmed
+  const openingNftNestAbortable = isOpeningNftNestAbortable(existing, pool)
 
   if (existing.status !== 'active' && !openingNftNestAbortable) {
     throw new StakingUserError('Position is not active', 400)
+  }
+
+  if (!openingNftNestAbortable) {
+    await assertNestingOperationsAllowed()
   }
 
   if (existing.status === 'active' && existing.unlock_at) {
@@ -191,12 +190,7 @@ export async function executeUnstakeAdminOverride(params: { position_id: string 
     throw new StakingUserError('Pool not found', 400)
   }
 
-  const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
-  const openingNftNestAbortable =
-    existing.status === 'pending' &&
-    pool.asset_type === 'nft' &&
-    pool.adapter_mode === 'onchain_enabled' &&
-    !nftFreezeConfirmed
+  const openingNftNestAbortable = isOpeningNftNestAbortable(existing, pool)
 
   if (existing.status !== 'active' && !openingNftNestAbortable) {
     throw new StakingUserError('Position is not active', 400)

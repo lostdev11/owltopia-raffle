@@ -41,6 +41,8 @@ type Props = {
   unstakePhase?: NestingTxPhase
   /** On-chain NFT perch: show guidance when the wallet lock step still needs finishing via Confirm nest. */
   freezeRequired?: boolean
+  /** Pending open before freeze — allows Cancel opening nest (matches server `isOpeningNftNestAbortable`). */
+  cancelOpeningAllowed?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
   nestingPaused?: boolean
@@ -55,6 +57,7 @@ export function PositionCard({
   claimPhase = 'idle',
   unstakePhase = 'idle',
   freezeRequired = false,
+  cancelOpeningAllowed = false,
   actionsEnabled = true,
   nestingPaused = false,
 }: Props) {
@@ -88,13 +91,8 @@ export function PositionCard({
   const canClaimOwl =
     paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
 
-  /** On-chain NFT nest before freeze is confirmed — user can back out and pick another asset. */
-  const openingNftNestAbortable =
-    position.status === 'pending' &&
-    !position.external_reference?.startsWith('nft_freeze_confirmed:')
-
   const canUnstake =
-    openingNftNestAbortable ||
+    cancelOpeningAllowed ||
     (position.status === 'active' &&
       (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs))
 
@@ -215,7 +213,7 @@ export function PositionCard({
             This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
             <span className="font-medium text-foreground/90">Confirm nest</span> to finish the wallet lock so the NFT
             cannot trade while nested.
-            {openingNftNestAbortable ? (
+            {cancelOpeningAllowed ? (
               <>
                 {' '}
                 Wrong owl? Use <span className="font-medium text-foreground/90">Cancel opening nest</span> below before
@@ -258,7 +256,7 @@ export function PositionCard({
           className="min-h-[44px] touch-manipulation bg-muted/50 text-muted-foreground border border-border shadow-none hover:bg-muted/80 disabled:opacity-40"
           disabled={
             !actionsEnabled ||
-            (nestingPaused && !openingNftNestAbortable) ||
+            (nestingPaused && !cancelOpeningAllowed) ||
             anyTxActive ||
             !canUnstake
           }
@@ -266,7 +264,7 @@ export function PositionCard({
         >
           {unstakePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           {unstakePhase === 'idle'
-            ? openingNftNestAbortable
+            ? cancelOpeningAllowed
               ? 'Cancel opening nest'
               : 'Leave nest'
             : nestingTxPhaseLabel(unstakePhase)}

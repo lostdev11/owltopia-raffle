@@ -12,7 +12,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, isSolflareBrowser, redirectToPhantomBrowser, redirectToSolflareBrowser } from '@/lib/utils'
+import {
+  isMobileDevice,
+  isAndroidDevice,
+  isPhantomBrowser,
+  isPhantomExtensionAvailable,
+  isSolflareBrowser,
+  isSolanaMobileEnvironment,
+  redirectToPhantomBrowser,
+  redirectToSolflareBrowser,
+} from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 
 const ANDROID_REDIRECT_GUARD_KEY = 'android_wallet_redirect_in_flight'
@@ -629,6 +638,11 @@ export function WalletConnectButton() {
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
         }
+        // Seeker / Solana Mobile Web Shell: use built-in MWA wallet — skip Phantom/Solflare redirect.
+        if (isSolanaMobileEnvironment()) {
+          setVisible(true)
+          return
+        }
         // If not already in a wallet browser, offer in-app first so connection stays in-app
         if (!isSolflareBrowser() && !isPhantomBrowser()) {
           setShowMobileInAppDialog(true)
@@ -654,6 +668,10 @@ export function WalletConnectButton() {
         keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
         sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
       }
+      if (isSolanaMobileEnvironment()) {
+        setVisible(true)
+        return
+      }
       if (!isSolflareBrowser() && !isPhantomBrowser()) {
         setShowMobileInAppDialog(true)
         return
@@ -674,6 +692,10 @@ export function WalletConnectButton() {
           const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+        if (isSolanaMobileEnvironment()) {
+          setVisible(true)
+          return
         }
         if (!isSolflareBrowser() && !isPhantomBrowser()) {
           setShowMobileInAppDialog(true)
@@ -762,7 +784,8 @@ export function WalletConnectButton() {
           <DialogHeader>
             <DialogTitle>Connect wallet</DialogTitle>
             <DialogDescription className="pt-2">
-              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no switching back and forth.
+              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no
+              switching back and forth. On Seeker, choose <strong>Solana Mobile</strong> in the wallet list instead.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-3">

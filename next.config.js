@@ -26,6 +26,11 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_VERCEL_DEPLOY_ENV: process.env.VERCEL_ENV ?? '',
     NEXT_PUBLIC_HELIUS_RPC_URL: synthesizedPublicHeliusRpcUrl(),
+    // Vercel sets VERCEL_GIT_COMMIT_SHA per deploy; mobile/Android tabs use it to prompt refresh.
+    NEXT_PUBLIC_APP_BUILD_ID:
+      process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+      process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
+      (process.env.NODE_ENV === 'development' ? 'dev' : 'local'),
   },
   // Strip console.log / console.debug / console.info from production bundles; keep warn + error for ops.
   compiler: {
