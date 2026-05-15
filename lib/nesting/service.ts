@@ -10,6 +10,7 @@ import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import {
+  assertNestingOperationsAllowed,
   assertNestingSelloutReached,
   assertRewardTreasuryConfigured,
   isNestingDbOnlyOwlClaimsAllowed,
@@ -31,6 +32,7 @@ export async function executeStake(params: {
   /** Admin-only QA: stake before `NESTING_SELL_OUT_*` gate is cleared. */
   bypassSelloutGate?: boolean
 }) {
+  assertNestingOperationsAllowed()
   const pool_id = params.pool_id.trim()
   if (!STAKING_UUID_RE.test(pool_id)) {
     throw new StakingUserError('Invalid pool_id', 400)
@@ -92,6 +94,7 @@ export async function executeStake(params: {
 }
 
 export async function executeUnstake(params: { wallet: string; position_id: string }) {
+  assertNestingOperationsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -101,11 +104,24 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
   if (!existing) {
     throw new StakingUserError('Position not found', 404)
   }
-  if (existing.status !== 'active') {
+
+  const pool = await getStakingPoolById(existing.pool_id)
+  if (!pool) {
+    throw new StakingUserError('Pool not found', 400)
+  }
+
+  const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
+  const openingNftNestAbortable =
+    existing.status === 'pending' &&
+    pool.asset_type === 'nft' &&
+    pool.adapter_mode === 'onchain_enabled' &&
+    !nftFreezeConfirmed
+
+  if (existing.status !== 'active' && !openingNftNestAbortable) {
     throw new StakingUserError('Position is not active', 400)
   }
 
-  if (existing.unlock_at) {
+  if (existing.status === 'active' && existing.unlock_at) {
     const unlockMs = new Date(existing.unlock_at).getTime()
     if (!Number.isNaN(unlockMs) && Date.now() < unlockMs) {
       throw new StakingUserError('Lock period not ended', 400, {
@@ -114,12 +130,8 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
     }
   }
 
-  const pool = await getStakingPoolById(existing.pool_id)
-  if (!pool) {
-    throw new StakingUserError('Pool not found', 400)
-  }
-
   if (
+    existing.status === 'active' &&
     pool.slug === getOwlCouncilGovernanceNestingPoolSlug().toLowerCase() &&
     isPastCouncilLegacyEscrowDepositCutoff()
   ) {
@@ -148,6 +160,7 @@ export async function executeClaim(params: {
   position_id: string
   rawAmount: unknown
 }) {
+  assertNestingOperationsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)

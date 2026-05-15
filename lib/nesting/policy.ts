@@ -19,6 +19,23 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
   return fallback
 }
 
+/**
+ * When true (via `NESTING_DISABLED=true`), stake / claim / unstake are rejected server-side.
+ * Use for maintenance or incident response. Mid-stake NFT freeze confirmation stays available in the UI.
+ */
+export function isNestingGloballyDisabled(): boolean {
+  return readBoolean(process.env.NESTING_DISABLED, false)
+}
+
+export function assertNestingOperationsAllowed(): void {
+  if (isNestingGloballyDisabled()) {
+    throw new StakingUserError(
+      'Nesting is paused right now. New nests, claims, and leaving a nest are temporarily unavailable—please try again later.',
+      503
+    )
+  }
+}
+
 export function isNestingSelloutRequired(): boolean {
   return readBoolean(process.env.NESTING_SELL_OUT_REQUIRED, DEFAULT_SELL_OUT_REQUIRED)
 }

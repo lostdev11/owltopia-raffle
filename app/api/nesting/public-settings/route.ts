@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getNestingPublicSettings } from '@/lib/db/nesting-public-settings'
+import { isNestingGloballyDisabled } from '@/lib/nesting/policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +13,7 @@ export async function GET() {
     const row = await getNestingPublicSettings()
     const landingPublic = !row || row.landing_public === true
     return NextResponse.json(
-      { landingPublic },
+      { landingPublic, nestingDisabled: isNestingGloballyDisabled() },
       {
         headers: {
           'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
@@ -21,6 +22,9 @@ export async function GET() {
     )
   } catch (e) {
     console.error('[nesting/public-settings]', e)
-    return NextResponse.json({ landingPublic: false }, { status: 200 })
+    return NextResponse.json(
+      { landingPublic: false, nestingDisabled: isNestingGloballyDisabled() },
+      { status: 200 }
+    )
   }
 }

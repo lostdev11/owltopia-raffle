@@ -16,9 +16,11 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   initialPools: StakingPoolRow[]
+  /** Server: env kill switch — landing shows a notice and perch CTAs pause. */
+  nestingDisabled?: boolean
 }
 
-export function NestingLandingClient({ initialPools }: Props) {
+export function NestingLandingClient({ initialPools, nestingDisabled = false }: Props) {
   const { connected, publicKey } = useWallet()
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
@@ -68,6 +70,18 @@ export function NestingLandingClient({ initialPools }: Props) {
         <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
         Back to raffles
       </Link>
+      {nestingDisabled ? (
+        <div
+          className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm text-foreground"
+          role="status"
+        >
+          <p className="font-medium text-foreground">Nesting is paused</p>
+          <p className="mt-1 text-muted-foreground leading-relaxed">
+            New nests, claims, and leaving a nest are temporarily turned off while we tend to things behind the
+            scenes. Your existing nests stay put—check back soon or follow announcements for the all-clear.
+          </p>
+        </div>
+      ) : null}
       <NestingHero />
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -139,7 +153,7 @@ export function NestingLandingClient({ initialPools }: Props) {
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {initialPools.map((pool) => (
               <li key={pool.id}>
-                <StakingPoolCard pool={pool} />
+                <StakingPoolCard pool={pool} nestingPaused={nestingDisabled} />
               </li>
             ))}
           </ul>

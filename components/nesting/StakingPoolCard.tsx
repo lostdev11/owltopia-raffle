@@ -11,9 +11,11 @@ type Props = {
   pool: StakingPoolRow
   /** Landing page passes false when showing inactive admin preview — default true */
   compact?: boolean
+  /** Kill switch: hide “Nest here” CTAs, show a short pause note */
+  nestingPaused?: boolean
 }
 
-export function StakingPoolCard({ pool, compact = false }: Props) {
+export function StakingPoolCard({ pool, compact = false, nestingPaused = false }: Props) {
   const minMax =
     pool.minimum_stake != null || pool.maximum_stake != null
       ? `${pool.minimum_stake ?? '—'} → ${pool.maximum_stake ?? '—'}`
@@ -61,12 +63,20 @@ export function StakingPoolCard({ pool, compact = false }: Props) {
       </CardContent>
       {!compact && (
         <CardFooter className="flex flex-wrap gap-2 border-t border-border/60 pt-4">
-          <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
-            <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>Nest here</Link>
-          </Button>
-          <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
-            <Link href="/dashboard/nesting">My nest</Link>
-          </Button>
+          {nestingPaused ? (
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Nesting is paused—open the dashboard later to land on this perch.
+            </p>
+          ) : (
+            <>
+              <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
+                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>Nest here</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
+                <Link href="/dashboard/nesting">My nest</Link>
+              </Button>
+            </>
+          )}
         </CardFooter>
       )}
     </Card>

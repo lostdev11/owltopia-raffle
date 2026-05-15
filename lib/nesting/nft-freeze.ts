@@ -52,6 +52,13 @@ async function assertAssetOwnedByWalletInCollection(params: {
   }
 
   const assetId = params.assetId.trim()
+  const collectionKey = requiredCollection.trim()
+  if (assetId === collectionKey) {
+    throw new StakingUserError(
+      'That address is the collection (contract) mint, not an individual NFT. Open your wallet’s NFT list and paste the asset mint for the Owl Nest you want to nest.',
+      400
+    )
+  }
   const ownerWallet = params.ownerWallet.trim()
   if (!assetId) throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
   if (!ownerWallet) throw new StakingUserError('Wallet is required for NFT staking.', 400)
@@ -91,7 +98,7 @@ async function assertAssetOwnedByWalletInCollection(params: {
   const inCollection =
     Array.isArray(json.result.grouping) &&
     json.result.grouping.some(
-      (g) => typeof g?.group_value === 'string' && g.group_value === requiredCollection
+      (g) => typeof g?.group_value === 'string' && g.group_value === collectionKey
     )
   if (!inCollection) {
     throw new StakingUserError('NFT is not part of the configured Owltopia Coin collection.', 400)

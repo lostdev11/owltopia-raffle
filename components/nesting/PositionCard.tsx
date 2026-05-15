@@ -44,6 +44,8 @@ type Props = {
   freezeRequired?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
+  /** Kill switch: claim / leave nest off; freeze lock still allowed when a stake is mid-flight. */
+  nestingPaused?: boolean
 }
 
 export function PositionCard({
@@ -58,6 +60,7 @@ export function PositionCard({
   securePhase = 'idle',
   freezeRequired = false,
   actionsEnabled = true,
+  nestingPaused = false,
 }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [dasNftName, setDasNftName] = useState<string | null>(null)
@@ -89,15 +92,20 @@ export function PositionCard({
   const canClaimOwl =
     paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
 
+  /** On-chain NFT nest before freeze is confirmed — user can back out and pick another asset. */
+  const openingNftNestAbortable =
+    position.status === 'pending' &&
+    !position.external_reference?.startsWith('nft_freeze_confirmed:')
+
   const canUnstake =
-    position.status === 'active' &&
-    (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs)
+    openingNftNestAbortable ||
+    (position.status === 'active' &&
+      (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs))
 
   const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
   const claimAmountLabel = claimable.toFixed(6)
 
   const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle' || securePhase !== 'idle'
-  const canAct = actionsEnabled
   const showLinePhase: NestingTxPhase =
     securePhase !== 'idle'
       ? securePhase
@@ -220,6 +228,14 @@ export function PositionCard({
         {needsFreeze ? (
           <p className="w-full text-xs text-amber-300">
             Freeze lock is not confirmed yet. Freeze this NFT in your wallet so it cannot trade while nested.
+            {openingNftNestAbortable ? (
+              <>
+                {' '}
+                If this is the wrong owl, use{' '}
+                <span className="font-medium text-foreground/90">Cancel opening nest</span> below—only
+                available before you confirm the freeze.
+              </>
+            ) : null}
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
@@ -229,7 +245,12 @@ export function PositionCard({
             variant="default"
             size="sm"
             className="min-h-[44px] touch-manipulation"
-            disabled={!canAct || anyTxActive || !onFreezeNft}
+            disabled={
+              !actionsEnabled ||
+              anyTxActive ||
+              !onFreezeNft ||
+              (nestingPaused && !needsFreeze)
+            }
             onClick={() => void handleFreezeNft()}
           >
             {securePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
@@ -241,7 +262,7 @@ export function PositionCard({
           variant="outline"
           size="sm"
           className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
-          disabled={!canAct || anyTxActive || !canClaimOwl}
+          disabled={!actionsEnabled || nestingPaused || anyTxActive || !canClaimOwl}
           onClick={() => void handleClaimMax()}
           aria-label={
             canClaimOwl
@@ -267,11 +288,20 @@ export function PositionCard({
           variant="secondary"
           size="sm"
           className="min-h-[44px] touch-manipulation bg-muted/50 text-muted-foreground border border-border shadow-none hover:bg-muted/80 disabled:opacity-40"
-          disabled={!canAct || anyTxActive || !canUnstake}
+          disabled={
+            !actionsEnabled ||
+            (nestingPaused && !openingNftNestAbortable) ||
+            anyTxActive ||
+            !canUnstake
+          }
           onClick={() => void handleUnstake()}
         >
           {unstakePhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          {unstakePhase === 'idle' ? 'Leave nest' : nestingTxPhaseLabel(unstakePhase)}
+          {unstakePhase === 'idle'
+            ? openingNftNestAbortable
+              ? 'Cancel opening nest'
+              : 'Leave nest'
+            : nestingTxPhaseLabel(unstakePhase)}
         </Button>
         </div>
       </CardFooter>
