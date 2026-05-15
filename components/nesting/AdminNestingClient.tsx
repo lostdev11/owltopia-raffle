@@ -634,9 +634,10 @@ export function AdminNestingClient() {
               <div className="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <span className="font-medium">Env kill switch is on.</span>{' '}
                 <span className="text-destructive/95">
-                  This deployment has <span className="font-mono">NESTING_DISABLED=true</span>. Nesting stays paused for
-                  everyone until you remove that variable in Vercel (or .env locally). The switch below cannot override
-                  it.
+                  This deployment reads <span className="font-mono">NESTING_DISABLED=true</span> from its environment.
+                  Nesting stays paused for everyone until that value is unset (Vercel env for this deploy target, or{' '}
+                  <span className="font-mono">.env.local</span> when developing). After changing Vercel env vars, trigger a
+                  new deployment so functions pick up the change. The switch below cannot override it.
                 </span>
               </div>
             ) : null}
@@ -645,7 +646,8 @@ export function AdminNestingClient() {
                 <p className="text-sm font-medium">Pause new nests, claims, and leaving</p>
                 <p className="text-xs text-muted-foreground">
                   Turn off when you want holders to use the nest dashboard again. Existing nests stay as they are on
-                  chain / in the database.
+                  chain / in the database. Switch <span className="text-foreground font-medium">off</span> = live
+                  holder actions; <span className="text-foreground font-medium">on</span> = paused.
                 </p>
               </div>
               <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
@@ -957,7 +959,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Support: force leave nest"
-          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. Use the staking_positions.id UUID."
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Use staking_positions.id."
         />
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
           <CardHeader>

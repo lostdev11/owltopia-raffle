@@ -20,13 +20,42 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
   return fallback
 }
 
+function nestingDisabledEnvRaw(): string | undefined {
+  if (typeof process === 'undefined') return undefined
+  // Dynamic key so Next/webpack is less likely to substitute a *build-time* value for `NESTING_DISABLED` into server
+  // chunks. Production should read the variable from the runtime environment after you change it in Vercel + redeploy.
+  return process.env['NESTING_' + 'DISABLED']
+}
+
 /**
  * When true (via `NESTING_DISABLED=true`), stake / claim / unstake are rejected server-side.
  * Use for maintenance or incident response that must override admin UI. Mid-flight MPL Core freeze completion still uses
  * `POST /api/me/staking/stake` with the same NFT (resume path in `executeStake`) and `POST /api/me/staking/freeze`.
  */
 export function isNestingEnvKillSwitchEnabled(): boolean {
-  return readBoolean(process.env.NESTING_DISABLED, false)
+  return readBoolean(nestingDisabledEnvRaw(), false)
+}
+
+export type NestingActionsPauseBreakdown = {
+  /** True when either lever is blocking holder actions. */
+  disabled: boolean
+  /** `NESTING_DISABLED` deployment env (cannot be overridden by admin pause switch). */
+  envKillSwitch: boolean
+  /** `nesting_public_settings.nesting_operations_paused` (admin “Pause holder actions”). */
+  adminDbPaused: boolean
+}
+
+/**
+ * Single DB read plus env: use when you need to explain *why* nesting is paused in the UI.
+ */
+export async function getNestingActionsPauseBreakdown(): Promise<NestingActionsPauseBreakdown> {
+  const envKillSwitch = isNestingEnvKillSwitchEnabled()
+  const adminDbPaused = await isNestingOperationsPausedInDb()
+  return {
+    envKillSwitch,
+    adminDbPaused,
+    disabled: envKillSwitch || adminDbPaused,
+  }
 }
 
 /**

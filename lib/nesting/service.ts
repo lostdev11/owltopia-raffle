@@ -207,6 +207,7 @@ export async function executeUnstakeAdminOverride(params: { position_id: string 
   return adapter.unstakePosition({
     wallet: holderWallet,
     positionId: position_id,
+    adminRecoveryUnstake: true,
   })
 }
 

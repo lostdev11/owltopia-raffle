@@ -73,6 +73,8 @@ export function DashboardNestingClient() {
 
   const [pools, setPools] = useState<StakingPoolRow[]>([])
   const [nestingDisabled, setNestingDisabled] = useState(false)
+  const [nestingPausedByDeployEnv, setNestingPausedByDeployEnv] = useState(false)
+  const [nestingPausedByAdmin, setNestingPausedByAdmin] = useState(false)
   const [nestingNftFreezeDelegate, setNestingNftFreezeDelegate] = useState('')
   const [positions, setPositions] = useState<StakingPositionRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -148,6 +150,8 @@ export function DashboardNestingClient() {
       if (!res.ok) return
       setPools(Array.isArray(json.pools) ? json.pools : [])
       setNestingDisabled(json.nesting_disabled === true)
+      setNestingPausedByDeployEnv(json.nesting_paused_by_deploy_env === true)
+      setNestingPausedByAdmin(json.nesting_paused_by_admin === true)
       setNestingNftFreezeDelegate(
         typeof json.nesting_nft_freeze_delegate === 'string' ? json.nesting_nft_freeze_delegate : ''
       )
@@ -727,7 +731,9 @@ export function DashboardNestingClient() {
     let estRaw = 0
     let claimed = 0
     for (const pos of positions) {
-      nested += Number(pos.amount)
+      if (pos.status === 'active' || pos.status === 'pending') {
+        nested += Number(pos.amount)
+      }
       claimed += Number(pos.claimed_rewards)
       if (pos.status === 'active') {
         estRaw += estimateClaimableRewards({
@@ -1344,9 +1350,28 @@ export function DashboardNestingClient() {
         >
           <p className="font-medium text-foreground">Nesting is paused</p>
           <p className="mt-1 text-muted-foreground leading-relaxed">
-            New nests, claims, and leaving a nest are off for the moment. If you were partway through opening a nest,
-            select the same Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for
-            nests that are still opening).
+            {nestingPausedByDeployEnv ? (
+              <>
+                The <span className="font-mono">NESTING_DISABLED</span> deployment flag is on, so new nests, claims, and
+                leaving a nest are blocked for everyone. The admin “pause holder actions” switch cannot override this.
+                Remove the variable for this environment in Vercel (or <span className="font-mono">.env.local</span> when
+                developing), deploy again, then refresh. If you were partway through opening a nest, select the same
+                Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for nests that are
+                still opening).
+              </>
+            ) : nestingPausedByAdmin ? (
+              <>
+                New nests, claims, and leaving a nest are paused from Owl Nesting admin. Turn off “pause holder actions”
+                there to resume. If you were partway through opening a nest, select the same Owltopia coin in the nest
+                form and use Confirm nest to finish the wallet lock (only for nests that are still opening).
+              </>
+            ) : (
+              <>
+                New nests, claims, and leaving a nest are off for the moment. If you were partway through opening a nest,
+                select the same Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for
+                nests that are still opening).
+              </>
+            )}
           </p>
         </div>
       ) : null}

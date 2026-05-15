@@ -66,22 +66,22 @@ export function PositionCard({
   }, [position.id, position.asset_identifier])
 
   useEffect(() => {
+    if (position.status === 'unstaked') return
     const id = window.setInterval(() => setNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [])
+  }, [position.status])
 
-  const claimable = useMemo(
-    () =>
-      estimateClaimableRewards({
-        amount: Number(position.amount),
-        rewardRateSnapshot: Number(position.reward_rate_snapshot),
-        rewardRateUnitSnapshot: position.reward_rate_unit_snapshot as RewardRateUnit,
-        claimedRewards: Number(position.claimed_rewards),
-        stakedAtMs: new Date(position.staked_at).getTime(),
-        asOfMs: nowMs,
-      }),
-    [position, nowMs]
-  )
+  const claimable = useMemo(() => {
+    if (position.status === 'unstaked') return 0
+    return estimateClaimableRewards({
+      amount: Number(position.amount),
+      rewardRateSnapshot: Number(position.reward_rate_snapshot),
+      rewardRateUnitSnapshot: position.reward_rate_unit_snapshot as RewardRateUnit,
+      claimedRewards: Number(position.claimed_rewards),
+      stakedAtMs: new Date(position.staked_at).getTime(),
+      asOfMs: nowMs,
+    })
+  }, [position, nowMs])
 
   const paysOwlRewards =
     (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
@@ -193,7 +193,11 @@ export function PositionCard({
           <div className="col-span-2">
             <dt className="text-muted-foreground mb-1">Countdown</dt>
             <dd>
-              <LockTimer unlockAtIso={position.unlock_at} />
+              {position.status === 'unstaked' ? (
+                <span className="text-xs text-muted-foreground">Ended when nest closed</span>
+              ) : (
+                <LockTimer unlockAtIso={position.unlock_at} />
+              )}
             </dd>
           </div>
         </dl>

@@ -23,6 +23,11 @@ export type StakeIntoPoolInput = {
 export type UnstakePositionInput = {
   wallet: string
   positionId: string
+  /**
+   * When true (admin override only), thaw skips Helius `getAsset` collection grouping checks
+   * and only verifies MPL Core on-chain ownership — for recovery when `collection_key` / DAS mismatch.
+   */
+  adminRecoveryUnstake?: boolean
 }
 
 export type ClaimPositionInput = {

@@ -18,9 +18,16 @@ type Props = {
   initialPools: StakingPoolRow[]
   /** Server: global pause (deployment env and/or admin “pause holder actions” in Owl Nesting admin). */
   nestingDisabled?: boolean
+  nestingPausedByDeployEnv?: boolean
+  nestingPausedByAdmin?: boolean
 }
 
-export function NestingLandingClient({ initialPools, nestingDisabled = false }: Props) {
+export function NestingLandingClient({
+  initialPools,
+  nestingDisabled = false,
+  nestingPausedByDeployEnv = false,
+  nestingPausedByAdmin = false,
+}: Props) {
   const { connected, publicKey } = useWallet()
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
@@ -77,8 +84,23 @@ export function NestingLandingClient({ initialPools, nestingDisabled = false }: 
         >
           <p className="font-medium text-foreground">Nesting is paused</p>
           <p className="mt-1 text-muted-foreground leading-relaxed">
-            New nests, claims, and leaving a nest are temporarily turned off while we tend to things behind the
-            scenes. Your existing nests stay put—check back soon or follow announcements for the all-clear.
+            {nestingPausedByDeployEnv ? (
+              <>
+                This deployment has the <span className="font-mono">NESTING_DISABLED</span> environment flag set, so new
+                nests, claims, and leaving a nest stay off until that is cleared on the host and a new deployment runs.
+                Your existing nests stay put.
+              </>
+            ) : nestingPausedByAdmin ? (
+              <>
+                New nests, claims, and leaving a nest are temporarily turned off from the Owl Nesting admin pause. Your
+                existing nests stay put—check back soon or follow announcements for the all-clear.
+              </>
+            ) : (
+              <>
+                New nests, claims, and leaving a nest are temporarily turned off while we tend to things behind the
+                scenes. Your existing nests stay put—check back soon or follow announcements for the all-clear.
+              </>
+            )}
           </p>
         </div>
       ) : null}

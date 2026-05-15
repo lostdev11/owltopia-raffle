@@ -105,6 +105,23 @@ async function assertAssetOwnedByWalletInCollection(params: {
   }
 }
 
+/** MPL Core on-chain ownership only (no Helius / collection grouping). */
+async function assertMplCoreAssetOwnedByWalletOnChain(params: { assetId: string; ownerWallet: string }): Promise<void> {
+  try {
+    new PublicKey(params.assetId.trim())
+    new PublicKey(params.ownerWallet.trim())
+  } catch {
+    throw new StakingUserError('Invalid wallet or NFT asset address.', 400)
+  }
+  const endpoint = resolveServerSolanaRpcUrl()
+  const umi: any = (createUmi as any)(endpoint as any)
+  const asset = await fetchAsset(umi as any, umiPublicKey(params.assetId.trim()))
+  const owner = (asset as any)?.owner?.toString?.()?.trim() || ''
+  if (!owner || owner !== params.ownerWallet.trim()) {
+    throw new StakingUserError('NFT is not currently in the staking wallet.', 400)
+  }
+}
+
 function signatureToString(result: any): string {
   const sig = result?.signature ?? result
   if (sig instanceof Uint8Array) return bs58.encode(sig)
@@ -205,8 +222,20 @@ export async function thawWalletNftForNesting(params: {
   ownerWallet: string
   assetId: string
   collectionMint?: string | null
+  /**
+   * Admin-only: trust MPL Core `asset.owner` on RPC instead of Helius collection grouping.
+   * Caller should pass `collectionMint: null` so thaw uses the asset’s real collection from chain.
+   */
+  adminRecoveryUnstake?: boolean
 }): Promise<{ signature: string | null; tokenAccount: string }> {
-  await assertAssetOwnedByWalletInCollection(params)
+  if (params.adminRecoveryUnstake === true) {
+    await assertMplCoreAssetOwnedByWalletOnChain({
+      assetId: params.assetId,
+      ownerWallet: params.ownerWallet,
+    })
+  } else {
+    await assertAssetOwnedByWalletInCollection(params)
+  }
 
   try {
     new PublicKey(params.ownerWallet.trim())

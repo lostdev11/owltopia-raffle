@@ -114,7 +114,9 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
     const thawed = await thawWalletNftForNesting({
       assetId: row.asset_identifier,
       ownerWallet: input.wallet,
-      collectionMint: pool.collection_key,
+      /** Wrong pool.collection_key breaks Helius grouping + thaw; recovery uses on-chain asset authority. */
+      collectionMint: input.adminRecoveryUnstake === true ? null : pool.collection_key,
+      adminRecoveryUnstake: input.adminRecoveryUnstake === true,
     })
     const position = await markPositionUnstaked(input.positionId, input.wallet, {
       unstake_signature: thawed.signature,

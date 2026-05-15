@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { listActiveStakingPools } from '@/lib/db/staking-pools'
 import { getAdminRole } from '@/lib/db/admins'
 import { isNestingLandingPublic } from '@/lib/db/nesting-public-settings'
-import { isNestingGloballyDisabled } from '@/lib/nesting/policy'
+import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { NestingLandingClient } from '@/components/nesting/NestingLandingClient'
 import {
@@ -45,6 +45,13 @@ export default async function NestingPage() {
   }
 
   const pools = await listActiveStakingPools()
-  const nestingDisabled = await isNestingGloballyDisabled()
-  return <NestingLandingClient initialPools={pools} nestingDisabled={nestingDisabled} />
+  const pause = await getNestingActionsPauseBreakdown()
+  return (
+    <NestingLandingClient
+      initialPools={pools}
+      nestingDisabled={pause.disabled}
+      nestingPausedByDeployEnv={pause.envKillSwitch}
+      nestingPausedByAdmin={pause.adminDbPaused}
+    />
+  )
 }
