@@ -73,7 +73,7 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
                 <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>Nest here</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
-                <Link href="/dashboard/nesting">My nest</Link>
+                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>My nest</Link>
               </Button>
             </>
           )}

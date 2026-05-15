@@ -183,7 +183,7 @@ export function NestingLandingClient({
       </section>
 
       <section>
-        <SectionHeader title="FAQ" description="Straight answers—no fluff." />
+        <SectionHeader title="FAQ" />
         <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60">
           {[
             {

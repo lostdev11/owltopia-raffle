@@ -16,7 +16,8 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 /**
  * GET /api/me/nesting/wallet-owl-nest-nfts?pool_id=<uuid>
  * Owl Nest NFT mints owned by the signed-in wallet that match the configured collection
- * (pool.collection_key or Owltopia env), excluding mints already in an active nest position.
+ * (pool.collection_key or Owltopia env), excluding mints already in an active nest and pending
+ * nests that already recorded `nft_freeze_confirmed:` (mid-open / awaiting-wallet-lock mints stay listed).
  *
  * Any SIWS session — not admin-only — so the staking UI can list wallet NFTs once nesting is public.
  */
@@ -74,12 +75,15 @@ export async function GET(request: NextRequest) {
     const positions = await listStakingPositionsByWallet(wallet)
     const alreadyNested = new Set<string>(
       positions
-        .filter(
-          (p) =>
-            (p.status === 'active' || p.status === 'pending') &&
-            typeof p.asset_identifier === 'string' &&
-            p.asset_identifier.trim()
-        )
+        .filter((p) => {
+          const mint = typeof p.asset_identifier === 'string' ? p.asset_identifier.trim() : ''
+          if (!mint) return false
+          if (p.status === 'active') return true
+          if (p.status !== 'pending') return false
+          // Pending without freeze confirmation: not "nested" yet — keep mint in the picker for resume.
+          if (!(p.external_reference ?? '').startsWith('nft_freeze_confirmed:')) return false
+          return true
+        })
         .map((p) => p.asset_identifier!.trim()),
     )
 

@@ -40,7 +40,7 @@ import { nestGalleryAnchorId, StakedNftNestGallery } from '@/components/nesting/
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
-import { runNestingTxAction } from '@/lib/nesting/run-tx-action'
+import { runNestingTxAction, throwIfNestingAborted } from '@/lib/nesting/run-tx-action'
 import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
@@ -86,7 +86,6 @@ export function DashboardNestingClient() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
 
-  const [stakePoolId, setStakePoolId] = useState('')
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeAssetId, setStakeAssetId] = useState('')
   const [stakeAssetIds, setStakeAssetIds] = useState<string[]>([])
@@ -126,6 +125,8 @@ export function DashboardNestingClient() {
   })
 
   const owlNestFetchAbortRef = useRef<AbortController | null>(null)
+  /** Lets the user back out of a slow open-nest flow (API / wallet / sync). */
+  const stakeTxAbortRef = useRef<AbortController | null>(null)
   const owlNestScanStatusRef = useRef(owlNestMintScan.status)
   owlNestScanStatusRef.current = owlNestMintScan.status
   /** Pool id for which we last finished a wallet scan (`done`). Cleared when perch changes so auto-refresh cannot run against stale “done”. */
@@ -285,16 +286,16 @@ export function DashboardNestingClient() {
     }
   }, [connected, publicKey])
 
-  useEffect(() => {
-    if (pools.length === 0) return
-    if (preselectedPoolId && pools.some((p) => p.id === preselectedPoolId)) {
-      setStakePoolId(preselectedPoolId)
-      return
+  const positionLockedPoolId = useMemo(() => {
+    const ids = new Set<string>()
+    for (const pos of positions) {
+      if (pos.status !== 'active' && pos.status !== 'pending') continue
+      const pid = pos.pool_id?.trim()
+      if (pid) ids.add(pid)
     }
-    if (pools.length === 1) {
-      setStakePoolId((id) => (id && pools.some((p) => p.id === id) ? id : pools[0].id))
-    }
-  }, [preselectedPoolId, pools])
+    if (ids.size !== 1) return null
+    return [...ids][0]!
+  }, [positions])
 
   const poolById = useMemo(() => {
     const m = new Map<string, StakingPoolRow>()
@@ -332,27 +333,25 @@ export function DashboardNestingClient() {
     [positions, poolById, nestingWalletMintHints]
   )
 
-  const selectedPerch = useMemo(
-    () => (stakePoolId ? pools.find((p) => p.id === stakePoolId) : undefined),
-    [pools, stakePoolId]
-  )
-
   /** Single active staking row (canonical Owl Nest deployment). */
   const solePerch = pools.length === 1 ? pools[0] : null
 
   /**
-   * Perch the UI should treat as fixed for this session—either the only
-   * perch on the platform (`solePerch`) or one the user navigated to via
-   * `?pool=<id>` (e.g. tapping "Nest here" on a specific perch card).
-   * In either case we hide the perch picker so it can't be swapped out.
+   * Perch the UI treats as fixed—no cross-perch dropdown. From: the only
+   * platform pool, `?pool=<id>`, or every active/pending nest sharing one pool.
    */
   const lockedPerch = useMemo(() => {
     if (solePerch) return solePerch
     if (preselectedPoolId) {
       return pools.find((p) => p.id === preselectedPoolId) ?? null
     }
+    if (positionLockedPoolId) {
+      return pools.find((p) => p.id === positionLockedPoolId) ?? null
+    }
     return null
-  }, [solePerch, preselectedPoolId, pools])
+  }, [solePerch, preselectedPoolId, pools, positionLockedPoolId])
+
+  const selectedPerch = useMemo(() => lockedPerch ?? undefined, [lockedPerch])
 
   const nftMintRequired = selectedPerch?.asset_type === 'nft'
   const tokenStakeRequired = selectedPerch?.asset_type === 'token'
@@ -418,14 +417,15 @@ export function DashboardNestingClient() {
   useEffect(() => {
     owlNestFetchAbortRef.current?.abort()
     owlNestLastLoadedPoolIdRef.current = null
-    if (!nftMintRequired || !stakePoolId) {
+    const poolId = selectedPerch?.id ?? ''
+    if (!nftMintRequired || !poolId) {
       setOwlNestMintScan({ status: 'idle', mints: [], configured: true })
       return
     }
     setOwlNestMintScan({ status: 'idle', mints: [], configured: true })
     setStakeAssetId('')
     setStakeAssetIds([])
-  }, [nftMintRequired, stakePoolId])
+  }, [nftMintRequired, selectedPerch?.id])
 
   useEffect(() => {
     return () => owlNestFetchAbortRef.current?.abort()
@@ -433,7 +433,8 @@ export function DashboardNestingClient() {
 
   const loadOwlNestNftsFromWallet = useCallback(async () => {
     if (!connected || !publicKey || needsSignIn || loading || error !== null) return
-    if (!nftMintRequired || !stakePoolId) return
+    const poolId = selectedPerch?.id
+    if (!nftMintRequired || !poolId) return
 
     owlNestFetchAbortRef.current?.abort()
     const ac = new AbortController()
@@ -452,7 +453,7 @@ export function DashboardNestingClient() {
 
     try {
       const res = await fetch(
-        `/api/me/nesting/wallet-owl-nest-nfts?pool_id=${encodeURIComponent(stakePoolId)}`,
+        `/api/me/nesting/wallet-owl-nest-nfts?pool_id=${encodeURIComponent(poolId)}`,
         {
           credentials: 'include',
           cache: 'no-store',
@@ -463,7 +464,7 @@ export function DashboardNestingClient() {
       const raw = await res.json().catch(() => ({}))
       if (ac.signal.aborted) return
       if (!res.ok) {
-        owlNestLastLoadedPoolIdRef.current = stakePoolId
+        owlNestLastLoadedPoolIdRef.current = poolId
         setOwlNestMintScan({
           status: 'done',
           mints: [],
@@ -474,7 +475,7 @@ export function DashboardNestingClient() {
         return
       }
       if (raw?.configured === false) {
-        owlNestLastLoadedPoolIdRef.current = stakePoolId
+        owlNestLastLoadedPoolIdRef.current = poolId
         setOwlNestMintScan({
           status: 'done',
           mints: [],
@@ -495,7 +496,7 @@ export function DashboardNestingClient() {
           image: typeof row.image === 'string' ? row.image : null,
         }))
         .filter((row: { mint: string }) => mintLooksValid(row.mint))
-      owlNestLastLoadedPoolIdRef.current = stakePoolId
+      owlNestLastLoadedPoolIdRef.current = poolId
       const resolvedCollectionAddress =
         typeof raw?.collectionAddress === 'string' ? raw.collectionAddress.trim() : null
       setOwlNestMintScan({
@@ -506,7 +507,7 @@ export function DashboardNestingClient() {
       })
     } catch {
       if (ac.signal.aborted) return
-      owlNestLastLoadedPoolIdRef.current = stakePoolId
+      owlNestLastLoadedPoolIdRef.current = poolId
       setOwlNestMintScan({
         status: 'done',
         mints: [],
@@ -522,7 +523,7 @@ export function DashboardNestingClient() {
     loading,
     error,
     nftMintRequired,
-    stakePoolId,
+    selectedPerch?.id,
   ])
 
   const loadOwlNestNftsRef = useRef(loadOwlNestNftsFromWallet)
@@ -635,15 +636,16 @@ export function DashboardNestingClient() {
 
   /** After stake/unstake, refresh eligible NFTs (only if user already loaded for this perch). */
   useEffect(() => {
-    if (!nftMintRequired || !stakePoolId) return
+    const poolId = selectedPerch?.id
+    if (!nftMintRequired || !poolId) return
     if (!connected || !publicKey || needsSignIn || loading || error !== null) return
     if (owlNestScanStatusRef.current !== 'done') return
     const loadedFor = owlNestLastLoadedPoolIdRef.current
-    if (loadedFor !== stakePoolId) return
+    if (loadedFor !== poolId) return
     void loadOwlNestNftsRef.current()
     // Intentionally keyed on nested set + perch only — avoids re-scan when `loading` flips during unrelated dashboard refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
-  }, [nestedActiveMintKey, nftMintRequired, stakePoolId])
+  }, [nestedActiveMintKey, nftMintRequired, selectedPerch?.id])
 
   const loadPerchTokenRef = useRef(loadPerchTokenFromWallet)
   loadPerchTokenRef.current = loadPerchTokenFromWallet
@@ -680,11 +682,11 @@ export function DashboardNestingClient() {
 
   /** While nesting is globally paused, still allow Confirm nest when every selected NFT is mid-open (pending, freeze not confirmed). */
   const canOnlyResumeFreeze = useMemo(() => {
-    if (!nestingDisabled || !stakePoolId.trim()) return false
-    const pool = poolById.get(stakePoolId.trim())
+    const pid = selectedPerch?.id?.trim() ?? ''
+    if (!nestingDisabled || !pid) return false
+    const pool = poolById.get(pid)
     if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') return false
     if (selectedNftStakeAssetIds.length === 0) return false
-    const pid = stakePoolId.trim()
     return selectedNftStakeAssetIds.every((assetId) => {
       const id = assetId.trim()
       if (!id) return false
@@ -696,7 +698,7 @@ export function DashboardNestingClient() {
           !(p.external_reference ?? '').startsWith('nft_freeze_confirmed:')
       )
     })
-  }, [nestingDisabled, stakePoolId, poolById, selectedNftStakeAssetIds, positions])
+  }, [nestingDisabled, selectedPerch?.id, poolById, selectedNftStakeAssetIds, positions])
 
   const toggleSelectedOwlNestMint = useCallback((mint: string) => {
     const exists = stakeAssetIds.includes(mint)
@@ -880,17 +882,21 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet]
   )
 
+  const cancelOpeningNest = useCallback(() => {
+    stakeTxAbortRef.current?.abort()
+  }, [])
+
   const handleStake = async () => {
     if (!publicKey) return
     setActionError(null)
     setSuccessMessage(null)
-    const pool_id = stakePoolId.trim()
-    const amountNum = Number(stakeAmount)
-    const pool = pools.find((p) => p.id === pool_id)
+    const pool = selectedPerch
     if (!pool) {
       setActionError('Choose a perch first.')
       return
     }
+    const pool_id = pool.id
+    const amountNum = Number(stakeAmount)
     const nftAssetIds = pool.asset_type === 'nft' ? selectedNftStakeAssetIds : []
     if (pool.asset_type === 'token') {
       if (Number.isNaN(amountNum) || amountNum <= 0) {
@@ -902,8 +908,14 @@ export function DashboardNestingClient() {
       return
     }
 
+    stakeTxAbortRef.current?.abort()
+    const stakeFlowAbort = new AbortController()
+    const signal = stakeFlowAbort.signal
+    stakeTxAbortRef.current = stakeFlowAbort
+
     try {
       const result = await runNestingTxAction({
+        signal,
         onPhase: setStakeTxPhase,
         async execute() {
           const stakeOne = async (assetId?: string) => {
@@ -916,6 +928,7 @@ export function DashboardNestingClient() {
               body.bypass_nesting_sellout_gate = true
             }
 
+            throwIfNestingAborted(signal)
             const res = await fetch('/api/me/staking/stake', {
               method: 'POST',
               credentials: 'include',
@@ -924,6 +937,7 @@ export function DashboardNestingClient() {
                 'X-Connected-Wallet': publicKey.toBase58(),
               },
               body: JSON.stringify(body),
+              signal,
             })
             const json = (await res.json().catch(() => ({}))) as {
               error?: string
@@ -953,6 +967,7 @@ export function DashboardNestingClient() {
               }
               setStakeTxPhase('awaiting_wallet_signature')
               const signature = await sendOnChainTokenStakeTransfer(pool, stakeAmount)
+              throwIfNestingAborted(signal)
               setStakeTxPhase('syncing')
               const syncRes = await fetch('/api/me/staking/sync', {
                 method: 'POST',
@@ -962,6 +977,7 @@ export function DashboardNestingClient() {
                   'X-Connected-Wallet': publicKey.toBase58(),
                 },
                 body: JSON.stringify({ position_id: positionId, signature, kind: 'stake' }),
+                signal,
               })
               const syncJson = (await syncRes.json().catch(() => ({}))) as { error?: string }
               if (!syncRes.ok) {
@@ -982,6 +998,7 @@ export function DashboardNestingClient() {
               }
               setStakeTxPhase('awaiting_wallet_signature')
               const signature = await sendMplCoreFreezeDelegateApproval(positionAssetId, delegateAddress)
+              throwIfNestingAborted(signal)
               setStakeTxPhase('syncing')
               const freezeRes = await fetch('/api/me/staking/freeze', {
                 method: 'POST',
@@ -991,6 +1008,7 @@ export function DashboardNestingClient() {
                   'X-Connected-Wallet': publicKey.toBase58(),
                 },
                 body: JSON.stringify({ position_id: positionId, signature }),
+                signal,
               })
               const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
               if (!freezeRes.ok) {
@@ -1004,10 +1022,13 @@ export function DashboardNestingClient() {
           if (pool.asset_type === 'nft') {
             let completed = 0
             for (const assetId of nftAssetIds) {
+              throwIfNestingAborted(signal)
               try {
                 await stakeOne(assetId)
                 completed += 1
               } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') throw e
+                if (e instanceof Error && e.name === 'AbortError') throw e
                 const prefix =
                   completed > 0 ? `${completed} of ${nftAssetIds.length} NFTs nested. ` : ''
                 setActionError(`${prefix}Failed on ${shortenAddress(assetId, 6)}.`)
@@ -1037,8 +1058,17 @@ export function DashboardNestingClient() {
           : 'Nest opened successfully — your stake is on file for this perch. Claim anytime from your nests below.'
       )
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setActionError(null)
+        void loadPositions()
+        return
+      }
       if (e instanceof Error && e.message === 'stake') return
       setActionError(e instanceof Error ? e.message : 'Stake failed')
+    } finally {
+      if (stakeTxAbortRef.current === stakeFlowAbort) {
+        stakeTxAbortRef.current = null
+      }
     }
   }
 
@@ -1430,7 +1460,9 @@ export function DashboardNestingClient() {
           description={
             solePerch
               ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet and pick one or more Owl Nest NFTs; each one is frozen in your wallet while it earns.'
-              : 'Token perches use an amount up top; Owl Nest NFT perches use the checklist below (one nest per NFT—use Select all when you want the whole flock). Then pick the perch and confirm.'
+              : lockedPerch
+                ? 'This perch is tied to your nest—load what you are tucking in below, then confirm. Rates and lock stay on this perch only.'
+                : 'Token perches use an amount up top; Owl Nest NFT perches use the checklist below (one nest per NFT—use Select all when you want the whole flock). Pick a perch from the list—each one keeps its own nests separate.'
           }
         />
         <div className="relative rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-card/90 via-card/60 to-black/50 p-2 sm:p-3 shadow-[0_0_48px_rgba(0,255,136,0.07)]">
@@ -1474,9 +1506,9 @@ export function DashboardNestingClient() {
                 />
               </>
             )}
-            {!stakePoolId && !lockedPerch ? (
+            {!selectedPerch ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                Tip: pick your perch below—the rate and lock apply to whatever you tuck in up here.
+                Tip: choose a perch below—each nest earns on one perch only, so we keep them separate from each other.
               </p>
             ) : null}
             {lockedPerch && lockedPerch.asset_type === 'nft' ? (
@@ -1595,52 +1627,29 @@ export function DashboardNestingClient() {
               </>
             ) : (
               <>
-                <Label htmlFor="stake-pool" className="mt-3 block text-sm font-medium text-foreground">
-                  Choose perch
-                </Label>
-                <div className="relative mt-1.5">
-                  <select
-                    id="stake-pool"
-                    aria-label="Choose perch to nest on"
-                    className={cn(
-                      'flex min-h-[48px] w-full appearance-none rounded-lg border border-emerald-500/30 bg-background/85 py-3 pl-3 pr-11 text-left text-base font-medium text-foreground ring-offset-background',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                      'touch-manipulation disabled:opacity-50'
-                    )}
-                    value={stakePoolId}
-                    onChange={(e) => setStakePoolId(e.target.value)}
-                  >
-                    <option value="">Select a perch…</option>
-                    {pools.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · {perchAssetKindLabel(p.asset_type)}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden
-                  />
-                </div>
-                {selectedPerch ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-emerald-500/15 pt-3 text-xs text-muted-foreground">
-                    <span className="tabular-nums">
-                      Reward {selectedPerch.reward_token ? `${selectedPerch.reward_token} · ` : ''}
-                      <span className="font-medium text-theme-prime/90">
-                        {formatRewardRate(Number(selectedPerch.reward_rate), selectedPerch.reward_rate_unit)}
-                      </span>
-                    </span>
-                    <span className="text-border" aria-hidden>
-                      ·
-                    </span>
-                    <span>
-                      Lock{' '}
-                      <span className="font-medium text-foreground/85">
-                        {selectedPerch.lock_period_days === 0 ? 'none' : `${selectedPerch.lock_period_days} days`}
-                      </span>
-                    </span>
-                  </div>
-                ) : null}
+                <p className="mt-3 text-sm font-medium text-foreground">Choose a perch</p>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Each nest belongs to one perch. Tap the row that matches what you hold—your dashboard will stay on
+                  that perch only (no mixing assets across perches).
+                </p>
+                <ul className="mt-3 list-none space-y-2 p-0" role="list">
+                  {pools.map((p) => (
+                    <li key={p.id}>
+                      <Link
+                        href={`/dashboard/nesting?pool=${encodeURIComponent(p.id)}`}
+                        className={cn(
+                          'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-background/85 px-3 py-3 text-left text-base font-medium text-foreground',
+                          'ring-offset-background hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2'
+                        )}
+                      >
+                        <span className="min-w-0 truncate">{p.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {perchAssetKindLabel(p.asset_type)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
               </>
             )}
           </div>
@@ -1854,6 +1863,12 @@ export function DashboardNestingClient() {
                         Select all
                       </Button>
                     </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground/85">Recommended:</span> select every coin you want,
+                      then confirm once (use Select all for the whole flock). That keeps the batch grouped in one run, so
+                      nest counts and totals are calculated for the full batch together—simpler than a separate transaction for
+                      each coin, especially when testing.
+                    </p>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {owlNestMintScan.mints.map((m) => {
                         const checked = stakeAssetIds.includes(m.mint)
@@ -1958,7 +1973,7 @@ export function DashboardNestingClient() {
                 !securityAck ||
                 (nestingDisabled && !canOnlyResumeFreeze) ||
                 stakeTxPhase !== 'idle' ||
-                !stakePoolId ||
+                !selectedPerch ||
                 (nftMintRequired && selectedNftStakeAssetIds.length === 0)
               }
               onClick={() => void handleStake()}

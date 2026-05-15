@@ -11,6 +11,20 @@ export type RunNestingTxActionParams<T> = {
    * Omit for DB-mock / SIWS-only flows to avoid a wallet popup step.
    */
   signStep?: () => Promise<void>
+  /** When aborted, phases return to `idle` without flashing `failed`. */
+  signal?: AbortSignal
+}
+
+export function throwIfNestingAborted(signal: AbortSignal | undefined) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
+  }
+}
+
+function isAbortError(e: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted) return true
+  if (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') return true
+  return e instanceof Error && e.name === 'AbortError'
 }
 
 let microDelay = (): Promise<void> => Promise.resolve()
@@ -26,25 +40,32 @@ if (typeof queueMicrotask === 'function') {
  * Rethrows `execute` errors; caller sets user-facing `actionError`. Always returns phase to `idle` on end.
  */
 export async function runNestingTxAction<T>(params: RunNestingTxActionParams<T>): Promise<T> {
-  const { onPhase, execute, afterSuccess, signStep } = params
+  const { onPhase, execute, afterSuccess, signStep, signal } = params
   try {
+    throwIfNestingAborted(signal)
     onPhase('preparing')
     await microDelay()
+    throwIfNestingAborted(signal)
     if (signStep) {
       onPhase('awaiting_wallet_signature')
       await signStep()
+      throwIfNestingAborted(signal)
     }
     onPhase('submitting')
     const result = await execute()
+    throwIfNestingAborted(signal)
     onPhase('syncing')
     if (afterSuccess) {
       await afterSuccess()
     }
+    throwIfNestingAborted(signal)
     onPhase('idle')
     return result
   } catch (e) {
-    onPhase('failed')
-    await microDelay()
+    if (!isAbortError(e, signal)) {
+      onPhase('failed')
+      await microDelay()
+    }
     onPhase('idle')
     throw e
   }
