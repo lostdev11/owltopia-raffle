@@ -27,10 +27,14 @@ export async function getNestingPublicSettings(): Promise<NestingPublicSettingsR
   }
 }
 
-/** Safe default when migration not applied yet. */
+/**
+ * When no settings row exists yet (pre-migration or empty DB), treat the landing as public
+ * so `/nesting` is not accidentally hidden. Admins can still turn it off once the row exists.
+ */
 export async function isNestingLandingPublic(): Promise<boolean> {
   const row = await getNestingPublicSettings()
-  return row?.landing_public === true
+  if (!row) return true
+  return row.landing_public === true
 }
 
 export async function setNestingLandingPublic(input: {

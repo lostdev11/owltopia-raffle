@@ -25,12 +25,17 @@ export function isNestingSelloutRequired(): boolean {
 
 export function isNestingSelloutReached(): boolean {
   if (!isNestingSelloutRequired()) return true
-  const flag = process.env.NESTING_SELL_OUT_REACHED?.trim().toLowerCase()
-  if (flag === 'true' || flag === '1' || flag === 'yes') return true
+
   const at = process.env.NESTING_SELL_OUT_AT?.trim()
-  if (!at) return false
-  const ms = Date.parse(at)
-  return Number.isFinite(ms) && Date.now() >= ms
+  if (at) {
+    const ms = Date.parse(at)
+    if (Number.isFinite(ms)) {
+      return Date.now() >= ms
+    }
+  }
+
+  // When unset, default true so staking is open unless you explicitly set REACHED=false or use SELL_OUT_AT.
+  return readBoolean(process.env.NESTING_SELL_OUT_REACHED, true)
 }
 
 export function assertNestingSelloutReached(): void {

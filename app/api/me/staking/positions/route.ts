@@ -9,7 +9,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 /**
  * GET /api/me/staking/positions
- * Admin session only until nesting is public — returns rows for session wallet (DB-backed).
+ * SIWS session required — returns staking rows for the session wallet (DB-backed).
  */
 export async function GET(request: NextRequest) {
   try {

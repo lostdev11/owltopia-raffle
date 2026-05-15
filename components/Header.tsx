@@ -86,27 +86,6 @@ export function Header() {
 
   // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
   const showOwlVision = isAdmin === true || adminSessionActive === true
-  const [nestingLandingPublic, setNestingLandingPublic] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/nesting/public-settings', { cache: 'no-store' })
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
-      .then((data) => {
-        if (cancelled) return
-        setNestingLandingPublic(data?.landingPublic === true)
-      })
-      .catch(() => {
-        if (!cancelled) setNestingLandingPublic(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [visibilityTick])
-
-  /** Nesting appears for admins always; for everyone when `/nesting` is turned on in Owl Nesting admin. */
-  const showNestingNav = isAdmin === true || adminSessionActive === true || nestingLandingPublic
-  const nestingNavHref = nestingLandingPublic ? '/nesting' : '/dashboard/nesting'
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -121,7 +100,7 @@ export function Header() {
     { href: '/council', label: 'Council', icon: Landmark },
     { href: '/owl-center', label: 'Owl Center', icon: Rocket },
     { href: '/gen2-presale', label: 'Gen2 Presale', icon: Sparkles },
-    ...(showNestingNav ? [{ href: nestingNavHref, label: 'Nesting', icon: Bird }] : []),
+    { href: '/nesting', label: 'Nesting', icon: Bird },
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -177,14 +156,12 @@ export function Header() {
                   <span className="hidden sm:inline">Gen2 Presale</span>
                 </Button>
               </Link>
-              {showNestingNav && (
-                <Link href={nestingNavHref}>
-                  <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
-                    <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">Nesting</span>
-                  </Button>
-                </Link>
-              )}
+              <Link href="/nesting">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
+                  <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Nesting</span>
+                </Button>
+              </Link>
               {connected && (
                 <Link href="/dashboard">
                   <Button variant="ghost" size="sm" className={desktopNavButtonClass}>

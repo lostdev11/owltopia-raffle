@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     const row = await getNestingPublicSettings()
-    const landingPublic = row?.landing_public === true
+    const landingPublic = !row || row.landing_public === true
     return NextResponse.json(
       { landingPublic },
       {
