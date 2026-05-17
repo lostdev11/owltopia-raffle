@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
   entryQualifiesForPlayerLeaderboard,
+  leaderboardMinTicketPriceSol,
   leaderboardPurchaseMaxTicketsPerWalletPerRaffle,
   leaderboardTicketsSoldMinDistinctNonCreatorBuyers,
   leaderboardWalletIsExcluded,
@@ -60,6 +61,8 @@ export type LeaderboardPeriodMeta = {
   /** Exclusive UTC range end (ISO), if scoped */
   rangeEndExclusive?: string
   leaderboardRules?: LeaderboardRulesMode
+  /** Server floor for ticket_price (SOL); UI copy should match. */
+  minTicketPriceSol?: number
 }
 
 type TimeWindow = { startIso: string; endIso: string }
@@ -590,6 +593,7 @@ export async function getLeaderboardWithMeta(period: LeaderboardPeriod): Promise
   const meta: LeaderboardPeriodMeta = {
     ...buildLeaderboardPeriodMeta(period),
     leaderboardRules: rulesMode,
+    minTicketPriceSol: leaderboardMinTicketPriceSol(),
   }
 
   const needThresholdTicketScan = rulesMode === 'threshold' && window != null

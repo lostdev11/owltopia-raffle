@@ -15,7 +15,9 @@ import {
   ShoppingCart,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from 'lucide-react'
+import { leaderboardTableDescriptions } from '@/lib/leaderboard/copy'
 
 const LEADERBOARD_MIN_YEAR = 2024
 
@@ -45,6 +47,7 @@ type LeaderboardPeriodMeta = {
   rangeStart?: string
   rangeEndExclusive?: string
   leaderboardRules?: LeaderboardRulesMode
+  minTicketPriceSol?: number
 }
 
 function utcNowYm(): { year: number; month: number } {
@@ -70,60 +73,6 @@ function formatWallet(wallet: string): string {
   return `${wallet.slice(0, 6)}…${wallet.slice(-4)}`
 }
 
-function tableDescriptions(meta: LeaderboardPeriodMeta | null): {
-  rafflesEntered: string
-  ticketsPurchased: string
-  rafflesCreated: string
-  rafflesWon: string
-  ticketsSold: string
-} {
-  const scope =
-    meta == null || meta.kind === 'all' ? 'all time (UTC)' : meta.label
-
-  const antiAbuseLegacy =
-    'Raffles priced at or below the floor do not count (default: must be above 0.001 SOL; USDC/OWL use the same ratio as referral dust rules). Entries exclude complimentary, refunded, or zero-amount rows. Tickets purchased: capped per wallet per raffle. Tickets sold: needs enough distinct paying buyers besides the creator.'
-
-  const thresholdExtra =
-    meta?.leaderboardRules === 'threshold'
-      ? ' Only raffles that reached their ticket draw goal are included; cancelled and draft raffles do not count.'
-      : ''
-
-  const antiAbuse = antiAbuseLegacy + thresholdExtra
-
-  const entered =
-    meta == null || meta.kind === 'all'
-      ? `Users with the most distinct raffles participated in (paid, confirmed entries). ${antiAbuse} Display names are set in My Dashboard.`
-      : `Users with the most distinct raffles participated in during this period (${scope}). ${antiAbuse} Display names are set in My Dashboard.`
-
-  const purchased =
-    meta == null || meta.kind === 'all'
-      ? `Players who have bought the most tickets across all raffles (paid, confirmed entries). ${antiAbuse}`
-      : `Players who bought the most tickets in this period (${scope}), ranked by confirmation time. ${antiAbuse}`
-
-  const created =
-    meta == null || meta.kind === 'all'
-      ? 'Creators who have launched the most raffles.'
-      : `Creators who launched the most raffles in this period (${scope}).`
-
-  const won =
-    meta == null || meta.kind === 'all'
-      ? 'Players who have won the most completed raffles on Owl Raffle.'
-      : `Players with the most wins recorded in this period (${scope}), by winner selection time.`
-
-  const sold =
-    meta == null || meta.kind === 'all'
-      ? `Creators whose raffles have sold the most paid tickets from non-creator buyers, only when enough distinct buyers participated. ${antiAbuse}`
-      : `Creators whose raffles sold the most eligible tickets in this period (${scope}). ${antiAbuse}`
-
-  return {
-    rafflesEntered: entered,
-    ticketsPurchased: purchased,
-    rafflesCreated: created,
-    rafflesWon: won,
-    ticketsSold: sold,
-  }
-}
-
 function LeaderboardTable({
   title,
   description,
@@ -140,13 +89,23 @@ function LeaderboardTable({
   displayNames: Record<string, string>
 }) {
   return (
-    <Card className="border-green-500/20 bg-black/40">
+    <Card className="border-green-500/20 bg-black/40 overflow-visible">
       <CardHeader className="pb-2 sm:pb-6">
-        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-          <Icon className="h-5 w-5 text-green-500 shrink-0" />
-          {title}
-        </CardTitle>
-        <CardDescription className="text-xs sm:text-sm">{description}</CardDescription>
+        <details className="group" open>
+          <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Icon className="h-5 w-5 text-green-500 shrink-0" aria-hidden />
+              <span className="underline-offset-2 group-open:underline hover:underline">{title}</span>
+              <ChevronDown
+                className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180 ml-auto"
+                aria-hidden
+              />
+            </CardTitle>
+          </summary>
+          <CardDescription className="text-xs sm:text-sm mt-2 leading-relaxed break-words">
+            {description}
+          </CardDescription>
+        </details>
       </CardHeader>
       <CardContent>
         {entries.length === 0 ? (
@@ -294,7 +253,7 @@ export default function LeaderboardPage() {
       .catch(() => setDisplayNames({}))
   }, [data])
 
-  const descriptions = tableDescriptions(periodMeta)
+  const descriptions = leaderboardTableDescriptions(periodMeta)
 
   return (
     <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4 max-w-5xl min-h-0">
