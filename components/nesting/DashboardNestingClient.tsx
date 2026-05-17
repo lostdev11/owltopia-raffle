@@ -2409,7 +2409,7 @@ export function DashboardNestingClient() {
       <section>
         <SectionHeader
           title="Your nests"
-          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card."
+          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card—tap the header to expand or collapse."
         />
         {!securityAck ? (
           <div
