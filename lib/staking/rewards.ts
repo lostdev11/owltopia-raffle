@@ -51,8 +51,12 @@ export function estimateClaimableRewards(params: {
   return pending > 0 ? pending : 0
 }
 
-/** Smallest positive claimable balance (UI units) treated as claimable (avoids float noise). */
-export const MIN_CLAIMABLE_REWARD_UI = 1e-12
+/**
+ * Smallest claimable balance (UI units) treated as claimable.
+ * Rewards accrue continuously; after a full claim, tiny new amounts appear within seconds.
+ * This floor keeps post-claim dust off the dashboard until a meaningful payout builds up.
+ */
+export const MIN_CLAIMABLE_REWARD_UI = 1e-4
 
 export function hasClaimableRewardBalance(claimableUi: number): boolean {
   if (!Number.isFinite(claimableUi)) return false

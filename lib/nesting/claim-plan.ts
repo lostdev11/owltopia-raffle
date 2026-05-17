@@ -9,6 +9,34 @@ export type PositionClaimPlan = {
   claimableNow: number
 }
 
+export function isOwlRewardPosition(
+  row: Pick<StakingPositionRow, 'reward_token_snapshot'>
+): boolean {
+  return (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
+}
+
+/** Active OWL nests with a claimable balance at `asOfMs` (same rules as Claim all). */
+export function buildOwlClaimPlansForPositions(
+  rows: StakingPositionRow[],
+  asOfMs = Date.now()
+): PositionClaimPlan[] {
+  const plans: PositionClaimPlan[] = []
+  for (const row of rows) {
+    if (row.status !== 'active' || !isOwlRewardPosition(row)) continue
+    const plan = buildFullPositionClaimPlan(row, asOfMs)
+    if (plan) plans.push(plan)
+  }
+  return plans
+}
+
+export function sumOwlClaimPlans(plans: PositionClaimPlan[]): { count: number; totalOwl: number } {
+  let totalOwl = 0
+  for (const plan of plans) {
+    totalOwl += plan.payoutAmount
+  }
+  return { count: plans.length, totalOwl }
+}
+
 /** Max-claim plan for an active nest (full pending balance). Returns null if nothing claimable. */
 export function buildFullPositionClaimPlan(
   row: StakingPositionRow,

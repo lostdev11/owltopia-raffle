@@ -11,7 +11,12 @@ import {
   listStakingPositionsByWallet,
 } from '@/lib/db/staking-positions'
 import { estimateAccruedRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
-import { buildFullPositionClaimPlan, noClaimableRewardsMessage } from '@/lib/nesting/claim-plan'
+import {
+  buildFullPositionClaimPlan,
+  buildOwlClaimPlansForPositions,
+  isOwlRewardPosition,
+  noClaimableRewardsMessage,
+} from '@/lib/nesting/claim-plan'
 import { executeBatchOwlClaims } from '@/lib/nesting/batch-claim'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
@@ -297,12 +302,9 @@ export async function executeClaimAll(params: { wallet: string }) {
   await assertNestingOperationsAllowed()
 
   const rows = await listStakingPositionsByWallet(params.wallet)
-  const owlRows = rows.filter(
-    (r) => r.status === 'active' && (r.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  )
-  const plans = owlRows
-    .map((r) => buildFullPositionClaimPlan(r))
-    .filter((p): p is NonNullable<typeof p> => p !== null)
+  const asOfMs = Date.now()
+  const plans = buildOwlClaimPlansForPositions(rows, asOfMs)
+  const owlRows = rows.filter((r) => r.status === 'active' && isOwlRewardPosition(r))
 
   if (plans.length === 0) {
     throw new StakingUserError(

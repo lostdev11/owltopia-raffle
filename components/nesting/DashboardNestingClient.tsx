@@ -39,9 +39,7 @@ import {
   isOpeningNftNestAbortable,
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
-import { estimateClaimableRewards } from '@/lib/staking/rewards'
-import { buildFullPositionClaimPlan } from '@/lib/nesting/claim-plan'
-import type { RewardRateUnit } from '@/lib/db/staking-pools'
+import { buildOwlClaimPlansForPositions, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
 import { nestGalleryAnchorId, StakedNftNestGallery } from '@/components/nesting/StakedNftNestGallery'
@@ -442,18 +440,9 @@ export function DashboardNestingClient() {
   }, [openPositions, poolById])
 
   const claimAllPreview = useMemo(() => {
-    let count = 0
-    let totalOwl = 0
-    for (const p of openPositions) {
-      if (p.status !== 'active') continue
-      if ((p.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') continue
-      const plan = buildFullPositionClaimPlan(p)
-      if (!plan) continue
-      count += 1
-      totalOwl += plan.payoutAmount
-    }
-    return { count, totalOwl }
-  }, [openPositions])
+    const plans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
+    return sumOwlClaimPlans(plans)
+  }, [openPositions, rewardsNowMs])
 
   const claimableNestCount = claimAllPreview.count
 
@@ -881,6 +870,53 @@ export function DashboardNestingClient() {
     })
   }, [positions, poolById])
 
+  const openNestFormNeedsAttention = useMemo(() => {
+    if (openingNestsNeedingWalletLock.length > 0) return true
+    if (stakeTxPhase !== 'idle') return true
+    if (openPositions.length === 0) return true
+    return false
+  }, [openingNestsNeedingWalletLock.length, stakeTxPhase, openPositions.length])
+
+  const [openNestFormExpanded, setOpenNestFormExpanded] = useState(() => true)
+
+  useEffect(() => {
+    if (openNestFormNeedsAttention) setOpenNestFormExpanded(true)
+  }, [openNestFormNeedsAttention])
+
+  const openNestFormDescription = solePerch
+    ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet and pick one or more Owl Nest NFTs; each one is frozen in your wallet while it earns.'
+    : lockedPerch
+      ? 'This perch is tied to your nest—load what you are tucking in below, then confirm. Rates and lock stay on this perch only.'
+      : 'Token perches use an amount up top; Owl Nest NFT perches use the checklist below (one nest per NFT—use Select all when you want the whole flock). Pick a perch from the list—each one keeps its own nests separate.'
+
+  const openNestFormCollapsedSummary = useMemo(() => {
+    const parts: string[] = []
+    if (openingNestsNeedingWalletLock.length > 0) {
+      parts.push(
+        openingNestsNeedingWalletLock.length === 1
+          ? '1 nest needs wallet lock'
+          : `${openingNestsNeedingWalletLock.length} nests need wallet lock`
+      )
+    }
+    if (stakeTxPhase !== 'idle') {
+      parts.push(nestingTxPhaseLabel(stakeTxPhase))
+    }
+    if (selectedNftStakeAssetIds.length > 0) {
+      parts.push(
+        `${selectedNftStakeAssetIds.length} coin${selectedNftStakeAssetIds.length === 1 ? '' : 's'} selected`
+      )
+    } else if (stakeAmount.trim()) {
+      parts.push(`${stakeAmount.trim()} ready to nest`)
+    }
+    if (parts.length > 0) return parts.join(' · ')
+    return 'Tap to tuck in tokens or Owltopia coins'
+  }, [
+    openingNestsNeedingWalletLock.length,
+    stakeTxPhase,
+    selectedNftStakeAssetIds.length,
+    stakeAmount,
+  ])
+
   const resumeOpeningNest = useCallback(
     (position: StakingPositionRow) => {
       const mint = position.asset_identifier?.trim()
@@ -888,6 +924,7 @@ export function DashboardNestingClient() {
       setStakeAssetId(mint)
       setStakeAssetIds([mint])
       setActionError(null)
+      setOpenNestFormExpanded(true)
       if (typeof document !== 'undefined') {
         document.getElementById('nesting-open-nest-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       }
@@ -984,25 +1021,18 @@ export function DashboardNestingClient() {
 
   const totals = useMemo(() => {
     let nested = 0
-    let estRaw = 0
     let claimed = 0
     for (const pos of positions) {
       if (pos.status === 'active' || pos.status === 'pending') {
         nested += Number(pos.amount)
       }
       claimed += Number(pos.claimed_rewards)
-      if (pos.status === 'active') {
-        estRaw += estimateClaimableRewards({
-          amount: Number(pos.amount),
-          rewardRateSnapshot: Number(pos.reward_rate_snapshot),
-          rewardRateUnitSnapshot: pos.reward_rate_unit_snapshot as RewardRateUnit,
-          claimedRewards: Number(pos.claimed_rewards),
-          stakedAtMs: new Date(pos.staked_at).getTime(),
-          asOfMs: rewardsNowMs,
-        })
-      }
     }
-    const est = estRaw
+    const owlPlans = buildOwlClaimPlansForPositions(
+      positions.filter((p) => p.status === 'active'),
+      rewardsNowMs
+    )
+    const est = sumOwlClaimPlans(owlPlans).totalOwl
     const activeCount = positions.filter((p) => p.status === 'active').length
     return { nested, est, claimed, activeCount }
   }, [positions, rewardsNowMs])
@@ -1870,6 +1900,7 @@ export function DashboardNestingClient() {
               setStakeAssetIds(mints)
               setStakeAssetId(mints[0] ?? '')
               setActionError(null)
+              setOpenNestFormExpanded(true)
               document.getElementById('nesting-open-nest-form')?.scrollIntoView({
                 behavior: 'smooth',
                 block: 'start',
@@ -1909,17 +1940,41 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
-      <section id="nesting-open-nest-form" className="space-y-4 scroll-mt-24">
-        <SectionHeader
-          title="Open a nest"
-          description={
-            solePerch
-              ? 'Everyone uses the same Owl Nest perch: 365-day lock, 1 OWL per day per NFT. Connect your wallet and pick one or more Owl Nest NFTs; each one is frozen in your wallet while it earns.'
-              : lockedPerch
-                ? 'This perch is tied to your nest—load what you are tucking in below, then confirm. Rates and lock stay on this perch only.'
-                : 'Token perches use an amount up top; Owl Nest NFT perches use the checklist below (one nest per NFT—use Select all when you want the whole flock). Pick a perch from the list—each one keeps its own nests separate.'
-          }
-        />
+      <section id="nesting-open-nest-form" className="scroll-mt-24">
+        <button
+          type="button"
+          className={cn(
+            'flex w-full min-h-[44px] touch-manipulation items-start justify-between gap-3 rounded-lg text-left',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+          )}
+          aria-expanded={openNestFormExpanded}
+          aria-controls="nesting-open-nest-form-content"
+          onClick={() => setOpenNestFormExpanded((v) => !v)}
+        >
+          <span className="sr-only">{openNestFormExpanded ? 'Collapse' : 'Expand'} Open a nest</span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h2 className="font-display text-xl sm:text-2xl tracking-wide text-theme-prime drop-shadow-[0_0_12px_rgba(0,255,136,0.25)]">
+              Open a nest
+            </h2>
+            <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+              {openNestFormExpanded ? openNestFormDescription : openNestFormCollapsedSummary}
+            </p>
+            {!openNestFormExpanded && openingNestsNeedingWalletLock.length > 0 ? (
+              <p className="text-xs text-amber-300/95 leading-relaxed">
+                Expand to finish the wallet lock — use Confirm nest below.
+              </p>
+            ) : null}
+          </div>
+          <ChevronDown
+            className={cn(
+              'mt-1 h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200',
+              openNestFormExpanded && 'rotate-180'
+            )}
+            aria-hidden
+          />
+        </button>
+        {openNestFormExpanded ? (
+        <div id="nesting-open-nest-form-content" className="mt-4 space-y-4">
         <div className="relative rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-card/90 via-card/60 to-black/50 p-2 sm:p-3 shadow-[0_0_48px_rgba(0,255,136,0.07)]">
           {/* Top: amount in (swap "from") */}
           <div className="rounded-xl border border-emerald-500/20 bg-black/40 p-4 sm:p-5">
@@ -2535,6 +2590,8 @@ export function DashboardNestingClient() {
             </Button>
           </div>
         </div>
+        </div>
+        ) : null}
       </section>
 
       <section>
