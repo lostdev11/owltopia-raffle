@@ -20,17 +20,41 @@ export function isNftNestedForGallery(
   return false
 }
 
-/** Pending on-chain NFT nest before wallet freeze is confirmed — user may cancel without waiting for lock. */
+/** Pending NFT nest before freeze is reflected in DB (`nft_freeze_confirmed:`). */
+export function isPendingNftNestBeforeFreezeConfirmed(
+  position: Pick<StakingPositionRow, 'status' | 'external_reference'>
+): boolean {
+  return (
+    position.status === 'pending' &&
+    !(position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+  )
+}
+
+/** Freeze recorded in DB but row never promoted to `active` (manual patch / partial write). */
+export function isPendingNftNestFreezeConfirmedButNotActive(
+  position: Pick<StakingPositionRow, 'status' | 'external_reference'>
+): boolean {
+  return (
+    position.status === 'pending' &&
+    (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+  )
+}
+
+/**
+ * Pending on-chain NFT nest before wallet freeze is confirmed — user may cancel without waiting for lock.
+ * Also true for orphaned `awaiting_nft_freeze` rows that never completed the wallet lock step.
+ */
 export function isOpeningNftNestAbortable(
   position: Pick<StakingPositionRow, 'status' | 'external_reference'>,
   pool: Pick<StakingPoolRow, 'asset_type' | 'adapter_mode'>
 ): boolean {
-  return (
-    position.status === 'pending' &&
-    pool.asset_type === 'nft' &&
-    pool.adapter_mode === 'onchain_enabled' &&
-    !(position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
-  )
+  if (pool.asset_type !== 'nft' || !isPendingNftNestBeforeFreezeConfirmed(position)) {
+    return false
+  }
+  if ((position.external_reference ?? '').trim() === 'awaiting_nft_freeze') {
+    return true
+  }
+  return pool.adapter_mode === 'onchain_enabled'
 }
 
 /**

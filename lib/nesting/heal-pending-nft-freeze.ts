@@ -10,8 +10,12 @@ import {
   type StakingPositionRow,
 } from '@/lib/db/staking-positions'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
-import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
-import { assertWalletNftFrozenForNesting } from '@/lib/nesting/nft-freeze'
+import {
+  isOpeningNftNestAbortable,
+  isPendingNftNestBeforeFreezeConfirmed,
+  isPendingNftNestFreezeConfirmedButNotActive,
+} from '@/lib/nesting/position-lifecycle'
+import { assertWalletNftFrozenForNesting, isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
 import { StakingUserError } from '@/lib/nesting/errors'
 
 const HEAL_MAX_PER_REQUEST = 6
@@ -23,14 +27,18 @@ export type HealPendingNftNestResult = {
 }
 
 function isPendingNftNestHealCandidate(
-  position: Pick<StakingPositionRow, 'status' | 'asset_identifier'>,
+  position: Pick<StakingPositionRow, 'status' | 'asset_identifier' | 'external_reference'>,
   pool: Pick<StakingPoolRow, 'asset_type' | 'adapter_mode'>
 ): boolean {
+  if (position.status !== 'pending' || !position.asset_identifier?.trim()) {
+    return false
+  }
+  if (pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') {
+    return false
+  }
   return (
-    position.status === 'pending' &&
-    Boolean(position.asset_identifier?.trim()) &&
-    pool.asset_type === 'nft' &&
-    pool.adapter_mode === 'onchain_enabled'
+    isPendingNftNestFreezeConfirmedButNotActive(position) ||
+    isPendingNftNestBeforeFreezeConfirmed(position)
   )
 }
 
@@ -63,6 +71,27 @@ export async function tryHealPendingNftNestPosition(
 
   const freezeRefConfirmed = (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
   if (freezeRefConfirmed) {
+    const frozenOnChain = await isWalletNftFrozenForNestingDelegate({
+      assetId: position.asset_identifier!,
+      collectionMint: pool.collection_key,
+    })
+    if (!frozenOnChain) {
+      try {
+        await assertWalletNftFrozenForNesting({
+          ownerWallet: position.wallet_address,
+          assetId: position.asset_identifier!,
+          collectionMint: pool.collection_key,
+        })
+      } catch (e) {
+        const message =
+          e instanceof StakingUserError
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : 'Could not confirm nest on-chain'
+        return { healed: false, error: message }
+      }
+    }
     const updated = await activatePendingWithConfirmedFreezeRef(position)
     return { healed: true, position: updated }
   }
@@ -116,7 +145,9 @@ export async function healPendingNftNestsForWallet(wallet: string): Promise<{
   for (const position of candidates) {
     if (healedCount >= HEAL_MAX_PER_REQUEST) break
     const pool = await getStakingPoolById(position.pool_id)
-    if (!pool || !isPendingNftNestHealCandidate(position, pool)) continue
+    if (!pool) continue
+
+    if (!isPendingNftNestHealCandidate(position, pool)) continue
 
     const r = await tryHealPendingNftNestPosition(position, pool)
     results.push({

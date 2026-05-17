@@ -5,11 +5,19 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
-import { estimateClaimableRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
+import {
+  estimateClaimableRewards,
+  hasClaimableRewardBalance,
+  meetsMinOwlClaimThreshold,
+  MIN_OWL_CLAIMABLE_TO_CLAIM,
+} from '@/lib/staking/rewards'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { LockTimer } from '@/components/nesting/LockTimer'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
+import {
+  isPendingNftNestFreezeConfirmedButNotActive,
+} from '@/lib/nesting/position-lifecycle'
 import {
   isNestingTxPhaseInFlight,
   nestingTxPhaseLabel,
@@ -17,14 +25,17 @@ import {
 } from '@/lib/nesting/tx-states'
 import { cn } from '@/lib/utils'
 
-function nestStatusPhrase(status: StakingPositionRow['status']) {
+function nestStatusPhrase(
+  status: StakingPositionRow['status'],
+  freezeConfirmedButNotActive: boolean
+) {
   switch (status) {
     case 'active':
       return 'Nesting'
     case 'unstaked':
       return 'Nest closed'
     case 'pending':
-      return 'Opening…'
+      return freezeConfirmedButNotActive ? 'Activating…' : 'Opening…'
     default:
       return status
   }
@@ -97,9 +108,11 @@ export function PositionNestRow({
   }, [position, nowMs])
 
   const paysOwlRewards = (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  const isOpening = position.status === 'pending'
+  const stuckActivating = isPendingNftNestFreezeConfirmedButNotActive(position)
+  const isOpening = position.status === 'pending' && !stuckActivating
   const canClaimOwl =
-    position.status === 'active' && hasClaimableRewardBalance(claimable)
+    position.status === 'active' &&
+    (paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12)
 
   const canUnstake =
     cancelOpeningAllowed ||
@@ -158,7 +171,7 @@ export function PositionNestRow({
           position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
         )}
       >
-        {nestStatusPhrase(position.status)}
+        {nestStatusPhrase(position.status, stuckActivating)}
       </span>
     </div>
   ) : (
@@ -175,7 +188,7 @@ export function PositionNestRow({
             position.status === 'active' ? 'text-emerald-400' : 'text-muted-foreground'
           }`}
         >
-          {nestStatusPhrase(position.status)}
+          {nestStatusPhrase(position.status, stuckActivating)}
         </span>
       </div>
     </CardHeader>
@@ -252,6 +265,11 @@ export function PositionNestRow({
           leave actions.
         </p>
       ) : null}
+      {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
+        <p className="w-full text-xs text-muted-foreground">
+          Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
+        </p>
+      ) : null}
       {!embedded && needsFreeze ? (
         <p className="w-full text-xs text-amber-300">
           This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
@@ -276,6 +294,12 @@ export function PositionNestRow({
             </>
           ) : null}
           .
+        </p>
+      ) : null}
+      {stuckActivating ? (
+        <p className="w-full text-xs text-amber-200/95 leading-relaxed">
+          Wallet lock is confirmed — finishing nest sync. Tap <span className="font-medium">Refresh</span> on the
+          dashboard; claim unlocks once status shows Nesting.
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">

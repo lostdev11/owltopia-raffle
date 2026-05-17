@@ -367,6 +367,7 @@ export default function DashboardPage() {
   const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
   const [isClaimingAllOfferRefunds, setIsClaimingAllOfferRefunds] = useState(false)
   const [buyoutRefundLoadingId, setBuyoutRefundLoadingId] = useState<string | null>(null)
+  const [isClaimingAllBuyoutRefunds, setIsClaimingAllBuyoutRefunds] = useState(false)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
   const [walletReady, setWalletReady] = useState(false)
@@ -1019,6 +1020,72 @@ export default function DashboardPage() {
     [loadDashboard]
   )
 
+  const handleClaimBuyoutRefund = useCallback(
+    async (offer: { id: string; raffle_id: string }) => {
+      setClaimActionError(null)
+      setBuyoutRefundLoadingId(offer.id)
+      try {
+        const res = await fetch(
+          `/api/raffles/${encodeURIComponent(offer.raffle_id)}/buyout/offers/${encodeURIComponent(offer.id)}/refund`,
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'X-Connected-Wallet': walletAddr },
+          },
+        )
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(typeof json?.error === 'string' ? json.error : 'Refund failed')
+          return
+        }
+        await loadDashboard({ silent: true })
+      } catch (e) {
+        setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
+      } finally {
+        setBuyoutRefundLoadingId(null)
+      }
+    },
+    [loadDashboard, walletAddr]
+  )
+
+  const handleClaimAllBuyoutRefunds = useCallback(
+    async (offers: { id: string; raffle_id: string }[]) => {
+      if (offers.length === 0) return
+      setClaimActionError(null)
+      setIsClaimingAllBuyoutRefunds(true)
+      let claimed = 0
+      try {
+        for (const offer of offers) {
+          setBuyoutRefundLoadingId(offer.id)
+          const res = await fetch(
+            `/api/raffles/${encodeURIComponent(offer.raffle_id)}/buyout/offers/${encodeURIComponent(offer.id)}/refund`,
+            {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'X-Connected-Wallet': walletAddr },
+            },
+          )
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            const base = typeof json?.error === 'string' ? json.error : 'Refund failed'
+            setClaimActionError(
+              claimed > 0 ? `${base} (${claimed} refund${claimed === 1 ? '' : 's'} claimed before this.)` : base
+            )
+            return
+          }
+          claimed++
+        }
+        await loadDashboard({ silent: true })
+      } catch (e) {
+        setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
+      } finally {
+        setBuyoutRefundLoadingId(null)
+        setIsClaimingAllBuyoutRefunds(false)
+      }
+    },
+    [loadDashboard, walletAddr]
+  )
+
   const handleToggleLiveActivityMuted = useCallback(() => {
     setLiveActivityMuted((prev) => {
       const next = !prev
@@ -1601,6 +1668,8 @@ export default function DashboardPage() {
       : claimRefundLoadingEntryId ? 'Processing your ticket refund...'
       : isClaimingAllOfferRefunds ? 'Claiming all offer refunds...'
       : claimOfferRefundLoadingId ? 'Processing your offer refund...'
+      : isClaimingAllBuyoutRefunds ? 'Claiming all buyout refunds...'
+      : buyoutRefundLoadingId ? 'Processing buyout refund...'
       : payCancelFeeLoadingId ? 'Paying cancellation fee...'
       : null
 
@@ -3211,6 +3280,27 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {buyoutRefundEligible.length > 1 && (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  className="touch-manipulation min-h-[44px]"
+                  disabled={buyoutRefundLoadingId !== null || isClaimingAllBuyoutRefunds}
+                  onClick={() => void handleClaimAllBuyoutRefunds(buyoutRefundEligible)}
+                >
+                  {isClaimingAllBuyoutRefunds ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                      Claiming all…
+                    </>
+                  ) : (
+                    `Claim all (${buyoutRefundEligible.length})`
+                  )}
+                </Button>
+              </div>
+            )}
             {buyoutRefundEligible.map((o) => (
               <div
                 key={o.id}
@@ -3228,31 +3318,8 @@ export default function DashboardPage() {
                   type="button"
                   variant="secondary"
                   className="min-h-[44px] w-full shrink-0 touch-manipulation sm:w-auto"
-                  disabled={buyoutRefundLoadingId === o.id}
-                  onClick={async () => {
-                    setBuyoutRefundLoadingId(o.id)
-                    setClaimActionError(null)
-                    try {
-                      const res = await fetch(
-                        `/api/raffles/${encodeURIComponent(o.raffle_id)}/buyout/offers/${encodeURIComponent(o.id)}/refund`,
-                        {
-                          method: 'POST',
-                          credentials: 'include',
-                          headers: { 'X-Connected-Wallet': walletAddr },
-                        },
-                      )
-                      const json = await res.json().catch(() => ({}))
-                      if (!res.ok) {
-                        setClaimActionError(typeof json?.error === 'string' ? json.error : 'Refund failed')
-                        return
-                      }
-                      await loadDashboard({ silent: true })
-                    } catch (e) {
-                      setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
-                    } finally {
-                      setBuyoutRefundLoadingId(null)
-                    }
-                  }}
+                  disabled={buyoutRefundLoadingId !== null}
+                  onClick={() => void handleClaimBuyoutRefund(o)}
                 >
                   {buyoutRefundLoadingId === o.id ? (
                     <>

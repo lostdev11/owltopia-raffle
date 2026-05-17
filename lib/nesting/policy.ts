@@ -117,6 +117,11 @@ export function isNestingDbOnlyOwlClaimsAllowed(): boolean {
   return readBoolean(process.env.NESTING_ALLOW_DB_ONLY_OWL_CLAIMS, false)
 }
 
+/** When true, `POST /api/me/staking/claim-all` is rejected (single-nest claim still allowed). */
+export function isNestingClaimAllDisabled(): boolean {
+  return readBoolean(process.env.NESTING_CLAIM_ALL_DISABLED, false)
+}
+
 export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
   StakingPoolRow,
   'asset_type' | 'reward_token' | 'reward_rate' | 'reward_rate_unit'

@@ -78,6 +78,21 @@ export function AdminNestingClient() {
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
+  const [claimAuditWallet, setClaimAuditWallet] = useState('')
+  const [claimAuditing, setClaimAuditing] = useState(false)
+  const [claimAuditReport, setClaimAuditReport] = useState<{
+    generated_at: string
+    wallets: Array<{
+      wallet_address: string
+      estimated_claimable_owl: number
+      onchain_claim_owl_24h: number
+      onchain_claim_tx_count_24h: number
+      risk_flags: string[]
+      risk_summary: string
+    }>
+  } | null>(null)
+  const [claimCatchupMsg, setClaimCatchupMsg] = useState<string | null>(null)
+  const [claimCatchupRunning, setClaimCatchupRunning] = useState(false)
 
   const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
   const [forceUnstaking, setForceUnstaking] = useState(false)
@@ -461,6 +476,66 @@ export function AdminNestingClient() {
       await fetchPools()
     } finally {
       setReconciling(false)
+    }
+  }
+
+  const runClaimLedgerAudit = async () => {
+    setClaimAuditing(true)
+    setClaimCatchupMsg(null)
+    setSaveError(null)
+    try {
+      const q = new URLSearchParams()
+      const w = claimAuditWallet.trim()
+      if (w) {
+        q.set('wallet', w)
+        q.set('flagged_only', 'false')
+      }
+      const res = await fetch(`/api/admin/staking/claim-ledger-audit?${q.toString()}`, {
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Claim ledger audit failed')
+        return
+      }
+      setClaimAuditReport(json as typeof claimAuditReport)
+    } finally {
+      setClaimAuditing(false)
+    }
+  }
+
+  const runClaimLedgerCatchup = async (dryRun: boolean) => {
+    const wallet = claimAuditWallet.trim()
+    if (!wallet) {
+      setSaveError('Enter holder wallet for catch-up.')
+      return
+    }
+    setClaimCatchupRunning(true)
+    setClaimCatchupMsg(null)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/staking/claim-ledger-catchup', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, dry_run: dryRun }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Catch-up failed')
+        return
+      }
+      const updated = typeof json?.positions_updated === 'number' ? json.positions_updated : 0
+      const zeroed =
+        typeof json?.total_claimable_zeroed_owl === 'number' ? json.total_claimable_zeroed_owl : 0
+      setClaimCatchupMsg(
+        dryRun
+          ? `Dry run: would update ${updated} nest(s), zero ~${zeroed.toFixed(6)} OWL of claimable UI.`
+          : `Updated ${updated} nest(s); zeroed ~${zeroed.toFixed(6)} OWL claimable in UI.`
+      )
+      if (!dryRun) await runClaimLedgerAudit()
+    } finally {
+      setClaimCatchupRunning(false)
     }
   }
 
@@ -930,6 +1005,91 @@ export function AdminNestingClient() {
                 </div>
               </div>
             </details>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Claim ledger audit (incident)"
+          description="Find wallets with repeat Claim-all on-chain payouts while the UI still shows high claimable. Catch-up syncs claimed_rewards to accrued (no extra SPL) after you confirm they were already paid."
+        />
+        <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="min-w-[200px] flex-1 space-y-1">
+                <Label htmlFor="claim-audit-wallet">Holder wallet (optional)</Label>
+                <Input
+                  id="claim-audit-wallet"
+                  value={claimAuditWallet}
+                  onChange={(e) => setClaimAuditWallet(e.target.value)}
+                  placeholder="Leave empty for flagged wallets"
+                  className="min-h-[44px] font-mono text-sm"
+                  autoComplete="off"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={claimAuditing || claimCatchupRunning}
+                onClick={() => void runClaimLedgerAudit()}
+              >
+                {claimAuditing ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Run audit
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
+                disabled={claimCatchupRunning || !claimAuditWallet.trim()}
+                onClick={() => void runClaimLedgerCatchup(true)}
+              >
+                Dry-run catch-up
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="min-h-[44px] touch-manipulation"
+                disabled={claimCatchupRunning || !claimAuditWallet.trim()}
+                onClick={() => void runClaimLedgerCatchup(false)}
+              >
+                {claimCatchupRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Apply catch-up
+              </Button>
+            </div>
+            {claimCatchupMsg ? <p className="text-sm text-muted-foreground">{claimCatchupMsg}</p> : null}
+            {claimAuditReport ? (
+              <div className="space-y-2 text-sm">
+                <p className="text-muted-foreground">
+                  Generated {new Date(claimAuditReport.generated_at).toLocaleString()} —{' '}
+                  {claimAuditReport.wallets.length} wallet(s)
+                </p>
+                <ul className="space-y-3 max-h-80 overflow-y-auto">
+                  {claimAuditReport.wallets.map((row) => (
+                    <li
+                      key={row.wallet_address}
+                      className="rounded-lg border border-border/50 bg-background/40 p-3 space-y-1"
+                    >
+                      <p className="font-mono text-xs break-all">{row.wallet_address}</p>
+                      <p>
+                        Claimable (est.):{' '}
+                        <span className="font-mono tabular-nums">{row.estimated_claimable_owl.toFixed(6)}</span> OWL
+                        {' · '}
+                        24h on-chain:{' '}
+                        <span className="font-mono tabular-nums">{row.onchain_claim_owl_24h.toFixed(6)}</span> OWL (
+                        {row.onchain_claim_tx_count_24h} tx)
+                      </p>
+                      {row.risk_flags.length > 0 ? (
+                        <p className="text-amber-200/95 text-xs leading-relaxed">{row.risk_summary}</p>
+                      ) : (
+                        <p className="text-muted-foreground text-xs">{row.risk_summary}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>

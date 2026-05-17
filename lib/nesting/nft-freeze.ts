@@ -185,6 +185,23 @@ function coreFreezeDelegateAuthorityMatches(asset: any, delegateAddress: string)
   return Boolean(address) && String(address) === delegateAddress
 }
 
+/** Read-only: true when MPL Core freeze delegate is set and frozen under our nesting authority. */
+export async function isWalletNftFrozenForNestingDelegate(params: {
+  assetId: string
+  collectionMint?: string | null
+}): Promise<boolean> {
+  try {
+    const { umi, signer } = await createCoreAuthorityUmi()
+    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+    return (
+      corePluginAlreadyFrozen(asset) &&
+      coreFreezeDelegateAuthorityMatches(asset, signer.publicKey.toString())
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function assertWalletNftFrozenForNesting(params: {
   ownerWallet: string
   assetId: string

@@ -209,15 +209,65 @@ export async function recordRewardClaim(params: {
   })
 
   if (error) {
-    const msg = error.message ?? ''
-    if (msg.includes('duplicate_tx')) {
-      throw new Error('This claim transaction was already recorded.')
-    }
-    if (msg.includes('position_not_found')) {
-      throw new Error('Position not found')
-    }
-    throw new Error(msg || 'Failed to record reward claim')
+    throw mapStakingRewardClaimRpcError(error.message)
   }
+}
+
+export type BatchRewardClaimItem = {
+  position_id: string
+  amount: number
+  new_claimed_total: number
+}
+
+export async function recordBatchRewardClaims(params: {
+  wallet: string
+  items: BatchRewardClaimItem[]
+  note?: string | null
+  transaction_signature?: string | null
+  execution_path?: StakingRewardExecutionPath | null
+}): Promise<{ recorded_count: number; idempotent_count: number; item_count: number }> {
+  if (params.items.length === 0) {
+    return { recorded_count: 0, idempotent_count: 0, item_count: 0 }
+  }
+
+  const db = getSupabaseAdmin()
+  const txSig = params.transaction_signature?.trim() || null
+  const executionPath: StakingRewardExecutionPath | null =
+    params.execution_path ?? (txSig ? 'onchain_transfer' : params.note === 'db_only_owl_claim' ? 'database_only' : null)
+
+  const { data, error } = await db.rpc('staking_record_batch_reward_claim', {
+    p_wallet: params.wallet.trim(),
+    p_items: params.items.map((item) => ({
+      position_id: item.position_id,
+      amount: item.amount,
+      new_claimed_total: item.new_claimed_total,
+    })),
+    p_note: params.note ?? null,
+    p_transaction_signature: txSig,
+    p_execution_path: executionPath,
+  })
+
+  if (error) {
+    throw mapStakingRewardClaimRpcError(error.message)
+  }
+
+  const row = (data ?? {}) as Record<string, unknown>
+  return {
+    recorded_count: Number(row.recorded_count ?? 0),
+    idempotent_count: Number(row.idempotent_count ?? 0),
+    item_count: Number(row.item_count ?? params.items.length),
+  }
+}
+
+function mapStakingRewardClaimRpcError(msg: string | undefined): Error {
+  const text = msg ?? ''
+  if (text.includes('duplicate_tx')) {
+    return new Error('This claim transaction was already recorded.')
+  }
+  if (text.includes('position_not_found')) {
+    return new Error('Position not found')
+  }
+  return new Error(text || 'Failed to record reward claim')
 }
 
 /** Positions that may need a one-off `getTransaction` re-check (bounded batch; no polling). */

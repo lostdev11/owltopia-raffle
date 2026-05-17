@@ -1549,6 +1549,7 @@ export function DashboardNestingClient() {
           })
           const json = (await res.json().catch(() => ({}))) as {
             error?: string
+            ledger_sync_failed?: boolean
             total_claimed?: number
             claim_count?: number
             execution?: { path?: 'onchain_transfer' | 'database_only' }
@@ -1557,6 +1558,10 @@ export function DashboardNestingClient() {
           if (!res.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
             setActionError(err)
+            if (json.ledger_sync_failed) {
+              await loadPositions()
+              await loadClaimLedger()
+            }
             throw new Error('claim-all')
           }
           return json
