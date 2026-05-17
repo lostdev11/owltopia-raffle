@@ -51,7 +51,8 @@ export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, clas
         </span>
       </label>
       <p className="text-[11px] text-muted-foreground/90">
-        We remember this choice for this browsing session only.
+        Required before you open a new nest (not for claiming OWL you already earned). We remember this for this browsing
+        session only.
       </p>
     </section>
   )
