@@ -1,5 +1,5 @@
 /**
- * Optional signing key for RAFFLE_RECIPIENT_WALLET — used for buyout refunds and winner payouts.
+ * Optional signing key for RAFFLE_RECIPIENT_WALLET — legacy buyout bids deposited to treasury before funds-escrow routing.
  * Set RAFFLE_RECIPIENT_SECRET_KEY (JSON byte array or base58), same formats as FUNDS_ESCROW_SECRET_KEY.
  * Public key must match RAFFLE_RECIPIENT_WALLET / NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET.
  */
@@ -40,4 +40,10 @@ export function getTreasurySigningKeypair(): Keypair | null {
   }
   cache = kp ?? null
   return cache
+}
+
+/** Base58 pubkey when RAFFLE_RECIPIENT_SECRET_KEY matches RAFFLE_RECIPIENT_WALLET; null if signing disabled. */
+export function getTreasurySigningPublicKey(): string | null {
+  const kp = getTreasurySigningKeypair()
+  return kp ? kp.publicKey.toBase58() : null
 }

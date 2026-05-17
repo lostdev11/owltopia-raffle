@@ -3053,8 +3053,7 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>
               Your buyout deposit can be returned when the offer expired or the winner accepted someone else&apos;s bid.
-              Uses the platform treasury wallet — ensure{' '}
-              <span className="font-mono text-xs">RAFFLE_RECIPIENT_SECRET_KEY</span> is configured for automatic refunds.
+              Refunds are sent from funds escrow (or legacy treasury for older bids).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

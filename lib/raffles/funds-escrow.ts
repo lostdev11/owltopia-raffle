@@ -343,6 +343,151 @@ export async function refundEntryFromFundsEscrow(
   }
 }
 
+/** Refund an expired/superseded NFT buyout bid held in funds escrow. */
+export async function refundBuyoutOfferFromFundsEscrow(offer: {
+  bidder_wallet: string
+  amount: number
+  currency: 'SOL' | 'USDC'
+}): Promise<FundsEscrowPayoutResult> {
+  return refundOfferBidFromFundsEscrow({
+    buyer_wallet: offer.bidder_wallet,
+    amount: offer.amount,
+    currency: offer.currency,
+  })
+}
+
+/**
+ * Pay winner net from funds escrow; send platform fee to raffle treasury in the same transaction.
+ */
+export async function payoutBuyoutAcceptanceFromFundsEscrow(params: {
+  winnerWallet: string
+  winnerNet: number
+  treasuryFee: number
+  currency: 'SOL' | 'USDC'
+}): Promise<FundsEscrowPayoutResult> {
+  const kp = getFundsEscrowKeypair()
+  if (!kp) {
+    return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
+  }
+
+  const treasury = treasuryWalletFromEnv()
+  if (!treasury) {
+    return { ok: false, error: 'Treasury wallet not configured (RAFFLE_RECIPIENT_WALLET).' }
+  }
+
+  const winnerNet = Number(params.winnerNet)
+  const treasuryFee = Number(params.treasuryFee)
+  if (!Number.isFinite(winnerNet) || winnerNet < 0 || !Number.isFinite(treasuryFee) || treasuryFee < 0) {
+    return { ok: false, error: 'Invalid buyout payout amounts.' }
+  }
+  if (winnerNet <= 0) {
+    return { ok: false, error: 'Nothing to pay winner.' }
+  }
+
+  const connection = getSolanaConnection()
+  const escrowPubkey = kp.publicKey
+  const winnerPk = new PublicKey(params.winnerWallet.trim())
+  const treasuryPk = new PublicKey(treasury)
+
+  try {
+    if (params.currency === 'SOL') {
+      const winnerLamports = Math.round(winnerNet * LAMPORTS_PER_SOL)
+      const feeLamports = Math.round(treasuryFee * LAMPORTS_PER_SOL)
+      if (winnerLamports <= 0) return { ok: false, error: 'Invalid SOL payout amount.' }
+
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: escrowPubkey,
+          toPubkey: winnerPk,
+          lamports: winnerLamports,
+        }),
+      )
+      if (feeLamports > 0) {
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: escrowPubkey,
+            toPubkey: treasuryPk,
+            lamports: feeLamports,
+          }),
+        )
+      }
+
+      const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      })
+      return { ok: true, signature: sig }
+    }
+
+    if (params.currency === 'USDC') {
+      const readConn = getSolanaReadConnection()
+      const tokenInfo = getTokenInfo('USDC')
+      if (!tokenInfo.mintAddress) {
+        return { ok: false, error: 'USDC mint not configured.' }
+      }
+      const mint = new PublicKey(tokenInfo.mintAddress)
+      const decimals = tokenInfo.decimals
+      const programId = await getFundsEscrowTokenProgramForMint(mint, escrowPubkey)
+      if (!programId) {
+        return { ok: false, error: 'Funds escrow has no USDC token account for buyout payout.' }
+      }
+
+      const winnerRaw = BigInt(Math.round(winnerNet * Math.pow(10, decimals)))
+      const feeRaw = BigInt(Math.round(treasuryFee * Math.pow(10, decimals)))
+      if (winnerRaw <= 0n) return { ok: false, error: 'Invalid USDC payout amount.' }
+
+      const fromAta = await getAssociatedTokenAddress(
+        mint,
+        escrowPubkey,
+        false,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+      )
+      const tx = new Transaction()
+
+      const addTokenPayout = async (toOwner: PublicKey, amount: bigint) => {
+        if (amount <= 0n) return
+        const toAta = await getAssociatedTokenAddress(
+          mint,
+          toOwner,
+          false,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        )
+        try {
+          await getAccount(readConn, toAta, 'confirmed', programId)
+        } catch {
+          tx.add(
+            createAssociatedTokenAccountInstruction(
+              escrowPubkey,
+              toAta,
+              toOwner,
+              mint,
+              programId,
+              ASSOCIATED_TOKEN_PROGRAM_ID,
+            ),
+          )
+        }
+        tx.add(createTransferInstruction(fromAta, toAta, escrowPubkey, amount, [], programId))
+      }
+
+      await addTokenPayout(winnerPk, winnerRaw)
+      await addTokenPayout(treasuryPk, feeRaw)
+
+      const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      })
+      return { ok: true, signature: sig }
+    }
+
+    return { ok: false, error: 'Unsupported offer currency.' }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg }
+  }
+}
+
 /**
  * Refund one unaccepted raffle offer amount from funds escrow back to the offer buyer.
  */

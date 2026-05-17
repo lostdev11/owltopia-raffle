@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById } from '@/lib/db/raffles'
 import { expireStaleBuyoutOffersForRaffle, listBuyoutOffersForRaffle } from '@/lib/db/buyout-offers'
 import { isRaffleBuyoutWindowOpen } from '@/lib/buyout/eligibility'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getBuyoutDepositWalletAddress } from '@/lib/buyout/deposit-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,12 +82,13 @@ export async function GET(
       activatedAt: o.activated_at,
     }))
 
-    const treasuryWallet = getRaffleTreasuryWalletAddress()
+    const depositWallet = getBuyoutDepositWalletAddress()
 
     return NextResponse.json({
       eligible,
       reason,
-      treasuryWallet,
+      depositWallet,
+      treasuryWallet: depositWallet,
       buyoutFeeBps: 100,
       winnerWallet: raffle.winner_wallet?.trim() ?? null,
       buyoutClosedAt: raffle.buyout_closed_at ?? null,

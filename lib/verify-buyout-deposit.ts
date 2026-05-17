@@ -37,17 +37,21 @@ function getFullAccountKeysForTransaction(tx: {
 export async function verifyBuyoutDepositTx(params: {
   transactionSignature: string
   bidderWallet: string
-  treasuryWallet: string
+  /** Recipient of the bid (funds escrow or legacy treasury). */
+  depositWallet: string
   expectedAmount: number
   currency: 'SOL' | 'USDC'
   /** Relax stale-tx check for retries */
   allowOlderThanHour?: boolean
+  /** @deprecated Use depositWallet */
+  treasuryWallet?: string
 }): Promise<{ valid: boolean; error?: string }> {
-  const { transactionSignature, bidderWallet, treasuryWallet, expectedAmount, currency } = params
+  const depositWallet = params.depositWallet?.trim() || params.treasuryWallet?.trim() || ''
+  const { transactionSignature, bidderWallet, expectedAmount, currency } = params
   try {
     const rpcUrl = resolveServerSolanaRpcUrl()
     const connection = new Connection(rpcUrl, 'confirmed')
-    const treasuryPubkey = new PublicKey(treasuryWallet.trim())
+    const treasuryPubkey = new PublicKey(depositWallet)
     const bidderPubkey = new PublicKey(bidderWallet.trim())
 
     const transaction = await getTransactionCached(transactionSignature, async () => {
@@ -120,7 +124,7 @@ export async function verifyBuyoutDepositTx(params: {
       }
       const recipientIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(treasuryPubkey))
       if (recipientIndex === -1) {
-        return { valid: false, error: `Treasury wallet ${treasuryWallet} not found in transaction.` }
+        return { valid: false, error: `Deposit wallet ${depositWallet} not found in transaction.` }
       }
       const balanceIncrease =
         (transaction.meta.postBalances[recipientIndex] - transaction.meta.preBalances[recipientIndex]) /

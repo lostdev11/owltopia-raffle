@@ -3,7 +3,7 @@ import { getRaffleById } from '@/lib/db/raffles'
 import { insertPendingBuyoutOffer } from '@/lib/db/buyout-offers'
 import { isRaffleBuyoutWindowOpen } from '@/lib/buyout/eligibility'
 import { requireSession } from '@/lib/auth-server'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getBuyoutDepositWalletAddress } from '@/lib/buyout/deposit-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,10 +57,10 @@ export async function POST(
       )
     }
 
-    const treasuryWallet = getRaffleTreasuryWalletAddress()
-    if (!treasuryWallet) {
+    const depositWallet = getBuyoutDepositWalletAddress()
+    if (!depositWallet) {
       return NextResponse.json(
-        { error: 'Treasury wallet is not configured (RAFFLE_RECIPIENT_WALLET).' },
+        { error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' },
         { status: 503 },
       )
     }
@@ -80,7 +80,9 @@ export async function POST(
 
     return NextResponse.json({
       offerId: offer.id,
-      treasuryWallet,
+      depositWallet,
+      /** @deprecated Use depositWallet — was treasury before funds-escrow routing */
+      treasuryWallet: depositWallet,
       amount,
       currency,
     })

@@ -8,13 +8,13 @@ import {
 import { isRaffleBuyoutWindowOpen } from '@/lib/buyout/eligibility'
 import { requireSession } from '@/lib/auth-server'
 import { verifyBuyoutDepositTx } from '@/lib/verify-buyout-deposit'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getBuyoutDepositWalletAddress } from '@/lib/buyout/deposit-wallet'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/buyout/offers/[offerId]/confirm
- * Confirms treasury deposit for a pending offer.
+ * Confirms funds-escrow deposit for a pending offer.
  */
 export async function POST(
   request: NextRequest,
@@ -66,15 +66,15 @@ export async function POST(
       )
     }
 
-    const treasuryWallet = getRaffleTreasuryWalletAddress()
-    if (!treasuryWallet) {
-      return NextResponse.json({ error: 'Treasury not configured' }, { status: 503 })
+    const depositWallet = getBuyoutDepositWalletAddress()
+    if (!depositWallet) {
+      return NextResponse.json({ error: 'Funds escrow not configured' }, { status: 503 })
     }
 
     const verify = await verifyBuyoutDepositTx({
       transactionSignature,
       bidderWallet: offer.bidder_wallet,
-      treasuryWallet,
+      depositWallet,
       expectedAmount: offer.amount,
       currency: offer.currency,
     })

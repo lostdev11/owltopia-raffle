@@ -13,7 +13,8 @@ import { Loader2, Landmark } from 'lucide-react'
 type BuyoutApiState = {
   eligible: boolean
   reason: string | null
-  treasuryWallet: string | null
+  depositWallet: string | null
+  treasuryWallet?: string | null
   buyoutFeeBps: number
   winnerWallet: string | null
   buyoutClosedAt: string | null
@@ -145,9 +146,9 @@ export function RaffleBuyoutPanel({
         return
       }
 
-      const treasuryWallet = created.treasuryWallet as string
+      const depositWallet = (created.depositWallet ?? created.treasuryWallet) as string
       const offerId = created.offerId as string
-      if (!treasuryWallet || !offerId) {
+      if (!depositWallet || !offerId) {
         setError('Invalid server response')
         setBusy(false)
         return
@@ -157,7 +158,7 @@ export function RaffleBuyoutPanel({
       const tx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: publicKey,
-          toPubkey: new PublicKey(treasuryWallet),
+          toPubkey: new PublicKey(depositWallet),
           lamports,
         }),
       )
@@ -290,9 +291,9 @@ export function RaffleBuyoutPanel({
           NFT buyout offers
         </CardTitle>
         <CardDescription className="text-xs sm:text-sm">
-          After the draw, anyone can bid SOL for this prize NFT. Deposits go to the platform treasury; offers stay
-          open for 24 hours after your deposit confirms. The winner may accept one offer — the platform keeps {feePct}%
-          and sends the rest to the winner. If your bid loses or expires, reclaim SOL from{' '}
+          After the draw, anyone can bid SOL for this prize NFT. Deposits go to platform funds escrow (same as ticket
+          escrow); offers stay open for 24 hours after your deposit confirms. The winner may accept one offer — the
+          platform keeps {feePct}% and sends the rest to the winner. If your bid loses or expires, reclaim SOL from{' '}
           <Link href="/dashboard" className="underline touch-manipulation">
             Dashboard
           </Link>
