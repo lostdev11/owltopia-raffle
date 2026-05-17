@@ -1,10 +1,6 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
-import {
-  estimateAccruedRewards,
-  meetsMinOwlClaimThreshold,
-  MIN_OWL_CLAIMABLE_TO_CLAIM,
-} from '@/lib/staking/rewards'
+import { estimateAccruedRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
 
 export type PositionClaimPlan = {
   positionId: string
@@ -12,8 +8,6 @@ export type PositionClaimPlan = {
   newClaimedTotal: number
   claimableNow: number
 }
-
-const FULL_CLAIM_EPS = 1e-5
 
 /** Max-claim plan for an active nest (full pending balance). Returns null if nothing claimable. */
 export function buildFullPositionClaimPlan(
@@ -36,11 +30,7 @@ export function buildFullPositionClaimPlan(
     asOfMs,
   })
   const claimableNow = Math.max(0, accruedNow - oldClaimed)
-  if (claimableNow <= FULL_CLAIM_EPS) return null
-
-  const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) return null
-  if (!paysOwlRewards && claimableNow <= 1e-12) return null
+  if (!hasClaimableRewardBalance(claimableNow)) return null
 
   return {
     positionId: row.id,
@@ -50,6 +40,6 @@ export function buildFullPositionClaimPlan(
   }
 }
 
-export function minOwlClaimThresholdMessage(): string {
-  return `Claim unlocks once at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL has accrued for a nest.`
+export function noClaimableRewardsMessage(): string {
+  return 'No OWL rewards are ready to claim on your nests yet — keep nesting and check back.'
 }

@@ -18,6 +18,7 @@ type Props = {
   posPhases: Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase }>
   freezeRequired: boolean
   actionsEnabled: boolean
+  securityAckRequired: boolean
   nestingPaused: boolean
 }
 
@@ -31,6 +32,7 @@ export function NftPerchGroupedNestCard({
   posPhases,
   freezeRequired,
   actionsEnabled,
+  securityAckRequired,
   nestingPaused,
 }: Props) {
   const pending = positions.filter((p) => p.status === 'pending').length
@@ -95,6 +97,7 @@ export function NftPerchGroupedNestCard({
                 freezeRequired={freezeRequired}
                 cancelOpeningAllowed={isOpeningNftNestAbortable(pos, pool)}
                 actionsEnabled={actionsEnabled}
+                securityAckRequired={securityAckRequired}
                 nestingPaused={nestingPaused}
               />
             </div>

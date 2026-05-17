@@ -277,11 +277,16 @@ export function DashboardNestingClient() {
   }, [])
 
   useEffect(() => {
-    try {
-      setSecurityAck(sessionStorage.getItem(NESTING_SECURITY_ACK_STORAGE_KEY) === '1')
-    } catch {
-      setSecurityAck(false)
+    const syncSecurityAckFromStorage = () => {
+      try {
+        setSecurityAck(sessionStorage.getItem(NESTING_SECURITY_ACK_STORAGE_KEY) === '1')
+      } catch {
+        setSecurityAck(false)
+      }
     }
+    syncSecurityAckFromStorage()
+    document.addEventListener('visibilitychange', syncSecurityAckFromStorage)
+    return () => document.removeEventListener('visibilitychange', syncSecurityAckFromStorage)
   }, [])
 
   useEffect(() => {
@@ -399,15 +404,21 @@ export function DashboardNestingClient() {
     return { nftNestGroups: groups, ungroupedOpenPositions }
   }, [openPositions, poolById])
 
-  const claimableNestCount = useMemo(
-    () =>
-      openPositions.filter((p) => {
-        if (p.status !== 'active') return false
-        if ((p.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') return false
-        return buildFullPositionClaimPlan(p) !== null
-      }).length,
-    [openPositions]
-  )
+  const claimAllPreview = useMemo(() => {
+    let count = 0
+    let totalOwl = 0
+    for (const p of openPositions) {
+      if (p.status !== 'active') continue
+      if ((p.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') continue
+      const plan = buildFullPositionClaimPlan(p)
+      if (!plan) continue
+      count += 1
+      totalOwl += plan.payoutAmount
+    }
+    return { count, totalOwl }
+  }, [openPositions])
+
+  const claimableNestCount = claimAllPreview.count
 
   const claimAllBusy = claimAllTxPhase !== 'idle'
 
@@ -1397,7 +1408,7 @@ export function DashboardNestingClient() {
   }
 
   const handleClaimAll = async () => {
-    if (!publicKey || claimableNestCount < 2) return
+    if (!publicKey || claimableNestCount < 1) return
     setActionError(null)
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
@@ -1683,7 +1694,11 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
-      <NestingSecurityNotice acknowledged={securityAck} onAcknowledgedChange={setSecurityAckPersisted} />
+      <NestingSecurityNotice
+        id="nesting-security-notice"
+        acknowledged={securityAck}
+        onAcknowledgedChange={setSecurityAckPersisted}
+      />
 
       {viewerIsAdmin === true ? (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] px-4 py-3 sm:px-5 sm:py-4">
@@ -1730,6 +1745,38 @@ export function DashboardNestingClient() {
           </Card>
         ))}
       </div>
+
+      {claimableNestCount >= 1 ? (
+        <div className="rounded-xl border border-theme-prime/35 bg-theme-prime/[0.06] p-4 space-y-2">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {claimableNestCount === 1
+              ? 'OWL is ready on 1 nest.'
+              : `${claimableNestCount} nests have OWL ready — claim in one payout instead of tapping each nest.`}
+          </p>
+          <Button
+            type="button"
+            variant="default"
+            className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)]"
+            disabled={
+              !securityAck ||
+              nestingDisabled ||
+              claimAllBusy ||
+              stakeTxPhase !== 'idle' ||
+              openPositions.some((p) => {
+                const phases = posPhases[p.id]
+                return phases?.claim !== 'idle' || phases?.unstake !== 'idle'
+              })
+            }
+            onClick={() => void handleClaimAll()}
+          >
+            {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+            {claimAllBusy
+              ? nestingTxPhaseLabel(claimAllTxPhase)
+              : `Claim all · ${claimAllPreview.totalOwl.toFixed(6)} OWL`}
+          </Button>
+          <NestingActionStatusLine phase={claimAllTxPhase} className="min-h-[1.25rem] text-center" />
+        </div>
+      ) : null}
 
       <section className="space-y-4">
         <SectionHeader
@@ -2362,35 +2409,39 @@ export function DashboardNestingClient() {
       <section>
         <SectionHeader
           title="Your nests"
-          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card; use Claim all when you can for one payout."
+          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card."
         />
-        {claimableNestCount >= 2 ? (
-          <div className="mb-4 space-y-2">
+        {!securityAck ? (
+          <div
+            className="mb-4 rounded-lg border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm"
+            role="status"
+          >
+            <p className="font-medium text-foreground">One more step before you can claim</p>
+            <p className="mt-1 text-muted-foreground leading-relaxed">
+              Scroll up and check the box under{' '}
+              <span className="font-medium text-foreground">Peek at safeguards before you nest</span>. Claim and leave
+              buttons stay off until that is checked (saved for this browser session).
+            </p>
             <Button
               type="button"
-              variant="default"
-              className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)]"
-              disabled={
-                !securityAck ||
-                nestingDisabled ||
-                claimAllBusy ||
-                stakeTxPhase !== 'idle' ||
-                openPositions.some((p) => {
-                  const phases = posPhases[p.id]
-                  return phases?.claim !== 'idle' || phases?.unstake !== 'idle'
+              variant="outline"
+              size="sm"
+              className="mt-3 min-h-[44px] touch-manipulation"
+              onClick={() =>
+                document.getElementById('nesting-security-notice')?.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'start',
                 })
               }
-              onClick={() => void handleClaimAll()}
             >
-              {claimAllBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
-              ) : null}
-              {claimAllBusy
-                ? nestingTxPhaseLabel(claimAllTxPhase)
-                : `Claim all (${claimableNestCount} nests)`}
+              Go to safeguards
             </Button>
-            <NestingActionStatusLine phase={claimAllTxPhase} className="min-h-[1.25rem] text-center" />
           </div>
+        ) : null}
+        {claimableNestCount >= 1 ? (
+          <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
+            Use <span className="font-medium text-foreground">Claim all</span> in the banner near the top when OWL is ready — one payout for every eligible nest.
+          </p>
         ) : null}
         {stakedNftGalleryItems.length > 0 ? (
           <div className="mb-6">
@@ -2413,6 +2464,7 @@ export function DashboardNestingClient() {
                   posPhases={posPhases}
                   freezeRequired={g.pool.asset_type === 'nft' && g.pool.adapter_mode === 'onchain_enabled'}
                   actionsEnabled={securityAck && !claimAllBusy}
+                  securityAckRequired={!securityAck}
                   nestingPaused={nestingDisabled}
                 />
               </li>
@@ -2438,6 +2490,7 @@ export function DashboardNestingClient() {
                     }
                     cancelOpeningAllowed={pool ? isOpeningNftNestAbortable(pos, pool) : false}
                     actionsEnabled={securityAck && !claimAllBusy}
+                    securityAckRequired={!securityAck}
                     nestingPaused={nestingDisabled}
                   />
                 </li>

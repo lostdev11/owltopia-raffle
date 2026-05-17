@@ -100,6 +100,9 @@ export function SolflareTouchFix() {
         }
 
         const target = e.target as HTMLElement
+        // Native checkboxes/radios already get reliable change events from touch; a delayed
+        // synthetic click here often toggles twice (checked → unchecked) on mobile wallets.
+        if (target?.closest?.('input[type="checkbox"], input[type="radio"]')) return
         let el = target?.closest?.(INTERACTIVE_SELECTOR) as HTMLElement | null
         if (!el || (el as HTMLButtonElement).disabled) return
         // If we hit a list item (wallet option), trigger the button inside so the adapter's handler runs

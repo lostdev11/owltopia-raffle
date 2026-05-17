@@ -8,11 +8,13 @@ type Props = {
   acknowledged: boolean
   onAcknowledgedChange: (next: boolean) => void
   className?: string
+  id?: string
 }
 
-export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, className }: Props) {
+export function NestingSecurityNotice({ acknowledged, onAcknowledgedChange, className, id }: Props) {
   return (
     <section
+      id={id}
       className={cn(
         'rounded-xl border border-border/80 bg-muted/30 px-4 py-4 sm:px-5 space-y-3',
         className

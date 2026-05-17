@@ -5,11 +5,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
-import {
-  estimateClaimableRewards,
-  meetsMinOwlClaimThreshold,
-  MIN_OWL_CLAIMABLE_TO_CLAIM,
-} from '@/lib/staking/rewards'
+import { estimateClaimableRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { LockTimer } from '@/components/nesting/LockTimer'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
@@ -45,6 +41,8 @@ export type PositionNestRowProps = {
   cancelOpeningAllowed?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
+  /** True when claim/leave are blocked until the safeguards checkbox is checked. */
+  securityAckRequired?: boolean
   nestingPaused?: boolean
 }
 
@@ -63,6 +61,7 @@ export function PositionNestRow({
   freezeRequired = false,
   cancelOpeningAllowed = false,
   actionsEnabled = true,
+  securityAckRequired = false,
   nestingPaused = false,
 }: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -91,15 +90,15 @@ export function PositionNestRow({
   }, [position, nowMs])
 
   const paysOwlRewards = (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  const canClaimOwl = paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12
+  const canClaimOwl = hasClaimableRewardBalance(claimable)
 
   const canUnstake =
     cancelOpeningAllowed ||
     (position.status === 'active' &&
       (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs))
 
-  const claimAmountInput = Math.floor(claimable * 1e6) / 1e6
-  const claimAmountLabel = claimable.toFixed(6)
+  const claimAmountInput = claimable
+  const claimAmountLabel = claimable.toLocaleString(undefined, { maximumFractionDigits: 6 })
 
   const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
   const showLinePhase: NestingTxPhase =
@@ -111,7 +110,7 @@ export function PositionNestRow({
     !position.external_reference?.startsWith('nft_freeze_confirmed:')
 
   const handleClaimMax = async () => {
-    if (!canClaimOwl || claimAmountInput <= 0) return
+    if (!canClaimOwl || !hasClaimableRewardBalance(claimAmountInput)) return
     try {
       await onClaim(position.id, claimAmountInput)
     } catch {
@@ -225,9 +224,10 @@ export function PositionNestRow({
   const footerInner = (
     <>
       <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
-      {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
-        <p className="w-full text-xs text-muted-foreground">
-          Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
+      {securityAckRequired ? (
+        <p className="w-full text-xs text-amber-200/95 leading-relaxed">
+          Check the safeguards box near the top of this page (Peek at safeguards before you nest) to unlock claim and
+          leave actions.
         </p>
       ) : null}
       {!embedded && needsFreeze ? (

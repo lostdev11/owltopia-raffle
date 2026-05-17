@@ -51,10 +51,10 @@ export function estimateClaimableRewards(params: {
   return pending > 0 ? pending : 0
 }
 
-/** Minimum claimable OWL (UI units) before the claim action is allowed (per nest position). */
-export const MIN_OWL_CLAIMABLE_TO_CLAIM = 1
+/** Smallest positive claimable balance (UI units) treated as claimable (avoids float noise). */
+export const MIN_CLAIMABLE_REWARD_UI = 1e-12
 
-export function meetsMinOwlClaimThreshold(claimableUi: number): boolean {
+export function hasClaimableRewardBalance(claimableUi: number): boolean {
   if (!Number.isFinite(claimableUi)) return false
-  return claimableUi >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
+  return claimableUi > MIN_CLAIMABLE_REWARD_UI
 }

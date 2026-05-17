@@ -10,8 +10,8 @@ import {
   getStakingPositionForWallet,
   listStakingPositionsByWallet,
 } from '@/lib/db/staking-positions'
-import { estimateAccruedRewards, meetsMinOwlClaimThreshold, MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
-import { buildFullPositionClaimPlan, minOwlClaimThresholdMessage } from '@/lib/nesting/claim-plan'
+import { estimateAccruedRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
+import { buildFullPositionClaimPlan, noClaimableRewardsMessage } from '@/lib/nesting/claim-plan'
 import { executeBatchOwlClaims } from '@/lib/nesting/batch-claim'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
@@ -247,14 +247,9 @@ export async function executeClaim(params: {
     asOfMs,
   })
   const claimableNow = Math.max(0, accruedNow - oldClaimed)
-  const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
 
-  if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) {
-    throw new StakingUserError(
-      `Claim unlocks once at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL has accrued for this nest.`,
-      400,
-      { claimable: claimableNow, min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM }
-    )
+  if (!hasClaimableRewardBalance(claimableNow)) {
+    throw new StakingUserError('No rewards to claim yet for this nest.', 400, { claimable: claimableNow })
   }
 
   if (amount > claimableNow + 1e-9) {
@@ -311,7 +306,7 @@ export async function executeClaimAll(params: { wallet: string }) {
 
   if (plans.length === 0) {
     throw new StakingUserError(
-      `No nests have claimable OWL right now. ${minOwlClaimThresholdMessage()}`,
+      noClaimableRewardsMessage(),
       400,
       { claimable_count: 0 }
     )
