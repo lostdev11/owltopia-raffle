@@ -134,8 +134,8 @@ export function CartBrowseRaffles() {
   const getQty = useCallback(
     (id: string) => {
       const q = quantities[id]
-      if (typeof q === 'number' && q >= 1) return Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, q)
-      return 1
+      if (typeof q === 'number' && q >= 0) return Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, q)
+      return 0
     },
     [quantities]
   )
@@ -224,15 +224,15 @@ export function CartBrowseRaffles() {
                 <Input
                   id={`browse-q-${raffle.id}`}
                   type="number"
-                  min={1}
+                  min={0}
                   max={MAX_TICKET_QUANTITY_PER_ENTRY}
                   inputMode="numeric"
                   className="w-20 h-11 text-base"
-                  value={quantities[raffle.id] ?? 1}
+                  value={quantities[raffle.id] ?? 0}
                   onChange={e => {
                     const n = Math.min(
                       MAX_TICKET_QUANTITY_PER_ENTRY,
-                      Math.max(1, Math.floor(Number(e.target.value) || 1))
+                      Math.max(0, Math.floor(Number(e.target.value) || 0))
                     )
                     setQuantities(prev => ({ ...prev, [raffle.id]: n }))
                   }}

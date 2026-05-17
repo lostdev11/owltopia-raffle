@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireSession } from '@/lib/auth-server'
 import { executeClaim } from '@/lib/nesting/service'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -13,7 +13,7 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()
@@ -32,10 +32,16 @@ export async function POST(request: NextRequest) {
       rawAmount: body?.amount,
     })
 
+    const txSig =
+      typeof result.transaction_signature === 'string' ? result.transaction_signature.trim() : ''
+
     return NextResponse.json({
       claimed: result.claimed,
       claimed_rewards_total: result.claimed_rewards_total,
-      execution: { path: 'database_mock' as const },
+      transaction_signature: txSig || null,
+      execution: {
+        path: txSig ? ('onchain_transfer' as const) : ('database_only' as const),
+      },
     })
   } catch (e) {
     if (isStakingUserError(e)) {

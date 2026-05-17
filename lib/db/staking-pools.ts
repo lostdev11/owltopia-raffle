@@ -44,6 +44,9 @@ export interface StakingPoolRow {
 }
 
 export async function listActiveStakingPools(): Promise<StakingPoolRow[]> {
+  const { ensureOwlCouncilGovernancePoolReady } = await import('@/lib/nesting/ensure-council-governance-pool')
+  await ensureOwlCouncilGovernancePoolReady()
+
   const db = getSupabaseForServerRead(supabase)
   const { data, error } = await db
     .from('staking_pools')
@@ -74,6 +77,17 @@ export async function listAllStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
 export async function getStakingPoolById(id: string): Promise<StakingPoolRow | null> {
   const db = getSupabaseAdmin()
   const { data, error } = await db.from('staking_pools').select('*').eq('id', id).maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data as StakingPoolRow | null
+}
+
+/** Lookup by slug (any `is_active` — used for governance vote math). */
+export async function getStakingPoolBySlug(slug: string): Promise<StakingPoolRow | null> {
+  const s = slug.trim().toLowerCase()
+  if (!s) return null
+  const db = getSupabaseAdmin()
+  const { data, error } = await db.from('staking_pools').select('*').eq('slug', s).maybeSingle()
 
   if (error) throw new Error(error.message)
   return data as StakingPoolRow | null

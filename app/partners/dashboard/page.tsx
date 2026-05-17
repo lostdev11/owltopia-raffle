@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Shield,
   Download,
+  Plus,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -512,6 +513,36 @@ export default function PartnerHostDashboardPage() {
           {error}
         </p>
       )}
+
+      <Card className={`${CARD_SURFACE} mb-6 overflow-hidden border-violet-500/25`}>
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="flex min-w-0 gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/12 text-violet-600 dark:text-violet-300">
+              <Plus className="h-5 w-5" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-foreground">Create partner raffle</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                Starts the normal raffle creator with Partner raffle only pre-selected for eligible partner wallets.
+                {tenantId
+                  ? ' Your linked Discord webhooks will handle partner raffle posts.'
+                  : ' Link a Discord tenant when you want automatic partner webhook posts.'}{' '}
+                <span className="text-foreground/85">
+                  Partner Pro can add a custom SPL as <strong className="font-medium">ticket</strong> payment on your
+                  raffles only (allowlisted wallet); see the{' '}
+                  <Link href="/partner-program" className="font-medium text-primary underline-offset-2 hover:underline">
+                    partner program
+                  </Link>{' '}
+                  page to apply.
+                </span>
+              </p>
+            </div>
+          </div>
+          <Button asChild className="min-h-[44px] w-full shrink-0 touch-manipulation sm:w-auto">
+            <Link href="/admin/raffles/new?mode=partner">Create partner raffle</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {data.creatorRefundRaffles.length > 0 && (
         <Card className={`${CARD_SURFACE} mb-6 border-amber-500/35 bg-amber-500/[0.06]`}>

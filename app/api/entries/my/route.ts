@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+
+import { requireSession } from '@/lib/auth-server'
 import { getEntriesByWallet } from '@/lib/db/entries'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 /**
- * GET /api/entries/my?wallet=<address>
- * Returns only entries for the given wallet (user's own entries).
- * Each item includes entry + raffle info and blockchain validation (transaction_signature, status).
+ * GET /api/entries/my
+ * SIWS session required — returns entries only for the signed-in wallet (ignores query/body wallets).
  */
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const wallet = searchParams.get('wallet')?.trim() ?? request.headers.get('x-wallet-address')?.trim()
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
 
+    const wallet = normalizeSolanaWalletAddress(session.wallet)
     if (!wallet) {
-      return NextResponse.json(
-        { error: 'Missing wallet. Provide ?wallet=<address> or header x-wallet-address.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
     }
 
     const entriesWithRaffles = await getEntriesByWallet(wallet)

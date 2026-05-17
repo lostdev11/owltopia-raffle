@@ -12,8 +12,54 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { isMobileDevice, isAndroidDevice, isPhantomBrowser, isPhantomExtensionAvailable, isSolflareBrowser, redirectToPhantomBrowser, redirectToSolflareBrowser } from '@/lib/utils'
+import {
+  isMobileDevice,
+  isAndroidDevice,
+  isPhantomBrowser,
+  isPhantomExtensionAvailable,
+  isSolflareBrowser,
+  isSolanaMobileEnvironment,
+  redirectToPhantomBrowser,
+  redirectToSolflareBrowser,
+} from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
+
+const ANDROID_REDIRECT_GUARD_KEY = 'android_wallet_redirect_in_flight'
+const ANDROID_REDIRECT_GUARD_WINDOW_MS = 5000
+
+function normalizeCompareUrl(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = new URL(trimmed, window.location.origin)
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '')
+  } catch {
+    return trimmed.split('?')[0]!.split('#')[0]!.replace(/\/+$/, '')
+  }
+}
+
+function isAndroidErrorPageHref(href: string): boolean {
+  return href === 'about:blank' || href === 'chrome-error://chromewebdata/'
+}
+
+function guardedAndroidRedirect(nextUrl: string): boolean {
+  if (typeof window === 'undefined') return false
+  const currentHref = window.location.href
+  const from = normalizeCompareUrl(currentHref)
+  const to = normalizeCompareUrl(nextUrl)
+  if (!to || from === to) return false
+
+  const now = Date.now()
+  const lastRaw = sessionStorage.getItem(ANDROID_REDIRECT_GUARD_KEY)
+  const last = lastRaw ? Number(lastRaw) : 0
+  if (Number.isFinite(last) && last > 0 && now - last < ANDROID_REDIRECT_GUARD_WINDOW_MS) {
+    return false
+  }
+
+  sessionStorage.setItem(ANDROID_REDIRECT_GUARD_KEY, String(now))
+  window.location.href = nextUrl
+  return true
+}
 
 export function WalletConnectButton() {
   const { publicKey, connected, disconnect, wallet, connecting } = useWallet()
@@ -155,15 +201,12 @@ export function WalletConnectButton() {
         if (document.readyState === 'loading') return
         
         const currentHref = window.location.href
-        const isBlankPage = 
-          currentHref === 'about:blank' ||
-          currentHref === 'chrome-error://chromewebdata/' ||
-          (document.body && document.body.textContent?.trim() === '' && document.body.children.length === 0 && document.body.innerHTML.trim() === '')
+        const isBlankPage = isAndroidErrorPageHref(currentHref)
         
         if (isBlankPage) {
           // Check for stored redirect URL from any mobile wallet
           // Try wallet-specific keys first, then generic key
-          const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+          const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
           let storedUrl: string | null = null
           let walletName: string | null = null
           
@@ -186,7 +229,7 @@ export function WalletConnectButton() {
             if (process.env.NODE_ENV === 'development') {
               console.log(`Detected blank page on mount (${walletName || 'unknown wallet'}), redirecting to stored URL:`, storedUrl)
             }
-            window.location.href = storedUrl
+            guardedAndroidRedirect(storedUrl)
             return
           }
           
@@ -195,10 +238,10 @@ export function WalletConnectButton() {
             if (window.history.length > 1) {
               window.history.back()
             } else {
-              window.location.href = window.location.origin
+              guardedAndroidRedirect(window.location.origin)
             }
           } catch (e) {
-            window.location.href = window.location.origin
+            guardedAndroidRedirect(window.location.origin)
           }
         }
       }
@@ -256,14 +299,12 @@ export function WalletConnectButton() {
         // On Android, ensure we're not on a blank page before cleaning
         if (isAndroidDevice()) {
           const currentHref = window.location.href
-          const isBlankPage = 
-            currentHref === 'about:blank' ||
-            currentHref === 'chrome-error://chromewebdata/'
+          const isBlankPage = isAndroidErrorPageHref(currentHref)
           
           if (isBlankPage) {
             // If we're on blank page but have callback params, redirect to stored URL
             // Check for stored URLs from any mobile wallet
-            const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+            const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
             let storedUrl: string | null = null
             let walletName: string | null = null
             
@@ -295,7 +336,7 @@ export function WalletConnectButton() {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Redirecting from blank page with callback params (${walletName || 'unknown wallet'}) to:`, storedUrlObj.toString())
               }
-              window.location.href = storedUrlObj.toString()
+              guardedAndroidRedirect(storedUrlObj.toString())
               return
             }
           }
@@ -353,7 +394,7 @@ export function WalletConnectButton() {
     if (!mounted || !isMobileDevice() || !isAndroidDevice()) return
 
     // List of mobile wallets that use deep links on Android
-    const mobileWalletNames = ['Solflare', 'Phantom', 'Coinbase', 'Trust', 'Solana Mobile']
+    const mobileWalletNames = ['Solflare', 'Phantom', 'Backpack', 'Coinbase', 'Trust', 'Solana Mobile']
     
     // Store the original URL before any mobile wallet connection on Android
     if (connecting && wallet?.adapter?.name) {
@@ -386,11 +427,7 @@ export function WalletConnectButton() {
             // Check if we're on a blank page or error page
             setTimeout(() => {
               const currentHref = window.location.href
-              const isBlankPage = 
-                currentHref === 'about:blank' ||
-                currentHref === 'chrome-error://chromewebdata/' ||
-                document.body?.textContent?.trim() === '' ||
-                (document.body?.children?.length === 0 && !document.body?.textContent)
+              const isBlankPage = isAndroidErrorPageHref(currentHref)
               
               // Get stored URL (try wallet-specific first, then generic)
               let storedUrl = sessionStorage.getItem(storageKey)
@@ -403,7 +440,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Detected blank page after ${walletName} connection, redirecting to:`, storedUrl)
                 }
-                window.location.href = storedUrl
+                guardedAndroidRedirect(storedUrl)
                 return
               }
               
@@ -429,7 +466,11 @@ export function WalletConnectButton() {
               }
               
               // If we have callback params but are on wrong page, redirect to stored URL
-              if (hasCallback && storedUrl && !currentHref.startsWith(storedUrl.split('?')[0])) {
+              if (
+                hasCallback &&
+                storedUrl &&
+                normalizeCompareUrl(currentHref) !== normalizeCompareUrl(storedUrl)
+              ) {
                 // Merge callback params with stored URL
                 const storedUrlObj = new URL(storedUrl)
                 urlParams.forEach((value, key) => {
@@ -442,7 +483,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Redirecting to stored URL with callback params (${walletName}):`, storedUrlObj.toString())
                 }
-                window.location.href = storedUrlObj.toString()
+                guardedAndroidRedirect(storedUrlObj.toString())
               }
             }, 500) // Small delay to allow page to load
           }
@@ -459,11 +500,11 @@ export function WalletConnectButton() {
               storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
             }
             
-            if (storedUrl && (currentHref === 'about:blank' || currentHref.includes('chrome-error'))) {
+            if (storedUrl && isAndroidErrorPageHref(currentHref)) {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Detected blank/error page on focus (${walletName}), redirecting to:`, storedUrl)
               }
-              window.location.href = storedUrl
+              guardedAndroidRedirect(storedUrl)
             }
           }, 500)
         }
@@ -535,7 +576,7 @@ export function WalletConnectButton() {
     // Without this, reconnecting often fails on subpages until user navigates away and back.
     setRemountKey((k) => k + 1)
     // Clear mobile wallet redirect URLs so they don't interfere with reconnect.
-    const walletNames = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile']
+    const walletNames = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile']
     walletNames.forEach((name) => sessionStorage.removeItem(`${name}_redirect_url`))
     sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect, clearWalletSelectionStorage])
@@ -593,9 +634,14 @@ export function WalletConnectButton() {
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
         if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+        // Seeker / Solana Mobile Web Shell: use built-in MWA wallet — skip Phantom/Solflare redirect.
+        if (isSolanaMobileEnvironment()) {
+          setVisible(true)
+          return
         }
         // If not already in a wallet browser, offer in-app first so connection stays in-app
         if (!isSolflareBrowser() && !isPhantomBrowser()) {
@@ -618,9 +664,13 @@ export function WalletConnectButton() {
       if (!isMobileDevice()) return
       const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
       if (currentUrl) {
-        const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+        const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
         keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
         sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+      }
+      if (isSolanaMobileEnvironment()) {
+        setVisible(true)
+        return
       }
       if (!isSolflareBrowser() && !isPhantomBrowser()) {
         setShowMobileInAppDialog(true)
@@ -639,9 +689,13 @@ export function WalletConnectButton() {
       if (isMobileDevice()) {
         const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
         if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
           keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
           sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+        }
+        if (isSolanaMobileEnvironment()) {
+          setVisible(true)
+          return
         }
         if (!isSolflareBrowser() && !isPhantomBrowser()) {
           setShowMobileInAppDialog(true)
@@ -730,7 +784,8 @@ export function WalletConnectButton() {
           <DialogHeader>
             <DialogTitle>Connect wallet</DialogTitle>
             <DialogDescription className="pt-2">
-              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no switching back and forth.
+              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no
+              switching back and forth. On Seeker, choose <strong>Solana Mobile</strong> in the wallet list instead.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-3">

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/raffles/[id]/buyout/offers/[offerId]/refund
- * Bidder reclaims escrow after offer expired or was superseded (requires treasury signing).
+ * Bidder reclaims deposit after offer expired or was superseded (funds escrow or legacy treasury).
  */
 export async function POST(
   request: NextRequest,

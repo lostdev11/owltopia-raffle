@@ -1,21 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { NextResponse } from 'next/server'
 import { listActiveStakingPools } from '@/lib/db/staking-pools'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { getNestingNftFreezeDelegateAddress } from '@/lib/nesting/nft-freeze'
+import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/staking/pools
- * Admin session only until nesting is public — active pools list (Supabase only; no RPC).
+ * Public active pools list (Supabase only; no RPC).
+ * Includes `nesting_disabled` plus `nesting_paused_by_deploy_env` / `nesting_paused_by_admin` so the UI can explain pauses.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const session = await requireAdminSession(request)
-    if (session instanceof NextResponse) return session
-
     const pools = await listActiveStakingPools()
-    return NextResponse.json({ pools })
+    const pause = await getNestingActionsPauseBreakdown()
+    return NextResponse.json({
+      pools,
+      nesting_nft_freeze_delegate: getNestingNftFreezeDelegateAddress() || null,
+      nesting_disabled: pause.disabled,
+      nesting_paused_by_deploy_env: pause.envKillSwitch,
+      nesting_paused_by_admin: pause.adminDbPaused,
+    })
   } catch (e) {
     console.error('[staking/pools]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

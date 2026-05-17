@@ -13,6 +13,7 @@ import {
   Sparkles,
   Ticket,
   Users,
+  Wallet,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PartnerProgramApplyForm } from '@/components/PartnerProgramApplyForm'
@@ -25,6 +26,11 @@ import {
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
+import {
+  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
+  PARTNER_PRO_SETUP_USD,
+  PARTNER_PRO_STANDARD_MONTHLY_USD,
+} from '@/lib/config/partner-program-pricing'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -35,20 +41,20 @@ const standardFeePercent = STANDARD_FEE_BPS / 100
 
 export const metadata: Metadata = {
   title: `Partner Program | ${PLATFORM_NAME}`,
-  description: `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, and Discord integration.`,
+  description: `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, Discord integration, and Partner Pro custom SPL ticket currency for your raffles only.`,
   alternates: { canonical: `${SITE_URL}/partner-program` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/partner-program`,
     siteName: PLATFORM_NAME,
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, visibility, and tooling for established projects.`,
+    description: `Owltopia Partner Program — reduced fees, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, visibility, and tooling for established projects.`,
+    description: `Owltopia Partner Program — reduced fees, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -81,8 +87,13 @@ const benefits: { icon: ReactNode; title: string; body: string }[] = [
   },
   {
     icon: <Coins className="h-5 w-5 text-violet-400" aria-hidden />,
-    title: 'SPL token prizes (tickets stay SOL / USDC)',
-    body: 'Offer SPL token prizes such as SOL, USDC, or TRQ from escrow where supported. Ticket purchases on listings remain in SOL or USDC as configured for each raffle.',
+    title: 'SPL token prizes',
+    body: `Offer allowlisted SPL token prizes from escrow where supported (for example SOL, USDC, or partner tokens). Prize token and ticket currency are chosen per raffle within what we enable for your account.`,
+  },
+  {
+    icon: <Wallet className="h-5 w-5 text-violet-400" aria-hidden />,
+    title: 'Partner Pro: your SPL for ticket sales (yours only)',
+    body: `Upgrade to Partner Pro and we can integrate your project’s SPL mint so your raffles can sell tickets in that token. The custom ticket currency is gated: only your linked partner creator wallet can create raffles that use it — it never appears for other hosts. Platform fees use the same partner rate on those ticket sales; we onboard each mint with you (decimals, program id, ops).`,
   },
   {
     icon: <Headphones className="h-5 w-5 text-violet-400" aria-hidden />,
@@ -109,11 +120,12 @@ const tiers = [
   },
   {
     name: 'Partner Pro',
-    price: '$100 setup + $20/month',
+    price: `$${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/month`,
     bullets: [
       'Everything in $0 Partner, plus custom onboarding and partner server setup.',
       'Discord partner tenant linking for raffle create/winner webhooks.',
       'Option to run direct-link / Discord-only raffles (hide from main public list).',
+      'Optional: your SPL token as ticket payment on your raffles only — allowlisted to your partner creator wallet, not available site-wide.',
     ],
     notIncluded: 'Not full white-label; still runs on Owltopia core infrastructure.',
   },
@@ -149,7 +161,9 @@ export default function PartnerProgramPage() {
             <h1 className="mb-2 text-3xl font-bold sm:text-4xl">Partner with Owltopia</h1>
             <p className="text-muted-foreground mb-0 max-w-2xl text-base sm:text-lg">
               We collaborate with established projects so you can host raffles on {PLATFORM_NAME} with better economics,
-              visibility, and support — without changing how players connect their wallets on mobile or desktop.
+              visibility, and support — without changing how players connect their wallets on mobile or desktop. Partner Pro
+              can include a custom SPL token for ticket sales on your raffles only (not site-wide); fees use the same
+              partner rate on those sales after onboarding.
             </p>
           </div>
         </div>
@@ -175,6 +189,13 @@ export default function PartnerProgramPage() {
           <h2 className="text-2xl font-semibold">Program tiers</h2>
           <p className="text-muted-foreground mb-4">
             To keep partnerships clear, we scope every partner into one tier before payment and onboarding.
+          </p>
+          <p className="text-muted-foreground mb-4 text-sm leading-relaxed">
+            <strong className="text-foreground/90">Grandfathered Partner Pro rate:</strong> active partners who were on the
+            program before this pricing update — including current Partner Pro accounts and existing $0 Partner accounts
+            that upgrade to Partner Pro — keep <strong className="text-foreground/90">${PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/month</strong>{' '}
+            after the one-time setup (billing is confirmed in onboarding). New Partner Pro subscriptions are{' '}
+            <strong className="text-foreground/90">${PARTNER_PRO_STANDARD_MONTHLY_USD}/month</strong>.
           </p>
           <div className="not-prose grid gap-4 md:grid-cols-3">
             {tiers.map((tier) => (

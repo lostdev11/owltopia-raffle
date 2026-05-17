@@ -1,31 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromRequest } from '@/lib/auth-server'
 import { getAdminRole } from '@/lib/db/admins'
-import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
+import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
+import { getActivePartnerCommunityWalletSet } from '@/lib/raffles/partner-communities'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Whether the connected session wallet may set list_on_platform=false (Discord / link only).
- * `partnerDiscordLinked` is true when this wallet is on the partner program list with a Discord tenant
- * (raffle create/winner webhooks can target that server’s channels only — see /owltopia-partner slash commands).
+ * Whether the connected session wallet may set list_on_platform=false (partner raffle only).
+ * Partner Pro+ gets the visibility control; `partnerDiscordLinked` tells the UI whether
+ * create/winner webhooks can target that server's channels.
+ * `isPartnerCommunityCreator` unlocks extra SPL prize tokens in the create form (beyond SOL/USDC for all creators).
  */
 export async function GET(request: NextRequest) {
   try {
     const session = getSessionFromRequest(request)
     const wallet = session?.wallet?.trim() ?? ''
     if (!wallet) {
-      return NextResponse.json({ canSetLinkOnly: false, partnerDiscordLinked: false })
+      return NextResponse.json({
+        canSetLinkOnly: false,
+        partnerDiscordLinked: false,
+        isPartnerCommunityCreator: false,
+      })
     }
-    const [adminRole, tenantId] = await Promise.all([
+    const [adminRole, entitlement, partnerWallets] = await Promise.all([
       getAdminRole(wallet),
-      getDiscordPartnerTenantIdForCreatorWallet(wallet),
+      getPartnerRaffleVisibilityEntitlementForCreatorWallet(wallet),
+      getActivePartnerCommunityWalletSet(),
     ])
-    const partnerDiscordLinked = tenantId != null && String(tenantId).trim() !== ''
-    const canSetLinkOnly = adminRole !== null || partnerDiscordLinked
-    return NextResponse.json({ canSetLinkOnly, partnerDiscordLinked })
+    const partnerDiscordLinked =
+      entitlement.discordPartnerTenantId != null && String(entitlement.discordPartnerTenantId).trim() !== ''
+    const canSetLinkOnly = adminRole !== null || entitlement.canSetPartnerOnly
+    const norm = normalizeSolanaWalletAddress(wallet)
+    let isPartnerCommunityCreator = false
+    if (norm) {
+      for (const w of partnerWallets) {
+        if (walletsEqualSolana(w, norm)) {
+          isPartnerCommunityCreator = true
+          break
+        }
+      }
+    }
+    return NextResponse.json({
+      canSetLinkOnly,
+      partnerDiscordLinked,
+      partnerTier: entitlement.partnerTier,
+      isPartnerCommunityCreator,
+    })
   } catch (e) {
     console.error('[GET /api/raffles/visibility-options]', e)
-    return NextResponse.json({ canSetLinkOnly: false, partnerDiscordLinked: false })
+    return NextResponse.json({
+      canSetLinkOnly: false,
+      partnerDiscordLinked: false,
+      isPartnerCommunityCreator: false,
+    })
   }
 }

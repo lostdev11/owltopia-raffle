@@ -13,7 +13,7 @@ const VERIFY_WINDOW_MS = 60_000
 /**
  * POST /api/auth/verify
  * Body: { wallet, message, signature } (signature = base64 from signMessage)
- * Verifies SIWS and sets httpOnly session cookie if wallet is admin.
+ * Verifies SIWS and sets an httpOnly session cookie for that wallet (any holder — not admin-only).
  */
 export async function POST(request: NextRequest) {
   try {

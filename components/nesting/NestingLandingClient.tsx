@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { Bird, Coins, Layers, Shield } from 'lucide-react'
+import { ArrowLeft, Bird, Coins, Layers, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { NestingHero } from '@/components/nesting/NestingHero'
+import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
+import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
@@ -16,9 +18,20 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   initialPools: StakingPoolRow[]
+  initialOwlNest365Stats?: OwlNest365PublicStats | null
+  /** Server: global pause (deployment env and/or admin “pause holder actions” in Owl Nesting admin). */
+  nestingDisabled?: boolean
+  nestingPausedByDeployEnv?: boolean
+  nestingPausedByAdmin?: boolean
 }
 
-export function NestingLandingClient({ initialPools }: Props) {
+export function NestingLandingClient({
+  initialPools,
+  initialOwlNest365Stats = null,
+  nestingDisabled = false,
+  nestingPausedByDeployEnv = false,
+  nestingPausedByAdmin = false,
+}: Props) {
   const { connected, publicKey } = useWallet()
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
@@ -61,29 +74,65 @@ export function NestingLandingClient({ initialPools }: Props) {
 
   return (
     <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-6xl space-y-12 sm:space-y-16">
+      <Link
+        href="/raffles"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground min-h-[44px] py-2 touch-manipulation -mt-1"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+        Back to raffles
+      </Link>
+      {nestingDisabled ? (
+        <div
+          className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm text-foreground"
+          role="status"
+        >
+          <p className="font-medium text-foreground">Nesting is paused</p>
+          <p className="mt-1 text-muted-foreground leading-relaxed">
+            {nestingPausedByDeployEnv ? (
+              <>
+                This deployment has the <span className="font-mono">NESTING_DISABLED</span> environment flag set, so new
+                nests, claims, and leaving a nest stay off until that is cleared on the host and a new deployment runs.
+                Your existing nests stay put.
+              </>
+            ) : nestingPausedByAdmin ? (
+              <>
+                New nests, claims, and leaving a nest are temporarily turned off from the Owl Nesting admin pause. Your
+                existing nests stay put—check back soon or follow announcements for the all-clear.
+              </>
+            ) : (
+              <>
+                New nests, claims, and leaving a nest are temporarily turned off while we tend to things behind the
+                scenes. Your existing nests stay put—check back soon or follow announcements for the all-clear.
+              </>
+            )}
+          </p>
+        </div>
+      ) : null}
       <NestingHero />
+
+      <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           {
             icon: Layers,
-            title: 'Stake assets',
-            body: 'Pick a pool and record a mock stake in our database — rates snapshot at stake time.',
+            title: 'Pick your perch',
+            body: 'Choose a perch that fits what you hold. Your reward rate locks in the moment you join.',
           },
           {
             icon: Coins,
-            title: 'Earn rewards',
-            body: 'Estimated rewards use time elapsed and your snapshot rate (no live chain scans).',
+            title: 'Rewards add up',
+            body: 'Watch OWL drip in over time—you can tap claim whenever you like (daily is totally fine).',
           },
           {
             icon: Shield,
-            title: 'Lockups',
-            body: 'Unlock timers are enforced in app logic until real custody ships.',
+            title: 'Fair countdowns',
+            body: 'Every perch spells out its lock timer. When it hits zero, you are free to spread your wings again.',
           },
           {
             icon: Bird,
-            title: 'Ecosystem ready',
-            body: 'Structured for Owltopia first and partner pools later.',
+            title: 'Built for Owltopia',
+            body: 'Homegrown for Owl holders first—with room for partner nests down the road.',
           },
         ].map(({ icon: Icon, title, body }) => (
           <Card key={title} className="rounded-xl border-border/60 bg-card/80">
@@ -105,34 +154,34 @@ export function NestingLandingClient({ initialPools }: Props) {
               <CardTitle className="text-base">Your nest</CardTitle>
               <CardDescription>
                 {positionPreview === -1
-                  ? 'Sign in on the staking dashboard (one wallet message) to load positions — no RPC.'
+                  ? 'Head to your dashboard and say hi with one wallet message—we will load your spots.'
                   : positionPreview === 0
-                    ? 'No active nest positions — open the dashboard to stake.'
-                    : `${positionPreview} active position${positionPreview === 1 ? '' : 's'}.`}
+                    ? 'No nests open yet—open your dashboard and pick a perch to start.'
+                    : `${positionPreview} nest${positionPreview === 1 ? '' : 's'} whooing along.`}
               </CardDescription>
             </div>
             <Button asChild variant="outline" className={cn(nestingMutedActionButtonClass)}>
-              <Link href="/dashboard/nesting">Open staking dashboard</Link>
+              <Link href="/dashboard/nesting">Open my nest</Link>
             </Button>
           </CardHeader>
         </Card>
       )}
 
-      <section id="pools" className="scroll-mt-24">
+      <section id="perches" className="scroll-mt-24">
         <SectionHeader
-          title="Available pools"
-          description="Pools are configured in Owl Vision (admin). Token and NFT pool types reserve fields for future on-chain checks."
+          title="Open perches"
+          description="Each card is a perch you can land on—locks, rates, and nest type are spelled out up front."
         />
         {initialPools.length === 0 ? (
           <EmptyState
-            title="No active pools yet."
-            body="Admins can create pools under Owl Vision → Owl Nesting admin."
+            title="No perches live yet"
+            body="Check back soon—new spots hatch here when admins flip them on."
           />
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {initialPools.map((pool) => (
               <li key={pool.id}>
-                <StakingPoolCard pool={pool} />
+                <StakingPoolCard pool={pool} nestingPaused={nestingDisabled} />
               </li>
             ))}
           </ul>
@@ -140,16 +189,20 @@ export function NestingLandingClient({ initialPools }: Props) {
       </section>
 
       <section>
-        <SectionHeader title="FAQ" description="Quick answers for the MVP flow." />
+        <SectionHeader title="FAQ" />
         <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60">
           {[
             {
-              q: 'Does this lock tokens on-chain?',
-              a: 'Not yet. Stakes are recorded in Supabase so UX and reward math can ship first; custody hooks will plug in later.',
+              q: 'Does my wallet send tokens somewhere when I nest?',
+              a: 'Not at first for every perch—we note your nest inside Owltopia so rewards spin up smoothly; stronger wallet vault upgrades roll out perch by perch.',
             },
             {
-              q: 'Why sign in on the dashboard?',
-              a: 'Stake, unstake, and claim actions require the same SIWS session as the rest of Owltopia — your wallet signs a message once.',
+              q: 'When can I claim OWL rewards?',
+              a: 'Anytime you have a balance waiting. Claim OWL daily for raffle tickets—or let it pile up and grab it in one swoop.',
+            },
+            {
+              q: 'Why do you ask me to sign a message on the dashboard?',
+              a: 'So we never mix up nests between wallets—it is just a quick hey-it-is-you check, same vibe as signing in elsewhere in Owltopia.',
             },
           ].map(({ q, a }) => (
             <div key={q} className="px-4 py-4 sm:px-5">

@@ -1629,7 +1629,15 @@ export async function transferPartnerSplPrizeToCreator(
     return { ok: false, error: 'Invalid prize amount for this partner token' }
   }
 
-  const transferResult = await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
+  let transferResult = await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
+  if (
+    !transferResult.ok &&
+    partner.currencyCode === 'SOL' &&
+    typeof transferResult.error === 'string' &&
+    transferResult.error.includes('Escrow does not hold this token')
+  ) {
+    transferResult = await payoutNativeSolFromEscrowToRecipient(creatorWallet, raw)
+  }
   if (!transferResult.ok || !transferResult.signature) {
     return transferResult
   }
@@ -1681,11 +1689,25 @@ export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
     const acc = await getAccount(connection, ata, 'confirmed', tokenProgram)
-    return { holds: acc.amount >= raw }
+    if (acc.amount >= raw) {
+      return { holds: true }
+    }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { holds: false, error: msg }
+    if (partner.currencyCode !== 'SOL') {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { holds: false, error: msg }
+    }
   }
+  if (partner.currencyCode === 'SOL') {
+    try {
+      const lamports = await connection.getBalance(keypair.publicKey, 'confirmed')
+      return { holds: BigInt(lamports) >= raw }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { holds: false, error: msg }
+    }
+  }
+  return { holds: false }
 }
 
 export async function checkEscrowHoldsNft(raffle: NftEscrowHoldProbe): Promise<{ holds: boolean; error?: string }> {

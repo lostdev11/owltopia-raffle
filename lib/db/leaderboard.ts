@@ -6,6 +6,7 @@
  * - **All-time** and months/years **before** that month keep **legacy** rules (floor price + `failed_refund_available` only).
  * - From the effective month onward, **threshold** rules apply: draw threshold met, plus exclude `cancelled` / `draft`.
  * Entries ignore complimentary, refunded, and zero-amount rows. Caps / distinct buyers — lib/leaderboard/hardening.ts.
+ * Raffles won counts every completed / successful_pending_claims draw (by winner_selected_at); it does not apply ticket floors or draw-threshold exclusion.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -73,6 +74,8 @@ type LeaderboardRaffleRow = {
   winner_selected_at: string | null
   ticket_price: number | string | null
   currency: string | null
+  alternate_ticket_currency: string | null
+  alternate_ticket_price: number | string | null
   prize_type: string | null
   min_tickets: number | string | null
   floor_price: string | null
@@ -193,6 +196,15 @@ function isLeaderboardExcludedByStatusThreshold(status: string | null): boolean 
   return s === 'failed_refund_available' || s === 'cancelled' || s === 'draft'
 }
 
+/** Wins: terminal failures / non-draw statuses only — not ticket floors or draw-threshold rollups. */
+function raffleStatusExcludedFromWinsLeaderboard(
+  status: string | null,
+  mode: LeaderboardRulesMode
+): boolean {
+  if (mode === 'legacy') return isFailedRefundOnlyLeaderboardExcluded(status)
+  return isLeaderboardExcludedByStatusThreshold(status)
+}
+
 /**
  * Same rule as {@link canSelectWinner}: confirmed non-refunded ticket count vs effective draw threshold;
  * when no positive threshold, require at least one ticket.
@@ -304,7 +316,7 @@ async function fetchAllLeaderboardRaffles(db: SupabaseClient): Promise<Leaderboa
     const { data, error } = await db
       .from('raffles')
       .select(
-        'id, created_by, creator_wallet, winner_wallet, status, created_at, winner_selected_at, ticket_price, currency, prize_type, min_tickets, floor_price'
+        'id, created_by, creator_wallet, winner_wallet, status, created_at, winner_selected_at, ticket_price, currency, alternate_ticket_currency, alternate_ticket_price, prize_type, min_tickets, floor_price'
       )
       .order('id', { ascending: true })
       .range(from, from + LEADERBOARD_PAGE_SIZE - 1)
@@ -538,7 +550,7 @@ function aggregateLeaderboard(
 
   const winsByWallet = new Map<string, number>()
   for (const r of raffles) {
-    if (excludedRaffleIds.has(r.id)) continue
+    if (raffleStatusExcludedFromWinsLeaderboard(r.status, mode)) continue
     const winner = normalizeWallet(r.winner_wallet)
     if (!winner || leaderboardWalletIsExcluded(winner)) continue
     if (!statusCountsAsRaffleWon(r.status)) continue

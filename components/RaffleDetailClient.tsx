@@ -29,10 +29,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency } from '@/lib/types'
 import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
+import {
+  acceptedTicketPaymentCurrencies,
+  formatRaffleTicketPriceSummary,
+  raffleAcceptsSolAndBambooTickets,
+  ticketUnitPriceForCurrency,
+} from '@/lib/raffles/dual-ticket-payment'
 import {
   getRaffleProfitInfo,
   normalizeRaffleTicketCurrency,
@@ -224,11 +230,23 @@ export function RaffleDetailClient({
   } | null>(null)
   const [showEscrowConfirmDialog, setShowEscrowConfirmDialog] = useState(false)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
+  const dualSolBamboo = useMemo(() => raffleAcceptsSolAndBambooTickets(raffle), [raffle])
+  const [ticketPaymentCurrency, setTicketPaymentCurrency] = useState<RaffleCurrency>(() =>
+    normalizeRaffleTicketCurrency(raffle.currency)
+  )
+  useEffect(() => {
+    setTicketPaymentCurrency(normalizeRaffleTicketCurrency(raffle.currency))
+  }, [raffle.id, raffle.currency, raffle.alternate_ticket_currency, raffle.alternate_ticket_price])
   const [showParticipants, setShowParticipants] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'owl-vision'>('overview')
   
-  // Calculate purchase amount automatically based on ticket price and quantity
-  const purchaseAmount = raffle.ticket_price * ticketQuantity
+  const purchaseAmount = useMemo(() => {
+    const unit = dualSolBamboo
+      ? ticketUnitPriceForCurrency(raffle, ticketPaymentCurrency)
+      : Number(raffle.ticket_price)
+    const n = unit != null && Number.isFinite(unit) ? unit : Number(raffle.ticket_price)
+    return n * ticketQuantity
+  }, [dualSolBamboo, raffle, ticketPaymentCurrency, ticketQuantity])
   const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
   const [showNftTransferDialog, setShowNftTransferDialog] = useState(false)
@@ -897,7 +915,7 @@ export function RaffleDetailClient({
       return
     }
 
-    if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+    if (ticketPaymentCurrency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
       return
     }
@@ -910,6 +928,7 @@ export function RaffleDetailClient({
       const res = await executeRafflePurchase({
         raffle,
         ticketQuantity,
+        paymentCurrency: dualSolBamboo ? ticketPaymentCurrency : undefined,
         publicKey,
         connection,
         sendTransaction,
@@ -1491,8 +1510,29 @@ export function RaffleDetailClient({
           setDepositEscrowError(`This raffle has an invalid ${prizeCur || 'token'} prize amount.`)
           return
         }
-        const mintPk = new PublicKey(mintStr)
         const escrowPubkey = new PublicKey(escrowAddress)
+        if (prizeCur === 'SOL') {
+          if (!connected) {
+            setDepositEscrowError('Connect a wallet that can sign SOL transfers.')
+            return
+          }
+          if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
+            setDepositEscrowError('This SOL prize amount is too large for a wallet transfer.')
+            return
+          }
+          logEscrowDepositPath(depositLogCtx, 'spl_transfer', { note: 'partner_SOL_native' })
+          const tx = new Transaction().add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: escrowPubkey,
+              lamports: Number(rawNeed),
+            })
+          )
+          const sig = await sendTransaction(tx, connection)
+          await afterWalletSignature(sig, 'spl_transfer')
+          return
+        }
+        const mintPk = new PublicKey(mintStr)
         logEscrowDepositPath(depositLogCtx, 'spl_transfer', { note: `partner_${prizeCur}` })
         let resolvedHolder = await getFungibleHolderInWallet(
           connection,
@@ -3404,12 +3444,18 @@ export function RaffleDetailClient({
                       <div className="flex items-center gap-1.5">
                         <span className="text-[11px] text-emerald-700 dark:text-emerald-100/80">Price</span>
                         <span className={`${classes.description} font-semibold flex items-center gap-1 text-emerald-900 dark:text-emerald-50`}>
-                          {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
-                          <CurrencyIcon
-                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'}
-                            size={14}
-                            className="inline-block"
-                          />
+                          {dualSolBamboo ? (
+                            formatRaffleTicketPriceSummary(raffle)
+                          ) : (
+                            <>
+                              {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
+                              <CurrencyIcon
+                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                                size={14}
+                                className="inline-block"
+                              />
+                            </>
+                          )}
                         </span>
                       </div>
                     )}
@@ -3465,7 +3511,7 @@ export function RaffleDetailClient({
                 <div className="min-w-0 space-y-1">
                   <p className="text-sm font-medium text-foreground">Show on public /raffles list</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    When off, link-only NFT raffles are hidden from the browse grid. Admins only — connect an admin
+                    When off, partner-only raffles are hidden from the browse grid. Admins only — connect an admin
                     wallet, or disconnect to use admin sign-in alone.
                   </p>
                   {browseListError && (
@@ -3684,9 +3730,19 @@ export function RaffleDetailClient({
               {raffle.ticket_price > 0 && (
                 <div>
                   <p className={classes.labelText + ' text-muted-foreground'}>Ticket Price</p>
-                  <div className={classes.contentText + ' font-bold flex items-center gap-2'}>
-                    {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
-                    <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={imageSize === 'small' ? 16 : 20} className="inline-block" />
+                  <div className={classes.contentText + ' font-bold flex items-center gap-2 flex-wrap'}>
+                    {dualSolBamboo ? (
+                      <span>{formatRaffleTicketPriceSummary(raffle)}</span>
+                    ) : (
+                      <>
+                        {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
+                        <CurrencyIcon
+                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                          size={imageSize === 'small' ? 16 : 20}
+                          className="inline-block"
+                        />
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -3884,7 +3940,17 @@ export function RaffleDetailClient({
               )
             })()}
 
-            {connected && (
+            {connected && !publicKey && (
+              <div
+                className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20 flex items-center gap-2 text-sm text-muted-foreground`}
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                <span>Finishing wallet connection… your ticket count appears in a moment.</span>
+              </div>
+            )}
+            {connected && publicKey && (
               <div className={`${imageSize === 'small' ? 'p-2' : imageSize === 'medium' ? 'p-3' : 'p-4'} rounded-lg bg-muted/50 border border-primary/20`}>
                 <div className="flex items-center justify-between">
                   <div>
@@ -4109,6 +4175,7 @@ export function RaffleDetailClient({
                   variant="compact"
                   walletAddress={walletAddress || undefined}
                   show={
+                    !dualSolBamboo &&
                     !purchasesBlocked &&
                     (availableTickets === null || availableTickets > 0) &&
                     userTickets === 0
@@ -4498,12 +4565,38 @@ export function RaffleDetailClient({
               )}
             </div>
             
+            {dualSolBamboo && (
+              <div className="space-y-2">
+                <Label>Pay with</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {acceptedTicketPaymentCurrencies(raffle).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setTicketPaymentCurrency(c)}
+                      className={`min-h-[44px] flex-1 rounded-md border px-3 py-2 text-base font-medium touch-manipulation transition-colors sm:text-sm ${
+                        ticketPaymentCurrency === c
+                          ? 'border-primary bg-primary/15 text-foreground'
+                          : 'border-input bg-background text-muted-foreground hover:bg-muted/60'
+                      }`}
+                    >
+                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  One checkout currency per purchase. Pick SOL or BAMBOO before you pay — cart checkout is not available for dual-currency raffles.
+                </p>
+              </div>
+            )}
+
             <HootBoostMeter quantity={ticketQuantity} />
             
             <ReferralComplimentaryHint
               variant="dialog"
               walletAddress={walletAddress || undefined}
               show={
+                !dualSolBamboo &&
                 ticketQuantity === 1 &&
                 userTickets === 0 &&
                 (availableTickets === null || availableTickets > 0)
@@ -4513,8 +4606,12 @@ export function RaffleDetailClient({
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-sm text-muted-foreground">Total Cost</span>
               <div className="text-xl font-bold flex items-center gap-2">
-                {purchaseAmount.toFixed(6)} {raffle.currency}
-                <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={20} className="inline-block" />
+                {purchaseAmount.toFixed(6)} {ticketPaymentCurrency}
+                <CurrencyIcon
+                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                  size={20}
+                  className="inline-block"
+                />
               </div>
             </div>
             

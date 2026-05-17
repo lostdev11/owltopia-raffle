@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { requireSession } from '@/lib/auth-server'
 import { getBalanceByWallet } from '@/lib/gen2-presale/db'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const ip = getClientIp(request)
     const rl = rateLimit(`gen2-balance:${ip}`, 120, 60_000)
     if (!rl.allowed) {
@@ -15,15 +19,22 @@ export async function GET(request: NextRequest) {
     }
 
     const walletRaw = request.nextUrl.searchParams.get('wallet')?.trim() ?? ''
-    const wallet = normalizeSolanaWalletAddress(walletRaw)
-    if (!wallet) {
-      return NextResponse.json({ error: 'Invalid wallet' }, { status: 400 })
+    const walletParam = normalizeSolanaWalletAddress(walletRaw)
+    const sessionWallet = normalizeSolanaWalletAddress(session.wallet)
+    if (!sessionWallet) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
+    }
+    if (!walletParam || !walletsEqualSolana(walletParam, sessionWallet)) {
+      return NextResponse.json(
+        { error: 'wallet must match your signed-in session' },
+        { status: 403 }
+      )
     }
 
-    const row = await getBalanceByWallet(wallet)
+    const row = await getBalanceByWallet(walletParam)
     if (!row) {
       return NextResponse.json({
-        wallet,
+        wallet: walletParam,
         purchased_mints: 0,
         gifted_mints: 0,
         used_mints: 0,

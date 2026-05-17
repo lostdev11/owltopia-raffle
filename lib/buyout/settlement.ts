@@ -17,6 +17,11 @@ import {
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
 import { getTreasurySigningKeypair } from '@/lib/solana/treasury-signing'
+import {
+  payoutBuyoutAcceptanceFromFundsEscrow,
+  refundBuyoutOfferFromFundsEscrow,
+} from '@/lib/raffles/funds-escrow'
+import { resolveBuyoutDepositSource } from '@/lib/buyout/deposit-source'
 import type { RaffleBuyoutOffer } from '@/lib/types'
 import { BUYOUT_TREASURY_FEE_BPS } from '@/lib/buyout/constants'
 
@@ -39,6 +44,12 @@ export function computeBuyoutSettlement(offer: Pick<RaffleBuyoutOffer, 'amount' 
   return { winnerNet, treasuryFee: fee }
 }
 
+function toSettlementResult(
+  r: { ok: true; signature: string } | { ok: false; error: string },
+): SettlementResult {
+  return r
+}
+
 async function getTreasuryTokenProgramForMint(
   mint: PublicKey,
   treasuryPubkey: PublicKey,
@@ -56,8 +67,8 @@ async function getTreasuryTokenProgramForMint(
   return null
 }
 
-/** Send net proceeds to winner from treasury; remainder stays as fee in treasury balance. */
-export async function payoutBuyoutAcceptance(params: {
+/** Legacy: pay winner net from treasury when the bid was deposited to RAFFLE_RECIPIENT_WALLET. */
+async function payoutBuyoutAcceptanceFromTreasury(params: {
   offer: RaffleBuyoutOffer
   winnerWallet: string
 }): Promise<SettlementResult> {
@@ -66,7 +77,7 @@ export async function payoutBuyoutAcceptance(params: {
     return {
       ok: false,
       error:
-        'Buyout payout is not configured. Set RAFFLE_RECIPIENT_SECRET_KEY matching RAFFLE_RECIPIENT_WALLET.',
+        'Legacy buyout payout requires RAFFLE_RECIPIENT_SECRET_KEY (bid was deposited to treasury before funds-escrow routing).',
     }
   }
 
@@ -158,14 +169,14 @@ export async function payoutBuyoutAcceptance(params: {
   }
 }
 
-/** Full refund of gross bid to bidder from treasury. */
-export async function refundBuyoutToBidder(offer: RaffleBuyoutOffer): Promise<SettlementResult> {
+/** Legacy: full refund from treasury when the bid was deposited to RAFFLE_RECIPIENT_WALLET. */
+async function refundBuyoutFromTreasury(offer: RaffleBuyoutOffer): Promise<SettlementResult> {
   const kp = getTreasurySigningKeypair()
   if (!kp) {
     return {
       ok: false,
       error:
-        'Buyout refund signing is not configured. Set RAFFLE_RECIPIENT_SECRET_KEY matching RAFFLE_RECIPIENT_WALLET.',
+        'This bid was sent to the platform treasury before funds-escrow routing. Set RAFFLE_RECIPIENT_SECRET_KEY matching RAFFLE_RECIPIENT_WALLET, or refund manually from treasury.',
     }
   }
 
@@ -255,4 +266,43 @@ export async function refundBuyoutToBidder(offer: RaffleBuyoutOffer): Promise<Se
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
+}
+
+/** Pay winner net from the wallet that held the accepted bid (funds escrow or legacy treasury). */
+export async function payoutBuyoutAcceptance(params: {
+  offer: RaffleBuyoutOffer
+  winnerWallet: string
+}): Promise<SettlementResult> {
+  const source = await resolveBuyoutDepositSource(params.offer)
+  if (!source) {
+    return { ok: false, error: 'Could not verify where this buyout deposit was sent on-chain.' }
+  }
+
+  if (source === 'funds_escrow') {
+    const { winnerNet, treasuryFee } = computeBuyoutSettlement(params.offer)
+    return toSettlementResult(
+      await payoutBuyoutAcceptanceFromFundsEscrow({
+        winnerWallet: params.winnerWallet,
+        winnerNet,
+        treasuryFee,
+        currency: params.offer.currency,
+      }),
+    )
+  }
+
+  return payoutBuyoutAcceptanceFromTreasury(params)
+}
+
+/** Full refund of gross bid to bidder from the wallet that received the deposit. */
+export async function refundBuyoutToBidder(offer: RaffleBuyoutOffer): Promise<SettlementResult> {
+  const source = await resolveBuyoutDepositSource(offer)
+  if (!source) {
+    return { ok: false, error: 'Could not verify where this buyout deposit was sent on-chain.' }
+  }
+
+  if (source === 'funds_escrow') {
+    return toSettlementResult(await refundBuyoutOfferFromFundsEscrow(offer))
+  }
+
+  return refundBuyoutFromTreasury(offer)
 }

@@ -184,6 +184,7 @@ export type OwlMyVoteRecord = {
   /** Display string from DB voting_power (OWL-weighted). */
   votingPowerDecimal: string
   councilVoteUsedEscrow: boolean
+  councilVoteUsedNesting?: boolean
 }
 
 export async function getOwlVoteRecordForWallet(
@@ -195,7 +196,7 @@ export async function getOwlVoteRecordForWallet(
 
   const { data, error } = await db()
     .from('owl_votes')
-    .select('vote_choice, voting_power, council_vote_used_escrow')
+    .select('vote_choice, voting_power, council_vote_used_escrow, council_vote_used_nesting')
     .eq('proposal_id', proposalId)
     .eq('wallet_address', w)
     .maybeSingle()
@@ -205,6 +206,7 @@ export async function getOwlVoteRecordForWallet(
     vote_choice?: string
     voting_power?: string | number | null
     council_vote_used_escrow?: boolean | null
+    council_vote_used_nesting?: boolean | null
   }
   const c = row.vote_choice
   if (c !== 'yes' && c !== 'no' && c !== 'abstain') return null
@@ -221,6 +223,7 @@ export async function getOwlVoteRecordForWallet(
     voteChoice: c,
     votingPowerDecimal,
     councilVoteUsedEscrow: row.council_vote_used_escrow === true,
+    councilVoteUsedNesting: row.council_vote_used_nesting === true,
   }
 }
 
@@ -240,6 +243,8 @@ export async function insertOwlVote(params: {
   votingPower: number | string
   /** When true, voting weight came from OWL in council escrow; locks that weight against withdrawal until voting ends. */
   councilVoteUsedEscrow?: boolean
+  /** When true, weight came from OWL staked in Council governance nesting pool. */
+  councilVoteUsedNesting?: boolean
 }): Promise<{ ok: true } | { ok: false; code: 'duplicate' | 'error'; message: string }> {
   try {
     const admin = getSupabaseAdmin()
@@ -249,6 +254,7 @@ export async function insertOwlVote(params: {
       vote_choice: params.voteChoice,
       voting_power: params.votingPower,
       council_vote_used_escrow: params.councilVoteUsedEscrow === true,
+      council_vote_used_nesting: params.councilVoteUsedNesting === true,
     })
     if (!error) return { ok: true }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdminSession } from '@/lib/auth-server'
+import { requireSession } from '@/lib/auth-server'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -9,11 +9,11 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 /**
  * GET /api/me/staking/positions
- * Admin session only until nesting is public — returns rows for session wallet (DB-backed).
+ * SIWS session required — returns staking rows for the session wallet (DB-backed).
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()

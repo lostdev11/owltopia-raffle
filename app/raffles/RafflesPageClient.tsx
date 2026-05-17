@@ -33,6 +33,7 @@ import {
   ShoppingCart,
   Gift,
   Users,
+  Globe,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -43,11 +44,10 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { filterRafflesByPendingVisibility, isPendingNftRaffleAtTime } from '@/lib/raffles/visibility'
 import { RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT } from '@/lib/raffles/list-query-statuses'
 import { RAFFLES_PAGE_SERVER_REFRESH_MS } from '@/lib/dev-budget'
-import {
-  CommunityGiveawayBrowseCard,
-  type CommunityGiveawayBrowseItem,
-} from '@/components/CommunityGiveawayBrowseCard'
+import { type CommunityGiveawayBrowseItem } from '@/components/CommunityGiveawayBrowseCard'
+import { GiveawayBrowseCarouselSection } from '@/components/giveaways/GiveawayBrowseCarouselSection'
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
+import { SolDomainsHubIntro } from '@/components/SolDomainsHubIntro'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
 import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
@@ -55,21 +55,16 @@ import {
   PURCHASE_COMPLETED_EVENT,
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
+import { cn } from '@/lib/utils'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
 /**
- * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: rows that are listed on-platform,
- * owned by `wallet`, or unlisted crypto/SPL/USDC prizes (not unlisted NFT link-only rows).
+ * PostgREST `.or()` string aligned with REST `fetchRafflesViaRestRaw`: public browse only includes
+ * rows explicitly listed on-platform. Partner raffle only rows stay direct-link / Discord-only.
  */
-function supabaseBrowseListOr(wallet: string | null): string {
-  const w = wallet?.trim() || ''
-  const parts = ['list_on_platform.eq.true']
-  if (w) {
-    parts.push(`created_by.eq.${w}`, `creator_wallet.eq.${w}`)
-  }
-  parts.push('and(list_on_platform.eq.false,or(prize_type.is.null,prize_type.neq.nft))')
-  return parts.join(',')
+function supabaseBrowseListOr(): string {
+  return 'list_on_platform.eq.true'
 }
 
 interface RafflesPageClientProps {
@@ -233,8 +228,15 @@ function PastRafflesCarousel({
           section="past"
           priority
           isPartnerCommunity={(() => {
-            const w = (current.raffle.creator_wallet || current.raffle.created_by || '').trim()
-            return w ? partnerWalletSet?.has(w) ?? false : false
+            const r = current.raffle
+            const w = (r.creator_wallet || r.created_by || '').trim()
+            const feeReason = (r.fee_tier_reason ?? '').trim()
+            return (
+              r.creator_is_partner === true ||
+              Boolean(r.discord_partner_tenant_id && String(r.discord_partner_tenant_id).trim()) ||
+              feeReason === 'partner_community' ||
+              (w ? partnerWalletSet?.has(w) ?? false : false)
+            )
           })()}
         />
       </div>
@@ -278,6 +280,7 @@ function isSupabasePausedError(message: string | null | undefined): boolean {
 type RafflesPageTab =
   | 'all'
   | 'partner-raffles'
+  | 'sol-domains'
   | 'giveaways'
   | 'my-entries'
   | 'owl-vision'
@@ -286,9 +289,15 @@ type RafflesPageTab =
 
 /** URL ?tab=… for deep links; must stay in sync with tab buttons below. */
 function tabFromSearchParams(sp: { get(name: string): string | null }): RafflesPageTab {
-  const t = sp.get('tab')
+  const t = (sp.get('tab') ?? '').trim().toLowerCase()
+  if (t === 'all' || t === 'main' || t === 'raffles') return 'all'
   if (t === 'giveaways' || t === 'giveaway') return 'giveaways'
   if (t === 'partners' || t === 'partner' || t === 'partner-raffles') return 'partner-raffles'
+  if (t === 'sol-domains' || t === 'sol' || t === 'sns' || t === 'domains') return 'sol-domains'
+  if (t === 'my-entries' || t === 'entries' || t === 'raffles-entered') return 'my-entries'
+  if (t === 'owl-vision' || t === 'owlvision') return 'owl-vision'
+  if (t === 'announcements' || t === 'announcement') return 'announcements'
+  if (t === 'leaderboard') return 'leaderboard'
   return 'all'
 }
 
@@ -382,11 +391,11 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        // Parity with server REST browse rules (include unlisted partner SPL/crypto, not link-only NFT).
+        // Parity with server REST browse rules: partner-only raffles are not shown on /raffles.
         const listWithVisibility =
           viewerIsAdmin
             ? listQ
-            : listQ.or(supabaseBrowseListOr(wallet || null))
+            : listQ.or(supabaseBrowseListOr())
         const { data, error } = await listWithVisibility.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
@@ -399,6 +408,7 @@ export function RafflesPageClient({
           nft_collection_name: r.nft_collection_name ?? null,
           nft_token_id: r.nft_token_id ?? null,
           nft_metadata_uri: r.nft_metadata_uri ?? null,
+          sol_domains_hub: r.sol_domains_hub === true,
         })) as Raffle[]
         const filtered = filterRafflesByPendingVisibility(normalized, wallet, viewerIsAdmin)
         if (cancelled) return
@@ -449,8 +459,7 @@ export function RafflesPageClient({
   const tabQueryKey = searchParams.get('tab') ?? ''
   useLayoutEffect(() => {
     setTab(tabFromSearchParams(searchParams))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keep this keyed to tabQueryKey only.
-    // `searchParams` by identity would reset Owl Vision / Leaderboard after in-app tab clicks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps intentionally `tabQueryKey` only; full `searchParams` identity would reset in-app tab picks (Owl Vision, Leaderboard, etc.).
   }, [tabQueryKey])
 
   const handleFeaturedCardTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
@@ -578,7 +587,7 @@ export function RafflesPageClient({
           .from('raffles')
           .select('*')
           .in('status', [...RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT])
-        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr(wallet || null))
+        const q = viewerIsAdmin ? listQ : listQ.or(supabaseBrowseListOr())
         const { data, error } = await q.order('created_at', { ascending: false })
         if (cancelled) return
         if (error) throw new Error(error.message)
@@ -591,6 +600,7 @@ export function RafflesPageClient({
             nft_collection_name: r.nft_collection_name ?? null,
             nft_token_id: r.nft_token_id ?? null,
             nft_metadata_uri: r.nft_metadata_uri ?? null,
+            sol_domains_hub: r.sol_domains_hub === true,
             })) as Raffle[]
             const filtered = filterRafflesByPendingVisibility(normalized, wallet || null, viewerIsAdmin)
             setClientBuckets(bucketRaffles(filtered, serverTime))
@@ -689,40 +699,73 @@ export function RafflesPageClient({
   )
 
   const partnerOnly = tab === 'partner-raffles'
+  const solDomainsOnly = tab === 'sol-domains'
   /** Match RafflesList / RaffleCard: DB flag or allowlisted partner wallet. */
   const isPartnerCommunityRaffle = useCallback(
     (raffle: Raffle) => {
       const w = (raffle.creator_wallet || raffle.created_by || '').trim()
+      const feeReason = (raffle.fee_tier_reason ?? '').trim()
       return (
         raffle.creator_is_partner === true ||
         Boolean(raffle.discord_partner_tenant_id && String(raffle.discord_partner_tenant_id).trim()) ||
+        feeReason === 'partner_community' ||
         (w ? partnerWalletSet.has(w) : false)
       )
     },
     [partnerWalletSet]
   )
-  /** Partner tab: only community partner raffles. Main tab: show all raffles. */
-  const filterPartnerBucket = useCallback(
+  /** Main: exclude .sol hub. Partner: partner hosts only, exclude .sol hub. .sol tab: hub rows only. */
+  const filterRafflesForCurrentTab = useCallback(
     (items: RaffleWithEntries[]) => {
-      if (partnerOnly) {
-        return items.filter(({ raffle }) => isPartnerCommunityRaffle(raffle))
+      if (tab === 'sol-domains') {
+        return items.filter(({ raffle }) => raffle.sol_domains_hub === true)
       }
-      return items
+      if (tab === 'partner-raffles') {
+        return items.filter(
+          ({ raffle }) => isPartnerCommunityRaffle(raffle) && !raffle.sol_domains_hub
+        )
+      }
+      return items.filter(({ raffle }) => !raffle.sol_domains_hub)
     },
-    [partnerOnly, isPartnerCommunityRaffle]
+    [tab, isPartnerCommunityRaffle]
   )
 
-  const activeView = useMemo(() => filterPartnerBucket(active), [active, filterPartnerBucket])
-  const pausedPendingView = useMemo(() => filterPartnerBucket(pausedPending), [pausedPending, filterPartnerBucket])
-  const futureView = useMemo(() => filterPartnerBucket(future), [future, filterPartnerBucket])
-  const pastView = useMemo(() => filterPartnerBucket(past), [past, filterPartnerBucket])
-
   const partnerFeaturedActive = useMemo(
-    () => active.filter(({ raffle }) => isPartnerCommunityRaffle(raffle)),
+    () =>
+      active.filter(
+        ({ raffle }) => isPartnerCommunityRaffle(raffle) && !raffle.sol_domains_hub
+      ),
     [active, isPartnerCommunityRaffle]
   )
 
-  const isEmptyPartnerView =
+  const activeView = useMemo(() => filterRafflesForCurrentTab(active), [active, filterRafflesForCurrentTab])
+  const pausedPendingView = useMemo(
+    () => filterRafflesForCurrentTab(pausedPending),
+    [pausedPending, filterRafflesForCurrentTab]
+  )
+  const futureView = useMemo(() => filterRafflesForCurrentTab(future), [future, filterRafflesForCurrentTab])
+  const pastView = useMemo(() => filterRafflesForCurrentTab(past), [past, filterRafflesForCurrentTab])
+
+  const selectRafflesPageTab = useCallback(
+    (next: RafflesPageTab) => {
+      setTab(next)
+      const params = new URLSearchParams(searchParams.toString())
+      if (next === 'all') params.delete('tab')
+      else params.set('tab', next)
+      const qs = params.toString()
+      router.replace(qs ? `/raffles?${qs}` : '/raffles', { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  const isEmptyCurrentTabView =
+    activeView.length === 0 &&
+    pausedPendingView.length === 0 &&
+    futureView.length === 0 &&
+    pastView.length === 0
+
+  const isEmptyFilteredMainView =
+    tab === 'all' &&
     activeView.length === 0 &&
     pausedPendingView.length === 0 &&
     futureView.length === 0 &&
@@ -746,7 +789,7 @@ export function RafflesPageClient({
 
   // Periodically refresh raffle data so threshold (prize_amount / floor_price) and list stay up to date
   useEffect(() => {
-    if (tab !== 'all' && tab !== 'partner-raffles') return
+    if (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains') return
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -757,7 +800,7 @@ export function RafflesPageClient({
 
   // Refresh when user returns to the tab so threshold/raffle edits are visible
   useEffect(() => {
-    if (tab !== 'all' && tab !== 'partner-raffles') return
+    if (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains') return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const handler = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
@@ -814,12 +857,18 @@ export function RafflesPageClient({
       return {
         pending: [] as CommunityGiveawayBrowseItem[],
         main: [] as CommunityGiveawayBrowseItem[],
+        closed: [] as CommunityGiveawayBrowseItem[],
+        claimed: [] as CommunityGiveawayBrowseItem[],
       }
     }
     const pending: CommunityGiveawayBrowseItem[] = []
     const main: CommunityGiveawayBrowseItem[] = []
+    const closed: CommunityGiveawayBrowseItem[] = []
+    const claimed: CommunityGiveawayBrowseItem[] = []
     for (const g of giveawaysList) {
       if (isPendingFutureCommunityGiveaway(g, serverTime)) pending.push(g)
+      else if (g.claimed) claimed.push(g)
+      else if (g.status !== 'open') closed.push(g)
       else main.push(g)
     }
     pending.sort((a, b) => {
@@ -830,8 +879,22 @@ export function RafflesPageClient({
       if (dr !== 0) return dr
       return new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
     })
-    return { pending, main }
+    closed.sort(
+      (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    )
+    claimed.sort(
+      (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()
+    )
+    return { pending, main, closed, claimed }
   }, [giveawaysList, serverTime])
+
+  const { giveawaysMainEveryone, giveawaysMainHolders } = useMemo(() => {
+    const main = giveawaysBuckets.main
+    return {
+      giveawaysMainEveryone: main.filter((g) => g.access_gate !== 'holder_only'),
+      giveawaysMainHolders: main.filter((g) => g.access_gate === 'holder_only'),
+    }
+  }, [giveawaysBuckets])
 
   const isEmpty = active.length === 0 && pausedPending.length === 0 && future.length === 0 && past.length === 0
   // If we recovered via client fallback, show list and only show error as secondary
@@ -873,13 +936,21 @@ export function RafflesPageClient({
         </div>
       )}
 
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 tracking-tight text-emerald-950 drop-shadow-sm dark:bg-gradient-to-r dark:from-white dark:via-green-400 dark:to-green-300 dark:bg-clip-text dark:text-transparent dark:drop-shadow-lg">
-          {PLATFORM_NAME}
-        </h1>
-        <p className="text-base sm:text-lg font-medium tracking-wide text-foreground/90 dark:bg-gradient-to-r dark:from-gray-300 dark:via-green-400 dark:to-gray-300 dark:bg-clip-text dark:text-transparent">
-          Trusted raffles with full transparency. Every entry verified on-chain.
-        </p>
+      <div className="mb-6 sm:mb-8 space-y-5 sm:space-y-6">
+        <div className="relative overflow-hidden rounded-2xl border border-green-500/25 bg-card/50 p-5 shadow-sm sm:p-7 dark:border-green-500/15 dark:bg-card/40 dark:shadow-black/25">
+          <div
+            className="pointer-events-none absolute -right-24 -top-28 h-48 w-48 rounded-full bg-green-500/[0.12] blur-3xl dark:bg-green-400/10"
+            aria-hidden
+          />
+          <div className="relative">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-2 tracking-tight text-emerald-950 drop-shadow-sm dark:bg-gradient-to-r dark:from-white dark:via-green-400 dark:to-green-300 dark:bg-clip-text dark:text-transparent dark:drop-shadow-lg">
+              {PLATFORM_NAME}
+            </h1>
+            <p className="text-base sm:text-lg font-medium tracking-wide text-foreground/90 dark:bg-gradient-to-r dark:from-gray-300 dark:via-green-400 dark:to-gray-300 dark:bg-clip-text dark:text-transparent">
+              Trusted raffles with full transparency. Every entry verified on-chain.
+            </p>
+          </div>
+        </div>
         {tab === 'all' && topProfitableActive.length > 0 && (
           <RaffleOverThresholdFlexShowcase
             items={topProfitableActive}
@@ -888,101 +959,84 @@ export function RafflesPageClient({
             onFeaturedTouchEnd={handleFeaturedCardTouchEnd}
           />
         )}
-        {/* Tabs: All raffles | Raffles entered | Owl Vision | Announcements | Leaderboard — mobile-friendly touch targets */}
-        <div className="mt-4 sm:mt-6 flex flex-wrap gap-1 sm:gap-2 border-b border-border -mx-1 px-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch]">
-          <button
-            type="button"
-            onClick={() => setTab('all')}
-            className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'all'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Main
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('partner-raffles')}
-            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'partner-raffles'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Users className="h-4 w-4 shrink-0" aria-hidden />
-            Partner raffles
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('giveaways')}
-            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'giveaways'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Gift className="h-4 w-4 shrink-0" />
-            Giveaways
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('my-entries')}
-            className={`touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'my-entries'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Raffles entered
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('owl-vision')}
-            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'owl-vision'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Eye className="h-4 w-4 shrink-0" />
-            Owl Vision
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('announcements')}
-            className={`relative flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'announcements'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Megaphone className="h-4 w-4 shrink-0" />
-            Announcements
-            {hasNewAnnouncements && (
-              <span
-                className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-background"
-                aria-label="New announcement"
-              />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('leaderboard')}
-            className={`flex items-center gap-1.5 touch-manipulation min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-t-md transition-colors whitespace-nowrap ${
-              tab === 'leaderboard'
-                ? 'bg-primary/20 text-primary border-b-2 border-primary -mb-px'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Trophy className="h-4 w-4 shrink-0" />
-            Leaderboard
-          </button>
-        </div>
+        <nav
+          className="rounded-xl border border-border/90 bg-muted/30 p-1.5 shadow-sm dark:border-border/60 dark:bg-muted/20"
+          aria-label="Raffles page sections"
+        >
+          <div className="flex flex-wrap gap-1 overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] pb-0.5 sm:gap-1.5">
+            {(
+              [
+                { id: 'all' as const, label: 'Main', onSelect: () => selectRafflesPageTab('all') },
+                {
+                  id: 'partner-raffles' as const,
+                  label: 'Partner raffles',
+                  icon: Users,
+                  onSelect: () => selectRafflesPageTab('partner-raffles'),
+                },
+                {
+                  id: 'sol-domains' as const,
+                  label: '.sol domains',
+                  icon: Globe,
+                  onSelect: () => selectRafflesPageTab('sol-domains'),
+                },
+                {
+                  id: 'giveaways' as const,
+                  label: 'Giveaways',
+                  icon: Gift,
+                  onSelect: () => selectRafflesPageTab('giveaways'),
+                },
+                { id: 'my-entries' as const, label: 'Raffles entered', onSelect: () => selectRafflesPageTab('my-entries') },
+                {
+                  id: 'owl-vision' as const,
+                  label: 'Owl Vision',
+                  icon: Eye,
+                  onSelect: () => selectRafflesPageTab('owl-vision'),
+                },
+                {
+                  id: 'announcements' as const,
+                  label: 'Announcements',
+                  icon: Megaphone,
+                  onSelect: () => selectRafflesPageTab('announcements'),
+                },
+                {
+                  id: 'leaderboard' as const,
+                  label: 'Leaderboard',
+                  icon: Trophy,
+                  onSelect: () => selectRafflesPageTab('leaderboard'),
+                },
+              ] as const
+            ).map((item) => {
+              const selected = tab === item.id
+              const Icon = 'icon' in item ? item.icon : undefined
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={item.onSelect}
+                  className={cn(
+                    'touch-manipulation relative flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:px-3.5',
+                    selected
+                      ? 'bg-background text-foreground shadow-sm ring-1 ring-green-500/25 dark:ring-green-400/20'
+                      : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'
+                  )}
+                >
+                  {Icon ? <Icon className="h-4 w-4 shrink-0 opacity-90" aria-hidden /> : null}
+                  <span className="whitespace-nowrap">{item.label}</span>
+                  {item.id === 'announcements' && hasNewAnnouncements ? (
+                    <span
+                      className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background sm:right-1.5 sm:top-1.5"
+                      aria-label="New announcement"
+                    />
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        </nav>
       </div>
 
       {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
-      {hasError && (tab === 'all' || tab === 'partner-raffles') && (
+      {hasError && (tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') && (
         <div className="mb-8 rounded-lg border border-destructive/30 bg-destructive/10 p-6">
           <h2 className="text-lg font-semibold text-destructive mb-2">Could not load raffles</h2>
           {showPausedMessage ? (
@@ -1024,17 +1078,23 @@ export function RafflesPageClient({
       )}
 
       {/* Main content: All raffles tab hidden on fetch error; other tabs still render. */}
-      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles')) && (
+      {(!hasError || (tab !== 'all' && tab !== 'partner-raffles' && tab !== 'sol-domains')) && (
         <>
           {tab === 'giveaways' ? (
             <div className="mb-8 sm:mb-12 w-full min-w-0 space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <div className="max-w-3xl">
-                <h2 className="text-xl sm:text-2xl font-bold mb-2">Community giveaways</h2>
-                <p className="text-sm text-muted-foreground">
-                  Free pool giveaways — join with your wallet (sign in on the giveaway page). Owl NFT holders can enter
-                  holder-only pools; everyone can join open pools. OWL boosts add extra draw weight before the boost
-                  deadline.
-                </p>
+              <div className="relative max-w-3xl overflow-hidden rounded-2xl border border-green-500/20 bg-card/40 p-5 shadow-sm sm:p-6 dark:border-green-500/12 dark:bg-card/35">
+                <div
+                  className="pointer-events-none absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-green-500/10 blur-2xl dark:bg-green-400/10"
+                  aria-hidden
+                />
+                <div className="relative space-y-2">
+                  <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Community giveaways</h2>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    Free pool giveaways — join with your wallet (sign in on the giveaway page). Owl NFT holders can enter
+                    holder-only pools; everyone can join open pools. OWL boosts add extra draw weight before the boost
+                    deadline.
+                  </p>
+                </div>
               </div>
               {giveawaysLoading && (
                 <div className="flex items-center gap-2 text-muted-foreground py-8">
@@ -1050,59 +1110,61 @@ export function RafflesPageClient({
               {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length === 0 && (
                 <p className="text-muted-foreground py-8">No public giveaways right now. Check back soon.</p>
               )}
-              {!giveawaysLoading && !giveawaysError &&
-                giveawaysList &&
-                giveawaysList.length > 0 &&
-                giveawaysBuckets.pending.length > 0 && (
-                  <section className="space-y-4" aria-labelledby="giveaways-pending-heading">
-                    <div className="max-w-3xl space-y-1">
-                      <h3 id="giveaways-pending-heading" className="text-lg font-semibold tracking-tight">
-                        Pending giveaways
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Scheduled or opening soon — the prize NFT is not verified in escrow yet. Entries open once the
-                        deposit confirms; dates below show boost and entry deadlines when set.
-                      </p>
-                    </div>
-                    <ul
-                      className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
-                      role="list"
-                    >
-                      {giveawaysBuckets.pending.map((g, i) => (
-                        <li key={g.id} className="min-w-0">
-                          <CommunityGiveawayBrowseCard g={g} priorityImage={i === 0} />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && giveawaysBuckets.main.length > 0 && (
-                <section className="space-y-4" aria-labelledby="giveaways-live-heading">
-                  {giveawaysBuckets.pending.length > 0 ? (
-                    <div className="max-w-3xl">
-                      <h3 id="giveaways-live-heading" className="text-lg font-semibold tracking-tight">
-                        Open giveaways
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Join now (sign in on the giveaway page), apply OWL boosts before the boost deadline, and watch for
-                        the draw after entries close.
-                      </p>
-                    </div>
-                  ) : null}
-                  <ul
-                    className="m-0 grid w-full list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 md:gap-5 lg:grid-cols-3 lg:gap-8"
-                    role="list"
-                  >
-                    {giveawaysBuckets.main.map((g, i) => (
-                      <li key={g.id} className="min-w-0">
-                        <CommunityGiveawayBrowseCard
-                          g={g}
-                          priorityImage={giveawaysBuckets.pending.length === 0 && i === 0}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+              {!giveawaysLoading && !giveawaysError && giveawaysList && giveawaysList.length > 0 && (
+                <div className="space-y-10 sm:space-y-14">
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-pending"
+                    title="Pending giveaways"
+                    description="Scheduled or opening soon — prize NFT not in escrow yet. Entries open after deposit confirms."
+                    items={giveawaysBuckets.pending}
+                    eagerFirstImage={giveawaysBuckets.pending.length > 0}
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-open-everyone"
+                    title="Open pools — everyone"
+                    description="Public pools — sign in on the giveaway page, OWL boosts before the boost deadline, draw after entries close."
+                    items={giveawaysMainEveryone}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 && giveawaysMainEveryone.length > 0
+                    }
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-holder-pools"
+                    title="Open pools — Owl NFT holders"
+                    description="Holder-only pools — same flow on the giveaway page with holder verification."
+                    items={giveawaysMainHolders}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 &&
+                      giveawaysMainEveryone.length === 0 &&
+                      giveawaysMainHolders.length > 0
+                    }
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-closed"
+                    title="Closed giveaways"
+                    description="Winner drawn or cancelled — entries are closed. View details for results or claim instructions."
+                    items={giveawaysBuckets.closed}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 &&
+                      giveawaysMainEveryone.length === 0 &&
+                      giveawaysMainHolders.length === 0 &&
+                      giveawaysBuckets.closed.length > 0
+                    }
+                  />
+                  <GiveawayBrowseCarouselSection
+                    sectionId="giveaways-prize-claimed"
+                    title="Prize claimed"
+                    description="Giveaways where the winner has claimed the prize from escrow."
+                    items={giveawaysBuckets.claimed}
+                    eagerFirstImage={
+                      giveawaysBuckets.pending.length === 0 &&
+                      giveawaysMainEveryone.length === 0 &&
+                      giveawaysMainHolders.length === 0 &&
+                      giveawaysBuckets.closed.length === 0 &&
+                      giveawaysBuckets.claimed.length > 0
+                    }
+                  />
+                </div>
               )}
             </div>
           ) : tab === 'owl-vision' ? (
@@ -1347,26 +1409,58 @@ export function RafflesPageClient({
                 </div>
               )}
             </div>
-          ) : (tab === 'all' || tab === 'partner-raffles') ? (
-            partnerOnly && isEmptyPartnerView ? (
+          ) : (tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') ? (
+            solDomainsOnly && isEmptyCurrentTabView ? (
+              <div className="mb-8 sm:mb-12 w-full min-w-0">
+                <SolDomainsHubIntro />
+                <div className="text-center py-12 px-2">
+                  {clientFetchStarted && !clientBuckets && !clientFetchError ? (
+                    <p className="text-xl text-muted-foreground">Loading raffles…</p>
+                  ) : (
+                    <>
+                      <p className="text-xl text-muted-foreground mb-4">No .sol hub raffles yet</p>
+                      <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                        When a host marks an NFT raffle for this hub, it appears here — not on Main or Partner.{' '}
+                        <button
+                          type="button"
+                          onClick={() => selectRafflesPageTab('all')}
+                          className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
+                        >
+                          Main
+                        </button>{' '}
+                        tab lists everything else.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleRefresh}
+                        className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
+                      >
+                        Refresh
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : partnerOnly && isEmptyCurrentTabView ? (
               <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
                 {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                   <p className="text-xl text-muted-foreground">Loading raffles…</p>
                 ) : (
                   <>
                     <p className="text-xl text-muted-foreground mb-4">No partner raffles to show yet</p>
-                    <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
-                      Raffles from verified partner communities (2% platform fee on tickets). See the{' '}
-                      <Link
-                        href="/partner-program"
-                        className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
-                      >
-                        Owltopia Partner Program
-                      </Link>
-                      {' '}or switch to{' '}
+                <p className="text-sm text-muted-foreground mb-6 max-w-2xl mx-auto">
+                  Raffles from verified partner communities (2% platform fee on tickets). Some hosts may sell tickets
+                  in their project SPL after Partner Pro onboarding — only their raffles, not site-wide. See the{' '}
+                  <Link
+                    href="/partner-program"
+                    className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline-flex items-center"
+                  >
+                    Owltopia Partner Program
+                  </Link>
+                  {' '}or switch to{' '}
                       <button
                         type="button"
-                        onClick={() => setTab('all')}
+                        onClick={() => selectRafflesPageTab('all')}
                         className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
                       >
                         Main
@@ -1374,7 +1468,7 @@ export function RafflesPageClient({
                       to see non-partner listings, or the{' '}
                       <button
                         type="button"
-                        onClick={() => setTab('partner-raffles')}
+                        onClick={() => selectRafflesPageTab('partner-raffles')}
                         className="text-foreground/90 underline font-medium touch-manipulation min-h-[44px] inline align-baseline"
                       >
                         Partner raffles
@@ -1393,43 +1487,50 @@ export function RafflesPageClient({
               </div>
             ) : (
             <>
+              {solDomainsOnly && <SolDomainsHubIntro />}
               {partnerOnly && partnerFeaturedActive.length > 0 && (
                 <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
               )}
               {partnerOnly && (
-                <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
-                  Only raffles from verified partner community hosts (2% platform fee on tickets).{' '}
-                  <Link href="/partner-program" className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
+                <p className="text-sm text-muted-foreground mb-4 max-w-2xl leading-relaxed">
+                  Only raffles from verified partner community hosts (2% platform fee on tickets). Partner Pro projects
+                  may also price tickets in their own SPL — only on their listings, not as a global option for every
+                  creator.{' '}
+                  <Link href="/partner-program" className="font-semibold text-foreground underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center">
                     Partner program
                   </Link>
                   . Use the Main tab for the rest of the site&apos;s raffles, or the{' '}
                   <Link
                     href="/partners/dashboard"
-                    className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
+                    className="font-semibold text-foreground underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline"
                   >
                     partner hub
                   </Link>
                   {` `}if you host for a community.
                 </p>
               )}
-          <div className="mb-8 sm:mb-12 w-full min-w-0">
+          <div id="browse-active" className="scroll-mt-28 mb-8 sm:mb-12 w-full min-w-0">
             {activeView.length > 0 ? (
-              <RafflesList
-                rafflesWithEntries={activeView}
-                title={partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
-                section="active"
-                serverNow={serverTime}
-                onTopProfitableChange={partnerOnly ? undefined : setTopProfitableActive}
-                partnerWalletSet={partnerWalletSet}
-              />
+                <RafflesList
+                  rafflesWithEntries={activeView}
+                  title={
+                    solDomainsOnly ? 'Live .sol raffles' : partnerOnly ? 'Active partner raffles' : 'Active Raffles'
+                  }
+                  section="active"
+                  serverNow={serverTime}
+                  onTopProfitableChange={tab === 'all' ? setTopProfitableActive : undefined}
+                  partnerWalletSet={partnerWalletSet}
+                />
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
+                  {solDomainsOnly ? 'Live .sol raffles' : partnerOnly ? 'Active partner raffles' : 'Active Raffles'}
                 </h2>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly
+                    {solDomainsOnly
+                      ? 'No live .sol hub raffles right now.'
+                      : partnerOnly
                       ? 'No active raffles from partner communities right now.'
                       : 'No active raffles at the moment. Check back soon!'}
                   </p>
@@ -1438,23 +1539,27 @@ export function RafflesPageClient({
             )}
           </div>
 
-          <div className="mb-8 sm:mb-12">
+          <div id="browse-upcoming" className="scroll-mt-28 mb-8 sm:mb-12">
             {futureView.length > 0 ? (
-              <RafflesList
-                rafflesWithEntries={futureView}
-                title={partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
-                section="future"
-                serverNow={serverTime}
-                partnerWalletSet={partnerWalletSet}
-              />
+                <RafflesList
+                  rafflesWithEntries={futureView}
+                  title={
+                    solDomainsOnly ? 'Upcoming .sol raffles' : partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'
+                  }
+                  section="future"
+                  serverNow={serverTime}
+                  partnerWalletSet={partnerWalletSet}
+                />
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
+                  {solDomainsOnly ? 'Upcoming .sol raffles' : partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'}
                 </h2>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly
+                    {solDomainsOnly
+                      ? 'No upcoming .sol hub raffles scheduled.'
+                      : partnerOnly
                       ? 'No upcoming partner raffles scheduled.'
                       : 'No upcoming raffles scheduled at this time'}
                   </p>
@@ -1463,27 +1568,41 @@ export function RafflesPageClient({
             )}
           </div>
 
-          <div className="mb-8 sm:mb-12">
+          <div id="browse-pending" className="scroll-mt-28 mb-8 sm:mb-12">
             {pausedPendingView.length > 0 ? (
-              <RafflesList
-                rafflesWithEntries={pausedPendingView}
-                title={partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
-                titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
-                section="future"
-                serverNow={serverTime}
-                partnerWalletSet={partnerWalletSet}
-              />
+                <RafflesList
+                  rafflesWithEntries={pausedPendingView}
+                  title={
+                    solDomainsOnly
+                      ? 'Pending .sol raffles'
+                      : partnerOnly
+                        ? 'Pending partner raffles'
+                        : 'Pending / Paused Raffles'
+                  }
+                  titleDescription="NFT prizes must be deposited to platform escrow and verified before the raffle can go live."
+                  section="future"
+                  serverNow={serverTime}
+                  partnerWalletSet={partnerWalletSet}
+                />
             ) : (
               <>
                 <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                  {partnerOnly ? 'Pending partner raffles' : 'Pending / Paused Raffles'}
+                  {solDomainsOnly
+                    ? 'Pending .sol raffles'
+                    : partnerOnly
+                      ? 'Pending partner raffles'
+                      : 'Pending / Paused Raffles'}
                 </h2>
                 <p className="text-sm text-muted-foreground mb-4">
                   NFT prizes must be deposited to platform escrow and verified before the raffle can go live.
                 </p>
                 <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    {partnerOnly ? 'No pending partner raffles right now.' : 'No pending or paused raffles right now.'}
+                    {solDomainsOnly
+                      ? 'No pending .sol hub raffles right now.'
+                      : partnerOnly
+                      ? 'No pending partner raffles right now.'
+                      : 'No pending or paused raffles right now.'}
                   </p>
                 </div>
               </>
@@ -1491,9 +1610,9 @@ export function RafflesPageClient({
           </div>
 
           {pastView.length > 0 && (
-            <div className="mb-8 sm:mb-12 w-full min-w-0">
+            <div id="browse-past" className="scroll-mt-28 mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
-                {partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
+                {solDomainsOnly ? 'Past .sol raffles' : partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
               </h2>
               {pastView.length > 3 ? (
                 <PastRafflesCarousel items={pastView} partnerWalletSet={partnerWalletSet} />
@@ -1509,8 +1628,8 @@ export function RafflesPageClient({
             </div>
           )}
 
-          {/* Empty state on All tab only (partner empty uses consolidated block above). */}
-          {tab === 'all' && isEmpty && (
+          {/* Empty state on Main tab when this tab’s filtered buckets are all empty. */}
+          {isEmptyFilteredMainView && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>

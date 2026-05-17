@@ -82,12 +82,25 @@ const BAMBOO_DEFINITION: PartnerPrizeTokenDefinition = {
   defaultImagePath: '/icon.png',
 }
 
+/** Pandarianz Gen 1 mint token (mainnet SPL, 0 decimals). PNDA partner prize. */
+const PG1MT_MINT_MAINNET = 'bViqre2oMVP3nqgo11ktnZyew5MhvEBoCv5NJQx5KXP'
+
+const PG1MT_DEFINITION: PartnerPrizeTokenDefinition = {
+  currencyCode: 'PG1MT',
+  displayLabel: 'Pandarianz Gen 1 Mint',
+  mint: PG1MT_MINT_MAINNET,
+  tokenProgram: 'spl',
+  decimals: 0,
+  defaultImagePath: '/icon.png',
+}
+
 const PARTNERS: PartnerPrizeTokenDefinition[] = [
   TRQ_DEFINITION,
   USDC_DEFINITION,
   SOL_DEFINITION,
   CANE_DEFINITION,
   BAMBOO_DEFINITION,
+  PG1MT_DEFINITION,
 ]
 
 /**
@@ -108,6 +121,12 @@ export function getPartnerPrizeTokenByCurrency(currency: string | null | undefin
 
 export function isPartnerPrizeCurrency(currency: string | null | undefined): boolean {
   return getPartnerPrizeTokenByCurrency(currency) != null
+}
+
+/** SOL/USDC SPL prizes (wrapped SOL in escrow) — any creator may use; other `PARTNERS` tickers stay partner-gated. */
+export function isPublicSplPrizeCurrency(currency: string | null | undefined): boolean {
+  const c = (currency || '').trim().toUpperCase()
+  return c === 'SOL' || c === 'USDC'
 }
 
 /** Crypto raffle whose prize is a partner SPL (not legacy SOL/USDC on-chain prize). */

@@ -17,12 +17,13 @@ import {
   createAssociatedTokenAccountInstruction,
   type Mint,
 } from '@solana/spl-token'
-import type { Raffle } from '@/lib/types'
+import type { Raffle, RaffleCurrency } from '@/lib/types'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isOwlEnabled } from '@/lib/tokens'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { clearReferralComplimentarySessionCache } from '@/lib/referrals/complimentary-session-client'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { isMobileDevice, isAndroidDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export type ExecuteRafflePurchaseResult =
   | { ok: true }
@@ -34,6 +35,7 @@ export type PurchasePaymentDetails = {
   currency?: string
   usdcMint: string
   owlMint: string | null
+  tokenMint?: string | null
   tokenDecimals: number
   split?: { recipient: string; amount: number }[]
 }
@@ -43,6 +45,8 @@ type PaymentDetails = PurchasePaymentDetails
 export type ExecuteRafflePurchaseOptions = {
   raffle: Raffle
   ticketQuantity: number
+  /** When raffle offers SOL + BAMBOO, which asset the buyer pays in (defaults to `raffle.currency`). */
+  paymentCurrency?: RaffleCurrency
   publicKey: PublicKey
   connection: Connection
   sendTransaction: (
@@ -65,6 +69,24 @@ export type ExecuteRafflePurchaseOptions = {
    * If omitted, only routerRefresh runs.
    */
   onVerifyPending?: (ctx: { entryId: string; transactionSignature: string }) => void | Promise<void>
+}
+
+/** SPL Token program: error index 1 isInsufficientFunds (transfer exceeds wallet token balance). */
+export function formatSplTokenTransferFailure(errorMessage: string, currency: string): string | null {
+  const hasCustomOne = /"Custom"\s*:\s*1/.test(errorMessage)
+  if (!hasCustomOne || !errorMessage.includes('InstructionError')) return null
+  if (currency === 'BAMBOO') {
+    return 'Not enough BAMBOO in your wallet for this payment. Check your token balance and try again.'
+  }
+  if (currency === 'OWL') {
+    return (
+      'Not enough OWL in your wallet for this payment. Staked OWL is separate — add or unwrap OWL so your token balance covers the ticket total, then try again.'
+    )
+  }
+  if (currency === 'USDC') {
+    return 'Not enough USDC in your wallet for this payment. Check your token balance (not just SOL for fees).'
+  }
+  return null
 }
 
 function classifyPurchaseError(err: unknown): {
@@ -360,6 +382,13 @@ function resolvePaymentsFromPurchaseDetails(details: PurchasePaymentDetails): {
   throw new Error('Invalid payment instructions')
 }
 
+function resolveSplPaymentMint(raffleCurrency: string, paymentDetails: PurchasePaymentDetails): string | null {
+  if (raffleCurrency === 'USDC') return paymentDetails.usdcMint
+  if (raffleCurrency === 'OWL') return paymentDetails.tokenMint ?? paymentDetails.owlMint
+  if (raffleCurrency === 'BAMBOO') return paymentDetails.tokenMint ?? null
+  return null
+}
+
 /**
  * Build legacy `Transaction` (wallet sign) from server payment details — single or merged cart splits.
  */
@@ -390,26 +419,16 @@ export async function buildPurchaseTransactionFromPaymentDetails(
         })
       )
     }
-  } else if (raffleCurrency === 'USDC') {
-    const usdcMint = new PublicKey(paymentDetails.usdcMint)
-    const mintInfo = await getMintRetries(connection, usdcMint)
+  } else if (raffleCurrency === 'USDC' || raffleCurrency === 'OWL' || raffleCurrency === 'BAMBOO') {
+    const mint = resolveSplPaymentMint(raffleCurrency, paymentDetails)
+    if (!mint) throw new Error(`${raffleCurrency} mint address not configured in payment details`)
+    const mintPk = new PublicKey(mint)
+    const mintInfo = await getMintRetries(connection, mintPk)
     await appendSplTransfersForPayments(
       connection,
       transaction,
       publicKey,
-      usdcMint,
-      payments,
-      mintInfo.decimals
-    )
-  } else if (raffleCurrency === 'OWL') {
-    if (!paymentDetails.owlMint) throw new Error('OWL mint address not configured in payment details')
-    const owlMint = new PublicKey(paymentDetails.owlMint)
-    const mintInfo = await getMintRetries(connection, owlMint)
-    await appendSplTransfersForPayments(
-      connection,
-      transaction,
-      publicKey,
-      owlMint,
+      mintPk,
       payments,
       mintInfo.decimals
     )
@@ -431,6 +450,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
   const {
     raffle,
     ticketQuantity,
+    paymentCurrency: paymentCurrencyOpt,
     publicKey,
     connection,
     sendTransaction,
@@ -443,7 +463,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     onVerifyPending,
   } = opts
 
-  if (raffle.currency === 'OWL' && !isOwlEnabled()) {
+  const payCurrency = (paymentCurrencyOpt ?? raffle.currency) as RaffleCurrency
+
+  if (payCurrency === 'OWL' && !isOwlEnabled()) {
     return { ok: false, error: 'OWL entry is not enabled yet — mint address pending.' }
   }
 
@@ -464,6 +486,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
             raffleId: raffle.id,
             walletAddress: publicKey.toBase58(),
             ticketQuantity,
+            ...(paymentCurrencyOpt ? { paymentCurrency: paymentCurrencyOpt } : {}),
           }),
           signal: controller.signal,
         })
@@ -566,7 +589,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     const transaction = await buildPurchaseTransactionFromPaymentDetails(
       connection,
       publicKey,
-      String(raffle.currency || 'SOL'),
+      String(payCurrency),
       paymentDetails
     )
 
@@ -597,12 +620,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
         throw new Error('Transaction was cancelled. Please try again if you want to continue.')
       }
 
-      const isMobile =
-        typeof navigator !== 'undefined' &&
-        /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-          navigator.userAgent || (navigator as { vendor?: string }).vendor || ''
-        )
-      const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '')
+      const isMobile = isMobileDevice()
+      const isAndroid = isAndroidDevice()
+      const isSeekerOrMobileShell = isSolanaMobileEnvironment()
 
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('Insufficient')) {
         throw new Error(
@@ -619,7 +639,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
         (errorMessage.includes('invalid') || errorMessage.includes('Invalid') || errorMessage.includes('serialize'))
       ) {
         throw new Error(
-          'Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.'
+          isSeekerOrMobileShell
+            ? 'Transaction validation failed on Seeker. Refresh this page, reconnect with Solana Mobile, and install any pending system or Seed Vault updates.'
+            : 'Transaction validation failed. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet app is up to date.'
         )
       }
       if (errorMessage.toLowerCase().includes('solflare')) {
@@ -629,7 +651,9 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       }
       if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
         throw new Error(
-          'Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.'
+          isSeekerOrMobileShell
+            ? 'Wallet error on Seeker. Refresh the page, choose Solana Mobile in the wallet list, and check for system or Seed Vault updates.'
+            : 'Wallet extension error. Please try: 1) Refreshing the page, 2) Reconnecting your wallet, 3) Ensuring your wallet extension is up to date.'
         )
       }
       if (errorMessage.includes('Network') || errorMessage.includes('connection')) {
@@ -637,6 +661,10 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       }
       if (isMobile && errorMessage.includes('timeout')) {
         throw new Error('Transaction timeout. This can happen on slower mobile connections. Please try again.')
+      }
+      const splMsg = formatSplTokenTransferFailure(errorMessage, String(payCurrency || ''))
+      if (splMsg) {
+        throw new Error(splMsg)
       }
       throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
     }

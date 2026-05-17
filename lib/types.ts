@@ -121,7 +121,7 @@ export type RaffleStatus =
   | null
 
 /** Supported raffle ticket currencies */
-export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL'
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
 
 export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
 
@@ -142,6 +142,13 @@ export interface Raffle {
   nft_metadata_uri: string | null
   ticket_price: number
   currency: RaffleCurrency
+  /**
+   * Optional second ticket asset paired with {@link currency} — only SOL↔BAMBOO (see migration 114).
+   * When set, {@link alternate_ticket_price} is the per-ticket price in this asset.
+   */
+  alternate_ticket_currency: RaffleCurrency | null
+  /** Per-ticket price in `alternate_ticket_currency` (null when single-currency tickets). */
+  alternate_ticket_price: number | null
   max_tickets: number | null
   min_tickets: number | null
   start_time: string
@@ -192,6 +199,11 @@ export interface Raffle {
    */
   creator_partner_display_name?: string | null
   /**
+   * Enriched at list time: `partner_community_creators.display_label` when set (admin partner brand name).
+   * Used for partner spotlight logo matching — profile display names often omit the brand keyword.
+   */
+  creator_partner_table_label?: string | null
+  /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */
@@ -206,6 +218,11 @@ export interface Raffle {
    * When false, it is for partner Discord / direct link only: still at `/raffles/{slug}` for entry.
    */
   list_on_platform: boolean
+  /**
+   * When true, raffle is shown only under the ".sol domains" hub tab (`?tab=sol-domains`), not Main or Partner.
+   * NFT raffles only; use `floor_price` for the listed reference value (no automated SNS/market calls).
+   */
+  sol_domains_hub: boolean
   /** When creator requested cancellation (pending admin approval). */
   cancellation_requested_at: string | null
   /** When admin accepted cancellation. */

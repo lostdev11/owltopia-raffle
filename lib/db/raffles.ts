@@ -91,7 +91,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_CORE =
-  ',prize_amount,prize_currency,ticket_price,currency,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 /** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
 const RAFFLE_TAIL_FUNDS_ESCROW =
@@ -102,7 +102,7 @@ const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 /** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,buyout_closed_at'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,sol_domains_hub,buyout_closed_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -298,6 +298,7 @@ function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
     nft_token_id: null,
     nft_metadata_uri: null,
     list_on_platform: true,
+    sol_domains_hub: false,
     discord_partner_tenant_id: null,
   } as Raffle
 }
@@ -377,19 +378,12 @@ async function fetchRafflesViaRestRaw(
     }
   }
 
-  // Always fetch without server-side list_on_platform filter so we can apply nuanced
-  // in-memory visibility rules (e.g., keep legacy SOL crypto raffles visible publicly).
+  // Always fetch without server-side list_on_platform filter so older schemas that return
+  // undefined still behave as listed, while explicit Partner raffle only rows are hidden.
   const data = await fetchOnce('off')
 
   const rows: Record<string, unknown>[] = Array.isArray(data) ? (data as Record<string, unknown>[]) : []
-  const publicRows = rows.filter((row) => {
-    if ((row as { list_on_platform?: boolean }).list_on_platform !== false) return true
-
-    // When unlisted, hide only NFT (link-only NFT raffles); keep SOL, USDC, and partner SPL token
-    // prize raffles visible with the same parity as stale list_on_platform=false legacy rows.
-    const prizeType = typeof row.prize_type === 'string' ? row.prize_type.trim().toLowerCase() : 'crypto'
-    return prizeType !== 'nft'
-  })
+  const publicRows = rows.filter((row) => (row as { list_on_platform?: boolean }).list_on_platform !== false)
 
   if (select === RAFFLE_SELECT_FALLBACK_NO_NFT) {
     return publicRows.map((row) => normalizeBaseRowToRaffle(row))
@@ -595,8 +589,8 @@ export async function getRaffles(
 }
 
 /**
- * Raffles where the creator requested cancellation and an admin must still finish the flow in Owl Vision.
- * Matches GET /api/admin/pending-cancellations (cancellation_requested_at set, status not cancelled).
+ * Raffles where the creator requested cancellation or paid the cancellation fee and an admin must still finish the flow in Owl Vision.
+ * Matches GET /api/admin/pending-cancellations (request or fee recorded, status not cancelled).
  * Unlike {@link getRaffles}, this does **not** filter by `RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT`, so legacy or
  * unexpected `status` values still appear — otherwise Manage Raffles can show an empty queue while Owl Vision lists many.
  */
@@ -608,7 +602,7 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
       const { data, error } = await client
         .from('raffles')
         .select(columns)
-        .not('cancellation_requested_at', 'is', null)
+        .or('cancellation_requested_at.not.is.null,cancellation_fee_paid_at.not.is.null')
         .neq('status', 'cancelled')
         .order('cancellation_requested_at', { ascending: false })
 
@@ -828,8 +822,16 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
     list_on_platform: (row as { list_on_platform?: unknown }).list_on_platform === false ? false : true,
+    sol_domains_hub: (row as { sol_domains_hub?: unknown }).sol_domains_hub === true,
     discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
     buyout_closed_at: (row.buyout_closed_at as string | null) ?? null,
+    alternate_ticket_currency:
+      (row.alternate_ticket_currency as Raffle['alternate_ticket_currency'] | null | undefined) ?? null,
+    alternate_ticket_price: (() => {
+      if (row.alternate_ticket_price == null || row.alternate_ticket_price === '') return null
+      const n = Number(row.alternate_ticket_price)
+      return Number.isFinite(n) && n > 0 ? n : null
+    })(),
     time_extension_count,
   } as Raffle
 }
@@ -1383,6 +1385,8 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     prize_currency: raffle.prize_currency,
     ticket_price: raffle.ticket_price,
     currency: raffle.currency,
+    alternate_ticket_currency: raffle.alternate_ticket_currency ?? null,
+    alternate_ticket_price: raffle.alternate_ticket_price ?? null,
     max_tickets: raffle.max_tickets,
     min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,
@@ -1453,6 +1457,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.discord_partner_tenant_id = null
   }
   insertData.list_on_platform = raffle.list_on_platform === false ? false : true
+  insertData.sol_domains_hub = raffle.sol_domains_hub === true
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
@@ -1722,11 +1727,11 @@ export async function deleteRaffle(id: string) {
 }
 
 /**
- * Select a winner for a raffle by uniform random choice among wallets with at least one confirmed ticket.
- * Total tickets per wallet do not change win probability (equal luck per participant).
+ * Select a winner for a raffle by weighted random choice: each confirmed ticket is one draw weight unit
+ * for its wallet (wallets with more tickets have higher win probability; the outcome is still random).
  * Only considers confirmed entries.
  * Checks if raffle meets minimum requirements before drawing.
- * 
+ *
  * @param raffleId - The ID of the raffle
  * @param forceOverride - If true, bypass minimum check (for admin override)
  * @returns The winner's wallet address, or null if no valid entries or minimum not met
@@ -1769,89 +1774,32 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     walletTickets.set(entry.wallet_address, current + Number(entry.ticket_quantity ?? 0))
   }
 
-  // One chance per wallet (ticket totals are ignored for the draw)
-  const wallets = Array.from(walletTickets.keys()).filter(
-    (w) => Math.max(0, Math.floor(Number(walletTickets.get(w)) || 0)) > 0,
-  )
-  const totalDrawWeight = wallets.length
+  const drawRows = Array.from(walletTickets.entries())
+    .map(([wallet, qty]) => ({
+      wallet,
+      tickets: Math.max(0, Math.floor(Number(qty) || 0)),
+    }))
+    .filter((r) => r.tickets > 0)
 
-  if (totalDrawWeight <= 0) {
+  const totalTicketWeight = drawRows.reduce((s, r) => s + r.tickets, 0)
+  if (totalTicketWeight <= 0) {
     console.warn(`No wallets with positive ticket totals for raffle ${raffleId}`)
     return null
   }
 
-  let random = Math.random() * totalDrawWeight
-
-  // Uniform pick: each wallet with tickets has weight 1
-  for (let i = 0; i < wallets.length; i++) {
-    random -= 1
-    if (random <= 0) {
-      const winnerWallet = wallets[i]
-      
-      // Compute settlement amounts (fee + creator payout) at settlement time
-      const revenue = getRaffleRevenue(entries)
-      const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
-      const grossRevenue =
-        revenueCurrency === 'USDC'
-          ? revenue.usdc
-          : revenueCurrency === 'SOL'
-          ? revenue.sol
-          : revenue.owl
-
-      const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-      const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
-      const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
-
-      const drawStatus = raffleUsesFundsEscrow(raffle)
-        ? 'successful_pending_claims'
-        : 'completed'
-
-      // Update the raffle with the winner and settlement info.
-      // Guard on winner fields so concurrent draws cannot both commit + fire webhooks.
-      const now = new Date().toISOString()
-      const { data: updatedRaffle, error } = await getSupabaseAdmin()
-        .from('raffles')
-        .update({
-          winner_wallet: winnerWallet,
-          winner_selected_at: now,
-          status: drawStatus,
-          creator_wallet: creatorWallet || null,
-          fee_bps_applied: feeBps,
-          fee_tier_reason: reason,
-          platform_fee_amount: platformFee,
-          creator_payout_amount: creatorPayout,
-          settled_at: now,
-        })
-        .eq('id', raffleId)
-        .is('winner_wallet', null)
-        .is('winner_selected_at', null)
-        .select('id')
-        .maybeSingle()
-
-      if (error) {
-        console.error('Error updating raffle with winner:', error)
-        throw new Error(`Failed to update raffle with winner: ${error.message}`)
-      }
-
-      // Another request already selected a winner first; do not send webhook again.
-      if (!updatedRaffle) {
-        const latest = await getRaffleById(raffleId)
-        return latest?.winner_wallet ?? null
-      }
-
-      const rawTickets = walletTickets.get(winnerWallet) ?? 0
-      console.log(
-        `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets held; equal odds among ${totalDrawWeight} wallets)`,
-      )
-      const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
-      await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
-      return winnerWallet
+  // Integer index in [0, totalTicketWeight): each ticket is one equally likely outcome.
+  const pick = Math.floor(Math.random() * totalTicketWeight)
+  let cumulative = 0
+  let winnerWallet = drawRows[0].wallet
+  for (const row of drawRows) {
+    cumulative += row.tickets
+    if (pick < cumulative) {
+      winnerWallet = row.wallet
+      break
     }
   }
 
-  // Fallback to last wallet (should not happen due to random <= 0 check)
-  const winnerWallet = wallets[wallets.length - 1]
-  // Compute settlement amounts for fallback path
+  // Compute settlement amounts (fee + creator payout) at settlement time
   const revenue = getRaffleRevenue(entries)
   const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
   const grossRevenue =
@@ -1898,6 +1846,12 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     const latest = await getRaffleById(raffleId)
     return latest?.winner_wallet ?? null
   }
+
+  const rawTickets = walletTickets.get(winnerWallet) ?? 0
+  console.log(
+    `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets for winner; ` +
+      `${totalTicketWeight} total ticket weights across ${drawRows.length} wallets)`,
+  )
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
   await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)

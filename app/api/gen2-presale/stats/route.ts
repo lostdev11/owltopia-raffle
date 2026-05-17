@@ -25,6 +25,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(payload)
   } catch (error) {
     console.error('gen2-presale stats:', error)
-    return NextResponse.json({ error: 'Failed to load stats' }, { status: 500 })
+    const isDev = process.env.NODE_ENV === 'development'
+    const detail = isDev && error instanceof Error ? error.message : undefined
+    return NextResponse.json(
+      { error: 'Failed to load stats', ...(detail ? { detail } : {}) },
+      { status: 500 }
+    )
   }
 }

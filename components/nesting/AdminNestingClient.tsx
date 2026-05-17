@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Globe, Loader2, PauseCircle, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,11 @@ import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
 import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
+import {
+  buildQuickNftPoolDescription,
+  isProbableSolanaPubkey,
+  suggestedNftPoolSlug,
+} from '@/lib/nesting/admin-quick-pool'
 
 const emptyForm = () => ({
   name: '',
@@ -65,9 +70,28 @@ export function AdminNestingClient() {
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState(emptyForm)
+  const [quickName, setQuickName] = useState('')
+  const [quickCollection, setQuickCollection] = useState('')
+  const [quickLocked, setQuickLocked] = useState(true)
+  const [quickMaxLockDays, setQuickMaxLockDays] = useState('365')
+  const [quickMinLockDays, setQuickMinLockDays] = useState('30')
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
+
+  const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
+  const [forceUnstaking, setForceUnstaking] = useState(false)
+  const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
+
+  const [landingPublic, setLandingPublic] = useState(false)
+  const [landingPublicLoading, setLandingPublicLoading] = useState(false)
+  const [landingPublicSaving, setLandingPublicSaving] = useState(false)
+  const [landingPublicUpdatedAt, setLandingPublicUpdatedAt] = useState<string | null>(null)
+  const [landingPublicUpdatedBy, setLandingPublicUpdatedBy] = useState<string | null>(null)
+
+  const [nestingOpsPaused, setNestingOpsPaused] = useState(false)
+  const [nestingOpsSaving, setNestingOpsSaving] = useState(false)
+  const [nestingEnvKillSwitch, setNestingEnvKillSwitch] = useState(false)
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -140,6 +164,93 @@ export function AdminNestingClient() {
     if (isAdmin && sessionReady) void fetchPools()
   }, [isAdmin, sessionReady, fetchPools])
 
+  useEffect(() => {
+    if (!sessionReady || !isAdmin) return
+    let cancelled = false
+    setLandingPublicLoading(true)
+    fetch('/api/admin/nesting/public-landing', { credentials: 'include', cache: 'no-store' })
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((json) => {
+        if (cancelled || !json) return
+        setLandingPublic(Boolean(json.landing_public))
+        setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+        setLandingPublicUpdatedBy(
+          typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+        )
+        setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+        setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLandingPublic(false)
+          setLandingPublicUpdatedAt(null)
+          setLandingPublicUpdatedBy(null)
+          setNestingOpsPaused(false)
+          setNestingEnvKillSwitch(false)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLandingPublicLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionReady, isAdmin, visibilityTick])
+
+  const patchLandingPublic = useCallback(async (next: boolean) => {
+    setLandingPublicSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/nesting/public-landing', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landing_public: next }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Could not update public landing')
+        return
+      }
+      setLandingPublic(Boolean(json.landing_public))
+      setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+      setLandingPublicUpdatedBy(
+        typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+      )
+      setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+      setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
+    } finally {
+      setLandingPublicSaving(false)
+    }
+  }, [])
+
+  const patchNestingOpsPaused = useCallback(async (nextPaused: boolean) => {
+    setNestingOpsSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/nesting/public-landing', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nesting_operations_paused: nextPaused }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Could not update nesting pause')
+        return
+      }
+      setNestingOpsPaused(Boolean(json.nesting_operations_paused))
+      setNestingEnvKillSwitch(Boolean(json.nesting_env_kill_switch))
+      setLandingPublic(Boolean(json.landing_public))
+      setLandingPublicUpdatedAt(typeof json.updated_at === 'string' ? json.updated_at : null)
+      setLandingPublicUpdatedBy(
+        typeof json.updated_by_wallet === 'string' ? json.updated_by_wallet : null
+      )
+    } finally {
+      setNestingOpsSaving(false)
+    }
+  }, [])
+
   const handleSignIn = useCallback(async () => {
     if (!publicKey || !signMessage) {
       setSignInError('Your wallet does not support message signing.')
@@ -184,6 +295,91 @@ export function AdminNestingClient() {
       setSigningIn(false)
     }
   }, [publicKey, signMessage, fetchPools])
+
+  const createQuickPool = async () => {
+    const name = quickName.trim()
+    const coll = quickCollection.trim()
+    setSaveError(null)
+    if (!name || !coll) {
+      setSaveError('Enter a pool name and collection address.')
+      return
+    }
+    if (!isProbableSolanaPubkey(coll)) {
+      setSaveError('Collection address does not look like a Solana public key.')
+      return
+    }
+    let maxLock = 365
+    let minLock = 30
+    if (quickLocked) {
+      maxLock = Number(quickMaxLockDays)
+      minLock = Number(quickMinLockDays)
+      if (!Number.isFinite(maxLock) || !Number.isFinite(minLock)) {
+        setSaveError('Lock days must be valid numbers.')
+        return
+      }
+      if (!Number.isInteger(maxLock) || !Number.isInteger(minLock) || maxLock < 1 || minLock < 1) {
+        setSaveError('Lock days must be whole numbers of at least 1.')
+        return
+      }
+      if (minLock > maxLock) {
+        setSaveError('Minimum lock days cannot be greater than maximum lock days.')
+        return
+      }
+    }
+
+    const slug = suggestedNftPoolSlug(name, coll)
+    const description = buildQuickNftPoolDescription({
+      poolName: name,
+      collectionMint: coll,
+      locked: quickLocked,
+      minLockDays: quickLocked ? minLock : 0,
+      maxLockDays: quickLocked ? maxLock : 0,
+    })
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/staking/pools', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          slug,
+          description,
+          asset_type: 'nft',
+          token_mint: null,
+          collection_key: coll,
+          reward_token: 'OWL',
+          reward_rate: 1,
+          reward_rate_unit: 'daily',
+          lock_period_days: quickLocked ? maxLock : 0,
+          minimum_stake: null,
+          maximum_stake: null,
+          platform_fee_bps: 0,
+          display_order: 0,
+          is_active: true,
+          partner_project_slug: null,
+          adapter_mode: 'mock',
+          lock_enforcement_source: 'database',
+          is_onchain_enabled: false,
+          requires_onchain_sync: false,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Save failed')
+        return
+      }
+      setQuickName('')
+      setQuickCollection('')
+      setQuickLocked(true)
+      setQuickMaxLockDays('365')
+      setQuickMinLockDays('30')
+      await fetchPools()
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const createPool = async () => {
     setSaving(true)
@@ -268,6 +464,40 @@ export function AdminNestingClient() {
     }
   }
 
+  const runForceUnstake = async () => {
+    const id = forceUnstakePositionId.trim()
+    setForceUnstakeMsg(null)
+    setSaveError(null)
+    if (!id) {
+      setSaveError('Paste a staking position id (UUID from Supabase or support ticket).')
+      return
+    }
+    setForceUnstaking(true)
+    try {
+      const res = await fetch('/api/admin/staking/unstake-override', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position_id: id }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Force unstake failed')
+        return
+      }
+      const holder =
+        typeof json?.holder_wallet === 'string' ? json.holder_wallet : (json?.position?.wallet_address as string) ?? ''
+      setForceUnstakeMsg(
+        holder
+          ? `Closed nest for holder ${holder}. Position status is now unstaked.`
+          : 'Nest closed successfully.'
+      )
+      setForceUnstakePositionId('')
+    } finally {
+      setForceUnstaking(false)
+    }
+  }
+
   if (!connected || !publicKey) {
     return (
       <div className="container mx-auto px-4 py-10 max-w-2xl">
@@ -344,15 +574,206 @@ export function AdminNestingClient() {
       )}
 
       <section className="space-y-4">
-        <SectionHeader title="Create pool" description="Slug must be unique. Reward rate uses the selected unit (snapshot at user stake time)." />
+        <SectionHeader
+          title="Public staking page"
+          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
+        />
+        <Card className="rounded-xl border-green-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe className="h-5 w-5 shrink-0" aria-hidden />
+              Public /nesting page
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Visible to everyone</p>
+                <p className="text-xs text-muted-foreground">
+                  When off, only admins can open /nesting (others are sent to the dashboard nest). When on, anyone can
+                  browse perches; staking still requires wallet connect and sign-in.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                {landingPublicLoading || landingPublicSaving ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+                <Switch
+                  id="nesting-public-landing"
+                  ariaLabel="Make Owl Nesting landing page public"
+                  checked={landingPublic}
+                  disabled={landingPublicLoading || landingPublicSaving}
+                  onCheckedChange={(v) => void patchLandingPublic(v)}
+                />
+              </div>
+            </div>
+            {landingPublicUpdatedAt ? (
+              <p className="text-xs text-muted-foreground">
+                Last updated {new Date(landingPublicUpdatedAt).toLocaleString()}
+                {landingPublicUpdatedBy ? ` · ${landingPublicUpdatedBy}` : ''}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Live nesting actions"
+          description="Controls the “Nesting is paused” banner and server blocks for new nests, claims, and leaving a nest. This is not the same as showing the public /nesting page."
+        />
+        <Card className="rounded-xl border-amber-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <PauseCircle className="h-5 w-5 shrink-0" aria-hidden />
+              Pause holder actions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {nestingEnvKillSwitch ? (
+              <div className="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <span className="font-medium">Env kill switch is on.</span>{' '}
+                <span className="text-destructive/95">
+                  This deployment reads <span className="font-mono">NESTING_DISABLED=true</span> from its environment.
+                  Nesting stays paused for everyone until that value is unset (Vercel env for this deploy target, or{' '}
+                  <span className="font-mono">.env.local</span> when developing). After changing Vercel env vars, trigger a
+                  new deployment so functions pick up the change. The switch below cannot override it.
+                </span>
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Pause new nests, claims, and leaving</p>
+                <p className="text-xs text-muted-foreground">
+                  Turn off when you want holders to use the nest dashboard again. Existing nests stay as they are on
+                  chain / in the database. Switch <span className="text-foreground font-medium">off</span> = live
+                  holder actions; <span className="text-foreground font-medium">on</span> = paused.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                {landingPublicLoading || nestingOpsSaving ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+                <Switch
+                  id="nesting-ops-paused"
+                  ariaLabel="Pause nesting holder actions"
+                  checked={nestingOpsPaused}
+                  disabled={landingPublicLoading || nestingOpsSaving}
+                  onCheckedChange={(v) => void patchNestingOpsPaused(v)}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Create pool"
+          description="Quick path: NFT collection perch with a preset description and OWL/day rewards. Expand Advanced for token pools, custom slug, or economics."
+        />
         <Card className="rounded-xl border-green-500/20">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Plus className="h-5 w-5" aria-hidden />
-              New pool
+              New pool (quick)
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+          <CardContent className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="qk-name">Pool name</Label>
+                <Input
+                  id="qk-name"
+                  autoComplete="off"
+                  placeholder="e.g. Gen2 collection nest"
+                  value={quickName}
+                  onChange={(e) => setQuickName(e.target.value)}
+                  className="min-h-[44px] touch-manipulation"
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="qk-coll">Collection address</Label>
+                <Input
+                  id="qk-coll"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Solana collection mint"
+                  value={quickCollection}
+                  onChange={(e) => setQuickCollection(e.target.value)}
+                  className="font-mono text-xs min-h-[44px] touch-manipulation"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Slug is generated from the name plus part of this mint. Rewards: 1 OWL/day/NFT (site policy).
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium">Locked staking</p>
+                <p className="text-xs text-muted-foreground">
+                  Off means no lock period on this perch. On requires max/min lock days (max is what unstaking waits for).
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0 touch-manipulation">
+                <Switch id="qk-locked" ariaLabel="Locked staking" checked={quickLocked} onCheckedChange={setQuickLocked} />
+                <Label htmlFor="qk-locked" className="text-sm cursor-pointer">
+                  {quickLocked ? 'Lock enabled' : 'No lock'}
+                </Label>
+              </div>
+            </div>
+            {quickLocked ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="qk-max-lock">Maximum lock (days)</Label>
+                  <Input
+                    id="qk-max-lock"
+                    inputMode="numeric"
+                    value={quickMaxLockDays}
+                    onChange={(e) => setQuickMaxLockDays(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">Stored as pool lock; unstaking follows this.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qk-min-lock">Minimum commitment (days)</Label>
+                  <Input
+                    id="qk-min-lock"
+                    inputMode="numeric"
+                    value={quickMinLockDays}
+                    onChange={(e) => setQuickMinLockDays(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">Included in the preset description (defaults 30).</p>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                className="min-h-[44px] bg-green-600 hover:bg-green-700 touch-manipulation"
+                disabled={saving || !quickName.trim() || !quickCollection.trim()}
+                onClick={() => void createQuickPool()}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Create NFT pool
+              </Button>
+            </div>
+
+            <details className="group rounded-xl border border-border/60 bg-background">
+              <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-sm font-medium touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
+                <ChevronDown
+                  className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                  aria-hidden
+                />
+                Advanced — full fields (token pool, custom slug, fees, adapters)
+              </summary>
+              <div className="border-t border-border/60 px-4 pb-4 pt-2">
+                <p className="text-xs text-muted-foreground mb-4">
+                  Use this when you need a token stake pool, a hand-written slug/description, or non-default reward
+                  settings.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="np-name">Name</Label>
               <Input id="np-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="min-h-[44px]" />
@@ -497,14 +918,18 @@ export function AdminNestingClient() {
             <div className="sm:col-span-2">
               <Button
                 type="button"
-                className="min-h-[44px] bg-green-600 hover:bg-green-700"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
                 disabled={saving || !form.name.trim() || !form.slug.trim() || !form.description.trim()}
                 onClick={() => void createPool()}
               >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Create pool
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Create pool (advanced)
               </Button>
             </div>
+                </div>
+              </div>
+            </details>
           </CardContent>
         </Card>
       </section>
@@ -527,6 +952,55 @@ export function AdminNestingClient() {
               Reconcile pending positions
             </Button>
             {reconcileMsg ? <p className="text-sm text-muted-foreground">{reconcileMsg}</p> : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Support: force leave nest"
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Use staking_positions.id."
+        />
+        <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base text-amber-200">
+              <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden />
+              Admin unstake override
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
+              vaults, tokens return to the holder wallet on record. Confirm the position id matches the user’s open nest
+              before continuing.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="force-unstake-pos">Position id</Label>
+              <Input
+                id="force-unstake-pos"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. 8f3c2a1b-…"
+                value={forceUnstakePositionId}
+                onChange={(e) => setForceUnstakePositionId(e.target.value)}
+                className="font-mono text-xs min-h-[44px] touch-manipulation"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="destructive"
+                className="min-h-[44px] touch-manipulation"
+                disabled={forceUnstaking || !forceUnstakePositionId.trim()}
+                onClick={() => void runForceUnstake()}
+              >
+                {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Force leave nest
+              </Button>
+              {forceUnstakeMsg ? (
+                <p className="text-sm text-muted-foreground max-w-xl">{forceUnstakeMsg}</p>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       </section>

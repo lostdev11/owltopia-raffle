@@ -102,6 +102,49 @@ export function isAndroidDevice(): boolean {
   return /android/i.test(userAgent)
 }
 
+function clientUserAgent(): string {
+  if (typeof window === 'undefined') return ''
+  return (
+    navigator.userAgent ||
+    navigator.vendor ||
+    (window as { opera?: string }).opera ||
+    ''
+  )
+}
+
+/**
+ * Solana Mobile Web Shell (Seeker and related devices).
+ * @see https://docs.solanamobile.com/developers/mobile-wallet-adapter-web
+ */
+export function isSolanaMobileWebShell(): boolean {
+  const ua = clientUserAgent().toLowerCase()
+  return ua.includes('solana mobile web shell')
+}
+
+/**
+ * Heuristic Seeker / Solana Mobile device in a normal Android browser.
+ * Not cryptographically verified — use SGT + SIWS when gating rewards.
+ */
+export function isLikelySeekerDevice(): boolean {
+  if (!isAndroidDevice()) return false
+  const ua = clientUserAgent().toLowerCase()
+  return (
+    ua.includes('seeker') ||
+    ua.includes('solanamobile') ||
+    ua.includes('solana mobile')
+  )
+}
+
+/** Built-in MWA wallet environment (Seeker Web Shell or likely Seeker hardware). */
+export function isSolanaMobileEnvironment(): boolean {
+  return isSolanaMobileWebShell() || isLikelySeekerDevice()
+}
+
+/** Android phones + Seeker / Solana Mobile — prioritize refresh + OS/wallet update hints. */
+export function isAndroidOrSolanaMobileClient(): boolean {
+  return isAndroidDevice() || isSolanaMobileEnvironment()
+}
+
 /**
  * Detects if Phantom wallet extension is available (desktop)
  */

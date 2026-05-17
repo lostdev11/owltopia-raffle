@@ -27,6 +27,12 @@ export default function AdminDiscordGiveawayPartnersPage() {
   const [newSecret, setNewSecret] = useState<string | null>(null)
   const [rotatingId, setRotatingId] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [savingWebhookId, setSavingWebhookId] = useState<string | null>(null)
+  const [testingWebhookKey, setTestingWebhookKey] = useState<string | null>(null)
+  const [webhookMessage, setWebhookMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [webhookEdits, setWebhookEdits] = useState<
+    Record<string, { raffle_webhook_url_created: string; raffle_webhook_url_winner: string }>
+  >({})
 
   const [form, setForm] = useState({
     name: '',
@@ -78,11 +84,24 @@ export default function AdminDiscordGiveawayPartnersPage() {
       const data = await res.json().catch(() => ({}))
       if (res.ok && Array.isArray(data.partners)) {
         setPartners(data.partners)
+        setWebhookEdits(
+          Object.fromEntries(
+            (data.partners as PartnerRow[]).map((p) => [
+              p.id,
+              {
+                raffle_webhook_url_created: p.raffle_webhook_url_created ?? '',
+                raffle_webhook_url_winner: p.raffle_webhook_url_winner ?? '',
+              },
+            ])
+          )
+        )
       } else {
         setPartners([])
+        setWebhookEdits({})
       }
     } catch {
       setPartners([])
+      setWebhookEdits({})
     } finally {
       setLoadingList(false)
     }
@@ -154,6 +173,85 @@ export default function AdminDiscordGiveawayPartnersPage() {
       await fetchList()
     } finally {
       setRotatingId(null)
+    }
+  }
+
+  const updateWebhookEdit = (
+    id: string,
+    field: 'raffle_webhook_url_created' | 'raffle_webhook_url_winner',
+    value: string
+  ) => {
+    setWebhookEdits((prev) => ({
+      ...prev,
+      [id]: {
+        raffle_webhook_url_created: prev[id]?.raffle_webhook_url_created ?? '',
+        raffle_webhook_url_winner: prev[id]?.raffle_webhook_url_winner ?? '',
+        [field]: value,
+      },
+    }))
+  }
+
+  const saveRaffleWebhooks = async (id: string) => {
+    const edit = webhookEdits[id] ?? { raffle_webhook_url_created: '', raffle_webhook_url_winner: '' }
+    setSavingWebhookId(id)
+    setWebhookMessage(null)
+    try {
+      const res = await fetch(`/api/admin/discord-giveaway-partners/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raffle_webhook_url_created: edit.raffle_webhook_url_created.trim() || null,
+          raffle_webhook_url_winner: edit.raffle_webhook_url_winner.trim() || null,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setWebhookMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : 'Could not save raffle webhooks',
+        })
+        return
+      }
+      setWebhookMessage({ type: 'success', text: 'Raffle webhooks saved.' })
+      await fetchList()
+    } catch (e) {
+      setWebhookMessage({ type: 'error', text: e instanceof Error ? e.message : 'Could not save raffle webhooks' })
+    } finally {
+      setSavingWebhookId(null)
+    }
+  }
+
+  const sendTestRaffleWebhook = async (id: string, target: 'created' | 'winner') => {
+    const key = `${id}:${target}`
+    setTestingWebhookKey(key)
+    setWebhookMessage(null)
+    try {
+      const res = await fetch(`/api/admin/discord-giveaway-partners/${id}/test-raffle-webhook`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setWebhookMessage({
+          type: 'error',
+          text: typeof data?.error === 'string' ? data.error : `Could not send ${target} test webhook`,
+        })
+        return
+      }
+      setWebhookMessage({
+        type: 'success',
+        text: `Sent ${target === 'winner' ? 'winner' : 'created'} test webhook.`,
+      })
+    } catch (e) {
+      setWebhookMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : `Could not send ${target} test webhook`,
+      })
+    } finally {
+      setTestingWebhookKey(null)
     }
   }
 
@@ -343,6 +441,17 @@ export default function AdminDiscordGiveawayPartnersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {webhookMessage ? (
+            <p
+              className={`mb-4 rounded-md border px-3 py-2 text-sm ${
+                webhookMessage.type === 'success'
+                  ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
+                  : 'border-destructive/30 bg-destructive/10 text-destructive'
+              }`}
+            >
+              {webhookMessage.text}
+            </p>
+          ) : null}
           {loadingList ? (
             <Loader2 className="h-6 w-6 animate-spin" />
           ) : partners.length === 0 ? (
@@ -380,6 +489,72 @@ export default function AdminDiscordGiveawayPartnersPage() {
                       (per-server: <code className="text-[11px]">/owltopia-partner webhook-raffle-*</code>)
                     </span>
                   </p>
+                  <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`created-wh-${p.id}`}>Ticket raffle created webhook URL</Label>
+                      <Input
+                        id={`created-wh-${p.id}`}
+                        value={webhookEdits[p.id]?.raffle_webhook_url_created ?? ''}
+                        onChange={(e) => updateWebhookEdit(p.id, 'raffle_webhook_url_created', e.target.value)}
+                        placeholder="https://discord.com/api/webhooks/…"
+                        className="min-h-[44px] font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`winner-wh-${p.id}`}>Ticket raffle winner webhook URL</Label>
+                      <Input
+                        id={`winner-wh-${p.id}`}
+                        value={webhookEdits[p.id]?.raffle_webhook_url_winner ?? ''}
+                        onChange={(e) => updateWebhookEdit(p.id, 'raffle_webhook_url_winner', e.target.value)}
+                        placeholder="https://discord.com/api/webhooks/…"
+                        className="min-h-[44px] font-mono text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={savingWebhookId === p.id}
+                        onClick={() => void saveRaffleWebhooks(p.id)}
+                      >
+                        {savingWebhookId === p.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Save raffle webhooks'
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={!p.raffle_webhook_url_created || testingWebhookKey === `${p.id}:created`}
+                        onClick={() => void sendTestRaffleWebhook(p.id, 'created')}
+                      >
+                        {testingWebhookKey === `${p.id}:created` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Send created test'
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px]"
+                        disabled={!p.raffle_webhook_url_winner || testingWebhookKey === `${p.id}:winner`}
+                        onClick={() => void sendTestRaffleWebhook(p.id, 'winner')}
+                      >
+                        {testingWebhookKey === `${p.id}:winner` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Send winner test'
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"

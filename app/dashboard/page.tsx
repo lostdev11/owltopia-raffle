@@ -692,6 +692,13 @@ export default function DashboardPage() {
           )
           return
         }
+        const txSig =
+          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
+            ? (json as { transactionSignature: string }).transactionSignature.trim()
+            : ''
+        if (txSig) {
+          window.open(solscanTxUrl(txSig), '_blank', 'noopener,noreferrer')
+        }
         await loadDashboard({ silent: true })
       } finally {
         setClaimProceedsLoadingId(null)
@@ -1095,6 +1102,8 @@ export default function DashboardPage() {
     return Object.values(
       sourceEntries.reduce<Record<string, RaffleEntrySummary>>((acc, row) => {
         const { entry, raffle, referred_by_label } = row
+        // Failed checkouts become `rejected` but used to be summed here → inflated "tickets" vs on-chain reality.
+        if (entry.status === 'rejected') return acc
         const key = raffle.id
         const qty = Number(entry.ticket_quantity) || 0
         const refLabel =
@@ -3044,8 +3053,7 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>
               Your buyout deposit can be returned when the offer expired or the winner accepted someone else&apos;s bid.
-              Uses the platform treasury wallet — ensure{' '}
-              <span className="font-mono text-xs">RAFFLE_RECIPIENT_SECRET_KEY</span> is configured for automatic refunds.
+              Refunds are sent from funds escrow (or legacy treasury for older bids).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

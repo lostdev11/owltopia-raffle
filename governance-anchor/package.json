@@ -1,0 +1,9 @@
+{
+  "name": "owltopia-governance-anchor",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "anchor test"
+  }
+}

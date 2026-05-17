@@ -298,10 +298,10 @@ export async function verifyBatchPaidEntries(
         mergedSplit
       )
     }
-    if (currencyNorm === 'OWL') {
-      const tokenInfo = getTokenInfo('OWL')
+    if (currencyNorm === 'OWL' || currencyNorm === 'BAMBOO') {
+      const tokenInfo = getTokenInfo(currencyNorm)
       if (!tokenInfo.mintAddress) {
-        return { valid: false, error: 'OWL mint address not configured' }
+        return { valid: false, error: `${currencyNorm} mint address not configured` }
       }
       return verifySplBatchAgainstTx(
         new PublicKey(tokenInfo.mintAddress),

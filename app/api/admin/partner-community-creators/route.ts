@@ -13,6 +13,19 @@ import { safeErrorMessage } from '@/lib/safe-error'
 export const dynamic = 'force-dynamic'
 const VALID_PARTNER_TIERS = new Set(['$0_partner', 'partner_pro', 'white_label'])
 
+function parseOptionalPartnerProMonthlyQuoteUsdc(body: Record<string, unknown>):
+  | { ok: true; value: number | null | undefined }
+  | { ok: false; error: string } {
+  if (!('partner_pro_monthly_quote_usdc' in body)) return { ok: true, value: undefined }
+  const raw = body.partner_pro_monthly_quote_usdc
+  if (raw === null) return { ok: true, value: null }
+  const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 500) {
+    return { ok: false, error: 'partner_pro_monthly_quote_usdc must be null or an integer 1–500' }
+  }
+  return { ok: true, value: n }
+}
+
 /**
  * GET /api/admin/partner-community-creators — full admin; lists all allowlisted partner creator wallets.
  */
@@ -99,6 +112,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const quoteParsed = parseOptionalPartnerProMonthlyQuoteUsdc(body as Record<string, unknown>)
+    if (!quoteParsed.ok) {
+      return NextResponse.json({ error: quoteParsed.error }, { status: 400 })
+    }
+    const partner_pro_monthly_quote_usdc = quoteParsed.value
+
     const row = await insertPartnerCommunityCreator({
       creator_wallet,
       display_label: display_label === undefined ? null : display_label,
@@ -106,6 +125,7 @@ export async function POST(request: NextRequest) {
       partner_tier: partner_tier_raw as '$0_partner' | 'partner_pro' | 'white_label',
       is_active,
       discord_partner_tenant_id,
+      partner_pro_monthly_quote_usdc,
     })
     clearPartnerCommunityWalletCache()
     return NextResponse.json({ creator: row })

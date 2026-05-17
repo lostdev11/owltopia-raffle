@@ -7,6 +7,7 @@ import type { RaffleCurrency } from '@/lib/types'
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
 const USDC_MINT_MAINNET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+const BAMBOO_MINT_MAINNET = 'Cndm5E8m1EnCvduCp1EsakUjEw2jKGTUCTa3iL48dSuB'
 
 export interface TokenInfo {
   symbol: string
@@ -24,6 +25,12 @@ const USDC_INFO: TokenInfo = {
   symbol: 'USDC',
   decimals: 6,
   mintAddress: USDC_MINT_MAINNET,
+}
+
+const BAMBOO_INFO: TokenInfo = {
+  symbol: 'BAMBOO',
+  decimals: 9,
+  mintAddress: BAMBOO_MINT_MAINNET,
 }
 
 /**
@@ -77,6 +84,8 @@ export function getTokenInfo(currency: RaffleCurrency): TokenInfo {
         mintAddress: mint,
       }
     }
+    case 'BAMBOO':
+      return BAMBOO_INFO
     default:
       return SOL_INFO
   }
@@ -85,7 +94,7 @@ export function getTokenInfo(currency: RaffleCurrency): TokenInfo {
 /**
  * All supported currency codes (for validation).
  */
-export const RAFFLE_CURRENCIES: RaffleCurrency[] = ['SOL', 'USDC', 'OWL']
+export const RAFFLE_CURRENCIES: RaffleCurrency[] = ['SOL', 'USDC', 'OWL', 'BAMBOO']
 
 export function isRaffleCurrency(s: string): s is RaffleCurrency {
   return RAFFLE_CURRENCIES.includes(s as RaffleCurrency)

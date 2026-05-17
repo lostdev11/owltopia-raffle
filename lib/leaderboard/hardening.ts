@@ -69,27 +69,49 @@ function defaultMinTicketOwlFromSol(): number {
   return (leaderboardMinTicketPriceSol() / REF_SOL) * REF_OWL
 }
 
+function defaultMinTicketBambooFromSol(): number {
+  return (leaderboardMinTicketPriceSol() / REF_SOL) * REF_OWL
+}
+
 export function leaderboardMinTicketPriceForCurrency(currency: string): number {
   const c = currency.trim().toUpperCase() || 'SOL'
   if (c === 'SOL') return leaderboardMinTicketPriceSol()
   if (c === 'USDC') return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_USDC', defaultMinTicketUsdcFromSol())
   if (c === 'OWL') return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_OWL', defaultMinTicketOwlFromSol())
+  if (c === 'BAMBOO') {
+    return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_BAMBOO', defaultMinTicketBambooFromSol())
+  }
   return Number.POSITIVE_INFINITY
 }
 
 export type LeaderboardRafflePriceFields = {
   ticket_price: number | string | null
   currency?: string | null
+  /** SOL↔BAMBOO dual-ticket raffles (migration 114). */
+  alternate_ticket_currency?: string | null
+  alternate_ticket_price?: number | string | null
 }
 
-/** Raffle counts in every leaderboard category when `ticket_price` is above the floor for its `currency`. */
-export function raffleCountsTowardLeaderboard(r: LeaderboardRafflePriceFields): boolean {
-  const price = Number(r.ticket_price)
+function ticketPriceAboveFloor(currency: string, price: number): boolean {
   if (!Number.isFinite(price) || price <= 0) return false
-  const cur = `${r.currency ?? 'SOL'}`.trim() || 'SOL'
-  const min = leaderboardMinTicketPriceForCurrency(cur)
+  const min = leaderboardMinTicketPriceForCurrency(currency)
   if (!Number.isFinite(min)) return false
   return price > min
+}
+
+/**
+ * Raffle counts toward entered / purchased / created / sold when primary or alternate ticket price
+ * is above the floor for that line's currency (supports SOL + BAMBOO dual-ticket listings).
+ */
+export function raffleCountsTowardLeaderboard(r: LeaderboardRafflePriceFields): boolean {
+  const primaryCur = `${r.currency ?? 'SOL'}`.trim() || 'SOL'
+  const primaryPrice = Number(r.ticket_price)
+  if (ticketPriceAboveFloor(primaryCur, primaryPrice)) return true
+
+  const altCur = (r.alternate_ticket_currency ?? '').trim()
+  if (!altCur) return false
+  const altPrice = Number(r.alternate_ticket_price)
+  return ticketPriceAboveFloor(altCur, altPrice)
 }
 
 /** Min distinct wallets (excluding creator) with qualifying purchases for a raffle to count toward Tickets sold leaderboard. */

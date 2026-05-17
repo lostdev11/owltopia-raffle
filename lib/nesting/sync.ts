@@ -5,6 +5,7 @@
 
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import {
+  getStakingPositionByStakeSignature,
   getStakingPositionForWallet,
   patchStakingPosition,
   type StakingPositionRow,
@@ -15,6 +16,9 @@ import {
   NESTING_SIGNATURE_MAX_LEN,
   NESTING_SIGNATURE_MIN_LEN,
 } from '@/lib/nesting/rpc-policy'
+import { getTokenInfo } from '@/lib/tokens'
+import { decimalToRawBigint } from '@/lib/nesting/token-amount'
+import { verifyNestingTokenStakeTransfer } from '@/lib/nesting/token-stake-transfer'
 
 export type StakingSyncKind = 'stake' | 'unstake' | 'claim'
 
@@ -91,6 +95,46 @@ export async function syncStakingPositionBySignature(params: {
   }
 
   const sig = params.signature.trim()
+  if (params.kind === 'stake') {
+    const existingSignature = await getStakingPositionByStakeSignature(sig)
+    if (existingSignature && existingSignature.id !== params.positionId) {
+      throw new StakingUserError('This staking transaction has already been used.', 400)
+    }
+  }
+
+  if (params.kind === 'stake' && pool.asset_type === 'token' && pool.adapter_mode === 'onchain_enabled') {
+    const owl = getTokenInfo('OWL')
+    if (!owl.mintAddress) {
+      throw new StakingUserError('OWL is not configured.', 503)
+    }
+    const expectedAmountRaw = decimalToRawBigint(position.amount, owl.decimals)
+    const verified = await verifyNestingTokenStakeTransfer({
+      signature: sig,
+      payerWallet: params.wallet,
+      pool,
+      expectedAmountRaw,
+      parsedTransaction: tx,
+    })
+    if (!verified.ok) {
+      await patchStakingPosition(params.positionId, {
+        sync_status: 'failed',
+        last_synced_at: now,
+        last_transaction_error: verified.error,
+      })
+      throw new StakingUserError(verified.error, 400)
+    }
+
+    const updated = await patchStakingPosition(params.positionId, {
+      stake_signature: sig,
+      status: 'active',
+      sync_status: 'confirmed',
+      last_synced_at: now,
+      last_transaction_error: null,
+      external_reference: 'token_stake_transfer_confirmed',
+    })
+    return { position: updated }
+  }
+
   const updates: Partial<{
     stake_signature: string | null
     unstake_signature: string | null

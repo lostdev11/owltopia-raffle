@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 087: NFT buyout offers (v1: post-draw only; no pre-bids).
--- Bidders deposit to platform treasury; winner accepts one offer (1% fee);
--- expired/superseded bids refund from treasury when RAFFLE_RECIPIENT_SECRET_KEY is set.
+-- Bidders deposit to platform funds escrow (FUNDS_ESCROW); winner accepts one offer (1% fee);
+-- expired/superseded bids refund from escrow; legacy treasury deposits use RAFFLE_RECIPIENT_SECRET_KEY.
 -- ============================================================================
 
 ALTER TABLE public.raffles

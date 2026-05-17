@@ -6,7 +6,7 @@ import { safeErrorMessage } from '@/lib/safe-error'
 export const dynamic = 'force-dynamic'
 
 /**
- * GET — any admin: raffles with a creator cancellation request still awaiting completion
+ * GET — any admin: raffles with a creator cancellation signal still awaiting completion
  * (not the same as the truncated /api/raffles list, which is capped for cold-start resilience).
  */
 export async function GET(request: NextRequest) {
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await getSupabaseAdmin()
       .from('raffles')
       .select('id, slug, title, status, cancellation_requested_at, cancellation_fee_paid_at')
-      .not('cancellation_requested_at', 'is', null)
+      .or('cancellation_requested_at.not.is.null,cancellation_fee_paid_at.not.is.null')
       .neq('status', 'cancelled')
       .order('cancellation_requested_at', { ascending: false })
 

@@ -304,18 +304,18 @@ export async function verifyTransaction(
         }
       }
       return { valid: false, error: `USDC verification failed: Could not verify transfer of ${expectedAmount} USDC. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
-    } else if (expectedCurrency === 'OWL') {
-      const tokenInfo = getTokenInfo('OWL')
+    } else if (expectedCurrency === 'OWL' || expectedCurrency === 'BAMBOO') {
+      const tokenInfo = getTokenInfo(expectedCurrency)
       if (!tokenInfo.mintAddress) {
-        return { valid: false, error: 'OWL mint address not configured' }
+        return { valid: false, error: `${expectedCurrency} mint address not configured` }
       }
       const decimals = tokenInfo.decimals
-      const OWL_MINT = new PublicKey(tokenInfo.mintAddress)
+      const tokenMint = new PublicKey(tokenInfo.mintAddress)
       const preTokenBalances = transaction.meta.preTokenBalances || []
       const postTokenBalances = transaction.meta.postTokenBalances || []
 
-      const getOwlIncrease = (ownerPubkey: PublicKey) => {
-        return getAssociatedTokenAddress(OWL_MINT, ownerPubkey).then(ata => {
+      const getTokenIncrease = (ownerPubkey: PublicKey) => {
+        return getAssociatedTokenAddress(tokenMint, ownerPubkey).then(ata => {
           const idx = accountKeysFull.findIndex((key: PublicKey) => key.equals(ata))
           if (idx === -1) return null
           const post = postTokenBalances.find(b => b.accountIndex === idx)?.uiTokenAmount?.amount
@@ -326,8 +326,8 @@ export async function verifyTransaction(
       }
 
       if (useSplit && creatorPubkey) {
-        const creatorIncrease = await getOwlIncrease(creatorPubkey)
-        const treasuryIncrease = await getOwlIncrease(treasuryPubkey)
+        const creatorIncrease = await getTokenIncrease(creatorPubkey)
+        const treasuryIncrease = await getTokenIncrease(treasuryPubkey)
         const expectedCreatorRaw = BigInt(Math.round(expectedCreatorAmount * Math.pow(10, decimals)))
         const expectedTreasuryRaw = BigInt(Math.round(expectedTreasuryAmount * Math.pow(10, decimals)))
         const expectedTotalRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
@@ -352,23 +352,23 @@ export async function verifyTransaction(
         }
       }
 
-      const recipientTokenAddress = await getAssociatedTokenAddress(OWL_MINT, treasuryPubkey)
+      const recipientTokenAddress = await getAssociatedTokenAddress(tokenMint, treasuryPubkey)
       const recipientTokenIndex = accountKeysFull.findIndex((key: PublicKey) => key.equals(recipientTokenAddress))
       if (recipientTokenIndex !== -1) {
         const matchingPostBalance = postTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
-        const rawPostOwl = matchingPostBalance?.uiTokenAmount?.amount
-        if (rawPostOwl != null) {
-          const postRaw = BigInt(rawPostOwl)
+        const rawPostToken = matchingPostBalance?.uiTokenAmount?.amount
+        if (rawPostToken != null) {
+          const postRaw = BigInt(rawPostToken)
           const matchingPreBalance = preTokenBalances.find(b => b.accountIndex === recipientTokenIndex)
           const preRaw = matchingPreBalance?.uiTokenAmount?.amount != null ? BigInt(matchingPreBalance.uiTokenAmount.amount) : BigInt(0)
           const increaseRaw = postRaw - preRaw
           const expectedRaw = BigInt(Math.round(Number(expectedAmount) * Math.pow(10, decimals)))
           const toleranceRaw = BigInt(1)
           if (increaseRaw >= expectedRaw - toleranceRaw && increaseRaw <= expectedRaw + toleranceRaw) return { valid: true }
-          return { valid: false, error: `OWL amount mismatch: expected ${expectedAmount}, got ${increaseRaw.toString()} raw. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
+          return { valid: false, error: `${expectedCurrency} amount mismatch: expected ${expectedAmount}, got ${increaseRaw.toString()} raw. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
         }
       }
-      return { valid: false, error: `OWL verification failed: Could not verify transfer of ${expectedAmount} OWL. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
+      return { valid: false, error: `${expectedCurrency} verification failed: Could not verify transfer of ${expectedAmount} ${expectedCurrency}. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
     } else {
       const error = `Unsupported currency: ${expectedCurrency}`
       console.error(error)

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { forbidUnlessSelfOrAdmin } from '@/lib/api-wallet-auth'
+import { requireSession } from '@/lib/auth-server'
 import { executeGen2PresaleConfirm } from '@/lib/gen2-presale/confirm-core'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
@@ -11,6 +13,9 @@ const SIG_REGEX = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request)
+    if (session instanceof NextResponse) return session
+
     const ip = getClientIp(request)
     const rl = rateLimit(`gen2-confirm:${ip}`, 40, 60_000)
     if (!rl.allowed) {
@@ -28,6 +33,9 @@ export async function POST(request: NextRequest) {
     if (!buyerNorm) {
       return NextResponse.json({ error: 'Invalid buyer wallet' }, { status: 400 })
     }
+
+    const authz = await forbidUnlessSelfOrAdmin(session, buyerNorm)
+    if (authz) return authz
 
     const qty = Number(body.quantity)
     if (

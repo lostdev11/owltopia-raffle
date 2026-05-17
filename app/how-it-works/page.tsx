@@ -64,7 +64,11 @@ export default function HowItWorksPage() {
               <strong>Connect your wallet</strong> — Use a Solana wallet (Phantom, Solflare, or another compatible app — mobile wallets work the same flow).
             </li>
             <li>
-              <strong>Buy tickets</strong> — You pay in <strong>SOL</strong>, <strong>USDC</strong>, or <strong>OWL</strong>, depending on how the raffle is set up. Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing.
+              <strong>Buy tickets</strong> — You pay in the ticket currency the host chose: usually <strong>SOL</strong>, <strong>USDC</strong>, or <strong>OWL</strong>. Some verified{' '}
+              <Link href="/partner-program" className="text-green-500 hover:underline">
+                Partner Pro
+              </Link>{' '}
+              communities may also list tickets in their own <strong>SPL token</strong> (only that partner&apos;s raffles; the mint is not a site-wide option for every creator). Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing.
             </li>
             <li>
               <strong>Entry is recorded</strong> — Your entry is stored with your wallet address and ticket count. Once your payment is verified on-chain, your entry counts toward the raffle.
@@ -143,7 +147,7 @@ export default function HowItWorksPage() {
             <Link href="/partner-program" className="text-green-500 hover:underline">
               partner program
             </Link>{' '}
-            creators pay <strong>2%</strong>. Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
+            creators pay <strong>2%</strong> on ticket sales, including when tickets are priced in a partner&apos;s custom SPL (same percentage). Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
           </p>
         </section>
 

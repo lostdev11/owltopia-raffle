@@ -1,10 +1,11 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
-import { PublicKey, Transaction } from '@solana/web3.js'
+import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
@@ -33,6 +34,7 @@ import {
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
 import { isEscrowSplPrizeFrozenVerifyError } from '@/lib/raffles/verify-prize-deposit-client'
+import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -65,6 +67,7 @@ import {
   getPartnerPrizeMintForCurrency,
   getPartnerPrizeTokenByCurrency,
   isPartnerPrizeCurrency,
+  isPublicSplPrizeCurrency,
   listPartnerPrizeTokens,
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
@@ -74,6 +77,10 @@ import {
   previewCreateRaffleThreshold,
 } from '@/lib/raffle-profit'
 import { isOwlEnabled } from '@/lib/tokens'
+import {
+  BAMBOO_TICKET_CURRENCY,
+  canWalletUseBambooTicketCurrency,
+} from '@/lib/raffles/bamboo-ticket-currency'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -117,9 +124,11 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
   persistUntilDismiss: false,
 }
 
-export function CreateRaffleForm() {
+export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlow?: boolean }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const createSubmitInFlightRef = useRef(false)
+  const partnerModeDefaultAppliedRef = useRef(false)
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
@@ -144,7 +153,7 @@ export function CreateRaffleForm() {
   /** Listing image comes from the selected prize NFT metadata. */
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [prizeMode, setPrizeMode] = useState<'nft' | 'token'>('nft')
-  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('TRQ')
+  const [tokenPrizeCurrency, setTokenPrizeCurrency] = useState<string>('SOL')
   const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
@@ -156,15 +165,30 @@ export function CreateRaffleForm() {
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
   const [raffleCurrency, setRaffleCurrency] = useState('SOL')
+  const [alternateBambooTicketPrice, setAlternateBambooTicketPrice] = useState('')
+  const [alternateSolTicketPrice, setAlternateSolTicketPrice] = useState('')
   const [ticketPrice, setTicketPrice] = useState('')
   /** When non-null, ticket was last set by floor autofill; floor edits re-suggest only if ticket still matches. */
   const lastAutofillTicketRef = useRef<string | null>(null)
   const [viewerIsAdmin, setViewerIsAdmin] = useState<boolean | null>(null)
   /** Partners / admins: hide from /raffles but keep the slug (share in Discord, etc.) */
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
+  /** Active `partner_community_creators` wallet — unlocks extra SPL prize tickers beyond SOL/USDC. */
+  const [isPartnerCommunityCreator, setIsPartnerCommunityCreator] = useState(false)
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
+  const partnerCreateMode = searchParams.get('mode') === 'partner'
+  useEffect(() => {
+    if (snsDomainHubFlow) setPrizeMode('nft')
+  }, [snsDomainHubFlow])
+  const canUseBambooTicketCurrency =
+    viewerIsAdmin === true ||
+    (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
+
+  useEffect(() => {
+    partnerModeDefaultAppliedRef.current = false
+  }, [publicKey, partnerCreateMode])
 
   useEffect(() => {
     if (prizeMode === 'token') {
@@ -180,6 +204,14 @@ export function CreateRaffleForm() {
   }, [prizeMode])
 
   useEffect(() => {
+    if (raffleCurrency !== 'SOL') setAlternateBambooTicketPrice('')
+  }, [raffleCurrency])
+
+  useEffect(() => {
+    if (raffleCurrency !== BAMBOO_TICKET_CURRENCY) setAlternateSolTicketPrice('')
+  }, [raffleCurrency])
+
+  useEffect(() => {
     if (raffleCurrency !== 'OWL') return
     if (!isOwlEnabled() || viewerIsAdmin === false) {
       setRaffleCurrency('SOL')
@@ -187,9 +219,18 @@ export function CreateRaffleForm() {
   }, [raffleCurrency, viewerIsAdmin])
 
   useEffect(() => {
+    if (raffleCurrency !== BAMBOO_TICKET_CURRENCY) return
+    if (!canUseBambooTicketCurrency) {
+      setRaffleCurrency('SOL')
+    }
+  }, [raffleCurrency, canUseBambooTicketCurrency])
+
+  useEffect(() => {
     if (tokenPrizeCurrency !== 'OWL') return
     if (!PARTNER_OWL_PRIZE_UI_ENABLED || viewerIsAdmin !== true) {
-      const fallback = listPartnerPrizeTokens()[0]?.currencyCode
+      const fallback =
+        listPartnerPrizeTokens().find((t) => isPublicSplPrizeCurrency(t.currencyCode))?.currencyCode ??
+        listPartnerPrizeTokens()[0]?.currencyCode
       if (fallback) setTokenPrizeCurrency(fallback)
     }
   }, [tokenPrizeCurrency, viewerIsAdmin])
@@ -227,30 +268,45 @@ export function CreateRaffleForm() {
     if (typeof window === 'undefined' || !connected) {
       setCanSetLinkOnlyVisibility(false)
       setPartnerDiscordLinked(false)
+      setIsPartnerCommunityCreator(false)
       setHideFromPublicBrowse(false)
       return
     }
     let cancelled = false
     fetch('/api/raffles/visibility-options', { credentials: 'include' })
       .then((r) => (cancelled || !r.ok ? null : r.json()))
-      .then((d: { canSetLinkOnly?: boolean; partnerDiscordLinked?: boolean } | null) => {
-        if (cancelled || !d) return
-        const ok = d.canSetLinkOnly === true
-        setCanSetLinkOnlyVisibility(ok)
-        setPartnerDiscordLinked(d.partnerDiscordLinked === true)
-        if (!ok) setHideFromPublicBrowse(false)
-      })
+      .then(
+        (
+          d: {
+            canSetLinkOnly?: boolean
+            partnerDiscordLinked?: boolean
+            isPartnerCommunityCreator?: boolean
+          } | null
+        ) => {
+          if (cancelled || !d) return
+          const ok = d.canSetLinkOnly === true
+          setCanSetLinkOnlyVisibility(ok)
+          setPartnerDiscordLinked(d.partnerDiscordLinked === true)
+          setIsPartnerCommunityCreator(d.isPartnerCommunityCreator === true)
+          if (!ok) setHideFromPublicBrowse(false)
+          if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
+            setHideFromPublicBrowse(true)
+            partnerModeDefaultAppliedRef.current = true
+          }
+        }
+      )
       .catch(() => {
         if (!cancelled) {
           setCanSetLinkOnlyVisibility(false)
           setPartnerDiscordLinked(false)
+          setIsPartnerCommunityCreator(false)
           setHideFromPublicBrowse(false)
         }
       })
     return () => {
       cancelled = true
     }
-  }, [connected, publicKey])
+  }, [connected, publicKey, partnerCreateMode, snsDomainHubFlow])
 
   /**
    * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
@@ -341,10 +397,20 @@ export function CreateRaffleForm() {
 
   const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
 
-  const allowedPartnerPrizeList = useMemo(() => listPartnerPrizeTokens(), [])
+  /** TRQ, CANE, etc. — only admins + partner-community wallets; SOL/USDC stay open to all creators. */
+  const canSelectPartnerPrizeTokens = viewerIsAdmin === true || isPartnerCommunityCreator
+
+  const allPartnerPrizeTokens = useMemo(() => [...listPartnerPrizeTokens()], [])
+
+  useEffect(() => {
+    if (canSelectPartnerPrizeTokens) return
+    if (isPublicSplPrizeCurrency(tokenPrizeCurrency)) return
+    setTokenPrizeCurrency('SOL')
+  }, [canSelectPartnerPrizeTokens, tokenPrizeCurrency])
 
   const partnerPrizeAmountPlaceholder = useMemo(() => {
     const dec = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)?.decimals ?? 9
+    if (dec === 0) return 'e.g. 1 or 10 (whole tokens only)'
     return dec <= 6 ? 'e.g. 100 or 50.25' : 'e.g. 1000 or 250.5'
   }, [tokenPrizeCurrency])
 
@@ -384,6 +450,9 @@ export function CreateRaffleForm() {
         } catch {
           // ignore
         }
+      }
+      if (snsDomainHubFlow) {
+        nfts = nfts.filter(walletNftLooksLikeSnsDomain)
       }
       setWalletNfts(nfts)
       setNftSearchQuery('')
@@ -436,6 +505,11 @@ export function CreateRaffleForm() {
     }
 
     if (isPartner) {
+      if (!isPublicSplPrizeCurrency(tokenPrizeCurrency) && viewerIsAdmin !== true && !isPartnerCommunityCreator) {
+        alert('That prize token is only for partner communities and admins. Choose SOL or USDC, or apply via the partner program.')
+        focusFormField('token_prize_select')
+        return
+      }
       const tokenMeta = getPartnerPrizeTokenByCurrency(tokenPrizeCurrency)
       const amt = partnerPrizeAmount.trim()
       if (!amt || !tokenMeta || humanPartnerPrizeToRawUnits(tokenPrizeCurrency, amt) == null) {
@@ -612,8 +686,33 @@ export function CreateRaffleForm() {
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
     }
+    if (canUseBambooTicketCurrency) {
+      if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
+        const ap = parseNftTicketPrice(alternateBambooTicketPrice.trim())
+        if (!ap.ok) {
+          alert(`Optional Bamboo ticket price: ${ap.error}`)
+          setLoading(false)
+          setCreateStep('idle')
+          createSubmitInFlightRef.current = false
+          return
+        }
+        data.alternate_bamboo_ticket_price = ap.value
+      }
+      if (currency === BAMBOO_TICKET_CURRENCY && alternateSolTicketPrice.trim()) {
+        const ap = parseNftTicketPrice(alternateSolTicketPrice.trim())
+        if (!ap.ok) {
+          alert(`Optional SOL ticket price: ${ap.error}`)
+          setLoading(false)
+          setCreateStep('idle')
+          createSubmitInFlightRef.current = false
+          return
+        }
+        data.alternate_sol_ticket_price = ap.value
+      }
+    }
     try {
-      const response = await fetch('/api/raffles', {
+      const createUrl = snsDomainHubFlow ? '/api/raffles/sns-domain' : '/api/raffles'
+      const response = await fetch(createUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1038,7 +1137,6 @@ export function CreateRaffleForm() {
                 phase: 'loading',
                 persistUntilDismiss: false,
               })
-              const mintPk = new PublicKey(prizeMint)
               const rawNeed = humanPartnerPrizeToRawUnits(prizeCur, raffle.prize_amount)
               if (rawNeed == null) {
                 alert(`Invalid ${prizeCur} prize amount from server. Open your raffle to try deposit again.`)
@@ -1058,81 +1156,106 @@ export function CreateRaffleForm() {
                 return
               }
               const escrowPubkey = new PublicKey(escrowAddress)
-              setEscrowProgress((p) => ({
-                ...p,
-                phase: 'loading',
-                persistUntilDismiss: false,
-                description: `Checking your ${prizeCur} balance — please wait.`,
-              }))
-              let resolvedHolder = await getFungibleHolderInWallet(
-                connection,
-                mintPk,
-                publicKey,
-                rawNeed,
-                'processed'
-              )
-              for (
-                let attempt = 0;
-                attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
-                attempt++
-              ) {
-                await new Promise((r) => setTimeout(r, 700))
-                resolvedHolder = await getFungibleHolderInWallet(
+              let depositSig: string
+              if (prizeCur === 'SOL') {
+                if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
+                  alert('This SOL prize amount is too large for a wallet transfer.')
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: 'When your wallet opens, approve the transaction to send SOL to escrow.',
+                }))
+                const tx = new Transaction().add(
+                  SystemProgram.transfer({
+                    fromPubkey: publicKey,
+                    toPubkey: escrowPubkey,
+                    lamports: Number(rawNeed),
+                  })
+                )
+                depositSig = await sendTransaction(tx, connection)
+                await confirmSignatureSuccessOnChain(connection, depositSig)
+              } else {
+                const mintPk = new PublicKey(prizeMint)
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: `Checking your ${prizeCur} balance — please wait.`,
+                }))
+                let resolvedHolder = await getFungibleHolderInWallet(
                   connection,
                   mintPk,
                   publicKey,
                   rawNeed,
                   'processed'
                 )
-              }
-              if (!resolvedHolder) {
-                alert(
-                  `Your wallet does not show enough ${prizeCur} for this prize yet (or the account is delegated). Top up ${prizeCur}, then open your raffle to deposit.`
-                )
-                router.push(`/raffles/${raffle.slug}?deposit=1`)
-                return
-              }
-              const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
-              const escrowAta = await getAssociatedTokenAddress(
-                mintPk,
-                escrowPubkey,
-                false,
-                tokenProgram,
-                ASSOCIATED_TOKEN_PROGRAM_ID
-              )
-              const tx = new Transaction()
-              try {
-                await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
-              } catch {
-                tx.add(
-                  createAssociatedTokenAccountInstruction(
-                    publicKey,
-                    escrowAta,
-                    escrowPubkey,
+                for (
+                  let attempt = 0;
+                  attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !resolvedHolder;
+                  attempt++
+                ) {
+                  await new Promise((r) => setTimeout(r, 700))
+                  resolvedHolder = await getFungibleHolderInWallet(
+                    connection,
                     mintPk,
-                    tokenProgram,
-                    ASSOCIATED_TOKEN_PROGRAM_ID
+                    publicKey,
+                    rawNeed,
+                    'processed'
+                  )
+                }
+                if (!resolvedHolder) {
+                  alert(
+                    `Your wallet does not show enough ${prizeCur} for this prize yet (or the account is delegated). Top up ${prizeCur}, then open your raffle to deposit.`
+                  )
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
+                const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
+                const escrowAta = await getAssociatedTokenAddress(
+                  mintPk,
+                  escrowPubkey,
+                  false,
+                  tokenProgram,
+                  ASSOCIATED_TOKEN_PROGRAM_ID
+                )
+                const tx = new Transaction()
+                try {
+                  await getAccount(connection, escrowAta, 'confirmed', tokenProgram)
+                } catch {
+                  tx.add(
+                    createAssociatedTokenAccountInstruction(
+                      publicKey,
+                      escrowAta,
+                      escrowPubkey,
+                      mintPk,
+                      tokenProgram,
+                      ASSOCIATED_TOKEN_PROGRAM_ID
+                    )
+                  )
+                }
+                tx.add(
+                  createTransferInstruction(
+                    sourceTokenAccount,
+                    escrowAta,
+                    publicKey,
+                    rawNeed,
+                    [],
+                    tokenProgram
                   )
                 )
+                setEscrowProgress((p) => ({
+                  ...p,
+                  phase: 'loading',
+                  persistUntilDismiss: false,
+                  description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
+                }))
+                depositSig = await sendTransaction(tx, connection)
+                await confirmSignatureSuccessOnChain(connection, depositSig)
               }
-              tx.add(
-                createTransferInstruction(
-                  sourceTokenAccount,
-                  escrowAta,
-                  publicKey,
-                  rawNeed,
-                  [],
-                  tokenProgram
-                )
-              )
-              setEscrowProgress((p) => ({
-                ...p,
-                phase: 'loading',
-                persistUntilDismiss: false,
-                description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
-              }))
-              const depositSig = await sendTransaction(tx, connection)
-              await confirmSignatureSuccessOnChain(connection, depositSig)
               setEscrowProgress((p) => ({
                 ...p,
                 phase: 'loading',
@@ -1239,7 +1362,7 @@ export function CreateRaffleForm() {
               }
               router.push(`/raffles/${raffle.slug}`)
             } catch (transferErr) {
-              console.error('Partner token transfer to escrow failed:', transferErr)
+              console.error('SPL prize token transfer to escrow failed:', transferErr)
               alert(
                 transferErr instanceof Error
                   ? transferErr.message
@@ -1305,10 +1428,11 @@ export function CreateRaffleForm() {
     return (
       <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
         <CardHeader>
-          <CardTitle>Create a raffle</CardTitle>
+          <CardTitle>{snsDomainHubFlow ? 'Create a .sol domain raffle' : 'Create a raffle'}</CardTitle>
           <CardDescription>
-            Connect your wallet to create a raffle (NFT or allowlisted partner token prize). Sign in from your
-            dashboard first so we can save your listing.
+            {snsDomainHubFlow
+              ? 'Connect your wallet to host a .sol domain raffle for the domains hub. Sign in from your dashboard first so we can save your listing.'
+              : 'Connect your wallet to create a raffle (NFT or SPL token prize such as SOL or USDC). Sign in from your dashboard first so we can save your listing.'}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -1353,6 +1477,7 @@ export function CreateRaffleForm() {
             />
           </div>
 
+          {!snsDomainHubFlow ? (
           <div className="space-y-3 rounded-md border bg-muted/30 p-4">
             <Label className="text-base">Prize type</Label>
             <div
@@ -1376,9 +1501,20 @@ export function CreateRaffleForm() {
                 onClick={() => setPrizeMode('token')}
                 aria-pressed={prizeMode === 'token'}
               >
-                Partner token
+                SPL Token
               </Button>
             </div>
+            {viewerIsAdmin !== true && !isPartnerCommunityCreator ? (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                <span className="font-medium text-foreground/90">SOL</span> and{' '}
+                <span className="font-medium text-foreground/90">USDC</span> are selectable below. Other SPL prize tokens
+                appear grayed out until you are on a partner allowlist —{' '}
+                <Link href="/partner-program" className="text-primary underline-offset-2 hover:underline">
+                  partner program
+                </Link>
+                .
+              </p>
+            ) : null}
             {prizeMode === 'token' && (
               <div className="space-y-1.5">
                 <Label htmlFor="token_prize_select" className="text-sm">
@@ -1397,10 +1533,21 @@ export function CreateRaffleForm() {
                   className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   aria-label="Prize token"
                 >
-                  {allowedPartnerPrizeList.map((t) => {
+                  {allPartnerPrizeTokens.map((t) => {
                     const label = t.displayLabel ? `${t.displayLabel} (${t.currencyCode})` : t.currencyCode
+                    const disabled =
+                      !isPublicSplPrizeCurrency(t.currencyCode) && !canSelectPartnerPrizeTokens
                     return (
-                      <option key={t.currencyCode} value={t.currencyCode}>
+                      <option
+                        key={t.currencyCode}
+                        value={t.currencyCode}
+                        disabled={disabled}
+                        title={
+                          disabled
+                            ? 'Partner prize token — available to Owltopia admins and allowlisted partner wallets'
+                            : undefined
+                        }
+                      >
                         {label}
                       </option>
                     )
@@ -1410,6 +1557,15 @@ export function CreateRaffleForm() {
               </div>
             )}
           </div>
+          ) : (
+            <div className="space-y-2 rounded-md border border-teal-500/25 bg-teal-500/5 p-4">
+              <p className="text-sm font-medium text-foreground">.sol domain prize (SNS)</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Only wallet NFTs that look like SNS .sol domains are listed. This path creates a raffle for the .sol
+                domains hub only (hidden from Main and Partner). The server verifies on-chain metadata before saving.
+              </p>
+            </div>
+          )}
 
           {prizeMode === 'token' && (
             <div
@@ -1452,7 +1608,7 @@ export function CreateRaffleForm() {
           <div id="nft-prize-section" tabIndex={-1} className="space-y-3 rounded-md border bg-muted/30 p-4">
               {prizeMode === 'nft' ? (
                 <>
-              <Label>NFT prize (from your wallet)</Label>
+              <Label>{snsDomainHubFlow ? '.sol domain prize (from your wallet)' : 'NFT prize (from your wallet)'}</Label>
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
@@ -1465,15 +1621,27 @@ export function CreateRaffleForm() {
                 onClick={loadWalletAssets}
                 disabled={loadingWalletAssets || !publicKey}
               >
-                {loadingWalletAssets ? 'Loading…' : 'Load NFTs from wallet'}
+                {loadingWalletAssets ? 'Loading…' : snsDomainHubFlow ? 'Load .sol domains from wallet' : 'Load NFTs from wallet'}
               </Button>
               {walletAssetsError && (
                 <p className="text-sm text-destructive">{walletAssetsError}</p>
               )}
               {walletNfts && walletNfts.length === 0 && !loadingWalletAssets && (
                 <div className="text-sm text-muted-foreground space-y-1">
-                  <p>No NFTs found in this wallet.</p>
-                  <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                  {snsDomainHubFlow ? (
+                    <>
+                      <p>No SNS-looking .sol domain NFTs found in this wallet.</p>
+                      <p>
+                        We filter by metadata (for example a name ending in <span className="font-mono">.sol</span> or
+                        known SNS/Bonfida collection hints). Transfer a domain NFT here, then load again.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>No NFTs found in this wallet.</p>
+                      <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                    </>
+                  )}
                 </div>
               )}
               {walletNfts && walletNfts.length > 0 && (
@@ -1575,11 +1743,74 @@ export function CreateRaffleForm() {
               >
                 <option value="SOL">SOL</option>
                 <option value="USDC">USDC</option>
-                {isOwlEnabled() && viewerIsAdmin === true ? (
-                  <option value="OWL">OWL</option>
+                {isOwlEnabled() && viewerIsAdmin === true ? <option value="OWL">OWL</option> : null}
+                {isOwlEnabled() && viewerIsAdmin !== true ? (
+                  <option value="OWL" disabled>
+                    OWL (platform admins only)
+                  </option>
                 ) : null}
+                {canUseBambooTicketCurrency ? (
+                  <option value={BAMBOO_TICKET_CURRENCY}>Bamboo (BAMBOO)</option>
+                ) : (
+                  <option value={BAMBOO_TICKET_CURRENCY} disabled>
+                    Bamboo (BAMBOO) — Partner Pro allowlisted wallet
+                  </option>
+                )}
               </select>
+              {(canUseBambooTicketCurrency || (partnerDiscordLinked && partnerCreateMode)) && (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {canUseBambooTicketCurrency ? (
+                    <>
+                      Extra ticket currencies in this menu are allowlisted to approved partner creator wallets only —
+                      other hosts do not see them.
+                    </>
+                  ) : (
+                    <>
+                      Want your project&apos;s SPL as ticket payment?{' '}
+                      <Link
+                        href="/partner-program"
+                        className="font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
+                      >
+                        Partner Pro
+                      </Link>{' '}
+                      adds custom ticket mints for your wallet&apos;s raffles only (not site-wide).
+                    </>
+                  )}
+                </p>
+              )}
             </div>
+            {canUseBambooTicketCurrency && raffleCurrency === 'SOL' && (
+              <div className="space-y-2">
+                <Label htmlFor="alternate_bamboo_ticket_price">Bamboo ticket price (optional)</Label>
+                <Input
+                  id="alternate_bamboo_ticket_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={alternateBambooTicketPrice}
+                  onChange={(e) => setAlternateBambooTicketPrice(e.target.value)}
+                  placeholder="e.g. 100 — same raffle, buyers may pay SOL or BAMBOO"
+                />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Leave blank for SOL-only tickets. When set, one raffle accepts both SOL (ticket price above) and BAMBOO
+                  at this price — no second listing for the same SPL prize.
+                </p>
+              </div>
+            )}
+            {canUseBambooTicketCurrency && raffleCurrency === BAMBOO_TICKET_CURRENCY && (
+              <div className="space-y-2">
+                <Label htmlFor="alternate_sol_ticket_price">SOL ticket price (optional)</Label>
+                <Input
+                  id="alternate_sol_ticket_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={alternateSolTicketPrice}
+                  onChange={(e) => setAlternateSolTicketPrice(e.target.value)}
+                  placeholder="e.g. 0.05 — buyers may pay BAMBOO or SOL"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="ticket_price">Ticket price *</Label>
@@ -1704,21 +1935,24 @@ export function CreateRaffleForm() {
 
           {canSetLinkOnlyVisibility && (
             <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-2">
+              {partnerCreateMode && (
+                <p className="text-xs font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  Partner raffle setup
+                </p>
+              )}
               <label className="flex items-start gap-3 touch-manipulation min-h-[44px]">
                 <input
                   type="checkbox"
-                  className="mt-1 h-4 w-4 shrink-0"
+                  className="mt-1 h-5 w-5 shrink-0"
                   checked={hideFromPublicBrowse}
                   onChange={(e) => setHideFromPublicBrowse(e.target.checked)}
                   id="hide-from-public-browse"
                 />
                 <span className="min-w-0 text-sm sm:text-base leading-relaxed text-foreground/95">
-                  <span className="font-medium">
-                    {partnerDiscordLinked ? 'Hide from public raffles list' : 'Discord / direct link only'}
-                  </span>
+                  <span className="font-medium">Partner raffle only</span>
                   {': '}
-                  do not show this raffle on the public raffles list. People can still enter using the
-                  page link (e.g. from your partner Discord or a shared link).
+                  hide this raffle from the public raffles list. People can still enter using the direct
+                  page link{partnerDiscordLinked ? ' from your partner Discord webhook or a shared link' : ' you share'}.
                 </span>
               </label>
             </div>

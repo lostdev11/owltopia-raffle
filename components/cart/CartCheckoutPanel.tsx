@@ -73,6 +73,26 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
   } = useCart()
   const { connected } = useWallet()
 
+  /** Lets users clear the tickets field and type freely; synced from `lines` on blur. */
+  const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({})
+
+  const lineIdsKey = lines.map(l => l.raffleId).join('|')
+
+  useEffect(() => {
+    if (!lineIdsKey) {
+      setQtyDraftById({})
+      return
+    }
+    const ids = new Set(lineIdsKey.split('|'))
+    setQtyDraftById(prev => {
+      const next = { ...prev }
+      for (const k of Object.keys(next)) {
+        if (!ids.has(k)) delete next[k]
+      }
+      return next
+    })
+  }, [lineIdsKey])
+
   const subtotalPreview = lines.reduce((s, l) => s + l.snapshot.ticket_price * l.quantity, 0)
   const currencyLabel = lines[0]?.snapshot.currency ?? ''
 
@@ -106,6 +126,7 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                       </Link>
                       <p className="text-xs text-muted-foreground">
                         {line.quantity === 1 ? '1 ticket' : `${line.quantity} tickets`} for this raffle
+                        {line.quantity < 1 ? ' — set a quantity to checkout' : ''}
                       </p>
                     </div>
                   </div>
@@ -129,11 +150,36 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                   </label>
                   <Input
                     id={`cart-q-${line.raffleId}`}
-                    type="number"
-                    min={1}
+                    type="text"
                     inputMode="numeric"
-                    value={line.quantity}
-                    onChange={e => setLineQuantity(line.raffleId, Number(e.target.value) || 1)}
+                    autoComplete="off"
+                    value={qtyDraftById[line.raffleId] ?? String(line.quantity)}
+                    onChange={e => {
+                      const raw = e.target.value
+                      setQtyDraftById(d => ({ ...d, [line.raffleId]: raw }))
+                      if (raw === '') {
+                        setLineQuantity(line.raffleId, 0)
+                        return
+                      }
+                      if (!/^\d*$/.test(raw)) return
+                      const n = Number(raw)
+                      if (!Number.isFinite(n)) return
+                      setLineQuantity(line.raffleId, n)
+                    }}
+                    onBlur={() => {
+                      const raw = qtyDraftById[line.raffleId]
+                      setQtyDraftById(d => {
+                        const { [line.raffleId]: _, ...rest } = d
+                        return rest
+                      })
+                      if (raw === undefined || raw === '') return
+                      const n = Math.floor(Number(raw))
+                      if (!Number.isFinite(n) || n < 0) {
+                        setLineQuantity(line.raffleId, 0)
+                        return
+                      }
+                      setLineQuantity(line.raffleId, n)
+                    }}
                     className="w-24 h-11 text-base touch-manipulation"
                     disabled={checkoutBusy}
                   />
@@ -188,7 +234,7 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
           <Button
             type="button"
             className="w-full touch-manipulation min-h-[44px] text-base"
-            disabled={checkoutBusy || lines.length === 0 || !connected}
+            disabled={checkoutBusy || lines.length === 0 || ticketCount < 1 || !connected}
             onClick={() => checkout()}
           >
             {checkoutBusy

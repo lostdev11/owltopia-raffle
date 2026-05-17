@@ -77,7 +77,7 @@ export default function TermsPage() {
           <ul className="list-disc pl-6 mb-4 space-y-2">
             <li>Participants purchase entries using cryptocurrency (SOL, USDC, or OWL, as offered on each raffle)</li>
             <li>Each purchase corresponds to one or more tickets as shown at checkout</li>
-            <li>Winners are selected by weighted random selection among confirmed entries (see Section 6)</li>
+            <li>Winners are selected by random draw where each confirmed ticket is one chance (see Section 6)</li>
             <li>Payments and many prize movements are recorded on-chain where applicable</li>
             <li>Owl Vision is an informational trust score on each raffle; it does not guarantee outcomes or replace your own judgment</li>
           </ul>
@@ -125,7 +125,7 @@ export default function TermsPage() {
             Winners and payouts follow these rules (in addition to anything stated on a specific raffle):
           </p>
           <ul className="list-disc pl-6 mb-4 space-y-2">
-            <li>Selection uses <strong>weighted random selection</strong> among <strong>confirmed</strong> entries: each wallet&apos;s probability is proportional to its total confirmed ticket count for that raffle. The draw is performed by Platform software (not an on-chain verifiable randomness beacon)</li>
+            <li>Selection uses a <strong>random draw</strong> over <strong>confirmed</strong> tickets: each confirmed ticket for that raffle is one equally weighted chance, so a wallet&apos;s win probability is proportional to its total confirmed ticket count. The outcome is still probabilistic (not deterministic). The draw is performed by Platform software (not an on-chain verifiable randomness beacon)</li>
             <li>If <strong>no minimum ticket threshold</strong> is set, a winner may be selected after the scheduled end time if there is at least one confirmed entry and other eligibility checks pass</li>
             <li>If a <strong>minimum ticket threshold</strong> is set, a winner can be selected only after the raffle has ended and <strong>confirmed</strong> ticket sales meet or exceed that threshold. There is <strong>no</strong> separate mandatory multi-day waiting period after the minimum is met solely for that reason</li>
             <li>If the minimum is <strong>not</strong> met when the raffle ends, the Platform may <strong>extend the end time once</strong>, typically by the same duration as the raffle&apos;s original window (or by seven days if that duration cannot be determined). If the minimum is still not met after that extension, the raffle may be marked failed; participants on <strong>funds-escrow</strong> raffles may be able to <strong>claim refunds</strong> of their ticket payments through the Platform, and escrowed NFT prizes may be returned to the creator when operationally possible</li>
@@ -213,7 +213,7 @@ export default function TermsPage() {
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">13. Raffle Policy and Minimum Requirements</h2>
           <p className="mb-4">
-            Minimum ticket thresholds, automatic end-time extensions, refund eligibility for failed minimums on funds-escrow raffles, NFT escrow and claims, and weighted winner selection are governed by <strong>Section 6 (Prize Distribution)</strong> and <strong>Section 5 (Entry and Payment)</strong>. Only confirmed entries count toward thresholds and draws. The Platform may process ended raffles, extensions, and draws on a schedule and/or through administrative tools.
+            Minimum ticket thresholds, automatic end-time extensions, refund eligibility for failed minimums on funds-escrow raffles, NFT escrow and claims, and random winner selection (per confirmed ticket weights) are governed by <strong>Section 6 (Prize Distribution)</strong> and <strong>Section 5 (Entry and Payment)</strong>. Only confirmed entries count toward thresholds and draws. The Platform may process ended raffles, extensions, and draws on a schedule and/or through administrative tools.
           </p>
         </section>
 

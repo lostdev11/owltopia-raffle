@@ -56,11 +56,12 @@ export function PoolOnChainSettingsForm({
 }: Props) {
   const [draft, setDraft] = useState<Draft>(() => poolToDraft(pool))
   const [localError, setLocalError] = useState<string | null>(null)
+  const onChainLockEnabled = draft.adapter_mode === 'onchain_enabled'
 
   useEffect(() => {
     setDraft(poolToDraft(pool))
     setLocalError(null)
-  }, [pool.id, pool.updated_at])
+  }, [pool])
 
   const save = async () => {
     setLocalError(null)
@@ -100,8 +101,7 @@ export function PoolOnChainSettingsForm({
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">Adapter & on-chain</CardTitle>
         <CardDescription className="text-xs">
-          mock and solana_ready keep DB-backed stakes. onchain_enabled targets the program when wired (stakes may 501
-          until then). No automatic RPC polling — users POST /api/me/staking/sync with a signature when needed.
+          mock and solana_ready keep DB-backed stakes. onchain_enabled uses on-chain token vaults or NFT freeze locks.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -110,6 +110,28 @@ export function PoolOnChainSettingsForm({
             {localError}
           </p>
         )}
+        <div className="flex flex-col gap-3 rounded-lg border border-green-500/20 bg-green-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">On-chain staking</p>
+            <p className="text-xs text-muted-foreground">
+              When on, token stakes use the pool vault, and NFT perches freeze the NFT in the holder wallet.
+            </p>
+          </div>
+          <Switch
+            id={`onchain-lock-${pool.id}`}
+            ariaLabel={`Toggle on-chain staking for pool ${pool.name}`}
+            checked={onChainLockEnabled}
+            onCheckedChange={(enabled) =>
+              setDraft((d) => ({
+                ...d,
+                adapter_mode: enabled ? 'onchain_enabled' : 'solana_ready',
+                is_onchain_enabled: enabled,
+                requires_onchain_sync: enabled && pool.asset_type === 'token',
+                lock_enforcement_source: enabled ? 'hybrid' : 'database',
+              }))
+            }
+          />
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor={`adapter-${pool.id}`}>Adapter mode</Label>
@@ -183,13 +205,13 @@ export function PoolOnChainSettingsForm({
             />
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor={`vault-${pool.id}`}>Vault address</Label>
+            <Label htmlFor={`vault-${pool.id}`}>Vault owner address</Label>
             <Input
               id={`vault-${pool.id}`}
               className="font-mono text-xs min-h-[44px]"
               value={draft.vault_address}
               onChange={(e) => setDraft((d) => ({ ...d, vault_address: e.target.value }))}
-              placeholder="Optional"
+              placeholder="Wallet owner for the OWL vault ATA"
             />
           </div>
           <div className="space-y-2">

@@ -8,6 +8,7 @@ const INTERACTIVE_SELECTOR =
 
 /** Match RaffleCard / featured card: ignore synthetic click after a scroll-like move */
 const TAP_MOVE_THRESHOLD_PX = 12
+const NATIVE_CLICK_WAIT_MS = 300
 
 /**
  * On mobile (including Solflare in-app browser), many WebViews don't reliably
@@ -39,8 +40,17 @@ export function SolflareTouchFix() {
         tracking: false,
         movedPastThreshold: false,
       }
+      let fallbackClickTimer: number | null = null
+      let dispatchingFallbackClick = false
+
+      const clearFallbackClick = () => {
+        if (fallbackClickTimer == null) return
+        window.clearTimeout(fallbackClickTimer)
+        fallbackClickTimer = null
+      }
 
       const onTouchStart = (e: TouchEvent) => {
+        clearFallbackClick()
         if (e.touches.length !== 1) {
           gesture.tracking = false
           return
@@ -66,6 +76,12 @@ export function SolflareTouchFix() {
       const onTouchCancel = () => {
         gesture.tracking = false
         gesture.movedPastThreshold = false
+        clearFallbackClick()
+      }
+
+      const onNativeClick = () => {
+        if (dispatchingFallbackClick) return
+        clearFallbackClick()
       }
 
       const onTouchEnd = (e: TouchEvent) => {
@@ -91,9 +107,19 @@ export function SolflareTouchFix() {
           const btn = el.querySelector?.('button')
           if (btn && !(btn as HTMLButtonElement).disabled) el = btn as HTMLElement
         }
-        const synthetic = document.createEvent('MouseEvents')
-        synthetic.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null)
-        setTimeout(() => el.dispatchEvent(synthetic), 0)
+        clearFallbackClick()
+        fallbackClickTimer = window.setTimeout(() => {
+          fallbackClickTimer = null
+          if (!document.contains(el) || (el as HTMLButtonElement).disabled) return
+          const synthetic = document.createEvent('MouseEvents')
+          synthetic.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null)
+          dispatchingFallbackClick = true
+          try {
+            el.dispatchEvent(synthetic)
+          } finally {
+            dispatchingFallbackClick = false
+          }
+        }, NATIVE_CLICK_WAIT_MS)
       }
 
       const cap = { passive: true, capture: true } as const
@@ -101,11 +127,14 @@ export function SolflareTouchFix() {
       document.addEventListener('touchmove', onTouchMove, cap)
       document.addEventListener('touchcancel', onTouchCancel, cap)
       document.addEventListener('touchend', onTouchEnd, cap)
+      document.addEventListener('click', onNativeClick, true)
       return () => {
+        clearFallbackClick()
         document.removeEventListener('touchstart', onTouchStart, cap)
         document.removeEventListener('touchmove', onTouchMove, cap)
         document.removeEventListener('touchcancel', onTouchCancel, cap)
         document.removeEventListener('touchend', onTouchEnd, cap)
+        document.removeEventListener('click', onNativeClick, true)
       }
     }
   }, [])

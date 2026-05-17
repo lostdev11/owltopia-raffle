@@ -13,11 +13,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, ShoppingCart, Sparkles } from 'lucide-react'
+import { Settings, Plus, LayoutDashboard, Trophy, Menu, Gift, Landmark, Bird, ShoppingCart, Sparkles, Rocket } from 'lucide-react'
 import { useCart } from '@/components/cart/CartProvider'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
-
 export function Header() {
   const { publicKey, connected } = useWallet()
   const { ticketCount } = useCart()
@@ -29,6 +28,27 @@ export function Header() {
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() =>
     typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   )
+  /** SIWS session wallet is admin — shows Owl Vision even if the wallet adapter is disconnected (common on mobile). */
+  const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/check?session=1', { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (cancelled) return undefined
+        return res.ok ? res.json() : undefined
+      })
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setAdminSessionActive(data?.isAdmin === true)
+      })
+      .catch(() => {
+        /* keep prior session hint on transient errors */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visibilityTick])
 
   // Re-run when connected/publicKey change or when user returns to tab so Owl Vision link appears right away.
   useEffect(() => {
@@ -43,13 +63,15 @@ export function Header() {
     if (cachedAdmin !== null) {
       setIsAdmin(cachedAdmin)
       setAdminRole(cachedRole)
-      return
     }
     let cancelled = false
-    fetch(`/api/admin/check?wallet=${addr}`)
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`, { cache: 'no-store' })
+      .then((res) => {
+        if (cancelled) return undefined
+        return res.ok ? res.json() : undefined
+      })
       .then((data) => {
-        if (cancelled) return
+        if (cancelled || data === undefined) return
         const admin = data?.isAdmin === true
         const role = admin && data?.role ? data.role : null
         setCachedAdmin(addr, admin, role)
@@ -57,18 +79,13 @@ export function Header() {
         setAdminRole(role)
       })
       .catch(() => {
-        if (!cancelled) {
-          setIsAdmin(false)
-          setAdminRole(null)
-        }
+        /* do not clear admin on network errors — keeps cache / SIWS session UX stable */
       })
     return () => { cancelled = true }
   }, [connected, publicKey, visibilityTick])
 
-  // Full admins see Owl Vision. Anyone with a connected wallet can create a raffle.
-  const showOwlVision = Boolean(isAdmin)
-  /** Nesting is admin-only in nav until the public flow is ready — avoids a dead link for visitors. */
-  const showNestingNav = Boolean(isAdmin)
+  // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
+  const showOwlVision = isAdmin === true || adminSessionActive === true
   const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -81,8 +98,9 @@ export function Header() {
     { href: '/cart' as const, label: cartLabel, icon: ShoppingCart },
     { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { href: '/council', label: 'Council', icon: Landmark },
+    { href: '/owl-center', label: 'Owl Center', icon: Rocket },
     { href: '/gen2-presale', label: 'Gen2 Presale', icon: Sparkles },
-    ...(showNestingNav ? [{ href: '/nesting', label: 'Nesting', icon: Bird }] : []),
+    { href: '/nesting', label: 'Nesting', icon: Bird },
     ...(connected ? [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(showOwlVision ? [{ href: '/admin', label: 'Owl Vision', icon: Settings }] : []),
     ...(showOwlVision ? [{ href: '/admin/community-giveaways', label: 'Giveaways', icon: Gift }] : []),
@@ -126,20 +144,24 @@ export function Header() {
                   <span className="hidden sm:inline">Council</span>
                 </Button>
               </Link>
+              <Link href="/owl-center">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
+                  <Rocket className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Owl Center</span>
+                </Button>
+              </Link>
               <Link href="/gen2-presale">
                 <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
                   <Sparkles className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 text-emerald-400/90" />
                   <span className="hidden sm:inline">Gen2 Presale</span>
                 </Button>
               </Link>
-              {showNestingNav && (
-                <Link href="/nesting">
-                  <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
-                    <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">Nesting</span>
-                  </Button>
-                </Link>
-              )}
+              <Link href="/nesting">
+                <Button variant="ghost" size="sm" className={desktopNavButtonClass}>
+                  <Bird className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Nesting</span>
+                </Button>
+              </Link>
               {connected && (
                 <Link href="/dashboard">
                   <Button variant="ghost" size="sm" className={desktopNavButtonClass}>

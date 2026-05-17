@@ -11,12 +11,38 @@ interface HeliusAsset {
   id?: string
   /** When true, the mint was burned; DAS can still return the row until re-indexed. */
   burnt?: boolean
+  collection?: { address?: string; key?: string }
   content?: {
     json_uri?: string
-    metadata?: { name?: string }
+    metadata?: {
+      name?: string
+      symbol?: string
+      collection?: { name?: string; key?: string; verified?: boolean }
+    }
     files?: Array<{ uri?: string; cdn_uri?: string }>
   }
   grouping?: Array<{ group_key?: string; group_value?: string }>
+}
+
+function extractCollectionMintFromDasAsset(item: HeliusAsset): string | null {
+  const top = item.collection
+  if (typeof top?.address === 'string' && top.address.trim().length >= 32) return top.address.trim()
+  if (typeof top?.key === 'string' && top.key.trim().length >= 32) return top.key.trim()
+  const grouping = item.grouping
+  if (Array.isArray(grouping)) {
+    for (const g of grouping) {
+      const gv = g?.group_value
+      const gk = g?.group_key
+      if (typeof gv === 'string' && gv.trim().length >= 32 && gk === 'collection') return gv.trim()
+    }
+    for (const g of grouping) {
+      const gv = g?.group_value
+      if (typeof gv === 'string' && gv.trim().length >= 32) return gv.trim()
+    }
+  }
+  const mk = item.content?.metadata?.collection?.key
+  if (typeof mk === 'string' && mk.trim().length >= 32) return mk.trim()
+  return null
 }
 
 /** Parsed token account info from getParsedTokenAccountsByOwner */
@@ -49,6 +75,8 @@ function parseTokenAccountsToNfts(
       name: null,
       image: null,
       collectionName: null,
+      collectionMint: null,
+      symbol: null,
     })
   }
   return nfts
@@ -185,8 +213,13 @@ export async function GET(request: NextRequest) {
         // Prefer direct uri over cdn_uri: Helius CDN proxy often gets 403 from hosts like jpegs.fun
         const image = firstFile?.uri ?? firstFile?.cdn_uri ?? null
         const name = content?.metadata?.name ?? null
-        // DAS grouping has collection address, not name; leave collectionName null
-        const collectionName: string | null = null
+        const symbol =
+          typeof content?.metadata?.symbol === 'string' ? content.metadata.symbol.trim() || null : null
+        const collectionMint = extractCollectionMintFromDasAsset(item)
+        const collectionName =
+          (typeof content?.metadata?.collection?.name === 'string' &&
+            content.metadata.collection.name.trim()) ||
+          null
 
         return {
           mint,
@@ -197,6 +230,8 @@ export async function GET(request: NextRequest) {
           name,
           image,
           collectionName,
+          collectionMint: collectionMint ?? null,
+          symbol,
         }
       })
 

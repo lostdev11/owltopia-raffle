@@ -1,5 +1,14 @@
-import { ipfsUriToHttpsGatewayUrl, rewriteDeadIpfsGatewayHttpsUrl } from '@/lib/ipfs-gateways'
-import { arweaveUriToHttps, fullyDecodeURIComponentSafe } from '@/lib/nft-media-uri'
+import {
+  ipfsGatewayCandidateUrls,
+  ipfsUriToHttpsGatewayUrl,
+  rewriteDeadIpfsGatewayHttpsUrl,
+} from '@/lib/ipfs-gateways'
+import {
+  arweaveUriToHttps,
+  fullyDecodeURIComponentSafe,
+  irysUploaderMirrorHttpsUrls,
+  isIrysUploaderHttpsUrl,
+} from '@/lib/nft-media-uri'
 
 /**
  * Public HTTPS hosts where we load images in the browser instead of `/api/proxy-image`.
@@ -25,6 +34,9 @@ export function isDirectRaffleImageHost(hostname: string): boolean {
 export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): string | null {
   if (!imageUrl?.trim()) return null
   let url = rewriteDeadIpfsGatewayHttpsUrl(imageUrl.trim())
+  /** `ar://…` is common in Metaplex metadata but is not a valid `<img src>`. */
+  const arHttps = arweaveUriToHttps(url)
+  if (arHttps) url = arHttps
 
   // Create flow used to persist `/api/proxy-image?url=...`; server fetch often 404s on Firebase/GCS.
   if (url.startsWith('/api/proxy-image')) {
@@ -98,6 +110,11 @@ export function getRaffleImageFallbackRawUrl(
       const raw = parsed.searchParams.get('url')
       if (!raw) return null
       const decoded = rewriteDeadIpfsGatewayHttpsUrl(fullyDecodeURIComponentSafe(raw))
+      if (isIrysUploaderHttpsUrl(decoded)) {
+        const mirrors = irysUploaderMirrorHttpsUrls(decoded)
+        const arMirror = mirrors.find((m) => m.startsWith('https://arweave.net'))
+        if (arMirror && arMirror !== decoded) return arMirror
+      }
       const arHttps = arweaveUriToHttps(decoded)
       if (arHttps) return arHttps
       const ipfsHttps = ipfsUriToHttpsGatewayUrl(decoded)
@@ -129,9 +146,40 @@ export function buildRaffleImageAttemptChain(
   }
   addSource(imageUrl)
   addSource(imageFallbackUrl)
+
+  /** Extra HTTPS gateway URLs for the same IPFS CID (proxy/mobile dead ends are common). */
+  const pushIpfsGatewayVariants = (raw: string | null | undefined) => {
+    if (!raw?.trim()) return
+    let u = rewriteDeadIpfsGatewayHttpsUrl(raw.trim())
+    const ar = arweaveUriToHttps(u)
+    if (ar) u = ar
+    const fromIpfsScheme = /^ipfs:\/\//i.test(u) ? ipfsUriToHttpsGatewayUrl(u) : null
+    const seed = fromIpfsScheme ?? u
+    if (!/^https?:\/\//i.test(seed) || !seed.includes('/ipfs/')) return
+    for (const g of ipfsGatewayCandidateUrls(seed)) {
+      chain.push(g)
+    }
+  }
+  pushIpfsGatewayVariants(imageUrl)
+  pushIpfsGatewayVariants(imageFallbackUrl)
+
+  const pushIrysMirrors = (raw: string | null | undefined) => {
+    if (!raw?.trim()) return
+    const u = raw.trim()
+    if (!isIrysUploaderHttpsUrl(u)) return
+    for (const m of irysUploaderMirrorHttpsUrls(u)) {
+      chain.push(m)
+    }
+  }
+  pushIrysMirrors(imageUrl)
+  pushIrysMirrors(imageFallbackUrl)
+
   const deduped: string[] = []
+  const seen = new Set<string>()
   for (const u of chain) {
-    if (deduped.length === 0 || deduped[deduped.length - 1] !== u) deduped.push(u)
+    if (!u?.trim() || seen.has(u)) continue
+    seen.add(u)
+    deduped.push(u)
   }
   return deduped
 }

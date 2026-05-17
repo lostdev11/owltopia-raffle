@@ -1,20 +1,67 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
-import { PARTNER_LOGOS } from '@/lib/partner-logos'
 import {
   PURCHASE_COMPLETED_EVENT,
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
 import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
+import {
+  getPartnerSpotlightLogo,
+  PARTNER_SPOTLIGHT_BRANDS,
+  partnerSpotlightImageCandidates,
+  type PartnerLogo,
+} from '@/lib/partner-logos'
 
 type Item = { raffle: Raffle; entries: Entry[] }
+
+/** Horizontal speed for Partner Spotlight without rendering duplicate logos. */
+const SPOTLIGHT_MARQUEE_PX_PER_SEC = 28
+
+/** One row per partner host — used to link each brand logo to a live raffle when possible. */
+function spotlightStripDedupeKey(r: Raffle): string {
+  const w = (r.creator_wallet || r.created_by || '').trim()
+  return w || `raffle:${r.id}`
+}
+
+function dedupeSpotlightStripItems(items: Item[]): Item[] {
+  const seen = new Set<string>()
+  const out: Item[] = []
+  for (const item of items) {
+    const key = spotlightStripDedupeKey(item.raffle)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function PartnerSpotlightLogoImg({ logo }: { logo: PartnerLogo }) {
+  const candidates = useMemo(() => partnerSpotlightImageCandidates(logo.src), [logo.src])
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    setIdx(0)
+  }, [logo.src])
+  const src = candidates[Math.min(idx, candidates.length - 1)] ?? logo.src
+  const hideAlt = src.endsWith('partner-slot-placeholder.svg')
+
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element -- static /public + multi-extension fallbacks */
+    <img
+      src={src}
+      alt={hideAlt ? '' : logo.alt}
+      className="h-full w-full object-contain"
+      loading="lazy"
+      decoding="async"
+      onError={() => setIdx((i) => (i + 1 < candidates.length ? i + 1 : i))}
+    />
+  )
+}
 
 /** Same idea as RafflesList: SSR sends entries: []; keep fetched rows across router.refresh. */
 function mergeCarouselProps(prev: Item[], next: Item[]): Item[] {
@@ -45,7 +92,19 @@ export function PartnerRafflesCarousel({
   const [displayItems, setDisplayItems] = useState<Item[]>(items)
   const itemsRef = useRef(items)
   const [marqueePaused, setMarqueePaused] = useState(false)
+  const [partnerMarqueeLoop, setPartnerMarqueeLoop] = useState(false)
+  const partnerMarqueeOuterRef = useRef<HTMLDivElement>(null)
+  const partnerMarqueeTrackRef = useRef<HTMLDivElement>(null)
   const resumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [spotlightMarqueePaused, setSpotlightMarqueePaused] = useState(false)
+  const spotlightResumeAfterPointerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const spotlightOuterRef = useRef<HTMLDivElement>(null)
+  const spotlightTrackRef = useRef<HTMLDivElement>(null)
+  const spotlightPosRef = useRef(0)
+  const spotlightDirRef = useRef(1)
+  const spotlightRafRef = useRef(0)
+  const [spotlightShouldMarquee, setSpotlightShouldMarquee] = useState(false)
 
   useEffect(() => {
     itemsRef.current = items
@@ -154,6 +213,7 @@ export function PartnerRafflesCarousel({
   useEffect(() => {
     return () => {
       if (resumeAfterPointerRef.current) clearTimeout(resumeAfterPointerRef.current)
+      if (spotlightResumeAfterPointerRef.current) clearTimeout(spotlightResumeAfterPointerRef.current)
     }
   }, [])
 
@@ -166,10 +226,143 @@ export function PartnerRafflesCarousel({
     }
   }, [itemsKey])
 
+  const spotlightHrefPool = useMemo(() => dedupeSpotlightStripItems(displayItems), [displayItems])
+
+  const spotlightMarqueeRows = useMemo(() => {
+    return PARTNER_SPOTLIGHT_BRANDS.map((logo) => {
+      const match = spotlightHrefPool.find((item) => {
+        const resolved = getPartnerSpotlightLogo(item.raffle)
+        return resolved?.src === logo.src
+      })
+      const href = match ? `/raffles/${match.raffle.slug}` : '/partner-program'
+      const title = match
+        ? match.raffle.creator_partner_display_name?.trim() ||
+          match.raffle.title?.trim() ||
+          'Partner raffle'
+        : `${logo.alt} - Partner program`
+      return { logo, href, title }
+    })
+  }, [spotlightHrefPool])
+
+  const spotlightStripKey = useMemo(
+    () =>
+      `${spotlightHrefPool.map(({ raffle }) => raffle.id).join(',')}|${spotlightMarqueeRows.map((r) => r.href).join('|')}`,
+    [spotlightHrefPool, spotlightMarqueeRows]
+  )
+
+  useEffect(() => {
+    setSpotlightMarqueePaused(false)
+    if (spotlightResumeAfterPointerRef.current) {
+      clearTimeout(spotlightResumeAfterPointerRef.current)
+      spotlightResumeAfterPointerRef.current = null
+    }
+  }, [spotlightStripKey])
+
+  useLayoutEffect(() => {
+    const outer = spotlightOuterRef.current
+    const track = spotlightTrackRef.current
+    if (!outer || !track || spotlightMarqueeRows.length <= 1) {
+      setSpotlightShouldMarquee(false)
+      spotlightPosRef.current = 0
+      spotlightDirRef.current = 1
+      if (track) track.style.transform = ''
+      return
+    }
+
+    const decide = () => {
+      const travel = Math.abs(track.scrollWidth - outer.clientWidth)
+      const canMarquee = travel > 1
+      setSpotlightShouldMarquee(canMarquee)
+      if (!canMarquee) {
+        spotlightPosRef.current = 0
+        spotlightDirRef.current = 1
+        track.style.transform = ''
+      }
+    }
+
+    decide()
+    const ro = new ResizeObserver(decide)
+    ro.observe(outer)
+    ro.observe(track)
+    return () => ro.disconnect()
+  }, [spotlightStripKey, spotlightMarqueeRows.length])
+
+  useEffect(() => {
+    if (!spotlightShouldMarquee || spotlightMarqueePaused) return
+    if (typeof window === 'undefined') return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const outer = spotlightOuterRef.current
+    const track = spotlightTrackRef.current
+    if (!outer || !track) return
+
+    let last = performance.now()
+    const step = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.064)
+      last = now
+      const rowOverflows = track.scrollWidth > outer.clientWidth
+      const maxOffset = Math.abs(track.scrollWidth - outer.clientWidth)
+      if (maxOffset <= 1) {
+        spotlightPosRef.current = 0
+        track.style.transform = ''
+        return
+      }
+
+      spotlightPosRef.current += spotlightDirRef.current * SPOTLIGHT_MARQUEE_PX_PER_SEC * dt
+      if (spotlightPosRef.current >= maxOffset) {
+        spotlightPosRef.current = maxOffset
+        spotlightDirRef.current = -1
+      } else if (spotlightPosRef.current <= 0) {
+        spotlightPosRef.current = 0
+        spotlightDirRef.current = 1
+      }
+
+      const x = rowOverflows ? -spotlightPosRef.current : spotlightPosRef.current
+      track.style.transform = `translate3d(${x}px,0,0)`
+      spotlightRafRef.current = requestAnimationFrame(step)
+    }
+
+    spotlightRafRef.current = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(spotlightRafRef.current)
+  }, [spotlightShouldMarquee, spotlightMarqueePaused, spotlightStripKey])
+
+  useLayoutEffect(() => {
+    const outer = partnerMarqueeOuterRef.current
+    const track = partnerMarqueeTrackRef.current
+    const len = displayItems.length
+    if (!outer || !track || len === 0) {
+      setPartnerMarqueeLoop(false)
+      return
+    }
+    if (len === 1) {
+      setPartnerMarqueeLoop(false)
+      return
+    }
+
+    const decide = () => {
+      const n = displayItems.length
+      if (n <= 1) {
+        setPartnerMarqueeLoop(false)
+        return
+      }
+      setPartnerMarqueeLoop((prevLoop) => {
+        const singleW = prevLoop ? track.scrollWidth / 2 : track.scrollWidth
+        return singleW > outer.clientWidth + 1
+      })
+    }
+
+    decide()
+    const ro = new ResizeObserver(decide)
+    ro.observe(outer)
+    ro.observe(track)
+    return () => ro.disconnect()
+  }, [itemsKey, displayItems.length])
+
   const loopItems = useMemo(() => {
     if (displayItems.length === 0) return []
+    if (displayItems.length === 1 || !partnerMarqueeLoop) return displayItems
     return [...displayItems, ...displayItems]
-  }, [displayItems])
+  }, [displayItems, partnerMarqueeLoop])
 
   const pauseMarquee = () => {
     setMarqueePaused(true)
@@ -187,70 +380,90 @@ export function PartnerRafflesCarousel({
     }, 3000)
   }
 
+  const pauseSpotlightMarquee = () => {
+    setSpotlightMarqueePaused(true)
+    if (spotlightResumeAfterPointerRef.current) {
+      clearTimeout(spotlightResumeAfterPointerRef.current)
+      spotlightResumeAfterPointerRef.current = null
+    }
+  }
+
+  const scheduleSpotlightResume = () => {
+    if (spotlightResumeAfterPointerRef.current) clearTimeout(spotlightResumeAfterPointerRef.current)
+    spotlightResumeAfterPointerRef.current = setTimeout(() => {
+      spotlightResumeAfterPointerRef.current = null
+      setSpotlightMarqueePaused(false)
+    }, 3000)
+  }
+
   const n = displayItems.length
-  const durationSec = Math.max(20, n * 8)
-  const logoDurationSec = Math.max(20, PARTNER_LOGOS.length * 6)
+  const durationSec = Math.max(24, n * 10)
 
   if (items.length === 0) return null
+
+  const renderSpotlightLogos = () =>
+    spotlightMarqueeRows.map(({ logo, href, title }, i) => (
+      <Link
+        key={`${logo.src}-${i}`}
+        href={href}
+        className="group relative shrink-0 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+        title={title}
+      >
+        <div className="relative h-[4.25rem] w-[4.25rem] overflow-hidden rounded-xl border border-white/10 bg-muted ring-1 ring-white/5 transition-transform duration-200 group-active:scale-[0.98] sm:h-[4.75rem] sm:w-[4.75rem]">
+          <PartnerSpotlightLogoImg logo={logo} />
+        </div>
+      </Link>
+    ))
 
   return (
     <section
       className="w-full min-w-0 mb-6 sm:mb-8"
       aria-labelledby="partner-raffles-carousel-heading"
     >
-      <div className="mb-3 min-w-0 sm:mb-4">
-        <div className="mb-2 flex min-w-0 items-center gap-2">
+      <div className="mb-4 min-w-0 sm:mb-5">
+        <div className="mb-3 flex min-w-0 items-center gap-2">
           <Users className="h-5 w-5 shrink-0 text-violet-400" aria-hidden />
           <h2 id="partner-raffles-carousel-heading" className="truncate text-base font-bold sm:text-lg">
             Partner Spotlight
           </h2>
         </div>
-        <div
-          className="partner-logos-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden pb-1"
-          style={{ touchAction: 'manipulation' as const }}
-          onPointerDown={pauseMarquee}
-          onPointerUp={scheduleResume}
-          onPointerCancel={scheduleResume}
-          role="region"
-          aria-label="Partner logos, auto-scrolling. Tap to pause."
-        >
+        {spotlightMarqueeRows.length > 0 ? (
           <div
-            className="partner-logos-marquee-track flex w-max flex-nowrap items-center gap-2.5 sm:gap-3"
-            dir="ltr"
-            style={
-              {
-                animationPlayState: marqueePaused ? 'paused' : 'running',
-                '--partner-logos-marquee-duration': `${logoDurationSec}s`,
-              } as CSSProperties
-            }
+            ref={spotlightOuterRef}
+            className={`partner-logos-marquee-outer -mx-1 px-1 pb-2 ${!spotlightShouldMarquee ? 'flex justify-center' : ''}`}
+            style={{ touchAction: 'manipulation' as const }}
+            onPointerDown={pauseSpotlightMarquee}
+            onPointerUp={scheduleSpotlightResume}
+            onPointerCancel={scheduleSpotlightResume}
+            role="region"
+            aria-label="Partner logos, auto-scrolling. Tap to pause."
           >
-            {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map((logo, idx) => (
-              <div
-                key={`${logo.src}-${idx}`}
-                className="flex h-[78px] w-[126px] shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-[92px] sm:w-[152px]"
-              >
-                <Image
-                  src={logo.src}
-                  alt={logo.alt}
-                  width={140}
-                  height={84}
-                  className="h-full w-full rounded-xl object-contain"
-                />
-              </div>
-            ))}
+            <div
+              ref={spotlightTrackRef}
+              className={`flex w-max flex-nowrap items-center gap-3 sm:gap-4 ${spotlightShouldMarquee ? 'will-change-transform' : ''}`}
+              dir="ltr"
+            >
+              {renderSpotlightLogos()}
+            </div>
           </div>
+        ) : null}
+
+        <div className="mt-5 border-t border-border/60 pt-4">
+          <h3 className="text-base font-bold text-foreground sm:text-lg">About the program</h3>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Verified partner community hosts are highlighted here with a reduced platform fee on tickets.{' '}
+            <Link
+              href="/partner-program"
+              className="font-semibold text-foreground/90 underline-offset-4 hover:underline touch-manipulation"
+            >
+              Partner program details
+            </Link>
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground sm:text-base">
-          <Link
-            href="/partner-program"
-            className="font-medium text-foreground/90 underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
-          >
-            About the program
-          </Link>
-        </p>
       </div>
       <div
-        className="partner-raffles-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden overflow-y-visible pt-4 pb-8 -mx-1 px-3 sm:pt-6 sm:pb-10 sm:px-5"
+        ref={partnerMarqueeOuterRef}
+        className={`partner-raffles-marquee-outer w-full min-w-0 max-w-full overflow-x-hidden overflow-y-visible pt-2 pb-8 -mx-1 px-3 sm:pb-10 sm:px-5 ${!partnerMarqueeLoop ? 'flex justify-center' : ''}`}
         style={{ touchAction: 'manipulation' as const }}
         onPointerDown={pauseMarquee}
         onPointerUp={scheduleResume}
@@ -259,11 +472,13 @@ export function PartnerRafflesCarousel({
         aria-label="Featured partner raffles, auto-scrolling. Tap to pause."
       >
         <div
+          ref={partnerMarqueeTrackRef}
           className="partner-raffles-marquee-track gap-4 sm:gap-5"
           dir="ltr"
           style={
             {
               animationPlayState: marqueePaused ? 'paused' : 'running',
+              animation: partnerMarqueeLoop ? undefined : 'none',
               '--partner-marquee-duration': `${durationSec}s`,
             } as CSSProperties
           }
@@ -271,7 +486,7 @@ export function PartnerRafflesCarousel({
           {loopItems.map(({ raffle, entries }, i) => (
             <div
               key={`${raffle.id}-${i}`}
-              className="flex min-h-0 w-[calc(100vw-1.5rem)] max-w-[26rem] shrink-0 self-stretch min-w-0 sm:w-[23rem] md:w-[25rem] lg:w-[26rem]"
+              className="flex min-h-0 w-[calc(100vw-2rem)] max-w-[min(92vw,36rem)] shrink-0 self-stretch min-w-0 sm:max-w-[34rem]"
             >
               <div className="flex h-full min-h-0 w-full flex-1 flex-col">
                 <RaffleCard
