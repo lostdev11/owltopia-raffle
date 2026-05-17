@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
+import { healPendingNftNestsForWallet } from '@/lib/nesting/heal-pending-nft-freeze'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -24,8 +25,19 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const positions = await listStakingPositionsByWallet(session.wallet)
-    return NextResponse.json({ wallet: session.wallet, positions })
+    const healDisabled = request.nextUrl.searchParams.get('heal') === '0'
+    if (healDisabled) {
+      const positions = await listStakingPositionsByWallet(session.wallet)
+      return NextResponse.json({ wallet: session.wallet, positions })
+    }
+
+    const { positions, results: heal_results } = await healPendingNftNestsForWallet(session.wallet)
+    const healed_count = heal_results.filter((r) => r.healed).length
+    return NextResponse.json({
+      wallet: session.wallet,
+      positions,
+      ...(healed_count > 0 ? { healed_count, heal_results } : {}),
+    })
   } catch (e) {
     console.error('[me/staking/positions]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

@@ -10,7 +10,11 @@ import type { RewardRateUnit } from '@/lib/db/staking-pools'
 import { LockTimer } from '@/components/nesting/LockTimer'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
-import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import {
+  isNestingTxPhaseInFlight,
+  nestingTxPhaseLabel,
+  type NestingTxPhase,
+} from '@/lib/nesting/tx-states'
 import { cn } from '@/lib/utils'
 
 function nestStatusPhrase(status: StakingPositionRow['status']) {
@@ -44,6 +48,8 @@ export type PositionNestRowProps = {
   /** True when claim/leave are blocked until the safeguards checkbox is checked. */
   securityAckRequired?: boolean
   nestingPaused?: boolean
+  /** Scroll to nest form and pre-select this coin (pending open only). */
+  onResumeOpening?: () => void
 }
 
 type PositionNestRowVariant = 'standalone' | 'embedded'
@@ -63,6 +69,7 @@ export function PositionNestRow({
   actionsEnabled = true,
   securityAckRequired = false,
   nestingPaused = false,
+  onResumeOpening,
 }: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [dasNftName, setDasNftName] = useState<string | null>(null)
@@ -90,7 +97,9 @@ export function PositionNestRow({
   }, [position, nowMs])
 
   const paysOwlRewards = (position.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  const canClaimOwl = hasClaimableRewardBalance(claimable)
+  const isOpening = position.status === 'pending'
+  const canClaimOwl =
+    position.status === 'active' && hasClaimableRewardBalance(claimable)
 
   const canUnstake =
     cancelOpeningAllowed ||
@@ -100,14 +109,20 @@ export function PositionNestRow({
   const claimAmountInput = claimable
   const claimAmountLabel = claimable.toLocaleString(undefined, { maximumFractionDigits: 6 })
 
-  const anyTxActive = claimPhase !== 'idle' || unstakePhase !== 'idle'
-  const showLinePhase: NestingTxPhase =
-    claimPhase !== 'idle' ? claimPhase : unstakePhase !== 'idle' ? unstakePhase : 'idle'
+  const anyTxInFlight = isNestingTxPhaseInFlight(claimPhase) || isNestingTxPhaseInFlight(unstakePhase)
+  const showLinePhase: NestingTxPhase = isNestingTxPhaseInFlight(claimPhase)
+    ? claimPhase
+    : isNestingTxPhaseInFlight(unstakePhase)
+      ? unstakePhase
+      : claimPhase === 'failed' || unstakePhase === 'failed'
+        ? 'failed'
+        : 'idle'
   const needsFreeze =
     freezeRequired &&
     Boolean(position.asset_identifier?.trim()) &&
     position.status !== 'unstaked' &&
     !position.external_reference?.startsWith('nft_freeze_confirmed:')
+  const showFinishOpening = isOpening && needsFreeze && Boolean(onResumeOpening)
 
   const handleClaimMax = async () => {
     if (!canClaimOwl || !hasClaimableRewardBalance(claimAmountInput)) return
@@ -192,7 +207,14 @@ export function PositionNestRow({
         </div>
         <div>
           <dt className="text-muted-foreground">Ready to claim</dt>
-          <dd className="font-mono tabular-nums text-theme-prime">{claimAmountLabel}</dd>
+          <dd
+            className={cn(
+              'font-mono tabular-nums',
+              isOpening ? 'text-muted-foreground' : 'text-theme-prime'
+            )}
+          >
+            {isOpening ? 'After opening' : claimAmountLabel}
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">OWL claimed (lifetime)</dt>
@@ -257,35 +279,48 @@ export function PositionNestRow({
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
-          disabled={!actionsEnabled || nestingPaused || anyTxActive || !canClaimOwl}
-          onClick={() => void handleClaimMax()}
-          aria-label={canClaimOwl ? `Claim ${claimAmountLabel} OWL rewards` : 'Claim OWL rewards'}
-        >
-          {claimPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          {claimPhase === 'idle' ? (
-            canClaimOwl ? (
-              <span className="tabular-nums">
-                Claim <span className="font-medium text-theme-prime">{claimAmountLabel}</span> OWL
-              </span>
+        {showFinishOpening ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="min-h-[44px] touch-manipulation font-semibold"
+            disabled={!actionsEnabled || anyTxInFlight}
+            onClick={() => onResumeOpening?.()}
+          >
+            Finish opening
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
+            disabled={!actionsEnabled || nestingPaused || anyTxInFlight || !canClaimOwl}
+            onClick={() => void handleClaimMax()}
+            aria-label={canClaimOwl ? `Claim ${claimAmountLabel} OWL rewards` : 'Claim OWL rewards'}
+          >
+            {claimPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {claimPhase === 'idle' ? (
+              canClaimOwl ? (
+                <span className="tabular-nums">
+                  Claim <span className="font-medium text-theme-prime">{claimAmountLabel}</span> OWL
+                </span>
+              ) : (
+                'Claim OWL'
+              )
             ) : (
-              'Claim OWL'
-            )
-          ) : (
-            nestingTxPhaseLabel(claimPhase)
-          )}
-        </Button>
+              nestingTxPhaseLabel(claimPhase)
+            )}
+          </Button>
+        )}
         <Button
           type="button"
           variant="secondary"
           size="sm"
           className="min-h-[44px] touch-manipulation bg-muted/50 text-muted-foreground border border-border shadow-none hover:bg-muted/80 disabled:opacity-40"
           disabled={
-            !actionsEnabled || (nestingPaused && !cancelOpeningAllowed) || anyTxActive || !canUnstake
+            !actionsEnabled || (nestingPaused && !cancelOpeningAllowed) || anyTxInFlight || !canUnstake
           }
           onClick={() => void handleUnstake()}
         >

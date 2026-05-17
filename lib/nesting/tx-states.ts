@@ -33,3 +33,16 @@ const PHASE_LABEL: Record<NestingTxPhase, string> = {
 export function nestingTxPhaseLabel(phase: NestingTxPhase): string {
   return PHASE_LABEL[phase] ?? phase
 }
+
+const IN_FLIGHT_PHASES: ReadonlySet<NestingTxPhase> = new Set([
+  'preparing',
+  'awaiting_wallet_signature',
+  'submitting',
+  'confirming',
+  'syncing',
+])
+
+/** True while a wallet/API action is actively running (not idle or failed). */
+export function isNestingTxPhaseInFlight(phase: NestingTxPhase): boolean {
+  return IN_FLIGHT_PHASES.has(phase)
+}

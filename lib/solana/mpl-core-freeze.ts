@@ -22,16 +22,34 @@ function signatureToString(result: any): string {
   return String(sig)
 }
 
+function mplCoreFreezeDelegateMatches(assetAccount: unknown, delegateAddress: string): boolean {
+  const asset = assetAccount as {
+    freezeDelegate?: { authority?: { address?: unknown }; frozen?: boolean }
+  }
+  const authority = asset?.freezeDelegate?.authority as { address?: unknown } | undefined
+  if (!authority || !delegateAddress.trim()) return false
+  const address = (authority as { address?: unknown }).address
+  return Boolean(address) && String(address) === delegateAddress.trim()
+}
+
+function mplCoreFreezeDelegateReady(assetAccount: unknown, delegateAddress: string): boolean {
+  const asset = assetAccount as { freezeDelegate?: { frozen?: boolean } }
+  return (
+    mplCoreFreezeDelegateMatches(assetAccount, delegateAddress) &&
+    asset?.freezeDelegate?.frozen === true
+  )
+}
+
 /**
  * Owner-signed MPL Core FreezeDelegate setup.
- * The owner wallet adds a FreezeDelegate plugin whose authority is the server-side delegate.
+ * Returns `null` when the asset already has the correct frozen delegate (skip wallet tx).
  */
 export async function addMplCoreFreezeDelegate({
   connection,
   wallet,
   assetId,
   delegateAddress,
-}: AddMplCoreFreezeDelegateArgs): Promise<string> {
+}: AddMplCoreFreezeDelegateArgs): Promise<string | null> {
   const pubkey = wallet?.publicKey ?? wallet?.adapter?.publicKey
   if (!pubkey) {
     throw new Error('Wallet adapter not ready for MPL Core freeze lock.')
@@ -46,6 +64,9 @@ export async function addMplCoreFreezeDelegate({
   const asset = publicKey(assetId)
   const delegatePublicKey = publicKey(delegate)
   const assetAccount: any = await fetchAsset(umi as any, asset)
+  if (mplCoreFreezeDelegateReady(assetAccount, delegate)) {
+    return null
+  }
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'
       ? assetAccount.updateAuthority.address

@@ -49,7 +49,11 @@ import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAsset
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { runNestingTxAction, throwIfNestingAborted } from '@/lib/nesting/run-tx-action'
-import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import {
+  isNestingTxPhaseInFlight,
+  nestingTxPhaseLabel,
+  type NestingTxPhase,
+} from '@/lib/nesting/tx-states'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingOwlCoinWalletProgressPanel'
@@ -163,6 +167,23 @@ export function DashboardNestingClient() {
     })
   }, [])
 
+  /** Clear stale `failed` / orphaned phases after refresh (avoids blocking Claim all). */
+  const clearStalePositionPhases = useCallback(() => {
+    setPosPhases((m) => {
+      let changed = false
+      const next: typeof m = {}
+      for (const [id, phases] of Object.entries(m)) {
+        const claim = isNestingTxPhaseInFlight(phases.claim) ? phases.claim : 'idle'
+        const unstake = isNestingTxPhaseInFlight(phases.unstake) ? phases.unstake : 'idle'
+        if (claim !== phases.claim || unstake !== phases.unstake) changed = true
+        if (claim !== 'idle' || unstake !== 'idle') {
+          next[id] = { claim, unstake }
+        }
+      }
+      return changed ? next : m
+    })
+  }, [])
+
   const walletAddr = publicKey?.toBase58() ?? ''
 
   const loadPools = useCallback(async () => {
@@ -219,9 +240,21 @@ export function DashboardNestingClient() {
     }
     setNeedsSignIn(false)
     setPositions(Array.isArray(json.positions) ? json.positions : [])
+    const healedCount =
+      typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
+    if (healedCount > 0) {
+      setSuccessNotice({
+        placement: 'page',
+        message:
+          healedCount === 1
+            ? 'Finished opening 1 nest on-chain — rewards are ready to claim.'
+            : `Finished opening ${healedCount} nests on-chain — rewards are ready to claim.`,
+      })
+    }
+    clearStalePositionPhases()
     void loadClaimLedger()
     return true
-  }, [connected, publicKey, loadClaimLedger])
+  }, [connected, publicKey, loadClaimLedger, clearStalePositionPhases])
 
   const refreshAll = useCallback(async () => {
     if (!connected || !publicKey) {
@@ -285,9 +318,13 @@ export function DashboardNestingClient() {
       }
     }
     syncSecurityAckFromStorage()
-    document.addEventListener('visibilitychange', syncSecurityAckFromStorage)
-    return () => document.removeEventListener('visibilitychange', syncSecurityAckFromStorage)
-  }, [])
+    const onVisible = () => {
+      syncSecurityAckFromStorage()
+      if (document.visibilityState === 'visible') clearStalePositionPhases()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [clearStalePositionPhases])
 
   useEffect(() => {
     try {
@@ -421,6 +458,16 @@ export function DashboardNestingClient() {
   const claimableNestCount = claimAllPreview.count
 
   const claimAllBusy = claimAllTxPhase !== 'idle'
+
+  const claimAllButtonDisabled = nestingDisabled || claimAllBusy || stakeTxPhase !== 'idle'
+
+  const claimAllDisabledReason = useMemo((): string | null => {
+    if (!claimAllButtonDisabled || claimableNestCount < 1) return null
+    if (claimAllBusy) return null
+    if (nestingDisabled) return 'Claims are paused right now — see the notice above.'
+    if (stakeTxPhase !== 'idle') return 'Finish the nest you are opening above, then try again.'
+    return null
+  }, [claimAllButtonDisabled, claimableNestCount, claimAllBusy, nestingDisabled, stakeTxPhase])
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -821,6 +868,33 @@ export function DashboardNestingClient() {
   }, [nftMintRequired, stakeAssetId, stakeAssetIds])
 
   /** While nesting is globally paused, still allow Confirm nest when every selected NFT is mid-open (pending, freeze not confirmed). */
+  /** Pending NFT nests that still need wallet lock or server freeze confirm. */
+  const openingNestsNeedingWalletLock = useMemo(() => {
+    return positions.filter((p) => {
+      if (p.status !== 'pending' || !p.asset_identifier?.trim()) return false
+      const pool = poolById.get(p.pool_id)
+      return (
+        pool?.asset_type === 'nft' &&
+        pool.adapter_mode === 'onchain_enabled' &&
+        isOpeningNftNestAbortable(p, pool)
+      )
+    })
+  }, [positions, poolById])
+
+  const resumeOpeningNest = useCallback(
+    (position: StakingPositionRow) => {
+      const mint = position.asset_identifier?.trim()
+      if (!mint) return
+      setStakeAssetId(mint)
+      setStakeAssetIds([mint])
+      setActionError(null)
+      if (typeof document !== 'undefined') {
+        document.getElementById('nesting-open-nest-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    },
+    []
+  )
+
   const canOnlyResumeFreeze = useMemo(() => {
     const pid = selectedPerch?.id?.trim() ?? ''
     if (!nestingDisabled || !pid) return false
@@ -1047,7 +1121,7 @@ export function DashboardNestingClient() {
   )
 
   const sendMplCoreFreezeDelegateApproval = useCallback(
-    async (assetId: string, delegateAddress: string): Promise<string> => {
+    async (assetId: string, delegateAddress: string): Promise<string | null> => {
       const adapter = wallet?.adapter
       if (!adapter || !publicKey) {
         throw new Error('Connect your wallet first.')
@@ -1174,25 +1248,44 @@ export function DashboardNestingClient() {
               if (!positionId || !positionAssetId) {
                 throw new NestingStakeFlowError('Stake was prepared, but the NFT position was missing.')
               }
-              setStakeTxPhase('awaiting_wallet_signature')
-              const signature = await sendMplCoreFreezeDelegateApproval(positionAssetId, delegateAddress)
-              throwIfNestingAborted(signal)
-              setStakeTxPhase('syncing')
-              const freezeRes = await fetch('/api/me/staking/freeze', {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Connected-Wallet': publicKey.toBase58(),
-                },
-                body: JSON.stringify({ position_id: positionId, signature }),
-                signal,
-              })
-              const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
-              if (!freezeRes.ok) {
-                throw new NestingStakeFlowError(
-                  typeof freezeJson.error === 'string' ? freezeJson.error : 'Could not confirm NFT freeze'
+
+              const confirmNftNestFreeze = async (freezeSignature?: string | null) => {
+                throwIfNestingAborted(signal)
+                setStakeTxPhase('syncing')
+                const freezeRes = await fetch('/api/me/staking/freeze', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Connected-Wallet': publicKey.toBase58(),
+                  },
+                  body: JSON.stringify({
+                    position_id: positionId,
+                    ...(freezeSignature?.trim() ? { signature: freezeSignature.trim() } : {}),
+                  }),
+                  signal,
+                })
+                const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
+                if (!freezeRes.ok) {
+                  throw new NestingStakeFlowError(
+                    typeof freezeJson.error === 'string'
+                      ? freezeJson.error
+                      : 'Could not confirm NFT freeze'
+                  )
+                }
+              }
+
+              // On-chain lock may already be done (wallet signed earlier); server can activate without another tx.
+              try {
+                await confirmNftNestFreeze(json.position?.stake_signature ?? null)
+              } catch (firstFreezeErr) {
+                if (!(firstFreezeErr instanceof NestingStakeFlowError)) throw firstFreezeErr
+                setStakeTxPhase('awaiting_wallet_signature')
+                const walletSig = await sendMplCoreFreezeDelegateApproval(
+                  positionAssetId,
+                  delegateAddress
                 )
+                await confirmNftNestFreeze(walletSig ?? json.position?.stake_signature ?? null)
               }
             }
             return json
@@ -1746,6 +1839,48 @@ export function DashboardNestingClient() {
         ))}
       </div>
 
+      {openingNestsNeedingWalletLock.length > 0 ? (
+        <div
+          className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm space-y-3"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="space-y-1">
+            <p className="font-medium text-foreground">
+              {openingNestsNeedingWalletLock.length === 1
+                ? '1 nest is still opening'
+                : `${openingNestsNeedingWalletLock.length} nests are still opening`}
+            </p>
+            <p className="text-muted-foreground leading-relaxed text-xs sm:text-sm">
+              The wallet lock step did not finish. We try to fix this automatically when you load the page; if a nest
+              still shows <span className="font-medium text-foreground/90">Opening…</span>, tap below and approve{' '}
+              <span className="font-medium text-foreground/90">Confirm nest</span> in your wallet.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="default"
+            className="min-h-[48px] w-full touch-manipulation font-semibold"
+            disabled={stakeTxPhase !== 'idle'}
+            onClick={() => {
+              const mints = openingNestsNeedingWalletLock
+                .map((p) => p.asset_identifier?.trim())
+                .filter((m): m is string => Boolean(m))
+              if (mints.length === 0) return
+              setStakeAssetIds(mints)
+              setStakeAssetId(mints[0] ?? '')
+              setActionError(null)
+              document.getElementById('nesting-open-nest-form')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+              })
+            }}
+          >
+            Finish opening {openingNestsNeedingWalletLock.length === 1 ? 'nest' : 'nests'}
+          </Button>
+        </div>
+      ) : null}
+
       {claimableNestCount >= 1 ? (
         <div className="rounded-xl border border-theme-prime/35 bg-theme-prime/[0.06] p-4 space-y-2">
           <p className="text-sm text-muted-foreground leading-relaxed">
@@ -1757,16 +1892,7 @@ export function DashboardNestingClient() {
             type="button"
             variant="default"
             className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)]"
-            disabled={
-              !securityAck ||
-              nestingDisabled ||
-              claimAllBusy ||
-              stakeTxPhase !== 'idle' ||
-              openPositions.some((p) => {
-                const phases = posPhases[p.id]
-                return phases?.claim !== 'idle' || phases?.unstake !== 'idle'
-              })
-            }
+            disabled={claimAllButtonDisabled}
             onClick={() => void handleClaimAll()}
           >
             {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
@@ -1774,11 +1900,16 @@ export function DashboardNestingClient() {
               ? nestingTxPhaseLabel(claimAllTxPhase)
               : `Claim all · ${claimAllPreview.totalOwl.toFixed(6)} OWL`}
           </Button>
+          {claimAllDisabledReason ? (
+            <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
+              {claimAllDisabledReason}
+            </p>
+          ) : null}
           <NestingActionStatusLine phase={claimAllTxPhase} className="min-h-[1.25rem] text-center" />
         </div>
       ) : null}
 
-      <section className="space-y-4">
+      <section id="nesting-open-nest-form" className="space-y-4 scroll-mt-24">
         <SectionHeader
           title="Open a nest"
           description={
@@ -2411,33 +2542,6 @@ export function DashboardNestingClient() {
           title="Your nests"
           description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card—tap the header to expand or collapse."
         />
-        {!securityAck ? (
-          <div
-            className="mb-4 rounded-lg border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm"
-            role="status"
-          >
-            <p className="font-medium text-foreground">One more step before you can claim</p>
-            <p className="mt-1 text-muted-foreground leading-relaxed">
-              Scroll up and check the box under{' '}
-              <span className="font-medium text-foreground">Peek at safeguards before you nest</span>. Claim and leave
-              buttons stay off until that is checked (saved for this browser session).
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-3 min-h-[44px] touch-manipulation"
-              onClick={() =>
-                document.getElementById('nesting-security-notice')?.scrollIntoView({
-                  behavior: 'smooth',
-                  block: 'start',
-                })
-              }
-            >
-              Go to safeguards
-            </Button>
-          </div>
-        ) : null}
         {claimableNestCount >= 1 ? (
           <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
             Use <span className="font-medium text-foreground">Claim all</span> in the banner near the top when OWL is ready — one payout for every eligible nest.
@@ -2463,9 +2567,9 @@ export function DashboardNestingClient() {
                   onClaim={handleClaim}
                   posPhases={posPhases}
                   freezeRequired={g.pool.asset_type === 'nft' && g.pool.adapter_mode === 'onchain_enabled'}
-                  actionsEnabled={securityAck && !claimAllBusy}
-                  securityAckRequired={!securityAck}
+                  actionsEnabled={!claimAllBusy}
                   nestingPaused={nestingDisabled}
+                  onResumeOpening={resumeOpeningNest}
                 />
               </li>
             ))}
@@ -2489,9 +2593,9 @@ export function DashboardNestingClient() {
                       pool?.asset_type === 'nft' && pool?.adapter_mode === 'onchain_enabled'
                     }
                     cancelOpeningAllowed={pool ? isOpeningNftNestAbortable(pos, pool) : false}
-                    actionsEnabled={securityAck && !claimAllBusy}
-                    securityAckRequired={!securityAck}
+                    actionsEnabled={!claimAllBusy}
                     nestingPaused={nestingDisabled}
+                    onResumeOpening={() => resumeOpeningNest(pos)}
                   />
                 </li>
               )
