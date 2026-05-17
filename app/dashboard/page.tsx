@@ -363,7 +363,9 @@ export default function DashboardPage() {
     null
   )
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
+  const [isClaimingAllRefunds, setIsClaimingAllRefunds] = useState(false)
   const [claimOfferRefundLoadingId, setClaimOfferRefundLoadingId] = useState<string | null>(null)
+  const [isClaimingAllOfferRefunds, setIsClaimingAllOfferRefunds] = useState(false)
   const [buyoutRefundLoadingId, setBuyoutRefundLoadingId] = useState<string | null>(null)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
   const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
@@ -919,6 +921,43 @@ export default function DashboardPage() {
     [loadDashboard]
   )
 
+  const handleClaimAllRefunds = useCallback(
+    async (entryIds: string[]) => {
+      if (entryIds.length === 0) return
+      setClaimActionError(null)
+      setIsClaimingAllRefunds(true)
+      let claimed = 0
+      try {
+        for (const entryId of entryIds) {
+          setClaimRefundLoadingEntryId(entryId)
+          const res = await fetch('/api/entries/claim-refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ entryId }),
+          })
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            const base =
+              typeof (json as { error?: string }).error === 'string'
+                ? (json as { error: string }).error
+                : 'Could not claim refund'
+            setClaimActionError(
+              claimed > 0 ? `${base} (${claimed} refund${claimed === 1 ? '' : 's'} claimed before this.)` : base
+            )
+            return
+          }
+          claimed++
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimRefundLoadingEntryId(null)
+        setIsClaimingAllRefunds(false)
+      }
+    },
+    [loadDashboard]
+  )
+
   const handleClaimOfferRefund = useCallback(
     async (offerId: string) => {
       setClaimActionError(null)
@@ -940,6 +979,41 @@ export default function DashboardPage() {
         await loadDashboard({ silent: true })
       } finally {
         setClaimOfferRefundLoadingId(null)
+      }
+    },
+    [loadDashboard]
+  )
+
+  const handleClaimAllOfferRefunds = useCallback(
+    async (offerIds: string[]) => {
+      if (offerIds.length === 0) return
+      setClaimActionError(null)
+      setIsClaimingAllOfferRefunds(true)
+      let claimed = 0
+      try {
+        for (const offerId of offerIds) {
+          setClaimOfferRefundLoadingId(offerId)
+          const res = await fetch(`/api/me/raffle-offers/${offerId}/claim-refund`, {
+            method: 'POST',
+            credentials: 'include',
+          })
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            const base =
+              typeof (json as { error?: string }).error === 'string'
+                ? (json as { error: string }).error
+                : 'Could not claim offer refund'
+            setClaimActionError(
+              claimed > 0 ? `${base} (${claimed} refund${claimed === 1 ? '' : 's'} claimed before this.)` : base
+            )
+            return
+          }
+          claimed++
+        }
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimOfferRefundLoadingId(null)
+        setIsClaimingAllOfferRefunds(false)
       }
     },
     [loadDashboard]
@@ -1523,7 +1597,9 @@ export default function DashboardPage() {
       : claimFailedMinPrizeReturnLoadingId ? 'Returning prize from escrow...'
       : claimGiveawayLoadingId ? 'Claiming NFT giveaway...'
       : claimCommunityGiveawayLoadingId ? 'Claiming community giveaway...'
+      : isClaimingAllRefunds ? 'Claiming all ticket refunds...'
       : claimRefundLoadingEntryId ? 'Processing your ticket refund...'
+      : isClaimingAllOfferRefunds ? 'Claiming all offer refunds...'
       : claimOfferRefundLoadingId ? 'Processing your offer refund...'
       : payCancelFeeLoadingId ? 'Paying cancellation fee...'
       : null
@@ -1661,6 +1737,31 @@ export default function DashboardPage() {
                   These raffles can be refunded on-chain from funds escrow. Claim your ticket payment back here
                   (mobile: use Wi‑Fi or solid data if the request fails).
                 </p>
+                {refundableEntries.length > 1 && (
+                  <div className="mb-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="touch-manipulation min-h-[44px]"
+                      disabled={claimRefundLoadingEntryId !== null || isClaimingAllRefunds}
+                      onClick={() =>
+                        void handleClaimAllRefunds(
+                          refundableEntries.slice(0, 25).map((x) => x.entry.id)
+                        )
+                      }
+                    >
+                      {isClaimingAllRefunds ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Claiming all…
+                        </>
+                      ) : (
+                        `Claim all (${Math.min(refundableEntries.length, 25)})`
+                      )}
+                    </Button>
+                  </div>
+                )}
                 <ul className="space-y-2">
                   {refundableEntries.slice(0, 25).map(({ entry, raffle }) => (
                     <li
@@ -1675,7 +1776,7 @@ export default function DashboardPage() {
                         variant="secondary"
                         size="sm"
                         className="touch-manipulation min-h-[44px] shrink-0"
-                        disabled={claimRefundLoadingEntryId === entry.id}
+                        disabled={claimRefundLoadingEntryId !== null}
                         onClick={() => handleClaimRefund(entry.id)}
                       >
                         {claimRefundLoadingEntryId === entry.id ? (
@@ -1699,6 +1800,31 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
                   If your raffle offer was not accepted, your bid stays in escrow until you claim it back here.
                 </p>
+                {offerRefundCandidates.length > 1 && (
+                  <div className="mb-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="touch-manipulation min-h-[44px]"
+                      disabled={claimOfferRefundLoadingId !== null || isClaimingAllOfferRefunds}
+                      onClick={() =>
+                        void handleClaimAllOfferRefunds(
+                          offerRefundCandidates.slice(0, 25).map((o) => o.offerId)
+                        )
+                      }
+                    >
+                      {isClaimingAllOfferRefunds ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Claiming all…
+                        </>
+                      ) : (
+                        `Claim all (${Math.min(offerRefundCandidates.length, 25)})`
+                      )}
+                    </Button>
+                  </div>
+                )}
                 <ul className="space-y-2">
                   {offerRefundCandidates.slice(0, 25).map((offer) => (
                     <li
@@ -1718,7 +1844,7 @@ export default function DashboardPage() {
                         variant="secondary"
                         size="sm"
                         className="touch-manipulation min-h-[44px] shrink-0"
-                        disabled={claimOfferRefundLoadingId === offer.offerId}
+                        disabled={claimOfferRefundLoadingId !== null}
                         onClick={() => handleClaimOfferRefund(offer.offerId)}
                       >
                         {claimOfferRefundLoadingId === offer.offerId ? (
@@ -2786,6 +2912,34 @@ export default function DashboardPage() {
                               </a>{' '}
                               or the raffle page Overview while connected.
                             </p>
+                            {refundableEntries.filter((x) => x.raffle.id === r.id).length > 1 && (
+                              <div className="flex justify-end pt-1">
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="sm"
+                                  className="touch-manipulation min-h-[44px]"
+                                  disabled={claimRefundLoadingEntryId !== null || isClaimingAllRefunds}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handleClaimAllRefunds(
+                                      refundableEntries
+                                        .filter((x) => x.raffle.id === r.id)
+                                        .map((x) => x.entry.id)
+                                    )
+                                  }}
+                                >
+                                  {isClaimingAllRefunds ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                      Claiming all…
+                                    </>
+                                  ) : (
+                                    `Claim all (${refundableEntries.filter((x) => x.raffle.id === r.id).length})`
+                                  )}
+                                </Button>
+                              </div>
+                            )}
                             <ul className="space-y-2 pt-1">
                               {refundableEntries
                                 .filter((x) => x.raffle.id === r.id)
@@ -2804,7 +2958,7 @@ export default function DashboardPage() {
                                       variant="secondary"
                                       size="sm"
                                       className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
-                                      disabled={claimRefundLoadingEntryId === entry.id}
+                                      disabled={claimRefundLoadingEntryId !== null}
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         void handleClaimRefund(entry.id)
