@@ -49,9 +49,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'OWL was sent to your wallet, but nest records did not finish updating. Do not use Claim all again — refresh the page, then claim per nest or contact support with your transaction.',
+            'OWL was sent to your wallet. Finishing nest record sync — wait a moment or refresh the page.',
           ledger_sync_failed: true,
           transaction_signature: e.txSignature,
+          total_claimed: e.payload.total_claimed,
+          claims: e.payload.claims,
         },
         { status: 503 }
       )

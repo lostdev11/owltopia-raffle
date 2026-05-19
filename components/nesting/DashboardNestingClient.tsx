@@ -39,6 +39,14 @@ import {
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
 import { buildOwlClaimPlansForPositions, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
+
+const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
+
+type PendingClaimLedgerSync = {
+  transaction_signature: string
+  claims: Array<{ position_id: string; amount: number; claimed_rewards_total: number }>
+  total_claimed: number
+}
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
 import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
@@ -103,6 +111,7 @@ export function DashboardNestingClient() {
     placement: 'form' | 'page'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
+  const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
   const stakeSuccessRef = useRef<HTMLDivElement | null>(null)
 
   const [stakeAmount, setStakeAmount] = useState('')
@@ -1495,11 +1504,162 @@ export function DashboardNestingClient() {
     }
   }
 
+  const syncClaimLedgerAfterPayout = useCallback(
+    async (pending: PendingClaimLedgerSync): Promise<boolean> => {
+      if (!publicKey) return false
+      const res = await fetch('/api/me/staking/claim-ledger-sync', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Connected-Wallet': publicKey.toBase58(),
+        },
+        body: JSON.stringify({
+          transaction_signature: pending.transaction_signature,
+          claims: pending.claims,
+        }),
+      })
+      if (res.ok) {
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+        }
+        return true
+      }
+      return false
+    },
+    [publicKey]
+  )
+
+  const catchUpClaimLedgerAfterPayout = useCallback(async (): Promise<boolean> => {
+    if (!publicKey) return false
+    const res = await fetch('/api/me/staking/claim-ledger-catchup', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Connected-Wallet': publicKey.toBase58(),
+      },
+      body: JSON.stringify({ confirm_owl_received: true }),
+    })
+    if (!res.ok) return false
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+    }
+    return true
+  }, [publicKey])
+
+  const applyClaimLedgerToPositions = useCallback(
+    (claims: Array<{ position_id: string; claimed_rewards_total: number }>) => {
+      const byId = new Map(claims.map((c) => [c.position_id, c.claimed_rewards_total]))
+      setPositions((prev) =>
+        prev.map((p) => {
+          const nextTotal = byId.get(p.id)
+          return nextTotal != null ? { ...p, claimed_rewards: nextTotal } : p
+        })
+      )
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!connected || !publicKey || typeof window === 'undefined') return
+    const raw = sessionStorage.getItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+    if (!raw) return
+
+    let pending: PendingClaimLedgerSync
+    try {
+      pending = JSON.parse(raw) as PendingClaimLedgerSync
+    } catch {
+      sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+      return
+    }
+    if (!pending.transaction_signature?.trim() || !Array.isArray(pending.claims) || pending.claims.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      setClaimAllTxPhase('syncing')
+      let synced = await syncClaimLedgerAfterPayout(pending)
+      if (!synced) {
+        synced = await catchUpClaimLedgerAfterPayout()
+      }
+      if (cancelled) return
+      setClaimAllTxPhase('idle')
+      if (!synced) return
+
+      applyClaimLedgerToPositions(
+        pending.claims.map((c) => ({
+          position_id: c.position_id,
+          claimed_rewards_total: c.claimed_rewards_total,
+        }))
+      )
+      setRewardsNowMs(Date.now())
+      await loadPositions()
+      await loadClaimLedger()
+      const totalLabel = pending.total_claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })
+      setSuccessNotice({
+        placement: 'page',
+        message: `Nest records updated — your ${totalLabel} OWL claim is recorded.`,
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    connected,
+    publicKey,
+    syncClaimLedgerAfterPayout,
+    catchUpClaimLedgerAfterPayout,
+    applyClaimLedgerToPositions,
+    loadPositions,
+    loadClaimLedger,
+  ])
+
+  const handleHealClaimLedger = async () => {
+    if (!publicKey) return
+    setClaimLedgerHealBusy(true)
+    setActionError(null)
+    setClaimLedgerNotice(null)
+    try {
+      setClaimAllTxPhase('syncing')
+      const ok = await catchUpClaimLedgerAfterPayout()
+      setClaimAllTxPhase('idle')
+      if (!ok) {
+        setActionError(
+          'Could not update nest records yet. Refresh the page and try again, or contact support with your wallet address.'
+        )
+        return
+      }
+      setRewardsNowMs(Date.now())
+      await loadPositions()
+      await loadClaimLedger()
+      setSuccessNotice({
+        placement: 'page',
+        message:
+          'Nest records updated — your dashboard now matches the OWL already in your wallet. You can claim new rewards as they accrue.',
+      })
+    } finally {
+      setClaimLedgerHealBusy(false)
+    }
+  }
+
+  const showClaimLedgerHeal =
+    claimableNestCount >= 1 &&
+    (Boolean(
+      actionError?.includes('OWL was sent') ||
+        actionError?.includes('nest totals are still syncing') ||
+        actionError?.includes('nest records did not finish')
+    ) ||
+      Boolean(claimLedgerNotice))
+
   const handleClaimAll = async () => {
     if (!publicKey || claimableNestCount < 1) return
     setActionError(null)
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
+    const claimPlans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
     try {
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
@@ -1517,18 +1677,69 @@ export function DashboardNestingClient() {
             ledger_sync_failed?: boolean
             total_claimed?: number
             claim_count?: number
-            claims?: Array<{ position_id: string; claimed_rewards_total: number }>
+            claims?: Array<{
+              position_id: string
+              claimed?: number
+              claimed_rewards_total: number
+            }>
             execution?: { path?: 'onchain_transfer' | 'database_only' }
             transaction_signature?: string | null
           }
+
+          if (!res.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
+            const pending: PendingClaimLedgerSync = {
+              transaction_signature: json.transaction_signature.trim(),
+              total_claimed:
+                typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
+                  ? json.total_claimed
+                  : claimPlans.reduce((s, p) => s + p.payoutAmount, 0),
+              claims: (json.claims?.length ? json.claims : claimPlans).map((c) => ({
+                position_id: 'positionId' in c ? c.positionId : c.position_id,
+                amount:
+                  'payoutAmount' in c
+                    ? c.payoutAmount
+                    : Number((c as { claimed?: number }).claimed ?? 0),
+                claimed_rewards_total:
+                  'newClaimedTotal' in c
+                    ? c.newClaimedTotal
+                    : Number(c.claimed_rewards_total),
+              })),
+            }
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem(PENDING_CLAIM_LEDGER_STORAGE_KEY, JSON.stringify(pending))
+            }
+            setClaimAllTxPhase('syncing')
+            let synced = await syncClaimLedgerAfterPayout(pending)
+            if (!synced) {
+              synced = await catchUpClaimLedgerAfterPayout()
+            }
+            if (synced) {
+              return {
+                total_claimed: pending.total_claimed,
+                claim_count: pending.claims.length,
+                claims: pending.claims.map((c) => ({
+                  position_id: c.position_id,
+                  claimed: c.amount,
+                  claimed_rewards_total: c.claimed_rewards_total,
+                })),
+                transaction_signature: pending.transaction_signature,
+                execution: { path: 'onchain_transfer' as const },
+                ledger_recovered: true,
+              }
+            }
+            setActionError(
+              'OWL was sent to your wallet, but nest totals are still syncing. Refresh the page in a few seconds — do not claim again yet.'
+            )
+            throw new Error('claim-all')
+          }
+
           if (!res.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
             setActionError(err)
-            if (json.ledger_sync_failed) {
-              await loadPositions()
-              await loadClaimLedger()
-            }
             throw new Error('claim-all')
+          }
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
           }
           return json
         },
@@ -1540,13 +1751,7 @@ export function DashboardNestingClient() {
       })
 
       if (Array.isArray(claimJson.claims) && claimJson.claims.length > 0) {
-        const byId = new Map(claimJson.claims.map((c) => [c.position_id, c.claimed_rewards_total]))
-        setPositions((prev) =>
-          prev.map((p) => {
-            const nextTotal = byId.get(p.id)
-            return nextTotal != null ? { ...p, claimed_rewards: nextTotal } : p
-          })
-        )
+        applyClaimLedgerToPositions(claimJson.claims)
       }
 
       const total =
@@ -1701,8 +1906,22 @@ export function DashboardNestingClient() {
       </div>
 
       {actionError && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {actionError}
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive space-y-3">
+          <p>{actionError}</p>
+          {showClaimLedgerHeal ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[44px] w-full touch-manipulation"
+              disabled={claimLedgerHealBusy || claimAllBusy}
+              onClick={() => void handleHealClaimLedger()}
+            >
+              {claimLedgerHealBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+              ) : null}
+              {claimLedgerHealBusy ? 'Updating nest records…' : 'I received OWL — update my nest records'}
+            </Button>
+          ) : null}
         </div>
       )}
 

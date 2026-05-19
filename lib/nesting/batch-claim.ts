@@ -90,7 +90,14 @@ export async function executeBatchOwlClaims(params: {
     })
   } catch (e) {
     if (txSig) {
-      throw new BatchClaimLedgerSyncError(txSig, e)
+      throw new BatchClaimLedgerSyncError(txSig, e, {
+        total_claimed: totalClaimed,
+        claims: params.plans.map((plan) => ({
+          position_id: plan.positionId,
+          claimed: plan.payoutAmount,
+          claimed_rewards_total: plan.newClaimedTotal,
+        })),
+      })
     }
     throw e
   }
