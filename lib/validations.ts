@@ -91,6 +91,12 @@ export const authVerifyBody = z.object({
   signature: z.string().min(1),
 })
 
+export const walletLinkVerifyBody = z.object({
+  linked_wallet: solanaAddress,
+  message: z.string().min(1),
+  signature: z.string().min(1),
+})
+
 export const profileUpdateBody = z.object({
   displayName: z.string().min(1).max(32).trim(),
 })

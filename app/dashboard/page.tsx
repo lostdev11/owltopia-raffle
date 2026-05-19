@@ -811,19 +811,35 @@ export default function DashboardPage() {
           r.status === 'cancelled'
             ? `/api/raffles/${r.id}/pay-cancellation-fee`
             : `/api/raffles/${r.id}/request-cancellation`
-        const res = await fetch(path, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ feeTransactionSignature: sig }),
-        })
-        const json = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setClaimActionError(
-            typeof (json as { error?: string }).error === 'string'
-              ? (json as { error: string }).error
-              : 'Could not record cancellation fee'
-          )
+        let lastError = 'Could not record cancellation fee'
+        let ok = false
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const res = await fetch(path, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ feeTransactionSignature: sig }),
+            })
+            const json = await res.json().catch(() => ({}))
+            if (res.ok) {
+              ok = true
+              break
+            }
+            lastError =
+              typeof (json as { error?: string }).error === 'string'
+                ? (json as { error: string }).error
+                : lastError
+            if (res.status < 500 && res.status !== 429) break
+          } catch (e) {
+            lastError = e instanceof Error ? e.message : lastError
+          }
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+          }
+        }
+        if (!ok) {
+          setClaimActionError(lastError)
           return
         }
         await loadDashboard({ silent: true })

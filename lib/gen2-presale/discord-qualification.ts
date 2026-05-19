@@ -1,5 +1,6 @@
 import type { Gen2DiscordRoleType } from '@/lib/db/discord-role-claims'
 import { isWalletOnGen2Whitelist } from '@/lib/db/gen2-whitelist'
+import { getPrimaryWalletForAddress, getWalletClusterAddresses } from '@/lib/db/wallet-links'
 import { getBalanceByWallet } from '@/lib/gen2-presale/db'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -23,11 +24,16 @@ export async function walletQualifiesForGen2WhitelistDiscord(wallet: string): Pr
   return isWalletOnGen2Whitelist(w)
 }
 
-export async function getGen2DiscordEligibility(wallet: string): Promise<Gen2DiscordEligibility> {
-  const [presale, whitelist] = await Promise.all([
-    walletQualifiesForGen2PresaleDiscord(wallet),
-    walletQualifiesForGen2WhitelistDiscord(wallet),
-  ])
+/** Eligibility across primary + linked wallets. */
+export async function getGen2DiscordEligibilityForCluster(primaryWallet: string): Promise<Gen2DiscordEligibility> {
+  const cluster = await getWalletClusterAddresses(primaryWallet)
+  let presale = false
+  let whitelist = false
+  for (const w of cluster) {
+    if (!presale) presale = await walletQualifiesForGen2PresaleDiscord(w)
+    if (!whitelist) whitelist = await walletQualifiesForGen2WhitelistDiscord(w)
+    if (presale && whitelist) break
+  }
 
   const eligibleRoleTypes: Gen2DiscordRoleType[] = []
   if (presale) eligibleRoleTypes.push('gen2_presale')
@@ -36,14 +42,19 @@ export async function getGen2DiscordEligibility(wallet: string): Promise<Gen2Dis
   return { presale, whitelist, eligibleRoleTypes }
 }
 
+export async function getGen2DiscordEligibility(wallet: string): Promise<Gen2DiscordEligibility> {
+  const primary = (await getPrimaryWalletForAddress(wallet)) ?? wallet
+  return getGen2DiscordEligibilityForCluster(primary)
+}
+
 export function isValidGen2DiscordRoleType(value: string): value is Gen2DiscordRoleType {
   return value === 'gen2_presale' || value === 'gen2_whitelist'
 }
 
 export async function walletQualifiesForGen2DiscordRoleType(
-  wallet: string,
+  primaryWallet: string,
   roleType: Gen2DiscordRoleType
 ): Promise<boolean> {
-  if (roleType === 'gen2_presale') return walletQualifiesForGen2PresaleDiscord(wallet)
-  return walletQualifiesForGen2WhitelistDiscord(wallet)
+  const { eligibleRoleTypes } = await getGen2DiscordEligibilityForCluster(primaryWallet)
+  return eligibleRoleTypes.includes(roleType)
 }

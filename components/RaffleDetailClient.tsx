@@ -2086,43 +2086,48 @@ export function RaffleDetailClient({
 
   const postRequestCancellation = useCallback(
     async (feeTransactionSignature: string | null) => {
-      const res = await fetch(`/api/raffles/${raffle.id}/request-cancellation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(
-          feeTransactionSignature ? { feeTransactionSignature } : {}
-        ),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const err =
-          (data as { error?: string }).error ?? 'Failed to request cancellation'
-        setError(err)
-        return { ok: false as const, data }
+      const path =
+        (raffle.status ?? '').toLowerCase() === 'cancelled'
+          ? `/api/raffles/${raffle.id}/pay-cancellation-fee`
+          : `/api/raffles/${raffle.id}/request-cancellation`
+      const body = JSON.stringify(
+        feeTransactionSignature ? { feeTransactionSignature } : {}
+      )
+      let lastError = 'Failed to request cancellation'
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body,
+          })
+          const data = await res.json().catch(() => ({}))
+          if (res.ok) {
+            return { ok: true as const, data }
+          }
+          lastError =
+            (data as { error?: string }).error ?? 'Failed to request cancellation'
+          const retryable = res.status === 429 || res.status >= 500
+          if (!retryable) break
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : lastError
+        }
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+        }
       }
-      return { ok: true as const, data }
+      setError(lastError)
+      return { ok: false as const, data: {} }
     },
-    [raffle.id]
+    [raffle.id, raffle.status]
   )
 
   const postPayCancellationFeeWhenCancelled = useCallback(
     async (feeTransactionSignature: string) => {
-      const res = await fetch(`/api/raffles/${raffle.id}/pay-cancellation-fee`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ feeTransactionSignature }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const err = (data as { error?: string }).error ?? 'Failed to record cancellation fee'
-        setError(err)
-        return { ok: false as const }
-      }
-      return { ok: true as const }
+      return postRequestCancellation(feeTransactionSignature)
     },
-    [raffle.id]
+    [postRequestCancellation]
   )
 
   const sendCancellationFeeAndGetSignature = useCallback(async () => {
@@ -2580,7 +2585,8 @@ export function RaffleDetailClient({
           )}
           {isCreator &&
             (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
-            !raffle.cancellation_requested_at && (
+            !raffle.cancellation_requested_at &&
+            (
               <Button
                 variant="outline"
                 size="default"

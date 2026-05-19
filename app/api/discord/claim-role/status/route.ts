@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getDiscordRoleClaimsForWallet } from '@/lib/db/discord-role-claims'
 import { getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
-import { getGen2DiscordEligibility } from '@/lib/gen2-presale/discord-qualification'
+import { getGen2DiscordEligibilityForCluster } from '@/lib/gen2-presale/discord-qualification'
+import { resolveWalletCluster } from '@/lib/wallet-cluster'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -24,15 +25,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     }
 
-    const wallet = normalizeSolanaWalletAddress(session.wallet)
-    if (!wallet) {
+    const sessionWallet = normalizeSolanaWalletAddress(session.wallet)
+    if (!sessionWallet) {
       return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
     }
 
+    const cluster = await resolveWalletCluster(sessionWallet)
+    const primaryWallet = cluster?.primary_wallet ?? sessionWallet
+
     const [profile, eligibility, claims] = await Promise.all([
-      getWalletProfileForDashboard(wallet),
-      getGen2DiscordEligibility(wallet),
-      getDiscordRoleClaimsForWallet(wallet),
+      getWalletProfileForDashboard(primaryWallet),
+      getGen2DiscordEligibilityForCluster(primaryWallet),
+      getDiscordRoleClaimsForWallet(primaryWallet),
     ])
 
     const claimsByType = {
@@ -41,7 +45,16 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      wallet,
+      session_wallet: sessionWallet,
+      primary_wallet: primaryWallet,
+      wallet: primaryWallet,
+      cluster: cluster
+        ? {
+            is_primary: cluster.is_primary,
+            linked_wallets: cluster.linked_wallets.map((r) => r.linked_wallet),
+            cluster_wallets: cluster.cluster_wallets,
+          }
+        : null,
       discord: profile.discord,
       eligibility,
       claims: claimsByType,

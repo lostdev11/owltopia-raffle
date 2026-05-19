@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, Loader2, MessageCircle } from 'lucide-react'
 
+import { Gen2LinkedWalletsPanel } from '@/components/gen2-presale/Gen2LinkedWalletsPanel'
 import { Button } from '@/components/ui/button'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { cn } from '@/lib/utils'
 
 type ClaimStatusResponse = {
+  primary_wallet?: string
+  cluster?: {
+    is_primary: boolean
+    linked_wallets: string[]
+    cluster_wallets: string[]
+  }
   discord?: { linked: boolean; username: string | null }
   eligibility?: {
     presale: boolean
@@ -32,12 +39,12 @@ const ROLES: RoleUi[] = [
   {
     roleType: 'gen2_presale',
     label: 'Gen2 presale role',
-    description: 'For wallets with at least one confirmed presale purchase.',
+    description: 'Confirmed presale on your primary or any linked wallet.',
   },
   {
     roleType: 'gen2_whitelist',
     label: 'Gen2 whitelist role',
-    description: 'For wallets on the official Gen2 whitelist.',
+    description: 'Whitelist on your primary or any linked wallet.',
   },
 ]
 
@@ -182,8 +189,17 @@ export function Gen2DiscordRoleCard({ connected, walletAddress, className }: Pro
     >
       <DiscordRoleCardHeader />
       <p className="mt-2 text-sm leading-relaxed text-[#A9CBB9]">
-        Connect Discord, join the Owltopia server, then claim your presale or whitelist role if you qualify.
+        Connect Discord on your <strong className="text-[#EAFBF4]">primary</strong> wallet, join the
+        server, then claim. Link extra wallets below if presale and whitelist are on different
+        addresses.
       </p>
+
+      <Gen2LinkedWalletsPanel
+        connected={connected}
+        sessionWalletHint={walletAddress}
+        onClusterChange={() => void refreshStatus()}
+        className="mt-4"
+      />
 
       {oauthFlash ? (
         <p
@@ -207,6 +223,16 @@ export function Gen2DiscordRoleCard({ connected, walletAddress, className }: Pro
       {signInError ? (
         <p className="mt-3 text-sm text-red-300" role="alert">
           {signInError}
+        </p>
+      ) : null}
+
+      {status?.cluster && !status.cluster.is_primary && status.primary_wallet ? (
+        <p className="mt-3 rounded-lg border border-[#00E58B]/25 bg-[#00E58B]/10 px-3 py-2 text-xs text-[#A9CBB9]">
+          Discord uses your primary wallet{' '}
+          <span className="font-mono text-[#EAFBF4]">
+            {status.primary_wallet.slice(0, 4)}…{status.primary_wallet.slice(-4)}
+          </span>
+          . Eligibility includes all linked wallets.
         </p>
       ) : null}
 

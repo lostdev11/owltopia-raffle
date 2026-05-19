@@ -14,6 +14,7 @@ import {
   isValidGen2DiscordRoleType,
   walletQualifiesForGen2DiscordRoleType,
 } from '@/lib/gen2-presale/discord-qualification'
+import { resolvePrimaryWallet } from '@/lib/wallet-cluster'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -35,10 +36,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     }
 
-    const wallet = normalizeSolanaWalletAddress(session.wallet)
-    if (!wallet) {
+    const sessionWallet = normalizeSolanaWalletAddress(session.wallet)
+    if (!sessionWallet) {
       return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
     }
+
+    const wallet = (await resolvePrimaryWallet(sessionWallet)) ?? sessionWallet
 
     const body = (await request.json().catch(() => ({}))) as { role_type?: string }
     const roleTypeRaw = typeof body.role_type === 'string' ? body.role_type.trim() : ''
@@ -56,8 +59,8 @@ export async function POST(request: NextRequest) {
         {
           error:
             roleType === 'gen2_presale'
-              ? 'You need at least one confirmed Gen2 presale purchase to claim this role.'
-              : 'Your wallet is not on the Gen2 whitelist.',
+              ? 'No confirmed Gen2 presale purchase on your primary or linked wallets.'
+              : 'No Gen2 whitelist entry on your primary or linked wallets.',
           code: 'not_eligible',
         },
         { status: 403 }
@@ -125,6 +128,7 @@ export async function POST(request: NextRequest) {
     console.info('[discord/claim-role] assigning', {
       tag: 'gen2_discord_role_claim',
       wallet,
+      session_wallet: sessionWallet,
       discord_id: discordId,
       role_type: roleType,
       claim_id: pending.id,
