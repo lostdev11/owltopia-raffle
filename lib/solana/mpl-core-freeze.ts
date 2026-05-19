@@ -4,8 +4,9 @@ import type { Connection } from '@solana/web3.js'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey } from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
-import { addPlugin, fetchAsset } from '@metaplex-foundation/mpl-core'
+import { addPlugin, fetchAsset, updatePlugin } from '@metaplex-foundation/mpl-core'
 import bs58 from 'bs58'
+import { isMplCoreNoApprovalsError } from '@/lib/solana/mpl-core-transfer-errors'
 import { resolveMetaplexClientRpcUrl } from '@/lib/solana-rpc-url'
 
 type AddMplCoreFreezeDelegateArgs = {
@@ -32,17 +33,21 @@ function mplCoreFreezeDelegateMatches(assetAccount: unknown, delegateAddress: st
   return Boolean(address) && String(address) === delegateAddress.trim()
 }
 
-function mplCoreFreezeDelegateReady(assetAccount: unknown, delegateAddress: string): boolean {
-  const asset = assetAccount as { freezeDelegate?: { frozen?: boolean } }
-  return (
-    mplCoreFreezeDelegateMatches(assetAccount, delegateAddress) &&
-    asset?.freezeDelegate?.frozen === true
-  )
+function hasMplCoreFreezeDelegate(assetAccount: unknown): boolean {
+  return Boolean((assetAccount as { freezeDelegate?: unknown })?.freezeDelegate)
+}
+
+function mplCoreFreezeDelegatePlugin(delegatePublicKey: ReturnType<typeof publicKey>) {
+  return {
+    type: 'FreezeDelegate' as const,
+    frozen: true,
+    authority: { type: 'Address' as const, address: delegatePublicKey },
+  }
 }
 
 /**
  * Owner-signed MPL Core FreezeDelegate setup.
- * Returns `null` when the asset already has the correct frozen delegate (skip wallet tx).
+ * Returns `null` when the nesting freeze delegate is already on the asset (server re-freezes if thawed).
  */
 export async function addMplCoreFreezeDelegate({
   connection,
@@ -64,7 +69,8 @@ export async function addMplCoreFreezeDelegate({
   const asset = publicKey(assetId)
   const delegatePublicKey = publicKey(delegate)
   const assetAccount: any = await fetchAsset(umi as any, asset)
-  if (mplCoreFreezeDelegateReady(assetAccount, delegate)) {
+  // Thawed re-nests still have the delegate plugin — skip wallet tx; /api/me/staking/freeze re-freezes.
+  if (mplCoreFreezeDelegateMatches(assetAccount, delegate)) {
     return null
   }
   const maybeCollection: any =
@@ -72,15 +78,28 @@ export async function addMplCoreFreezeDelegate({
       ? assetAccount.updateAuthority.address
       : undefined
 
-  const result = await addPlugin(umi as any, {
+  const plugin = mplCoreFreezeDelegatePlugin(delegatePublicKey)
+  const ixArgs = {
     asset,
     ...(maybeCollection ? { collection: maybeCollection } : {}),
-    plugin: {
-      type: 'FreezeDelegate',
-      frozen: true,
-      authority: { type: 'Address', address: delegatePublicKey },
-    },
-  } as any).sendAndConfirm(umi as any)
+    plugin,
+  }
 
-  return signatureToString(result)
+  try {
+    const builder = hasMplCoreFreezeDelegate(assetAccount)
+      ? updatePlugin(umi as any, ixArgs as any)
+      : addPlugin(umi as any, ixArgs as any)
+    const result = await builder.sendAndConfirm(umi as any)
+    return signatureToString(result)
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    if (isMplCoreNoApprovalsError(detail)) {
+      throw new Error(
+        'This Owltopia coin has collection plugins that blocked updating the nest lock (Metaplex error 0x1a). ' +
+          'That often happens when a previous nest left a freeze plugin or the collection requires extra approvals. ' +
+          'Try closing any old nest first, or contact Owltopia support with the coin mint address.'
+      )
+    }
+    throw e
+  }
 }
