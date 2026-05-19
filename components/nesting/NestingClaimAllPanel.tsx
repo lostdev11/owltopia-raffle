@@ -36,7 +36,7 @@ export function NestingClaimAllPanel({
 }: Props) {
   if (activeOwlNestCount < 1) return null
 
-  const canClaim = claimableNestCount >= 1 && totalOwl >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
+  const canClaim = totalOwl >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
   const claimDisabled = disabled || !canClaim || busy
 
   return (
@@ -68,9 +68,10 @@ export function NestingClaimAllPanel({
         ) : (
           <>
             <span className="font-medium text-muted-foreground">OWL is accruing</span> on{' '}
-            {activeOwlNestCount === 1 ? 'your nest' : `${activeOwlNestCount} nests`}. Claim unlocks at{' '}
-            <span className="font-medium text-foreground">{MIN_OWL_CLAIMABLE_TO_CLAIM} OWL</span> per nest (any amount
-            above that).
+            {activeOwlNestCount === 1 ? 'your nest' : `${activeOwlNestCount} nests`}. Claim all unlocks when your nests
+            total at least{' '}
+            <span className="font-medium text-foreground">{MIN_OWL_CLAIMABLE_TO_CLAIM} OWL</span> combined (per-nest
+            claim still needs {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL on that nest).
           </>
         )}
       </p>

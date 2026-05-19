@@ -20,15 +20,24 @@ export function isOwlRewardPosition(
   return (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
 }
 
-/** Active OWL nests with a claimable balance at `asOfMs` (same rules as Claim all). */
+export type BuildOwlClaimPlansOptions = {
+  /**
+   * Claim all: include every nest with pending OWL when the combined total meets the 1 OWL minimum.
+   * Per-nest claims still require ≥1 OWL on that nest.
+   */
+  forClaimAll?: boolean
+}
+
+/** Active OWL nests with a claimable balance at `asOfMs`. */
 export function buildOwlClaimPlansForPositions(
   rows: StakingPositionRow[],
-  asOfMs = Date.now()
+  asOfMs = Date.now(),
+  options?: BuildOwlClaimPlansOptions
 ): PositionClaimPlan[] {
   const plans: PositionClaimPlan[] = []
   for (const row of rows) {
     if (row.status !== 'active' || !isOwlRewardPosition(row)) continue
-    const plan = buildFullPositionClaimPlan(row, asOfMs)
+    const plan = buildFullPositionClaimPlan(row, asOfMs, options)
     if (plan) plans.push(plan)
   }
   return plans
@@ -40,6 +49,16 @@ export function sumOwlClaimPlans(plans: PositionClaimPlan[]): { count: number; t
     totalOwl += plan.payoutAmount
   }
   return { count: plans.length, totalOwl }
+}
+
+/** Claim-all eligibility for any wallet’s active OWL nests (combined ≥1 OWL minimum). */
+export function buildOwlClaimAllPreview(
+  rows: StakingPositionRow[],
+  asOfMs = Date.now()
+): { plans: PositionClaimPlan[]; count: number; totalOwl: number; ready: boolean } {
+  const plans = buildOwlClaimPlansForPositions(rows, asOfMs, { forClaimAll: true })
+  const { count, totalOwl } = sumOwlClaimPlans(plans)
+  return { plans, count, totalOwl, ready: meetsMinOwlClaimThreshold(totalOwl) }
 }
 
 /** Sum of pending OWL on all active nests (no 1 OWL per-nest floor — for live “accruing” display). */
@@ -65,7 +84,8 @@ export function sumOwlPendingAccrualForPositions(
 /** Max-claim plan for an active nest (full pending balance). Returns null if nothing claimable. */
 export function buildFullPositionClaimPlan(
   row: StakingPositionRow,
-  asOfMs = Date.now()
+  asOfMs = Date.now(),
+  options?: BuildOwlClaimPlansOptions
 ): PositionClaimPlan | null {
   if (row.status !== 'active') return null
 
@@ -84,8 +104,15 @@ export function buildFullPositionClaimPlan(
   })
   const claimableNow = Math.max(0, accruedNow - oldClaimed)
   const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) return null
-  if (!paysOwlRewards && claimableNow <= 1e-12) return null
+  if (paysOwlRewards) {
+    if (options?.forClaimAll) {
+      if (claimableNow <= 1e-12) return null
+    } else if (!meetsMinOwlClaimThreshold(claimableNow)) {
+      return null
+    }
+  } else if (claimableNow <= 1e-12) {
+    return null
+  }
 
   return {
     positionId: row.id,
@@ -96,11 +123,15 @@ export function buildFullPositionClaimPlan(
 }
 
 export function noClaimableRewardsMessage(): string {
-  return `No nests have claimable OWL right now. ${minOwlClaimThresholdMessage()}`
+  return `No claimable OWL right now. ${minOwlClaimAllThresholdMessage()}`
 }
 
 export function minOwlClaimThresholdMessage(): string {
-  return 'Claim unlocks once at least 1 OWL has accrued for a nest.'
+  return 'Per-nest claim unlocks once at least 1 OWL has accrued on that nest.'
+}
+
+export function minOwlClaimAllThresholdMessage(): string {
+  return 'Claim all unlocks when your active nests total at least 1 OWL combined (each nest can be below 1 OWL).'
 }
 
 export function minOwlClaimPayoutRejectedMessage(payoutAmount: number): string {

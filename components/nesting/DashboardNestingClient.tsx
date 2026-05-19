@@ -39,9 +39,8 @@ import {
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
 import {
-  buildOwlClaimPlansForPositions,
+  buildOwlClaimAllPreview,
   isOwlRewardPosition,
-  sumOwlClaimPlans,
   sumOwlPendingAccrualForPositions,
 } from '@/lib/nesting/claim-plan'
 
@@ -457,12 +456,13 @@ export function DashboardNestingClient() {
     return { nftNestGroups: groups, ungroupedOpenPositions }
   }, [openPositions, poolById])
 
-  const claimAllPreview = useMemo(() => {
-    const plans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
-    return sumOwlClaimPlans(plans)
-  }, [openPositions, rewardsNowMs])
+  const claimAllPreview = useMemo(
+    () => buildOwlClaimAllPreview(openPositions, rewardsNowMs),
+    [openPositions, rewardsNowMs]
+  )
 
   const claimableNestCount = claimAllPreview.count
+  const claimAllReady = claimAllPreview.ready
 
   const claimAllBusy = claimAllTxPhase !== 'idle'
 
@@ -473,14 +473,14 @@ export function DashboardNestingClient() {
     nestingClaimsBlocked || claimAllBusy || stakeTxPhase !== 'idle'
 
   const claimAllDisabledReason = useMemo((): string | null => {
-    if (!claimAllButtonDisabled || claimableNestCount < 1) return null
+    if (!claimAllButtonDisabled || !claimAllReady) return null
     if (claimAllBusy) return null
     if (nestingClaimsBlocked) {
       return 'Claims are off while NESTING_DISABLED is set — see the notice above.'
     }
     if (stakeTxPhase !== 'idle') return 'Finish the nest you are opening above, then try again.'
     return null
-  }, [claimAllButtonDisabled, claimableNestCount, claimAllBusy, nestingClaimsBlocked, stakeTxPhase])
+  }, [claimAllButtonDisabled, claimAllReady, claimAllBusy, nestingClaimsBlocked, stakeTxPhase])
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -1036,8 +1036,7 @@ export function DashboardNestingClient() {
       claimed += Number(pos.claimed_rewards)
     }
     const activeRows = positions.filter((p) => p.status === 'active')
-    const owlPlans = buildOwlClaimPlansForPositions(activeRows, rewardsNowMs)
-    const est = sumOwlClaimPlans(owlPlans).totalOwl
+    const est = buildOwlClaimAllPreview(activeRows, rewardsNowMs).totalOwl
     const accruingOwl = sumOwlPendingAccrualForPositions(activeRows, rewardsNowMs)
     const activeCount = activeRows.length
     return { nested, est, accruingOwl, claimed, activeCount }
@@ -1052,7 +1051,7 @@ export function DashboardNestingClient() {
       }
       return null
     }
-    return 'Updates live · claim from 1 OWL per nest (any amount above)'
+    return 'Updates live · Claim all from 1 OWL combined across nests'
   }, [totals])
 
   const pendingOpenCount = useMemo(
@@ -1686,7 +1685,7 @@ export function DashboardNestingClient() {
   }
 
   const showClaimLedgerHeal =
-    claimableNestCount >= 1 &&
+    claimAllReady &&
     (Boolean(
       actionError?.includes('OWL was sent') ||
         actionError?.includes('nest totals are still syncing') ||
@@ -1695,11 +1694,11 @@ export function DashboardNestingClient() {
       Boolean(claimLedgerNotice))
 
   const handleClaimAll = async () => {
-    if (!publicKey || claimableNestCount < 1) return
+    if (!publicKey || !claimAllReady) return
     setActionError(null)
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
-    const claimPlans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
+    const claimPlans = claimAllPreview.plans
     const ledgerClaims: Array<{ position_id: string; claimed_rewards_total: number }> = []
     try {
       const claimJson = await runNestingTxAction({
@@ -1982,8 +1981,8 @@ export function DashboardNestingClient() {
             {pendingOpenCount === 1 ? '1 nest is still opening' : `${pendingOpenCount} nests are still opening`}
           </p>
           <p className="mt-1 text-muted-foreground text-xs sm:text-sm">
-            <span className="font-medium text-foreground">Claim all</span> appears once a nest is active and has{' '}
-            <span className="font-medium text-foreground">1+ OWL</span> ready. Finish opening below, then refresh.
+            <span className="font-medium text-foreground">Claim all</span> appears once your active nests total{' '}
+            <span className="font-medium text-foreground">1+ OWL</span> combined. Finish opening below, then refresh.
           </p>
         </div>
       ) : null}
@@ -2194,15 +2193,15 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
-      {claimableNestCount < 1 && totals.activeCount > 0 && !nestsPendingOnly ? (
+      {!claimAllReady && totals.activeCount > 0 && !nestsPendingOnly ? (
         <div
           className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground leading-relaxed"
           role="status"
         >
           <p>
             <span className="font-medium text-foreground">OWL is accruing</span> on{' '}
-            {totals.activeCount === 1 ? 'your nest' : `${totals.activeCount} nests`}. Claim unlocks once at least{' '}
-            <span className="font-medium text-foreground">1 OWL</span> is ready per nest (check{' '}
+            {totals.activeCount === 1 ? 'your nest' : `${totals.activeCount} nests`}. Claim all unlocks when your nests
+            total at least <span className="font-medium text-foreground">1 OWL</span> combined (see{' '}
             <span className="font-medium text-foreground">Ready to claim</span> above).
           </p>
         </div>
@@ -2944,16 +2943,16 @@ export function DashboardNestingClient() {
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden">
           <Button
             type="button"
-            variant={claimableNestCount >= 1 ? 'default' : 'outline'}
+            variant={claimAllReady ? 'default' : 'outline'}
             className={cn(
               'min-h-[52px] w-full touch-manipulation text-base',
-              claimableNestCount >= 1 ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
+              claimAllReady ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
             )}
-            disabled={claimAllButtonDisabled || claimableNestCount < 1}
+            disabled={claimAllButtonDisabled || !claimAllReady}
             onClick={() => void handleClaimAll()}
           >
             {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
-            {claimableNestCount >= 1
+            {claimAllReady
               ? `Claim all · ${claimAllPreview.totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`
               : 'Claim all — accruing OWL'}
           </Button>

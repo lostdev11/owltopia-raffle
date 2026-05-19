@@ -18,7 +18,7 @@ import {
 } from '@/lib/staking/rewards'
 import {
   buildFullPositionClaimPlan,
-  buildOwlClaimPlansForPositions,
+  buildOwlClaimAllPreview,
   isOwlRewardPosition,
   minOwlClaimPayoutRejectedMessage,
   minOwlClaimThresholdMessage,
@@ -346,10 +346,10 @@ export async function executeClaimAll(params: { wallet: string }) {
 
   const rows = await listStakingPositionsByWallet(params.wallet)
   const asOfMs = Date.now()
-  const plans = buildOwlClaimPlansForPositions(rows, asOfMs)
+  const { plans, ready: claimAllReady } = buildOwlClaimAllPreview(rows, asOfMs)
   const owlRows = rows.filter((r) => r.status === 'active' && isOwlRewardPosition(r))
 
-  if (plans.length === 0) {
+  if (plans.length === 0 || !claimAllReady) {
     throw new StakingUserError(
       noClaimableRewardsMessage(),
       400,

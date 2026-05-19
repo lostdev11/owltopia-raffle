@@ -6,7 +6,7 @@ import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
 import { minOwlClaimPayoutRejectedMessage } from '@/lib/nesting/claim-plan'
 import { StakingUserError } from '@/lib/nesting/errors'
-import { isValidOwlClaimPayoutAmount, meetsMinOwlClaimThreshold } from '@/lib/staking/rewards'
+import { isPositiveOwlClaimSlice, meetsMinOwlClaimThreshold } from '@/lib/staking/rewards'
 
 export type BatchOwlClaimResult = {
   total_claimed: number
@@ -72,8 +72,8 @@ export async function executeBatchOwlClaims(params: {
   }
 
   for (const plan of params.plans) {
-    if (!isValidOwlClaimPayoutAmount(plan.payoutAmount)) {
-      throw new StakingUserError(minOwlClaimPayoutRejectedMessage(plan.payoutAmount), 400)
+    if (!isPositiveOwlClaimSlice(plan.payoutAmount)) {
+      throw new StakingUserError('Each nest in a Claim all batch must have pending OWL.', 400)
     }
   }
   if (!meetsMinOwlClaimThreshold(totalClaimed)) {
