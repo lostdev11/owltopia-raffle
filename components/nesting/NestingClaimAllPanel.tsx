@@ -68,8 +68,9 @@ export function NestingClaimAllPanel({
         ) : (
           <>
             <span className="font-medium text-muted-foreground">OWL is accruing</span> on{' '}
-            {activeOwlNestCount === 1 ? 'your nest' : `${activeOwlNestCount} nests`}. Claim all unlocks when at least{' '}
-            <span className="font-medium text-foreground">{MIN_OWL_CLAIMABLE_TO_CLAIM} OWL</span> is ready.
+            {activeOwlNestCount === 1 ? 'your nest' : `${activeOwlNestCount} nests`}. Claim unlocks at{' '}
+            <span className="font-medium text-foreground">{MIN_OWL_CLAIMABLE_TO_CLAIM} OWL</span> per nest (any amount
+            above that).
           </>
         )}
       </p>

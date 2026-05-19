@@ -273,7 +273,8 @@ export function PositionNestRow({
       ) : null}
       {paysOwlRewards && claimable > 0 && !canClaimOwl ? (
         <p className="w-full text-xs text-muted-foreground">
-          Claim unlocks at {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL — keep nesting.
+          Accruing toward {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL minimum — you can claim any amount from{' '}
+          {MIN_OWL_CLAIMABLE_TO_CLAIM} OWL up once ready.
         </p>
       ) : null}
       {!embedded && needsFreeze ? (

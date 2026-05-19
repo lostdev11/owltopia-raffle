@@ -63,3 +63,13 @@ export function meetsMinOwlClaimThreshold(claimableUi: number): boolean {
 export function hasClaimableRewardBalance(claimableUi: number): boolean {
   return meetsMinOwlClaimThreshold(claimableUi)
 }
+
+/** True when an OWL payout amount is allowed (minimum 1 OWL; no upper cap beyond pending balance). */
+export function isValidOwlClaimPayoutAmount(payoutUi: number): boolean {
+  return meetsMinOwlClaimThreshold(payoutUi)
+}
+
+/** User-facing rules for OWL claim minimum and that larger amounts are supported. */
+export function owlClaimAmountRulesMessage(): string {
+  return `Each claim must be at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL. You can claim any amount from ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL up to your full pending balance on that nest.`
+}

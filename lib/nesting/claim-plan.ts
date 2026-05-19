@@ -4,6 +4,7 @@ import {
   estimateAccruedRewards,
   estimateClaimableRewards,
   meetsMinOwlClaimThreshold,
+  MIN_OWL_CLAIMABLE_TO_CLAIM,
 } from '@/lib/staking/rewards'
 
 export type PositionClaimPlan = {
@@ -100,4 +101,8 @@ export function noClaimableRewardsMessage(): string {
 
 export function minOwlClaimThresholdMessage(): string {
   return 'Claim unlocks once at least 1 OWL has accrued for a nest.'
+}
+
+export function minOwlClaimPayoutRejectedMessage(payoutAmount: number): string {
+  return `Each OWL claim must be at least ${MIN_OWL_CLAIMABLE_TO_CLAIM}. You tried ${payoutAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL.`
 }

@@ -1052,7 +1052,7 @@ export function DashboardNestingClient() {
       }
       return null
     }
-    return 'Updates live · claim unlocks at 1 OWL per nest'
+    return 'Updates live · claim from 1 OWL per nest (any amount above)'
   }, [totals])
 
   const pendingOpenCount = useMemo(

@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/staking-positions'
 import {
   estimateAccruedRewards,
+  isValidOwlClaimPayoutAmount,
   meetsMinOwlClaimThreshold,
   MIN_OWL_CLAIMABLE_TO_CLAIM,
 } from '@/lib/staking/rewards'
@@ -19,6 +20,7 @@ import {
   buildFullPositionClaimPlan,
   buildOwlClaimPlansForPositions,
   isOwlRewardPosition,
+  minOwlClaimPayoutRejectedMessage,
   minOwlClaimThresholdMessage,
   noClaimableRewardsMessage,
 } from '@/lib/nesting/claim-plan'
@@ -313,6 +315,14 @@ export async function executeClaim(params: {
   const isFullClaim = claimableNow > 0 && amount >= claimableNow - FULL_CLAIM_EPS
   const payoutAmount = isFullClaim ? claimableNow : amount
   const newClaimedTotal = isFullClaim ? accruedNow : oldClaimed + amount
+
+  if (paysOwlRewards && !isValidOwlClaimPayoutAmount(payoutAmount)) {
+    throw new StakingUserError(minOwlClaimPayoutRejectedMessage(payoutAmount), 400, {
+      payout: payoutAmount,
+      claimable: claimableNow,
+      min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM,
+    })
+  }
 
   const adapter = resolveMutationAdapter(pool)
   return adapter.claimPositionRewards({

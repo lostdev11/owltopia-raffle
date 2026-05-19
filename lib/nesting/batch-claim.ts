@@ -4,6 +4,9 @@ import { BatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
 import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
 import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
+import { minOwlClaimPayoutRejectedMessage } from '@/lib/nesting/claim-plan'
+import { StakingUserError } from '@/lib/nesting/errors'
+import { isValidOwlClaimPayoutAmount, meetsMinOwlClaimThreshold } from '@/lib/staking/rewards'
 
 export type BatchOwlClaimResult = {
   total_claimed: number
@@ -66,6 +69,15 @@ export async function executeBatchOwlClaims(params: {
   const totalClaimed = params.plans.reduce((sum, p) => sum + p.payoutAmount, 0)
   if (totalClaimed <= 0) {
     return { total_claimed: 0, claims: [], transaction_signature: null, execution_path: 'database_only' }
+  }
+
+  for (const plan of params.plans) {
+    if (!isValidOwlClaimPayoutAmount(plan.payoutAmount)) {
+      throw new StakingUserError(minOwlClaimPayoutRejectedMessage(plan.payoutAmount), 400)
+    }
+  }
+  if (!meetsMinOwlClaimThreshold(totalClaimed)) {
+    throw new StakingUserError(minOwlClaimPayoutRejectedMessage(totalClaimed), 400)
   }
 
   const transfer = await tryTransferOwlRewardClaim({
