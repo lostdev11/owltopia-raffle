@@ -78,11 +78,11 @@ async function sumPurchasedMintsPaginated(): Promise<number> {
 }
 
 /**
- * Spots counted toward presale progress.
+ * Spots counted toward presale progress and sold-out UI.
  *
- * Source of truth is sum(purchased_mints) from balances because admin refunds deduct
- * purchased_mints without requiring a purchase-row status change. This keeps sold/remaining
- * accurate after partial or wallet-level refunds.
+ * Source of truth is sum(confirmed purchase quantities) — same rule as
+ * `confirm_gen2_presale_purchase` oversell guard. Refunds tied to a purchase tx set
+ * status to `refunded` and deduct balance; both stay aligned.
  */
 export async function sumConfirmedPresaleSold(): Promise<number> {
   const db = getSupabaseAdmin()
@@ -91,15 +91,15 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
       db.rpc('gen2_presale_sold_confirmed_quantity'),
       db.rpc('gen2_presale_sum_purchased_mints'),
     ])
+    if (!e1 && soldRows != null) {
+      const a = Number(soldRows)
+      if (Number.isFinite(a)) return Math.max(0, a)
+    }
     if (!e2 && mintSum != null) {
       const b = Number(mintSum)
       if (Number.isFinite(b)) {
         return Math.max(0, b)
       }
-    }
-    if (!e1 && soldRows != null) {
-      const a = Number(soldRows)
-      if (Number.isFinite(a)) return Math.max(0, a)
     }
   } catch {
     // fall through to legacy
@@ -109,8 +109,8 @@ export async function sumConfirmedPresaleSold(): Promise<number> {
     sumConfirmedPurchasesPaginated(),
     sumPurchasedMintsPaginated(),
   ])
-  if (Number.isFinite(fromBalances)) return Math.max(0, fromBalances)
-  return Math.max(0, fromPurchases)
+  if (Number.isFinite(fromPurchases)) return Math.max(0, fromPurchases)
+  return Math.max(0, fromBalances)
 }
 
 export type Gen2BalanceRow = {
