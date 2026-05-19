@@ -3,10 +3,14 @@
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
+import { nestingClaimAccruingButtonClass, nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import { MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
 import { cn } from '@/lib/utils'
 
 type Props = {
+  /** Active OWL nests on this wallet (show panel even when nothing claimable yet). */
+  activeOwlNestCount: number
   claimableNestCount: number
   totalOwl: number
   busy: boolean
@@ -19,6 +23,7 @@ type Props = {
 }
 
 export function NestingClaimAllPanel({
+  activeOwlNestCount,
   claimableNestCount,
   totalOwl,
   busy,
@@ -29,28 +34,42 @@ export function NestingClaimAllPanel({
   id = 'nesting-claim-all-banner',
   className,
 }: Props) {
-  if (claimableNestCount < 1) return null
+  if (activeOwlNestCount < 1) return null
+
+  const canClaim = claimableNestCount >= 1 && totalOwl >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
+  const claimDisabled = disabled || !canClaim || busy
 
   return (
     <div
       id={id}
       className={cn(
-        'rounded-xl border-2 border-theme-prime/55 bg-theme-prime/[0.1] p-4 space-y-3 scroll-mt-24 shadow-[0_0_28px_rgba(0,255,136,0.12)]',
+        'rounded-xl border-2 p-4 space-y-3 scroll-mt-24',
+        canClaim
+          ? 'border-theme-prime/55 bg-theme-prime/[0.1] shadow-[0_0_28px_rgba(0,255,136,0.12)]'
+          : 'border-border/60 bg-muted/20',
         className
       )}
       role="region"
       aria-label="Claim all OWL rewards"
     >
       <p className="text-sm text-foreground leading-relaxed">
-        {claimableNestCount === 1 ? (
-          <>
-            <span className="font-semibold text-theme-prime">OWL is ready</span> on 1 nest — claim in one wallet
-            payout.
-          </>
+        {canClaim ? (
+          claimableNestCount === 1 ? (
+            <>
+              <span className="font-semibold text-theme-prime">OWL is ready</span> on 1 nest — claim in one wallet
+              payout.
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-theme-prime">{claimableNestCount} nests</span> have OWL ready — claim
+              everything in one payout (no need to tap each nest).
+            </>
+          )
         ) : (
           <>
-            <span className="font-semibold text-theme-prime">{claimableNestCount} nests</span> have OWL ready — claim
-            everything in one payout (no need to tap each nest).
+            <span className="font-medium text-muted-foreground">OWL is accruing</span> on{' '}
+            {activeOwlNestCount === 1 ? 'your nest' : `${activeOwlNestCount} nests`}. Claim all unlocks when at least{' '}
+            <span className="font-medium text-foreground">{MIN_OWL_CLAIMABLE_TO_CLAIM} OWL</span> is ready.
           </>
         )}
       </p>
@@ -68,17 +87,23 @@ export function NestingClaimAllPanel({
       ) : null}
       <Button
         type="button"
-        variant="default"
-        className="min-h-[52px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.22)]"
-        disabled={disabled}
+        variant={canClaim ? 'default' : 'outline'}
+        className={cn(
+          'min-h-[52px] w-full touch-manipulation text-base',
+          canClaim ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
+        )}
+        disabled={claimDisabled}
         onClick={onClaimAll}
+        aria-disabled={claimDisabled}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
         {busy
           ? nestingTxPhaseLabel(phase, 'claim') || 'Processing…'
-          : `Claim all · ${totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`}
+          : canClaim
+            ? `Claim all · ${totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`
+            : 'Claim all — accruing OWL'}
       </Button>
-      {disabledReason ? (
+      {disabledReason && canClaim ? (
         <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
           {disabledReason}
         </p>

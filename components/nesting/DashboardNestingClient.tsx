@@ -38,7 +38,7 @@ import {
   isOpeningNftNestAbortable,
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
-import { buildOwlClaimPlansForPositions, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
+import { buildOwlClaimPlansForPositions, isOwlRewardPosition, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
 
 const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
 
@@ -67,7 +67,11 @@ import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
 import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
 import { NESTING_SECURITY_ACK_STORAGE_KEY } from '@/lib/nesting/security-notice-content'
 import { formatRewardRate, perchAssetKindLabel, shortenAddress } from '@/lib/nesting/format'
-import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
+import {
+  nestingClaimAccruingButtonClass,
+  nestingClaimReadyButtonClass,
+  nestingMutedActionButtonClass,
+} from '@/lib/nesting/ui-classes'
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { cn, isMobileDevice } from '@/lib/utils'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -1039,6 +1043,10 @@ export function DashboardNestingClient() {
     () => openPositions.filter((p) => p.status === 'pending').length,
     [openPositions]
   )
+  const activeOwlNestCount = useMemo(
+    () => positions.filter((p) => p.status === 'active' && isOwlRewardPosition(p)).length,
+    [positions]
+  )
   const nestsPendingOnly = pendingOpenCount > 0 && totals.activeCount === 0
 
   const handleSignIn = useCallback(async () => {
@@ -1451,6 +1459,7 @@ export function DashboardNestingClient() {
     setActionError(null)
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
+    let claimedRewardsTotal: number | undefined
     try {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
@@ -1483,21 +1492,23 @@ export function DashboardNestingClient() {
             setActionError(err)
             throw new Error('claim')
           }
+          if (typeof json.claimed_rewards_total === 'number' && Number.isFinite(json.claimed_rewards_total)) {
+            claimedRewardsTotal = json.claimed_rewards_total
+          }
           return json
         },
         afterSuccess: async () => {
+          if (typeof claimedRewardsTotal === 'number') {
+            setPositions((prev) =>
+              prev.map((p) =>
+                p.id === positionId ? { ...p, claimed_rewards: claimedRewardsTotal! } : p
+              )
+            )
+          }
           setRewardsNowMs(Date.now())
-          await loadPositions()
           await loadClaimLedger()
         },
       })
-
-      const total = claimJson.claimed_rewards_total
-      if (typeof total === 'number' && Number.isFinite(total)) {
-        setPositions((prev) =>
-          prev.map((p) => (p.id === positionId ? { ...p, claimed_rewards: total } : p))
-        )
-      }
 
       const claimedAmount =
         typeof claimJson.claimed === 'number' && Number.isFinite(claimJson.claimed)
@@ -1673,6 +1684,7 @@ export function DashboardNestingClient() {
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
     const claimPlans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
+    const ledgerClaims: Array<{ position_id: string; claimed_rewards_total: number }> = []
     try {
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
@@ -1727,6 +1739,12 @@ export function DashboardNestingClient() {
               synced = await catchUpClaimLedgerAfterPayout()
             }
             if (synced) {
+              ledgerClaims.push(
+                ...pending.claims.map((c) => ({
+                  position_id: c.position_id,
+                  claimed_rewards_total: c.claimed_rewards_total,
+                }))
+              )
               return {
                 total_claimed: pending.total_claimed,
                 claim_count: pending.claims.length,
@@ -1754,18 +1772,26 @@ export function DashboardNestingClient() {
           if (typeof window !== 'undefined') {
             sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
           }
+          const rows = (json.claims?.length ? json.claims : claimPlans).map((c) => ({
+            position_id: 'positionId' in c ? c.positionId : c.position_id,
+            claimed_rewards_total:
+              'newClaimedTotal' in c
+                ? c.newClaimedTotal
+                : Number((c as { claimed_rewards_total?: number }).claimed_rewards_total),
+          }))
+          ledgerClaims.push(
+            ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
+          )
           return json
         },
         afterSuccess: async () => {
+          if (ledgerClaims.length > 0) {
+            applyClaimLedgerToPositions(ledgerClaims)
+          }
           setRewardsNowMs(Date.now())
-          await loadPositions()
           await loadClaimLedger()
         },
       })
-
-      if (Array.isArray(claimJson.claims) && claimJson.claims.length > 0) {
-        applyClaimLedgerToPositions(claimJson.claims)
-      }
 
       const total =
         typeof claimJson.total_claimed === 'number' && Number.isFinite(claimJson.total_claimed)
@@ -1921,6 +1947,7 @@ export function DashboardNestingClient() {
       </div>
 
       <NestingClaimAllPanel
+        activeOwlNestCount={activeOwlNestCount}
         claimableNestCount={claimableNestCount}
         totalOwl={claimAllPreview.totalOwl}
         busy={claimAllBusy}
@@ -2815,6 +2842,7 @@ export function DashboardNestingClient() {
         <NestingClaimAllPanel
           id="nesting-claim-all-inline"
           className="mb-4"
+          activeOwlNestCount={activeOwlNestCount}
           claimableNestCount={claimableNestCount}
           totalOwl={claimAllPreview.totalOwl}
           busy={claimAllBusy}
@@ -2884,17 +2912,22 @@ export function DashboardNestingClient() {
         </Link>
       </p>
 
-      {claimableNestCount >= 1 ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-theme-prime/40 bg-background/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden">
+      {activeOwlNestCount >= 1 ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden">
           <Button
             type="button"
-            variant="default"
-            className="min-h-[52px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.22)]"
-            disabled={claimAllButtonDisabled}
+            variant={claimableNestCount >= 1 ? 'default' : 'outline'}
+            className={cn(
+              'min-h-[52px] w-full touch-manipulation text-base',
+              claimableNestCount >= 1 ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
+            )}
+            disabled={claimAllButtonDisabled || claimableNestCount < 1}
             onClick={() => void handleClaimAll()}
           >
             {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
-            Claim all · {claimAllPreview.totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL
+            {claimableNestCount >= 1
+              ? `Claim all · ${claimAllPreview.totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`
+              : 'Claim all — accruing OWL'}
           </Button>
         </div>
       ) : null}

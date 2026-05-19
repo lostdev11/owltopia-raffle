@@ -23,6 +23,7 @@ import {
   nestingTxPhaseLabel,
   type NestingTxPhase,
 } from '@/lib/nesting/tx-states'
+import { nestingClaimAccruingButtonClass, nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
 function nestStatusPhrase(
@@ -325,10 +326,10 @@ export function PositionNestRow({
             variant={canClaimOwl && !claimBlocked ? 'default' : 'outline'}
             size="sm"
             className={cn(
-              'min-h-[44px] touch-manipulation disabled:opacity-40',
+              'min-h-[44px] touch-manipulation',
               canClaimOwl && !claimBlocked
-                ? 'font-semibold shadow-[0_0_16px_rgba(0,255,136,0.15)]'
-                : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                ? nestingClaimReadyButtonClass
+                : nestingClaimAccruingButtonClass
             )}
             disabled={!actionsEnabled || claimBlocked || anyTxInFlight || !canClaimOwl}
             onClick={() => void handleClaimMax()}
@@ -340,8 +341,10 @@ export function PositionNestRow({
                 <span className="tabular-nums">
                   Claim <span className="font-medium text-theme-prime">{claimAmountLabel}</span> OWL
                 </span>
+              ) : paysOwlRewards && claimable > 0 ? (
+                `Accruing · ${claimAmountLabel} OWL`
               ) : (
-                'Claim OWL'
+                'Claim OWL — accruing'
               )
             ) : (
               nestingTxPhaseLabel(claimPhase, 'claim')
