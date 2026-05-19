@@ -25,6 +25,7 @@ type Props = {
   actionsEnabled: boolean
   securityAckRequired?: boolean
   nestingPaused: boolean
+  claimsPaused?: boolean
   onResumeOpening?: (position: StakingPositionRow) => void
 }
 
@@ -42,6 +43,7 @@ export function NftPerchGroupedNestCard({
   actionsEnabled,
   securityAckRequired = false,
   nestingPaused,
+  claimsPaused,
   onResumeOpening,
 }: Props) {
   const pending = positions.filter((p) => p.status === 'pending').length
@@ -216,6 +218,7 @@ export function NftPerchGroupedNestCard({
                   actionsEnabled={actionsEnabled}
                   securityAckRequired={securityAckRequired}
                   nestingPaused={nestingPaused}
+                  claimsPaused={claimsPaused}
                   onResumeOpening={
                     onResumeOpening ? () => onResumeOpening(pos) : undefined
                   }

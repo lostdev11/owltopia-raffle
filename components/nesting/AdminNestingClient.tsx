@@ -695,7 +695,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Live nesting actions"
-          description="Controls the “Nesting is paused” banner and server blocks for new nests, claims, and leaving a nest. This is not the same as showing the public /nesting page."
+          description="Controls the “Nesting is paused” banner and server blocks for new nests and leaving a nest. Holders can still claim accrued OWL while this is on. Use NESTING_DISABLED in deployment env to block claims too. This is not the same as showing the public /nesting page."
         />
         <Card className="rounded-xl border-amber-500/20">
           <CardHeader>
@@ -718,9 +718,10 @@ export function AdminNestingClient() {
             ) : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1 min-w-0">
-                <p className="text-sm font-medium">Pause new nests, claims, and leaving</p>
+                <p className="text-sm font-medium">Pause new nests and leaving</p>
                 <p className="text-xs text-muted-foreground">
-                  Turn off when you want holders to use the nest dashboard again. Existing nests stay as they are on
+                  Claims stay enabled so holders can collect OWL they already earned. Turn off when you want holders to
+                  open or leave nests again. Existing nests stay as they are on
                   chain / in the database. Switch <span className="text-foreground font-medium">off</span> = live
                   holder actions; <span className="text-foreground font-medium">on</span> = paused.
                 </p>

@@ -27,6 +27,7 @@ import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import {
+  assertNestingClaimsAllowed,
   assertNestingOperationsAllowed,
   assertNestingSelloutReached,
   assertRewardTreasuryConfigured,
@@ -234,7 +235,7 @@ export async function executeClaim(params: {
   position_id: string
   rawAmount: unknown
 }) {
-  await assertNestingOperationsAllowed()
+  assertNestingClaimsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -324,7 +325,7 @@ export async function executeClaim(params: {
 
 /** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
 export async function executeClaimAll(params: { wallet: string }) {
-  await assertNestingOperationsAllowed()
+  assertNestingClaimsAllowed()
 
   if (isNestingClaimAllDisabled()) {
     throw new StakingUserError(

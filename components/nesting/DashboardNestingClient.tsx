@@ -456,15 +456,21 @@ export function DashboardNestingClient() {
 
   const claimAllBusy = claimAllTxPhase !== 'idle'
 
-  const claimAllButtonDisabled = nestingDisabled || claimAllBusy || stakeTxPhase !== 'idle'
+  /** Deploy kill switch only — admin “pause holder actions” still allows claims. */
+  const nestingClaimsBlocked = nestingPausedByDeployEnv
+
+  const claimAllButtonDisabled =
+    nestingClaimsBlocked || claimAllBusy || stakeTxPhase !== 'idle'
 
   const claimAllDisabledReason = useMemo((): string | null => {
     if (!claimAllButtonDisabled || claimableNestCount < 1) return null
     if (claimAllBusy) return null
-    if (nestingDisabled) return 'Claims are paused right now — see the notice above.'
+    if (nestingClaimsBlocked) {
+      return 'Claims are off while NESTING_DISABLED is set — see the notice above.'
+    }
     if (stakeTxPhase !== 'idle') return 'Finish the nest you are opening above, then try again.'
     return null
-  }, [claimAllButtonDisabled, claimableNestCount, claimAllBusy, nestingDisabled, stakeTxPhase])
+  }, [claimAllButtonDisabled, claimableNestCount, claimAllBusy, nestingClaimsBlocked, stakeTxPhase])
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -1986,9 +1992,12 @@ export function DashboardNestingClient() {
               </>
             ) : nestingPausedByAdmin ? (
               <>
-                New nests, claims, and leaving a nest are paused from Owl Nesting admin. Turn off “pause holder actions”
-                there to resume. If you were partway through opening a nest, select the same Owltopia coin in the nest
-                form and use Confirm nest to finish the wallet lock (only for nests that are still opening).
+                New nests and leaving a nest are paused from Owl Nesting admin.{' '}
+                <span className="font-medium text-foreground">Claim all</span> and per-nest{' '}
+                <span className="font-medium text-foreground">Claim OWL</span> still work for rewards you already earned.
+                Turn off “pause holder actions” in Admin → Nesting when you want to open or leave nests again. If you were
+                partway through opening a nest, select the same Owltopia coin in the nest form and use Confirm nest to
+                finish the wallet lock (only for nests that are still opening).
               </>
             ) : (
               <>
@@ -2097,7 +2106,10 @@ export function DashboardNestingClient() {
       ) : null}
 
       {claimableNestCount >= 1 ? (
-        <div className="rounded-xl border border-theme-prime/35 bg-theme-prime/[0.06] p-4 space-y-3">
+        <div
+          id="nesting-claim-all-banner"
+          className="rounded-xl border-2 border-theme-prime/50 bg-theme-prime/[0.08] p-4 space-y-3 scroll-mt-24"
+        >
           <p className="text-sm text-muted-foreground leading-relaxed">
             {claimableNestCount === 1
               ? 'OWL is ready on 1 nest.'
@@ -2137,6 +2149,18 @@ export function DashboardNestingClient() {
             labelContext="claim"
             className="min-h-[1.25rem] text-center"
           />
+        </div>
+      ) : totals.activeCount > 0 ? (
+        <div
+          className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground leading-relaxed"
+          role="status"
+        >
+          <p>
+            <span className="font-medium text-foreground">OWL is accruing</span> on{' '}
+            {totals.activeCount === 1 ? 'your nest' : `${totals.activeCount} nests`}. Claim unlocks once at least{' '}
+            <span className="font-medium text-foreground">1 OWL</span> is ready per nest (check{' '}
+            <span className="font-medium text-foreground">Ready to claim</span> above).
+          </p>
         </div>
       ) : null}
 
@@ -2801,7 +2825,20 @@ export function DashboardNestingClient() {
         />
         {claimableNestCount >= 1 ? (
           <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
-            Use <span className="font-medium text-foreground">Claim all</span> in the banner near the top when OWL is ready — one payout for every eligible nest.
+            <button
+              type="button"
+              className="font-medium text-theme-prime underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
+              onClick={() =>
+                document.getElementById('nesting-claim-all-banner')?.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'start',
+                })
+              }
+            >
+              Jump to Claim all
+            </button>
+            {' '}
+            — one payout for every nest with 1+ OWL ready, or use the green Claim button on each nest row.
           </p>
         ) : null}
         {openPositions.length === 0 ? (
@@ -2821,6 +2858,7 @@ export function DashboardNestingClient() {
                   freezeRequired={g.pool.asset_type === 'nft' && g.pool.adapter_mode === 'onchain_enabled'}
                   actionsEnabled={!claimAllBusy}
                   nestingPaused={nestingDisabled}
+                  claimsPaused={nestingClaimsBlocked}
                   onResumeOpening={resumeOpeningNest}
                 />
               </li>
@@ -2847,6 +2885,7 @@ export function DashboardNestingClient() {
                     cancelOpeningAllowed={pool ? isOpeningNftNestAbortable(pos, pool) : false}
                     actionsEnabled={!claimAllBusy}
                     nestingPaused={nestingDisabled}
+                    claimsPaused={nestingClaimsBlocked}
                     onResumeOpening={() => resumeOpeningNest(pos)}
                   />
                 </li>

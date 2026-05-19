@@ -76,6 +76,16 @@ export async function assertNestingOperationsAllowed(): Promise<void> {
   }
 }
 
+/** Claims stay available during admin “pause holder actions”; only the deploy kill switch blocks payouts. */
+export function assertNestingClaimsAllowed(): void {
+  if (isNestingEnvKillSwitchEnabled()) {
+    throw new StakingUserError(
+      'OWL claims are paused for maintenance (NESTING_DISABLED). Try again after the team clears the deployment flag.',
+      503
+    )
+  }
+}
+
 export function isNestingSelloutRequired(): boolean {
   return readBoolean(process.env.NESTING_SELL_OUT_REQUIRED, DEFAULT_SELL_OUT_REQUIRED)
 }

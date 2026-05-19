@@ -58,7 +58,10 @@ export type PositionNestRowProps = {
   actionsEnabled?: boolean
   /** True when claim/leave are blocked until the safeguards checkbox is checked. */
   securityAckRequired?: boolean
+  /** Blocks Leave nest / cancel opening (admin pause or deploy kill switch). */
   nestingPaused?: boolean
+  /** Blocks Claim OWL (deploy kill switch only — admin pause still allows claims). */
+  claimsPaused?: boolean
   /** Scroll to nest form and pre-select this coin (pending open only). */
   onResumeOpening?: () => void
 }
@@ -80,8 +83,10 @@ export function PositionNestRow({
   actionsEnabled = true,
   securityAckRequired = false,
   nestingPaused = false,
+  claimsPaused,
   onResumeOpening,
 }: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
+  const claimBlocked = claimsPaused ?? nestingPaused
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [dasNftName, setDasNftName] = useState<string | null>(null)
 
@@ -317,10 +322,15 @@ export function PositionNestRow({
         ) : (
           <Button
             type="button"
-            variant="outline"
+            variant={canClaimOwl && !claimBlocked ? 'default' : 'outline'}
             size="sm"
-            className="min-h-[44px] touch-manipulation border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground disabled:opacity-40"
-            disabled={!actionsEnabled || nestingPaused || anyTxInFlight || !canClaimOwl}
+            className={cn(
+              'min-h-[44px] touch-manipulation disabled:opacity-40',
+              canClaimOwl && !claimBlocked
+                ? 'font-semibold shadow-[0_0_16px_rgba(0,255,136,0.15)]'
+                : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+            )}
+            disabled={!actionsEnabled || claimBlocked || anyTxInFlight || !canClaimOwl}
             onClick={() => void handleClaimMax()}
             aria-label={canClaimOwl ? `Claim ${claimAmountLabel} OWL rewards` : 'Claim OWL rewards'}
           >
