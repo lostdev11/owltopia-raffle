@@ -64,7 +64,11 @@ import { cn, isMobileDevice } from '@/lib/utils'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
 import { getTokenInfo } from '@/lib/tokens'
-import { addMplCoreFreezeDelegate } from '@/lib/solana/mpl-core-freeze'
+import {
+  addMplCoreFreezeDelegate,
+  batchRelockMplCoreNestAssetsInWallet,
+} from '@/lib/solana/mpl-core-freeze'
+import { stakingClaimResponseNeedsWalletRelock } from '@/lib/nesting/claim-relock'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import { formatNestingWalletError } from '@/lib/nesting/wallet-error'
 
@@ -1148,21 +1152,37 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet]
   )
 
-  /** Re-freeze Owner-authority Owl Nest coins before claim (avoids server RemovePlugin / 0x1a). */
-  const ensureWalletNestLocksForClaim = useCallback(
-    async (positionIds: string[]) => {
-      const delegateAddress = nestingNftFreezeDelegate.trim()
-      if (!delegateAddress || !wallet?.adapter || !publicKey) return
-
+  const nestRelockAssetIdsForPositions = useCallback(
+    (positionIds: string[]) => {
+      const out: string[] = []
       for (const positionId of [...new Set(positionIds)]) {
         const pos = positions.find((p) => p.id === positionId)
         if (!pos?.asset_identifier?.trim()) continue
         const pool = poolById.get(pos.pool_id)
         if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') continue
-        await sendMplCoreFreezeDelegateApproval(pos.asset_identifier.trim(), delegateAddress)
+        out.push(pos.asset_identifier.trim())
       }
+      return out
     },
-    [nestingNftFreezeDelegate, wallet, publicKey, positions, poolById, sendMplCoreFreezeDelegateApproval]
+    [positions, poolById]
+  )
+
+  /** One wallet tx to re-lock thawed Owner-delegate coins when the server rejects claim. */
+  const batchRelockNestCoinsForClaim = useCallback(
+    async (positionIds: string[]) => {
+      const delegateAddress = nestingNftFreezeDelegate.trim()
+      const adapter = wallet?.adapter
+      if (!delegateAddress || !adapter || !publicKey) return
+      const assetIds = nestRelockAssetIdsForPositions(positionIds)
+      if (assetIds.length === 0) return
+      await batchRelockMplCoreNestAssetsInWallet({
+        connection,
+        wallet: adapter,
+        assetIds,
+        delegateAddress,
+      })
+    },
+    [connection, nestingNftFreezeDelegate, nestRelockAssetIdsForPositions, publicKey, wallet]
   )
 
   const cancelOpeningNest = useCallback(() => {
@@ -1450,26 +1470,36 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
-          setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
-          await ensureWalletNestLocksForClaim([positionId])
-          setPosSubPhase(positionId, 'claim', 'syncing')
-          const res = await fetch('/api/me/staking/claim', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-            body: JSON.stringify({ position_id: positionId, amount }),
-          })
-          const json = (await res.json().catch(() => ({}))) as {
-            error?: string
-            claimed?: number
-            claimable?: number
-            claimed_rewards_total?: number
-            transaction_signature?: string | null
-            execution?: { path?: 'onchain_transfer' | 'database_only' }
+          const postClaim = async () => {
+            const res = await fetch('/api/me/staking/claim', {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+              body: JSON.stringify({ position_id: positionId, amount }),
+            })
+            const json = (await res.json().catch(() => ({}))) as {
+              error?: string
+              code?: string
+              claimed?: number
+              claimable?: number
+              claimed_rewards_total?: number
+              transaction_signature?: string | null
+              execution?: { path?: 'onchain_transfer' | 'database_only' }
+            }
+            return { res, json }
           }
+
+          let { res, json } = await postClaim()
+          if (!res.ok && stakingClaimResponseNeedsWalletRelock(json)) {
+            setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
+            await batchRelockNestCoinsForClaim([positionId])
+            setPosSubPhase(positionId, 'claim', 'submitting')
+            ;({ res, json } = await postClaim())
+          }
+
           if (!res.ok) {
             const err =
               res.status === 501
@@ -1485,6 +1515,7 @@ export function DashboardNestingClient() {
           return json
         },
         afterSuccess: async () => {
+          setRewardsNowMs(Date.now())
           await loadPositions()
           await loadClaimLedger()
         },
@@ -1542,25 +1573,36 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
         async execute() {
-          setClaimAllTxPhase('awaiting_wallet_signature')
-          await ensureWalletNestLocksForClaim(claimPlans.map((p) => p.positionId))
-          setClaimAllTxPhase('syncing')
-          const res = await fetch('/api/me/staking/claim-all', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-          })
-          const json = (await res.json().catch(() => ({}))) as {
-            error?: string
-            ledger_sync_failed?: boolean
-            total_claimed?: number
-            claim_count?: number
-            execution?: { path?: 'onchain_transfer' | 'database_only' }
-            transaction_signature?: string | null
+          const positionIds = claimPlans.map((p) => p.positionId)
+          const postClaimAll = async () => {
+            const res = await fetch('/api/me/staking/claim-all', {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+            })
+            const json = (await res.json().catch(() => ({}))) as {
+              error?: string
+              code?: string
+              ledger_sync_failed?: boolean
+              total_claimed?: number
+              claim_count?: number
+              execution?: { path?: 'onchain_transfer' | 'database_only' }
+              transaction_signature?: string | null
+            }
+            return { res, json }
           }
+
+          let { res, json } = await postClaimAll()
+          if (!res.ok && stakingClaimResponseNeedsWalletRelock(json)) {
+            setClaimAllTxPhase('awaiting_wallet_signature')
+            await batchRelockNestCoinsForClaim(positionIds)
+            setClaimAllTxPhase('submitting')
+            ;({ res, json } = await postClaimAll())
+          }
+
           if (!res.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
             setActionError(err)
@@ -1573,6 +1615,7 @@ export function DashboardNestingClient() {
           return json
         },
         afterSuccess: async () => {
+          setRewardsNowMs(Date.now())
           await loadPositions()
           await loadClaimLedger()
         },
