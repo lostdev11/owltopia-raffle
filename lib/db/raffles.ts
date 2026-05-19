@@ -4,7 +4,11 @@ import type { Raffle, Entry, RaffleStatus } from '@/lib/types'
 import { isRetryableError, withRetry, withQueryRetry } from '@/lib/db-retry'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { calculateSettlement } from '@/lib/raffles/calculate-settlement'
-import { getRaffleRevenue, normalizeRaffleTicketCurrency } from '@/lib/raffle-profit'
+import {
+  getRaffleRevenue,
+  normalizeRaffleTicketCurrency,
+  revenueInCurrency,
+} from '@/lib/raffle-profit'
 import {
   raffleUsesFundsEscrow,
   raffleCountsTowardLiveFundsEscrowBreakdown,
@@ -1801,13 +1805,8 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
   // Compute settlement amounts (fee + creator payout) at settlement time
   const revenue = getRaffleRevenue(entries)
-  const revenueCurrency = (raffle.currency || 'SOL').toUpperCase()
-  const grossRevenue =
-    revenueCurrency === 'USDC'
-      ? revenue.usdc
-      : revenueCurrency === 'SOL'
-      ? revenue.sol
-      : revenue.owl
+  const revenueCurrency = normalizeRaffleTicketCurrency(raffle.currency || 'SOL')
+  const grossRevenue = revenueInCurrency(revenue, revenueCurrency)
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
