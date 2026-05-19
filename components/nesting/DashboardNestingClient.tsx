@@ -64,6 +64,7 @@ import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatu
 import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingOwlCoinWalletProgressPanel'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
+import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
 import { NESTING_SECURITY_ACK_STORAGE_KEY } from '@/lib/nesting/security-notice-content'
 import { formatRewardRate, perchAssetKindLabel, shortenAddress } from '@/lib/nesting/format'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
@@ -1034,6 +1035,12 @@ export function DashboardNestingClient() {
     return { nested, est, claimed, activeCount }
   }, [positions, rewardsNowMs])
 
+  const pendingOpenCount = useMemo(
+    () => openPositions.filter((p) => p.status === 'pending').length,
+    [openPositions]
+  )
+  const nestsPendingOnly = pendingOpenCount > 0 && totals.activeCount === 0
+
   const handleSignIn = useCallback(async () => {
     if (!publicKey || !signMessage) {
       setSignInError('Your wallet does not support message signing.')
@@ -1839,7 +1846,9 @@ export function DashboardNestingClient() {
         </Button>
         <h1 className="text-2xl font-bold">Almost there</h1>
         <p className="text-muted-foreground">
-          Say hi with one wallet message so we can pull up your nests—no gas fees, just a signature.
+          Say hi with one wallet message so we can pull up your nests and show{' '}
+          <span className="font-medium text-foreground">Claim all</span> when OWL is ready—no gas fees, just a
+          signature.
         </p>
         {signInError && <p className="text-destructive text-sm">{signInError}</p>}
         <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
@@ -1910,6 +1919,31 @@ export function DashboardNestingClient() {
           Refresh
         </Button>
       </div>
+
+      <NestingClaimAllPanel
+        claimableNestCount={claimableNestCount}
+        totalOwl={claimAllPreview.totalOwl}
+        busy={claimAllBusy}
+        disabled={claimAllButtonDisabled}
+        disabledReason={claimAllDisabledReason}
+        phase={claimAllTxPhase}
+        onClaimAll={() => void handleClaimAll()}
+      />
+
+      {claimableNestCount < 1 && nestsPendingOnly ? (
+        <div
+          className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm leading-relaxed"
+          role="status"
+        >
+          <p className="font-medium text-foreground">
+            {pendingOpenCount === 1 ? '1 nest is still opening' : `${pendingOpenCount} nests are still opening`}
+          </p>
+          <p className="mt-1 text-muted-foreground text-xs sm:text-sm">
+            <span className="font-medium text-foreground">Claim all</span> appears once a nest is active and has{' '}
+            <span className="font-medium text-foreground">1+ OWL</span> ready. Finish opening below, then refresh.
+          </p>
+        </div>
+      ) : null}
 
       {actionError && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive space-y-3">
@@ -2105,52 +2139,7 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
-      {claimableNestCount >= 1 ? (
-        <div
-          id="nesting-claim-all-banner"
-          className="rounded-xl border-2 border-theme-prime/50 bg-theme-prime/[0.08] p-4 space-y-3 scroll-mt-24"
-        >
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {claimableNestCount === 1
-              ? 'OWL is ready on 1 nest.'
-              : `${claimableNestCount} nests have OWL ready — claim in one payout instead of tapping each nest.`}
-          </p>
-          {claimAllBusy ? (
-            <div
-              className="flex items-center gap-3 rounded-lg border border-theme-prime/30 bg-background/60 px-3 py-2.5"
-              role="status"
-              aria-live="polite"
-            >
-              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-theme-prime" aria-hidden />
-              <p className="text-sm font-medium text-foreground">
-                {nestingTxPhaseLabel(claimAllTxPhase, 'claim') || 'Processing your claim…'}
-              </p>
-            </div>
-          ) : null}
-          <Button
-            type="button"
-            variant="default"
-            className="min-h-[48px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.18)]"
-            disabled={claimAllButtonDisabled}
-            onClick={() => void handleClaimAll()}
-          >
-            {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
-            {claimAllBusy
-              ? nestingTxPhaseLabel(claimAllTxPhase, 'claim') || 'Processing…'
-              : `Claim all · ${claimAllPreview.totalOwl.toFixed(6)} OWL`}
-          </Button>
-          {claimAllDisabledReason ? (
-            <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
-              {claimAllDisabledReason}
-            </p>
-          ) : null}
-          <NestingActionStatusLine
-            phase={claimAllTxPhase}
-            labelContext="claim"
-            className="min-h-[1.25rem] text-center"
-          />
-        </div>
-      ) : totals.activeCount > 0 ? (
+      {claimableNestCount < 1 && totals.activeCount > 0 && !nestsPendingOnly ? (
         <div
           className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground leading-relaxed"
           role="status"
@@ -2823,24 +2812,17 @@ export function DashboardNestingClient() {
           title="Your nests"
           description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card—tap the header to expand or collapse."
         />
-        {claimableNestCount >= 1 ? (
-          <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
-            <button
-              type="button"
-              className="font-medium text-theme-prime underline-offset-4 hover:underline touch-manipulation min-h-[44px] inline-flex items-center"
-              onClick={() =>
-                document.getElementById('nesting-claim-all-banner')?.scrollIntoView({
-                  behavior: 'smooth',
-                  block: 'start',
-                })
-              }
-            >
-              Jump to Claim all
-            </button>
-            {' '}
-            — one payout for every nest with 1+ OWL ready, or use the green Claim button on each nest row.
-          </p>
-        ) : null}
+        <NestingClaimAllPanel
+          id="nesting-claim-all-inline"
+          className="mb-4"
+          claimableNestCount={claimableNestCount}
+          totalOwl={claimAllPreview.totalOwl}
+          busy={claimAllBusy}
+          disabled={claimAllButtonDisabled}
+          disabledReason={claimAllDisabledReason}
+          phase={claimAllTxPhase}
+          onClaimAll={() => void handleClaimAll()}
+        />
         {openPositions.length === 0 ? (
           <EmptyState title="No nests yet." body="Open one above or skim the public perches on the nesting page." />
         ) : (
@@ -2901,6 +2883,21 @@ export function DashboardNestingClient() {
           What Owl Nesting is
         </Link>
       </p>
+
+      {claimableNestCount >= 1 ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-theme-prime/40 bg-background/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden">
+          <Button
+            type="button"
+            variant="default"
+            className="min-h-[52px] w-full touch-manipulation font-semibold text-base shadow-[0_0_22px_rgba(0,255,136,0.22)]"
+            disabled={claimAllButtonDisabled}
+            onClick={() => void handleClaimAll()}
+          >
+            {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+            Claim all · {claimAllPreview.totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL
+          </Button>
+        </div>
+      ) : null}
     </main>
   )
 }
