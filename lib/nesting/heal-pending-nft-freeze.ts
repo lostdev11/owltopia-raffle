@@ -14,11 +14,13 @@ import {
   isOpeningNftNestAbortable,
   isPendingNftNestBeforeFreezeConfirmed,
   isPendingNftNestFreezeConfirmedButNotActive,
+  sortStakingPositionsOldestFirst,
 } from '@/lib/nesting/position-lifecycle'
 import { assertWalletNftFrozenForNesting, isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
 import { StakingUserError } from '@/lib/nesting/errors'
 
-const HEAL_MAX_PER_REQUEST = 6
+const HEAL_MAX_PER_PASS = 10
+const HEAL_MAX_PASSES = 3
 
 export type HealPendingNftNestResult = {
   positionId: string
@@ -135,31 +137,39 @@ export async function healPendingNftNestsForWallet(wallet: string): Promise<{
   results: HealPendingNftNestResult[]
   positions: StakingPositionRow[]
 }> {
-  const positions = await listStakingPositionsByWallet(wallet)
-  const candidates = positions.filter((p) => p.status === 'pending' && p.asset_identifier?.trim())
-  if (candidates.length === 0) {
-    return { results: [], positions }
-  }
+  let positions = await listStakingPositionsByWallet(wallet)
   const results: HealPendingNftNestResult[] = []
-  let healedCount = 0
+  let totalHealed = 0
 
-  for (const position of candidates) {
-    if (healedCount >= HEAL_MAX_PER_REQUEST) break
-    const pool = await getStakingPoolById(position.pool_id)
-    if (!pool) continue
+  for (let pass = 0; pass < HEAL_MAX_PASSES; pass++) {
+    const candidates = sortStakingPositionsOldestFirst(
+      positions.filter((p) => p.status === 'pending' && p.asset_identifier?.trim())
+    )
+    if (candidates.length === 0) break
 
-    if (!isPendingNftNestHealCandidate(position, pool)) continue
+    let healedThisPass = 0
+    for (const position of candidates) {
+      if (healedThisPass >= HEAL_MAX_PER_PASS) break
+      const pool = await getStakingPoolById(position.pool_id)
+      if (!pool) continue
 
-    const r = await tryHealPendingNftNestPosition(position, pool)
-    results.push({
-      positionId: position.id,
-      healed: r.healed,
-      error: r.error,
-    })
-    if (r.healed) healedCount += 1
+      if (!isPendingNftNestHealCandidate(position, pool)) continue
+
+      const r = await tryHealPendingNftNestPosition(position, pool)
+      results.push({
+        positionId: position.id,
+        healed: r.healed,
+        error: r.error,
+      })
+      if (r.healed) {
+        healedThisPass += 1
+        totalHealed += 1
+      }
+    }
+
+    if (healedThisPass === 0) break
+    positions = await listStakingPositionsByWallet(wallet)
   }
 
-  const refreshed =
-    healedCount > 0 ? await listStakingPositionsByWallet(wallet) : positions
-  return { results, positions: refreshed }
+  return { results, positions }
 }

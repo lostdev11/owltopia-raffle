@@ -15,8 +15,10 @@ import {
 } from '@/lib/nesting/nft-nest-onchain-lock'
 import { isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
 import { StakingUserError } from '@/lib/nesting/errors'
+import { sortStakingPositionsOldestFirst } from '@/lib/nesting/position-lifecycle'
 
-const RECONCILE_MAX_PER_REQUEST = 8
+const RECONCILE_MAX_PER_PASS = 16
+const RECONCILE_MAX_PASSES = 2
 
 export type ReconcileActiveNftFreezeResult = {
   positionId: string
@@ -28,33 +30,38 @@ export async function reconcileActiveNftFreezeLocksForWallet(wallet: string): Pr
   results: ReconcileActiveNftFreezeResult[]
   positions: StakingPositionRow[]
 }> {
-  const positions = await listStakingPositionsByWallet(wallet)
-  const candidates = positions.filter((p) => p.status === 'active' && p.asset_identifier?.trim())
-  if (candidates.length === 0) {
-    return { results: [], positions }
-  }
-
+  let positions = await listStakingPositionsByWallet(wallet)
   const results: ReconcileActiveNftFreezeResult[] = []
-  let reconciledCount = 0
 
-  for (const position of candidates) {
-    if (reconciledCount >= RECONCILE_MAX_PER_REQUEST) break
-    const pool = await getStakingPoolById(position.pool_id)
-    if (!pool || !positionRequiresOnChainNftFreezeLock(position, pool)) continue
+  for (let pass = 0; pass < RECONCILE_MAX_PASSES; pass++) {
+    const candidates = sortStakingPositionsOldestFirst(
+      positions.filter((p) => p.status === 'active' && p.asset_identifier?.trim())
+    )
+    if (candidates.length === 0) break
 
-    try {
-      await assertActiveNftNestOnChainLock(position, pool, { repairMissingFreeze: true })
-      results.push({ positionId: position.id, reconciled: true })
-      reconciledCount += 1
-    } catch (e) {
-      const message =
-        e instanceof StakingUserError
-          ? e.message
-          : e instanceof Error
+    let reconciledThisPass = 0
+    for (const position of candidates) {
+      if (reconciledThisPass >= RECONCILE_MAX_PER_PASS) break
+      const pool = await getStakingPoolById(position.pool_id)
+      if (!pool || !positionRequiresOnChainNftFreezeLock(position, pool)) continue
+
+      try {
+        await assertActiveNftNestOnChainLock(position, pool, { repairMissingFreeze: true })
+        results.push({ positionId: position.id, reconciled: true })
+        reconciledThisPass += 1
+      } catch (e) {
+        const message =
+          e instanceof StakingUserError
             ? e.message
-            : 'Could not verify nest lock on-chain'
-      results.push({ positionId: position.id, reconciled: false, error: message })
+            : e instanceof Error
+              ? e.message
+              : 'Could not verify nest lock on-chain'
+        results.push({ positionId: position.id, reconciled: false, error: message })
+      }
     }
+
+    if (reconciledThisPass === 0) break
+    positions = await listStakingPositionsByWallet(wallet)
   }
 
   return { results, positions }

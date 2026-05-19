@@ -5,7 +5,10 @@ import {
   type StakingPositionRow,
 } from '@/lib/db/staking-positions'
 import { isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
-import { isPendingNftNestBeforeFreezeConfirmed } from '@/lib/nesting/position-lifecycle'
+import {
+  isPendingNftNestBeforeFreezeConfirmed,
+  sortStakingPositionsOldestFirst,
+} from '@/lib/nesting/position-lifecycle'
 
 export type ClearOrphanedPendingNestResult = {
   positionId: string
@@ -20,7 +23,7 @@ export type ClearOrphanedPendingNestResult = {
 export async function clearOrphanedPendingNftNestsForWallet(
   wallet: string
 ): Promise<{ results: ClearOrphanedPendingNestResult[]; cleared_count: number }> {
-  const positions = await listStakingPositionsByWallet(wallet)
+  const positions = sortStakingPositionsOldestFirst(await listStakingPositionsByWallet(wallet))
   const results: ClearOrphanedPendingNestResult[] = []
   let clearedCount = 0
 

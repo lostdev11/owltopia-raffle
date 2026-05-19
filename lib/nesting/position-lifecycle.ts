@@ -1,6 +1,13 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 
+/** Oldest nests first — used by heal/reconcile so early nesters are not starved by per-request caps. */
+export function sortStakingPositionsOldestFirst<T extends { staked_at: string }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => new Date(a.staked_at).getTime() - new Date(b.staked_at).getTime()
+  )
+}
+
 /** Active nest or in-progress open (pending) — not closed (`unstaked`). */
 export function isOpenStakingPosition(pos: Pick<StakingPositionRow, 'status'>): boolean {
   return pos.status === 'active' || pos.status === 'pending'
