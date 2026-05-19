@@ -1,6 +1,10 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import type { RewardRateUnit } from '@/lib/db/staking-pools'
-import { estimateAccruedRewards, meetsMinOwlClaimThreshold } from '@/lib/staking/rewards'
+import {
+  estimateAccruedRewards,
+  estimateClaimableRewards,
+  meetsMinOwlClaimThreshold,
+} from '@/lib/staking/rewards'
 
 export type PositionClaimPlan = {
   positionId: string
@@ -35,6 +39,26 @@ export function sumOwlClaimPlans(plans: PositionClaimPlan[]): { count: number; t
     totalOwl += plan.payoutAmount
   }
   return { count: plans.length, totalOwl }
+}
+
+/** Sum of pending OWL on all active nests (no 1 OWL per-nest floor — for live “accruing” display). */
+export function sumOwlPendingAccrualForPositions(
+  rows: StakingPositionRow[],
+  asOfMs = Date.now()
+): number {
+  let total = 0
+  for (const row of rows) {
+    if (row.status !== 'active' || !isOwlRewardPosition(row)) continue
+    total += estimateClaimableRewards({
+      amount: Number(row.amount),
+      rewardRateSnapshot: Number(row.reward_rate_snapshot),
+      rewardRateUnitSnapshot: row.reward_rate_unit_snapshot as RewardRateUnit,
+      claimedRewards: Number(row.claimed_rewards),
+      stakedAtMs: new Date(row.staked_at).getTime(),
+      asOfMs,
+    })
+  }
+  return total
 }
 
 /** Max-claim plan for an active nest (full pending balance). Returns null if nothing claimable. */

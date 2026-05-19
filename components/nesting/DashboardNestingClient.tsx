@@ -38,7 +38,12 @@ import {
   isOpeningNftNestAbortable,
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
-import { buildOwlClaimPlansForPositions, isOwlRewardPosition, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
+import {
+  buildOwlClaimPlansForPositions,
+  isOwlRewardPosition,
+  sumOwlClaimPlans,
+  sumOwlPendingAccrualForPositions,
+} from '@/lib/nesting/claim-plan'
 
 const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
 
@@ -1030,14 +1035,25 @@ export function DashboardNestingClient() {
       }
       claimed += Number(pos.claimed_rewards)
     }
-    const owlPlans = buildOwlClaimPlansForPositions(
-      positions.filter((p) => p.status === 'active'),
-      rewardsNowMs
-    )
+    const activeRows = positions.filter((p) => p.status === 'active')
+    const owlPlans = buildOwlClaimPlansForPositions(activeRows, rewardsNowMs)
     const est = sumOwlClaimPlans(owlPlans).totalOwl
-    const activeCount = positions.filter((p) => p.status === 'active').length
-    return { nested, est, claimed, activeCount }
+    const accruingOwl = sumOwlPendingAccrualForPositions(activeRows, rewardsNowMs)
+    const activeCount = activeRows.length
+    return { nested, est, accruingOwl, claimed, activeCount }
   }, [positions, rewardsNowMs])
+
+  const readyToClaimSubline = useMemo((): string | null => {
+    const { est, accruingOwl } = totals
+    if (accruingOwl <= 1e-12) return null
+    if (est >= 1 - 1e-9) {
+      if (accruingOwl > est + 1e-6) {
+        return `${est.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL claimable now`
+      }
+      return null
+    }
+    return 'Updates live · claim unlocks at 1 OWL per nest'
+  }, [totals])
 
   const pendingOpenCount = useMemo(
     () => openPositions.filter((p) => p.status === 'pending').length,
@@ -2109,15 +2125,27 @@ export function DashboardNestingClient() {
           {
             label: 'Total nestled',
             value: totals.nested.toLocaleString(undefined, { maximumFractionDigits: 6 }),
+            subline: null as string | null,
           },
-          { label: 'Open nests', value: String(totals.activeCount) },
-          { label: 'Ready to claim', value: totals.est.toFixed(6) },
-          { label: 'Rewards claimed', value: totals.claimed.toFixed(6) },
-        ].map(({ label, value }) => (
+          { label: 'Open nests', value: String(totals.activeCount), subline: null },
+          {
+            label: 'Ready to claim',
+            value: totals.accruingOwl.toLocaleString(undefined, { maximumFractionDigits: 6 }),
+            subline: readyToClaimSubline,
+          },
+          {
+            label: 'Rewards claimed',
+            value: totals.claimed.toLocaleString(undefined, { maximumFractionDigits: 6 }),
+            subline: null,
+          },
+        ].map(({ label, value, subline }) => (
           <Card key={label} className="rounded-xl border-border/60 bg-card/90">
             <CardHeader className="pb-2">
               <CardDescription>{label}</CardDescription>
               <CardTitle className="text-lg font-mono tabular-nums">{value}</CardTitle>
+              {subline ? (
+                <p className="text-[11px] text-muted-foreground leading-snug pt-0.5">{subline}</p>
+              ) : null}
             </CardHeader>
           </Card>
         ))}
