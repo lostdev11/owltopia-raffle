@@ -6,15 +6,20 @@ import {
   formatDiscordDisplayName,
   getDiscordOAuthRedirectUriFromRequest,
   getRequestOriginForOAuth,
-  verifyDiscordOAuthState,
+  parseDiscordOAuthState,
 } from '@/lib/discord-oauth'
 import { linkDiscordToWallet } from '@/lib/db/wallet-profiles'
 
 export const dynamic = 'force-dynamic'
 
-function redirectWith(request: NextRequest, query: Record<string, string>): NextResponse {
+function redirectWith(
+  request: NextRequest,
+  query: Record<string, string>,
+  returnPath?: string | null
+): NextResponse {
   const base = getRequestOriginForOAuth(request)
-  const u = new URL(`${base}/dashboard`)
+  const path = returnPath?.startsWith('/') ? returnPath : '/dashboard'
+  const u = new URL(`${base}${path}`)
   for (const [k, v] of Object.entries(query)) {
     u.searchParams.set(k, v)
   }
@@ -45,7 +50,8 @@ export async function GET(request: NextRequest) {
       return redirectWith(request, { discord_error: 'missing_params' })
     }
 
-    if (!verifyDiscordOAuthState(state, session.wallet)) {
+    const parsedState = parseDiscordOAuthState(state, session.wallet)
+    if (!parsedState.ok) {
       return redirectWith(request, { discord_error: 'invalid_state' })
     }
 
@@ -67,7 +73,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return redirectWith(request, { discord_linked: '1' })
+    return redirectWith(request, { discord_linked: '1' }, parsedState.returnPath)
   } catch (e) {
     console.error('[me/discord/callback]', e)
     return redirectWith(request, { discord_error: 'link_failed' })

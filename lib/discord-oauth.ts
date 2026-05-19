@@ -17,49 +17,74 @@ function getOAuthSecret(): string {
   return secret
 }
 
-type OAuthStatePayload = { w: string; exp: number; r: string; v: 1 }
+type OAuthStatePayload = { w: string; exp: number; r: string; v: 1; rt?: string }
 
-export function generateDiscordOAuthState(wallet: string): string {
+/** Safe post-auth path on this site (e.g. /gen2-presale). */
+export function sanitizeDiscordOAuthReturnPath(path: string | null | undefined): string | null {
+  const p = (path ?? '').trim()
+  if (!p.startsWith('/') || p.startsWith('//')) return null
+  if (p.includes('://')) return null
+  return p.split('?')[0]?.split('#')[0] || null
+}
+
+export function generateDiscordOAuthState(wallet: string, returnPath?: string | null): string {
   const secret = getOAuthSecret()
+  const rt = sanitizeDiscordOAuthReturnPath(returnPath)
   const payload: OAuthStatePayload = {
     w: wallet.trim(),
     exp: Date.now() + OAUTH_STATE_TTL_MS,
     r: `${Date.now()}:${Math.random()}`,
     v: 1,
+    ...(rt ? { rt } : {}),
   }
   const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
   const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url')
   return `${payloadB64}.${sig}`
 }
 
-export function verifyDiscordOAuthState(state: string, expectedWallet: string): boolean {
+export function parseDiscordOAuthState(
+  state: string,
+  expectedWallet: string
+): { ok: true; returnPath: string | null } | { ok: false } {
   const [payloadB64, sigB64] = (state || '').split('.')
-  if (!payloadB64 || !sigB64) return false
+  if (!payloadB64 || !sigB64) return { ok: false }
   try {
     const secret = getOAuthSecret()
     const expected = createHmac('sha256', secret).update(payloadB64).digest()
     const got = Buffer.from(sigB64, 'base64url')
-    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return false
+    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return { ok: false }
 
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Partial<OAuthStatePayload>
-    if (payload.v !== 1) return false
-    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number') return false
-    if (payload.w.trim() !== expectedWallet.trim()) return false
-    if (payload.exp < Date.now()) return false
-    return true
+    if (payload.v !== 1) return { ok: false }
+    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number') return { ok: false }
+    if (payload.w.trim() !== expectedWallet.trim()) return { ok: false }
+    if (payload.exp < Date.now()) return { ok: false }
+    const returnPath =
+      typeof payload.rt === 'string' ? sanitizeDiscordOAuthReturnPath(payload.rt) : null
+    return { ok: true, returnPath }
   } catch {
-    return false
+    return { ok: false }
   }
+}
+
+export function verifyDiscordOAuthState(state: string, expectedWallet: string): boolean {
+  return parseDiscordOAuthState(state, expectedWallet).ok
 }
 
 export function getDiscordOAuthClientId(): string | null {
   const id =
-    process.env.DISCORD_OAUTH_CLIENT_ID?.trim() || process.env.DISCORD_APPLICATION_ID?.trim()
+    process.env.DISCORD_CLIENT_ID?.trim() ||
+    process.env.DISCORD_OAUTH_CLIENT_ID?.trim() ||
+    process.env.DISCORD_APPLICATION_ID?.trim()
   return id || null
 }
 
 export function getDiscordOAuthClientSecret(): string | null {
-  return process.env.DISCORD_OAUTH_CLIENT_SECRET?.trim() || null
+  return (
+    process.env.DISCORD_CLIENT_SECRET?.trim() ||
+    process.env.DISCORD_OAUTH_CLIENT_SECRET?.trim() ||
+    null
+  )
 }
 
 /**
@@ -81,14 +106,16 @@ export function getRequestOriginForOAuth(request: NextRequest): string {
  * the host the user used (avoids token exchange failures from www vs non-www mismatch with NEXT_PUBLIC_SITE_URL).
  */
 export function getDiscordOAuthRedirectUriFromRequest(request: NextRequest): string {
-  const explicit = process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
+  const explicit =
+    process.env.DISCORD_REDIRECT_URI?.trim() || process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
   if (explicit) return explicit
   return `${getRequestOriginForOAuth(request)}/api/me/discord/callback`
 }
 
 /** Fallback when no NextRequest is available (prefer getDiscordOAuthRedirectUriFromRequest in routes). */
 export function getDiscordOAuthRedirectUri(): string {
-  const explicit = process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
+  const explicit =
+    process.env.DISCORD_REDIRECT_URI?.trim() || process.env.DISCORD_OAUTH_REDIRECT_URI?.trim()
   if (explicit) return explicit
   const base = getSiteBaseUrl()
   return `${base}/api/me/discord/callback`
