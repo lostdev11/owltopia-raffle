@@ -24,6 +24,9 @@ export const RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT = [
 
 export const RAFFLES_ACTIVE_ONLY_LIST_STATUSES = ['live', 'ready_to_draw'] as const
 
+/** Creator cancellation must be actioned while the listing can still be wound down. */
+export const RAFFLES_PENDING_CANCELLATION_QUEUE_STATUSES = RAFFLES_ACTIVE_ONLY_LIST_STATUSES
+
 export function rafflesRestStatusInClause(includeDraft: boolean, activeOnly: boolean): string {
   if (activeOnly) {
     return `in.(${[...RAFFLES_ACTIVE_ONLY_LIST_STATUSES].join(',')})`

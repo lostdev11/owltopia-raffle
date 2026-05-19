@@ -18,6 +18,7 @@ import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleWinnerDrawn } from '@/lib/discord-raffle-webhooks'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import {
+  RAFFLES_PENDING_CANCELLATION_QUEUE_STATUSES,
   RAFFLES_PUBLIC_LIST_STATUSES,
   RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT,
   rafflesRestStatusInClause,
@@ -594,7 +595,7 @@ export async function getRaffles(
 
 /**
  * Raffles where the creator requested cancellation or paid the cancellation fee and an admin must still finish the flow in Owl Vision.
- * Matches GET /api/admin/pending-cancellations (request or fee recorded, status not cancelled).
+ * Matches GET /api/admin/pending-cancellations (request or fee recorded, status live / ready_to_draw).
  * Unlike {@link getRaffles}, this does **not** filter by `RAFFLES_PUBLIC_LIST_STATUSES_WITH_DRAFT`, so legacy or
  * unexpected `status` values still appear — otherwise Manage Raffles can show an empty queue while Owl Vision lists many.
  */
@@ -607,7 +608,7 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
         .from('raffles')
         .select(columns)
         .or('cancellation_requested_at.not.is.null,cancellation_fee_paid_at.not.is.null')
-        .neq('status', 'cancelled')
+        .in('status', [...RAFFLES_PENDING_CANCELLATION_QUEUE_STATUSES])
         .order('cancellation_requested_at', { ascending: false })
 
       if (error) {
