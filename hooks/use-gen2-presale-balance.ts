@@ -38,8 +38,8 @@ export function useGen2PresaleBalance(wallet: string | null) {
         setBalance(null)
         setError(
           siwsNorm
-            ? 'Your Owltopia sign-in wallet does not match this connected wallet — sign in again with Owltopia for this address.'
-            : 'Sign in with Owltopia (Dashboard) to load your presale balance for this wallet.'
+            ? 'Your signed-in wallet does not match this connected wallet — sign in again with this wallet.'
+            : 'Sign in with this wallet to load your presale credits.'
         )
         return
       }
@@ -51,9 +51,7 @@ export function useGen2PresaleBalance(wallet: string | null) {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
-          throw new Error(
-            'Sign in with Owltopia (Dashboard) to load your presale balance for this wallet.'
-          )
+          throw new Error('Sign in with this wallet to load your presale credits.')
         }
         throw new Error((data as { error?: string }).error || 'Balance failed')
       }

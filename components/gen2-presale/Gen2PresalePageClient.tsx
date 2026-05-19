@@ -400,6 +400,8 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
               statsLoading={statsLoading}
               balance={balance}
               balanceLoading={balLoading}
+              balanceError={balError}
+              onSignedIn={() => void refreshBal()}
               purchasesOpen={purchasesOpen}
               presaleSoldOut={presaleSoldOut}
               onPurchased={onPresalePurchaseSettled}

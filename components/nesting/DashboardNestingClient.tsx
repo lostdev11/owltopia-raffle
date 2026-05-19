@@ -34,7 +34,6 @@ import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import type { StakingRewardEventRow } from '@/lib/db/staking-reward-events'
 import {
-  isNftNestedForGallery,
   isOpenStakingPosition,
   isOpeningNftNestAbortable,
   nftMintBlocksDuplicateStakeExceptResume,
@@ -42,7 +41,7 @@ import {
 import { buildOwlClaimPlansForPositions, sumOwlClaimPlans } from '@/lib/nesting/claim-plan'
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
-import { nestGalleryAnchorId, StakedNftNestGallery } from '@/components/nesting/StakedNftNestGallery'
+import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
@@ -468,23 +467,6 @@ export function DashboardNestingClient() {
     }
     return m
   }, [owlNestMintScan.mints])
-
-  const stakedNftGalleryItems = useMemo(
-    () =>
-      positions
-        .filter(
-          (p) => Boolean(p.asset_identifier?.trim()) && isNftNestedForGallery(p)
-        )
-        .map((p) => {
-          const mint = p.asset_identifier!.trim()
-          return {
-            position: p,
-            poolName: poolById.get(p.pool_id)?.name ?? `Perch ${p.pool_id.slice(0, 8)}…`,
-            walletHint: nestingWalletMintHints.get(mint) ?? null,
-          }
-        }),
-    [positions, poolById, nestingWalletMintHints]
-  )
 
   /** Single active staking row (canonical Owl Nest deployment). */
   const solePerch = pools.length === 1 ? pools[0] : null
@@ -2608,11 +2590,6 @@ export function DashboardNestingClient() {
           <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
             Use <span className="font-medium text-foreground">Claim all</span> in the banner near the top when OWL is ready — one payout for every eligible nest.
           </p>
-        ) : null}
-        {stakedNftGalleryItems.length > 0 ? (
-          <div className="mb-6">
-            <StakedNftNestGallery items={stakedNftGalleryItems} />
-          </div>
         ) : null}
         {openPositions.length === 0 ? (
           <EmptyState title="No nests yet." body="Open one above or skim the public perches on the nesting page." />

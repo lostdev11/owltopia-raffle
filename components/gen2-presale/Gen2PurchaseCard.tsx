@@ -12,6 +12,7 @@ import {
   buildSpotLines,
   type Gen2PresalePurchaseReceiptState,
 } from '@/components/gen2-presale/Gen2PresalePurchaseDialog'
+import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,6 +38,9 @@ type Props = {
   /** Wallet balance row — used to enforce the per-wallet credit cap in the quantity UI. */
   balance?: Gen2PresaleBalance | null
   balanceLoading?: boolean
+  /** When set, user must sign in with wallet before balance/purchase APIs work. */
+  balanceError?: string | null
+  onSignedIn?: () => void
   /** False when admin paused presale or supply is sold out (`purchases_open` on stats). */
   purchasesOpen: boolean
   presaleSoldOut?: boolean
@@ -54,6 +58,8 @@ export function Gen2PurchaseCard({
   statsLoading,
   balance = null,
   balanceLoading = false,
+  balanceError = null,
+  onSignedIn,
   purchasesOpen,
   presaleSoldOut = false,
   onPurchased,
@@ -163,9 +169,7 @@ export function Gen2PurchaseCard({
       }
       if (!createRes.ok) {
         if (createRes.status === 401) {
-          throw new Error(
-            'Sign in with Owltopia first (Dashboard → sign in with wallet), then try your purchase again.'
-          )
+          throw new Error('Sign in with this wallet below, then try your purchase again.')
         }
         if (createRes.status === 403 && createJson.code === 'presale_not_live') {
           throw new Error(createJson.error || 'Presale is not live.')
@@ -173,7 +177,7 @@ export function Gen2PurchaseCard({
         if (createRes.status === 403) {
           throw new Error(
             createJson.error ||
-              'Your signed-in Owltopia session must match this connected wallet. Sign in again from Dashboard.'
+              'Your signed-in wallet must match this connected wallet. Sign in again with this wallet.'
           )
         }
         if (createRes.status === 409) {
@@ -252,7 +256,7 @@ export function Gen2PurchaseCard({
       if (!confirmRes.ok) {
         if (confirmRes.status === 401 || confirmRes.status === 403) {
           throw new Error(
-            'Sign-in session missing or does not match this wallet. From Dashboard, sign in again, then use Record payment with your transaction signature if credits did not appear.'
+            'Sign in with this wallet again, then use Record payment with your transaction signature if credits did not appear.'
           )
         }
         const failMsg =
@@ -524,11 +528,32 @@ export function Gen2PurchaseCard({
             )}
           </Button>
 
+          {balanceError && !balanceLoading ? (
+            <Gen2PresaleSignInPrompt
+              className="mt-4"
+              title="Sign in to buy presale spots"
+              message={balanceError}
+              onSignedIn={onSignedIn}
+            />
+          ) : null}
+
           {error && (
             <p className="mt-4 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-200" role="alert">
               {error}
             </p>
           )}
+
+          {error && !balanceError && /sign in/i.test(error) ? (
+            <Gen2PresaleSignInPrompt
+              className="mt-4"
+              title="Sign in with this wallet"
+              message="Confirm the sign-in message in your wallet, then try again."
+              onSignedIn={() => {
+                onSignedIn?.()
+                setError(null)
+              }}
+            />
+          ) : null}
 
         </>
       )}

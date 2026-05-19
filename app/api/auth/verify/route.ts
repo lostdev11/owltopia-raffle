@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { consumeNonce, verifySignIn, setSessionCookieInResponse } from '@/lib/auth-server'
+import {
+  consumeNonce,
+  parseNonceFromSignInMessage,
+  verifySignIn,
+  setSessionCookieInResponse,
+} from '@/lib/auth-server'
 import { authVerifyBody } from '@/lib/validations'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { syncReferralStateForWallet } from '@/lib/db/referrals'
@@ -43,8 +48,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const nonceMatch = messageStr.match(/Nonce: ([^\n]+)/)
-    const nonce = nonceMatch?.[1]?.trim()
+    const nonce = parseNonceFromSignInMessage(messageStr)
     if (!nonce || !consumeNonce(nonce, walletStr)) {
       return NextResponse.json(
         { error: 'Invalid or expired nonce' },

@@ -14,10 +14,10 @@ export function useSiwsSignIn() {
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const signIn = useCallback(async () => {
+  const signIn = useCallback(async (opts?: { onSuccess?: () => void | Promise<void> }): Promise<boolean> => {
     if (!publicKey || !signMessage) {
       setError('Your wallet does not support message signing.')
-      return
+      return false
     }
     setError(null)
     setSigningIn(true)
@@ -54,9 +54,12 @@ export function useSiwsSignIn() {
         throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
       }
 
+      await opts?.onSuccess?.()
       router.refresh()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed')
+      return false
     } finally {
       setSigningIn(false)
     }

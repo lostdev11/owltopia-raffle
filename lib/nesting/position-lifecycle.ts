@@ -6,20 +6,6 @@ export function isOpenStakingPosition(pos: Pick<StakingPositionRow, 'status'>): 
   return pos.status === 'active' || pos.status === 'pending'
 }
 
-/**
- * NFT is fully nested for gallery / picker — active, or pending after freeze confirmed.
- * Mid-open pending (before freeze) is excluded.
- */
-export function isNftNestedForGallery(
-  position: Pick<StakingPositionRow, 'status' | 'external_reference'>
-): boolean {
-  if (position.status === 'active') return true
-  if (position.status === 'pending') {
-    return (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
-  }
-  return false
-}
-
 /** Pending NFT nest before freeze is reflected in DB (`nft_freeze_confirmed:`). */
 export function isPendingNftNestBeforeFreezeConfirmed(
   position: Pick<StakingPositionRow, 'status' | 'external_reference'>

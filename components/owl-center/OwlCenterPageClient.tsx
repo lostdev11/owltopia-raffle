@@ -5,6 +5,7 @@ import { Rocket, Sparkles, Wallet } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { Gen2ElectricBorder } from '@/components/gen2-presale/Gen2ElectricBorder'
+import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
 import { useGen2PresaleBalance } from '@/hooks/use-gen2-presale-balance'
@@ -13,7 +14,8 @@ import { cn } from '@/lib/utils'
 export function OwlCenterPageClient() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? null
-  const { balance, loading: balanceLoading, error: balanceError } = useGen2PresaleBalance(wallet)
+  const { balance, loading: balanceLoading, error: balanceError, refresh: refreshBalance } =
+    useGen2PresaleBalance(wallet)
 
   const available = balance?.available_mints ?? 0
   const hasCredits = available > 0
@@ -99,12 +101,12 @@ export function OwlCenterPageClient() {
                 </div>
               </dl>
               {balanceError && (
-                <p
-                  className="mt-4 rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-100"
-                  role="alert"
-                >
-                  {balanceError}. Sign in from Dashboard if credits do not load.
-                </p>
+                <Gen2PresaleSignInPrompt
+                  className="mt-4"
+                  title="Load your presale credits"
+                  message={balanceError}
+                  onSignedIn={() => void refreshBalance()}
+                />
               )}
               {hasCredits && (
                 <p className="mt-4 text-sm text-[#A9CBB9]">
