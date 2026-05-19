@@ -1148,6 +1148,23 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet]
   )
 
+  /** Re-freeze Owner-authority Owl Nest coins before claim (avoids server RemovePlugin / 0x1a). */
+  const ensureWalletNestLocksForClaim = useCallback(
+    async (positionIds: string[]) => {
+      const delegateAddress = nestingNftFreezeDelegate.trim()
+      if (!delegateAddress || !wallet?.adapter || !publicKey) return
+
+      for (const positionId of [...new Set(positionIds)]) {
+        const pos = positions.find((p) => p.id === positionId)
+        if (!pos?.asset_identifier?.trim()) continue
+        const pool = poolById.get(pos.pool_id)
+        if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') continue
+        await sendMplCoreFreezeDelegateApproval(pos.asset_identifier.trim(), delegateAddress)
+      }
+    },
+    [nestingNftFreezeDelegate, wallet, publicKey, positions, poolById, sendMplCoreFreezeDelegateApproval]
+  )
+
   const cancelOpeningNest = useCallback(() => {
     stakeTxAbortRef.current?.abort()
   }, [])
@@ -1433,6 +1450,9 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
+          setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
+          await ensureWalletNestLocksForClaim([positionId])
+          setPosSubPhase(positionId, 'claim', 'syncing')
           const res = await fetch('/api/me/staking/claim', {
             method: 'POST',
             credentials: 'include',
@@ -1518,9 +1538,13 @@ export function DashboardNestingClient() {
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
     try {
+      const claimPlans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
         async execute() {
+          setClaimAllTxPhase('awaiting_wallet_signature')
+          await ensureWalletNestLocksForClaim(claimPlans.map((p) => p.positionId))
+          setClaimAllTxPhase('syncing')
           const res = await fetch('/api/me/staking/claim-all', {
             method: 'POST',
             credentials: 'include',

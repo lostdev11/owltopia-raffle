@@ -74,6 +74,7 @@ export async function tryHealPendingNftNestPosition(
     const frozenOnChain = await isWalletNftFrozenForNestingDelegate({
       assetId: position.asset_identifier!,
       collectionMint: pool.collection_key,
+      ownerWallet: position.wallet_address,
     })
     if (!frozenOnChain) {
       try {

@@ -106,6 +106,7 @@ export async function reconcileAllActiveNftFreezeLocksAdmin(params?: {
       const wasFrozen = await isWalletNftFrozenForNestingDelegate({
         assetId,
         collectionMint: pool.collection_key,
+        ownerWallet: wallet,
       })
       await assertNftNestOnChainLockHeld({
         ownerWallet: wallet,
