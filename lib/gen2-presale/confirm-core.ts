@@ -384,6 +384,20 @@ export async function executeGen2PresaleConfirm(params: {
     return { ok: false, httpStatus: 500, message: msg }
   }
 
+  const soldBefore = await sumConfirmedPresaleSold()
+  const remainingBefore = cfg.presaleSupply - soldBefore
+  if (remainingBefore <= 0) {
+    return { ok: false, httpStatus: 409, code: 'sold_out', message: 'Presale sold out' }
+  }
+  if (qty > remainingBefore) {
+    return {
+      ok: false,
+      httpStatus: 409,
+      code: 'insufficient_supply',
+      message: `Only ${remainingBefore} presale spots remaining`,
+    }
+  }
+
   const buyerPk = new PublicKey(buyerNorm)
 
   const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')

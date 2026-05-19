@@ -13,10 +13,16 @@ import { Gen2LiveBadge } from '@/components/gen2-presale/Gen2LiveBadge'
 import { Gen2PresaleBanner } from '@/components/gen2-presale/Gen2PresaleBanner'
 import { Gen2ProgressCard } from '@/components/gen2-presale/Gen2ProgressCard'
 import { Gen2PurchaseCard } from '@/components/gen2-presale/Gen2PurchaseCard'
+import { Gen2DiscordRoleCard } from '@/components/gen2-presale/Gen2DiscordRoleCard'
 import { Gen2StickyCta } from '@/components/gen2-presale/Gen2StickyCta'
 import { useGen2PresaleBalance } from '@/hooks/use-gen2-presale-balance'
 import { useGen2PresaleStats } from '@/hooks/use-gen2-presale-stats'
 import { useWallet } from '@solana/wallet-adapter-react'
+import {
+  canPurchaseGen2PresaleSpots,
+  GEN2_OWL_CENTER_PATH,
+  isGen2PresaleSoldOut,
+} from '@/lib/gen2-presale/purchase-availability'
 import { getGen2PresaleBalanceIssues, getGen2PresaleStatsIssues } from '@/lib/gen2-presale/presale-sanity'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
@@ -232,6 +238,8 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
   } = useGen2PresaleBalance(wallet)
 
   const presaleLive = stats?.presale_live === true
+  const presaleSoldOut = isGen2PresaleSoldOut(stats)
+  const purchasesOpen = canPurchaseGen2PresaleSpots(stats)
   const statsStatusLoading = statsLoading && stats == null
   const spotPriceUsdc =
     stats?.unit_price_usdc ??
@@ -285,7 +293,11 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
       posterSrc="/images/owltopia-gen2-presale-poster.jpg"
       className="text-[#EAFBF4]"
     >
-      <Gen2PresaleBanner live={stats?.presale_live} statsLoading={statsStatusLoading} />
+      <Gen2PresaleBanner
+        live={stats?.presale_live}
+        soldOut={presaleSoldOut}
+        statsLoading={statsStatusLoading}
+      />
 
       {presaleSanityIssues.length > 0 && (
         <div className="mx-auto max-w-6xl px-4 pt-4">
@@ -308,7 +320,7 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
         <section className="animate-page-enter text-center md:text-left">
           <div className="flex flex-col items-center gap-4 md:flex-row md:items-start md:justify-between">
             <div className="max-w-2xl space-y-4">
-              <Gen2LiveBadge live={stats?.presale_live} loading={statsStatusLoading} />
+              <Gen2LiveBadge live={stats?.presale_live} soldOut={presaleSoldOut} loading={statsStatusLoading} />
               <h1 className="font-display text-4xl tracking-tight text-[#EAFBF4] sm:text-5xl md:text-6xl">
                 Owltopia Gen2 Presale
               </h1>
@@ -324,15 +336,21 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Link
-                  href="#gen2-purchase"
+                  href={presaleSoldOut ? GEN2_OWL_CENTER_PATH : '#gen2-purchase'}
                   className={cn(
                     'inline-flex min-h-[44px] items-center justify-center rounded-xl border px-6 font-bold touch-manipulation transition',
-                    presaleLive
+                    purchasesOpen
                       ? 'border-[#00FF9C]/45 bg-[#00E58B]/20 text-[#EAFBF4] shadow-[0_0_28px_rgba(0,255,156,0.3)] hover:bg-[#00E58B]/30'
-                      : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] hover:border-[#FFD769]/35 hover:text-[#EAFBF4]'
+                      : presaleSoldOut
+                        ? 'border-[#00FF9C]/35 bg-[#00E58B]/10 text-[#EAFBF4] hover:bg-[#00E58B]/20'
+                        : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] hover:border-[#FFD769]/35 hover:text-[#EAFBF4]'
                   )}
                 >
-                  {presaleLive ? 'Buy presale spots' : 'Presale details'}{' '}
+                  {presaleSoldOut
+                    ? 'Owl Center (mint when live)'
+                    : purchasesOpen
+                      ? 'Buy presale spots'
+                      : 'Presale details'}{' '}
                   <ChevronRight className="ml-1 h-5 w-5" />
                 </Link>
                 <Link
@@ -382,7 +400,8 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
               statsLoading={statsLoading}
               balance={balance}
               balanceLoading={balLoading}
-              presaleLive={presaleLive}
+              purchasesOpen={purchasesOpen}
+              presaleSoldOut={presaleSoldOut}
               onPurchased={onPresalePurchaseSettled}
               className="scroll-mt-28 border border-[#00FF9C]/30 bg-[#10161C]/85 shadow-[0_0_52px_rgba(0,255,156,0.16)] backdrop-blur-md"
             />
@@ -399,6 +418,8 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
               />
             </Gen2ElectricBorder>
           </div>
+
+          <Gen2DiscordRoleCard connected={connected} walletAddress={wallet} className="mt-10" />
 
           <div id="gen2-participants" className="scroll-mt-28">
             <Gen2ParticipantsCard
@@ -543,28 +564,45 @@ export function Gen2PresalePageClient({ showAdminPausedNote = false }: Gen2Presa
         <section className="mt-16 mb-12 animate-page-enter">
           <Gen2ElectricBorder>
             <div className="bg-[#151D24]/95 p-10 text-center shadow-[inset_0_0_60px_rgba(0,229,139,0.04)]">
-              <Gen2LiveBadge className="mx-auto" live={stats?.presale_live} loading={statsStatusLoading} />
-              <h2 className="mt-4 font-display text-3xl text-[#EAFBF4]">Ready when you are</h2>
+              <Gen2LiveBadge
+                className="mx-auto"
+                live={stats?.presale_live}
+                soldOut={presaleSoldOut}
+                loading={statsStatusLoading}
+              />
+              <h2 className="mt-4 font-display text-3xl text-[#EAFBF4]">
+                {presaleSoldOut ? 'Presale sold out' : 'Ready when you are'}
+              </h2>
               <p className="mx-auto mt-2 max-w-lg text-[#A9CBB9]">
-                {stats?.remaining ?? '—'} spots still available — secure your Gen2 edge before the crowd.
+                {presaleSoldOut
+                  ? 'All presale spots are claimed. Redeem your credits when Owl Center mint goes live.'
+                  : purchasesOpen
+                    ? `${stats?.remaining ?? '—'} spots still available — secure your Gen2 edge before the crowd.`
+                    : 'Purchasing is paused — check back when the presale reopens.'}
               </p>
               <Link
-                href="#gen2-purchase"
+                href={presaleSoldOut ? GEN2_OWL_CENTER_PATH : '#gen2-purchase'}
                 className={cn(
                   'mt-6 inline-flex min-h-[48px] items-center justify-center rounded-xl px-8 font-bold touch-manipulation',
-                  presaleLive
+                  purchasesOpen
                     ? 'border border-[#00FF9C]/45 bg-[#00E58B]/25 text-[#EAFBF4] shadow-[0_0_32px_rgba(0,255,156,0.35)] animate-button-glow-pulse hover:bg-[#00E58B]/40'
-                    : 'border border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] hover:border-[#FFD769]/40 hover:text-[#EAFBF4]'
+                    : presaleSoldOut
+                      ? 'border border-[#00FF9C]/40 bg-[#00E58B]/15 text-[#EAFBF4] hover:bg-[#00E58B]/25'
+                      : 'border border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] hover:border-[#FFD769]/40 hover:text-[#EAFBF4]'
                 )}
               >
-                {presaleLive ? 'Buy presale spots' : 'View presale details'}
+                {presaleSoldOut
+                  ? 'Owl Center (mint when live)'
+                  : purchasesOpen
+                    ? 'Buy presale spots'
+                    : 'View presale details'}
               </Link>
             </div>
           </Gen2ElectricBorder>
         </section>
       </main>
 
-      <Gen2StickyCta presaleLive={presaleLive} />
+      <Gen2StickyCta purchasesOpen={purchasesOpen} presaleSoldOut={presaleSoldOut} />
     </HeroVideoBackground>
   )
 }

@@ -66,7 +66,10 @@ export function getGen2PresaleStatsIssues(stats: Gen2PresaleStats): string[] {
     issues.push('Spot price (USDC) is invalid.')
   }
 
-  if (presale_live && (unit_lamports == null || unit_lamports === '')) {
+  const soldOut =
+    !sold_sync_unavailable && Number.isFinite(remaining) && remaining <= 0
+
+  if (presale_live && !soldOut && (unit_lamports == null || unit_lamports === '')) {
     issues.push('SOL quote unavailable — refresh the page or try again on Wi‑Fi before purchasing.')
   }
 

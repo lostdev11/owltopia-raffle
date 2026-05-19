@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Transaction } from '@solana/web3.js'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Loader2, Minus, Plus } from 'lucide-react'
 
@@ -22,6 +23,11 @@ import {
   GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
   gen2PresaleCreditsRemainingForWallet,
 } from '@/lib/gen2-presale/max-per-purchase'
+import {
+  GEN2_OWL_CENTER_PATH,
+  GEN2_PRESALE_SOLD_OUT_BODY,
+  GEN2_PRESALE_SOLD_OUT_HEADLINE,
+} from '@/lib/gen2-presale/purchase-availability'
 import type { Gen2PresaleBalance, Gen2PresaleStats } from '@/lib/gen2-presale/types'
 import { cn } from '@/lib/utils'
 
@@ -31,8 +37,9 @@ type Props = {
   /** Wallet balance row — used to enforce the per-wallet credit cap in the quantity UI. */
   balance?: Gen2PresaleBalance | null
   balanceLoading?: boolean
-  /** False when admin has paused new purchases (`presale_live` on stats). */
-  presaleLive: boolean
+  /** False when admin paused presale or supply is sold out (`purchases_open` on stats). */
+  purchasesOpen: boolean
+  presaleSoldOut?: boolean
   onPurchased: (result?: {
     balance?: Gen2PresaleBalance
     stats?: Pick<Gen2PresaleStats, 'presale_supply' | 'sold' | 'remaining' | 'percent_sold'>
@@ -47,7 +54,8 @@ export function Gen2PurchaseCard({
   statsLoading,
   balance = null,
   balanceLoading = false,
-  presaleLive,
+  purchasesOpen,
+  presaleSoldOut = false,
   onPurchased,
   className,
 }: Props) {
@@ -125,7 +133,11 @@ export function Gen2PurchaseCard({
       setError('Choose a valid quantity.')
       return
     }
-    if (!presaleLive) {
+    if (presaleSoldOut) {
+      setError('Presale is sold out. Mint with your credits when Owl Center goes live.')
+      return
+    }
+    if (!purchasesOpen) {
       setError('Presale purchases are paused. Check back when we go live.')
       return
     }
@@ -167,6 +179,11 @@ export function Gen2PurchaseCard({
         if (createRes.status === 409) {
           if (createJson.code === 'wallet_cap') {
             throw new Error(createJson.error || 'Wallet presale credit limit reached.')
+          }
+          if (createJson.code === 'sold_out') {
+            throw new Error(
+              'Presale is sold out. New spots are no longer available — redeem your credits when Owl Center mint goes live.'
+            )
           }
           throw new Error(createJson.error || 'Sold out or not enough spots left.')
         }
@@ -241,8 +258,10 @@ export function Gen2PurchaseCard({
         const failMsg =
           confirmRes.status === 409 && confirmJson.code === 'duplicate_tx'
             ? 'This purchase was already recorded. Refresh your balance.'
-            : confirmJson.error ||
-              'On-chain payment succeeded but confirmation failed. Contact support with your tx signature.'
+            : confirmRes.status === 409 && confirmJson.code === 'sold_out'
+              ? 'Presale sold out before your payment could be recorded. If you paid during the final spots, contact support with your transaction signature.'
+              : confirmJson.error ||
+                'On-chain payment succeeded but confirmation failed. Contact support with your tx signature.'
 
         if (confirmRes.status === 409 && confirmJson.code === 'duplicate_tx') {
           const txSig = confirmJson.txSignature ?? signature
@@ -330,7 +349,7 @@ export function Gen2PurchaseCard({
       }
       setPhase('idle')
     }
-  }, [connected, publicKey, maxQty, qty, presaleLive, sendTransaction, connection, onPurchased, router])
+  }, [connected, publicKey, maxQty, qty, purchasesOpen, presaleSoldOut, sendTransaction, connection, onPurchased, router])
 
   return (
     <>
@@ -362,7 +381,23 @@ export function Gen2PurchaseCard({
         </div>
       </div>
 
-      {!presaleLive && (
+      {presaleSoldOut && (
+        <div
+          className="mt-4 rounded-lg border border-[#00FF9C]/35 bg-[#00E58B]/10 px-3 py-3 text-sm text-[#EAFBF4]"
+          role="status"
+        >
+          <p className="font-semibold text-[#00FF9C]">{GEN2_PRESALE_SOLD_OUT_HEADLINE}</p>
+          <p className="mt-1 text-[#A9CBB9]">{GEN2_PRESALE_SOLD_OUT_BODY}</p>
+          <Link
+            href={GEN2_OWL_CENTER_PATH}
+            className="mt-3 inline-flex min-h-[44px] items-center rounded-lg border border-[#00FF9C]/40 px-4 py-2 font-semibold text-[#00FF9C] touch-manipulation hover:bg-[#00E58B]/15"
+          >
+            Owl Center (mint when live)
+          </Link>
+        </div>
+      )}
+
+      {!presaleSoldOut && !purchasesOpen && (
         <p
           className="mt-4 rounded-lg border border-[#FFD769]/40 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#EAFBF4]"
           role="status"
@@ -387,7 +422,7 @@ export function Gen2PurchaseCard({
                 size="icon"
                 className="h-11 w-11 shrink-0 touch-manipulation border-[#1F6F54] bg-[#10161C] text-[#EAFBF4]"
                 onClick={() => adjustQty(-1)}
-                disabled={busy || !presaleLive || qty <= 1}
+                disabled={busy || !purchasesOpen || qty <= 1}
                 aria-label="Decrease quantity"
               >
                 <Minus className="h-4 w-4" />
@@ -402,7 +437,7 @@ export function Gen2PurchaseCard({
                   if (!Number.isFinite(n)) return
                   setQty(Math.min(maxQty, Math.max(1, Math.floor(n))))
                 }}
-                disabled={!presaleLive}
+                disabled={!purchasesOpen}
                 className="h-11 w-20 border-[#1F6F54] bg-[#10161C] text-center font-bold text-[#EAFBF4]"
               />
               <Button
@@ -411,7 +446,7 @@ export function Gen2PurchaseCard({
                 size="icon"
                 className="h-11 w-11 shrink-0 touch-manipulation border-[#1F6F54] bg-[#10161C] text-[#EAFBF4]"
                 onClick={() => adjustQty(1)}
-                disabled={busy || !presaleLive || qty >= maxQty}
+                disabled={busy || !purchasesOpen || qty >= maxQty}
                 aria-label="Increase quantity"
               >
                 <Plus className="h-4 w-4" />
@@ -457,7 +492,7 @@ export function Gen2PurchaseCard({
 
           <Button
             type="button"
-            disabled={busy || !presaleLive || maxQty < 1 || phase === 'signing'}
+            disabled={busy || !purchasesOpen || maxQty < 1 || phase === 'signing'}
             onClick={() => void buy()}
             className={cn(
               'mt-6 h-12 min-h-[48px] w-full touch-manipulation border border-[#00FF9C]/45 text-base font-bold',
@@ -465,7 +500,12 @@ export function Gen2PurchaseCard({
               'animate-button-glow-pulse disabled:animate-none'
             )}
           >
-            {phase === 'idle' && (presaleLive ? 'Buy presale spots' : 'Presale paused')}
+            {phase === 'idle' &&
+              (presaleSoldOut
+                ? 'Presale sold out'
+                : purchasesOpen
+                  ? 'Buy presale spots'
+                  : 'Presale paused')}
             {phase === 'building' && (
               <>
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Building transaction…

@@ -1,5 +1,6 @@
 'use client'
 
+import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { cn } from '@/lib/utils'
 import type { Gen2PresaleStats } from '@/lib/gen2-presale/types'
 
@@ -14,6 +15,7 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
   const sold = stats?.sold ?? 0
   const remaining = stats?.remaining ?? supply
   const pct = Math.min(100, Math.max(0, stats?.percent_sold ?? 0))
+  const soldOut = isGen2PresaleSoldOut(stats)
 
   return (
     <div
@@ -33,8 +35,12 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs uppercase tracking-wider text-[#FFD769]/90">Only live</p>
-            <p className="text-xl font-bold tabular-nums text-[#00FF9C]">{loading ? '—' : remaining}</p>
+            <p className="text-xs uppercase tracking-wider text-[#FFD769]/90">
+              {soldOut ? 'Sold out' : 'Remaining'}
+            </p>
+            <p className={cn('text-xl font-bold tabular-nums', soldOut ? 'text-[#00FF9C]' : 'text-[#00FF9C]')}>
+              {loading ? '—' : soldOut ? '0' : remaining}
+            </p>
           </div>
         </div>
         <div className="h-3 overflow-hidden rounded-full bg-[#10161C] ring-1 ring-[#00E58B]/20">
@@ -52,12 +58,21 @@ export function Gen2ProgressCard({ stats, loading, className }: Props) {
           <span className="text-sm text-[#A9CBB9]">USD value; you pay in SOL.</span>
         </div>
         <p className="text-sm leading-relaxed text-[#A9CBB9]">
-          Secure your Gen2 allocation before WL and public.{' '}
-          <span className="font-medium text-[#EAFBF4]">{supply} total presale spots</span>
-          {stats?.sold_sync_unavailable ? (
-            <> — live demand sync is offline (connection); totals above are not updated yet.</>
+          {soldOut ? (
+            <>
+              All <span className="font-medium text-[#EAFBF4]">{supply} presale spots</span> are claimed. Mint with
+              your credits when Owl Center goes live.
+            </>
           ) : (
-            <> — demand is tracked live.</>
+            <>
+              Secure your Gen2 allocation before WL and public.{' '}
+              <span className="font-medium text-[#EAFBF4]">{supply} total presale spots</span>
+              {stats?.sold_sync_unavailable ? (
+                <> — live demand sync is offline (connection); totals above are not updated yet.</>
+              ) : (
+                <> — demand is tracked live.</>
+              )}
+            </>
           )}
         </p>
       </div>
