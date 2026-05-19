@@ -64,11 +64,7 @@ import { cn, isMobileDevice } from '@/lib/utils'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
 import { getTokenInfo } from '@/lib/tokens'
-import {
-  addMplCoreFreezeDelegate,
-  batchRelockMplCoreNestAssetsInWallet,
-} from '@/lib/solana/mpl-core-freeze'
-import { stakingClaimResponseNeedsWalletRelock } from '@/lib/nesting/claim-relock'
+import { addMplCoreFreezeDelegate } from '@/lib/solana/mpl-core-freeze'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import { formatNestingWalletError } from '@/lib/nesting/wallet-error'
 
@@ -1152,39 +1148,6 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet]
   )
 
-  const nestRelockAssetIdsForPositions = useCallback(
-    (positionIds: string[]) => {
-      const out: string[] = []
-      for (const positionId of [...new Set(positionIds)]) {
-        const pos = positions.find((p) => p.id === positionId)
-        if (!pos?.asset_identifier?.trim()) continue
-        const pool = poolById.get(pos.pool_id)
-        if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') continue
-        out.push(pos.asset_identifier.trim())
-      }
-      return out
-    },
-    [positions, poolById]
-  )
-
-  /** One wallet tx to re-lock thawed Owner-delegate coins when the server rejects claim. */
-  const batchRelockNestCoinsForClaim = useCallback(
-    async (positionIds: string[]) => {
-      const delegateAddress = nestingNftFreezeDelegate.trim()
-      const adapter = wallet?.adapter
-      if (!delegateAddress || !adapter || !publicKey) return
-      const assetIds = nestRelockAssetIdsForPositions(positionIds)
-      if (assetIds.length === 0) return
-      await batchRelockMplCoreNestAssetsInWallet({
-        connection,
-        wallet: adapter,
-        assetIds,
-        delegateAddress,
-      })
-    },
-    [connection, nestingNftFreezeDelegate, nestRelockAssetIdsForPositions, publicKey, wallet]
-  )
-
   const cancelOpeningNest = useCallback(() => {
     stakeTxAbortRef.current?.abort()
   }, [])
@@ -1470,36 +1433,22 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
-          const postClaim = async () => {
-            const res = await fetch('/api/me/staking/claim', {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Connected-Wallet': publicKey.toBase58(),
-              },
-              body: JSON.stringify({ position_id: positionId, amount }),
-            })
-            const json = (await res.json().catch(() => ({}))) as {
-              error?: string
-              code?: string
-              claimed?: number
-              claimable?: number
-              claimed_rewards_total?: number
-              transaction_signature?: string | null
-              execution?: { path?: 'onchain_transfer' | 'database_only' }
-            }
-            return { res, json }
+          const res = await fetch('/api/me/staking/claim', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+            body: JSON.stringify({ position_id: positionId, amount }),
+          })
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            claimed?: number
+            claimed_rewards_total?: number
+            transaction_signature?: string | null
+            execution?: { path?: 'onchain_transfer' | 'database_only' }
           }
-
-          let { res, json } = await postClaim()
-          if (!res.ok && stakingClaimResponseNeedsWalletRelock(json)) {
-            setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
-            await batchRelockNestCoinsForClaim([positionId])
-            setPosSubPhase(positionId, 'claim', 'submitting')
-            ;({ res, json } = await postClaim())
-          }
-
           if (!res.ok) {
             const err =
               res.status === 501
@@ -1528,12 +1477,6 @@ export function DashboardNestingClient() {
         )
       }
 
-      if (claimJson.execution?.path === 'database_only') {
-        setClaimLedgerNotice(
-          'This claim was recorded in the app only (no on-chain OWL transfer). Your wallet will not change until the reward treasury sends SPL, or you turn off local-only mode.'
-        )
-      }
-
       const claimedAmount =
         typeof claimJson.claimed === 'number' && Number.isFinite(claimJson.claimed)
           ? claimJson.claimed
@@ -1543,23 +1486,12 @@ export function DashboardNestingClient() {
         placement: 'page',
         message:
           claimJson.execution?.path === 'database_only'
-            ? `Claim successful — ${claimedLabel} OWL was recorded for this nest.`
-            : `Claim successful — ${claimedLabel} OWL was sent to your wallet.`,
+            ? `Claim successful — ${claimedLabel} OWL recorded for this nest.`
+            : `Claim successful — ${claimedLabel} OWL sent to your wallet.`,
       })
-
-      const sig =
-        typeof claimJson.transaction_signature === 'string' ? claimJson.transaction_signature.trim() : ''
-      if (sig) {
-        const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
-        window.open(
-          `https://solscan.io/tx/${encodeURIComponent(sig)}${dev ? '?cluster=devnet' : ''}`,
-          '_blank',
-          'noopener,noreferrer'
-        )
-      }
     } catch (e) {
       if (e instanceof Error && e.message === 'claim') throw e
-      setActionError(e instanceof Error ? e.message : 'Claim failed')
+      setActionError(formatNestingWalletError(e, wallet?.adapter?.name))
     }
   }
 
@@ -1569,40 +1501,26 @@ export function DashboardNestingClient() {
     setSuccessNotice(null)
     setClaimLedgerNotice(null)
     try {
-      const claimPlans = buildOwlClaimPlansForPositions(openPositions, rewardsNowMs)
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
         async execute() {
-          const positionIds = claimPlans.map((p) => p.positionId)
-          const postClaimAll = async () => {
-            const res = await fetch('/api/me/staking/claim-all', {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Connected-Wallet': publicKey.toBase58(),
-              },
-            })
-            const json = (await res.json().catch(() => ({}))) as {
-              error?: string
-              code?: string
-              ledger_sync_failed?: boolean
-              total_claimed?: number
-              claim_count?: number
-              execution?: { path?: 'onchain_transfer' | 'database_only' }
-              transaction_signature?: string | null
-            }
-            return { res, json }
+          const res = await fetch('/api/me/staking/claim-all', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+          })
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            ledger_sync_failed?: boolean
+            total_claimed?: number
+            claim_count?: number
+            claims?: Array<{ position_id: string; claimed_rewards_total: number }>
+            execution?: { path?: 'onchain_transfer' | 'database_only' }
+            transaction_signature?: string | null
           }
-
-          let { res, json } = await postClaimAll()
-          if (!res.ok && stakingClaimResponseNeedsWalletRelock(json)) {
-            setClaimAllTxPhase('awaiting_wallet_signature')
-            await batchRelockNestCoinsForClaim(positionIds)
-            setClaimAllTxPhase('submitting')
-            ;({ res, json } = await postClaimAll())
-          }
-
           if (!res.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
             setActionError(err)
@@ -1621,9 +1539,13 @@ export function DashboardNestingClient() {
         },
       })
 
-      if (claimJson.execution?.path === 'database_only') {
-        setClaimLedgerNotice(
-          'These claims were recorded in the app only (no on-chain OWL transfer). Your wallet will not change until the reward treasury sends SPL, or you turn off local-only mode.'
+      if (Array.isArray(claimJson.claims) && claimJson.claims.length > 0) {
+        const byId = new Map(claimJson.claims.map((c) => [c.position_id, c.claimed_rewards_total]))
+        setPositions((prev) =>
+          prev.map((p) => {
+            const nextTotal = byId.get(p.id)
+            return nextTotal != null ? { ...p, claimed_rewards: nextTotal } : p
+          })
         )
       }
 
@@ -1640,20 +1562,9 @@ export function DashboardNestingClient() {
         placement: 'page',
         message:
           claimJson.execution?.path === 'database_only'
-            ? `Claimed ${totalLabel} OWL from ${count} nests (recorded in the app).`
-            : `Claimed ${totalLabel} OWL from ${count} nests — sent to your wallet in one transfer.`,
+            ? `Claim successful — ${totalLabel} OWL recorded from ${count} nests.`
+            : `Claim successful — ${totalLabel} OWL sent to your wallet.`,
       })
-
-      const sig =
-        typeof claimJson.transaction_signature === 'string' ? claimJson.transaction_signature.trim() : ''
-      if (sig) {
-        const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
-        window.open(
-          `https://solscan.io/tx/${encodeURIComponent(sig)}${dev ? '?cluster=devnet' : ''}`,
-          '_blank',
-          'noopener,noreferrer'
-        )
-      }
     } catch (e) {
       if (e instanceof Error && e.message === 'claim-all') throw e
       setActionError(e instanceof Error ? e.message : 'Claim all failed')
@@ -1967,12 +1878,24 @@ export function DashboardNestingClient() {
       ) : null}
 
       {claimableNestCount >= 1 ? (
-        <div className="rounded-xl border border-theme-prime/35 bg-theme-prime/[0.06] p-4 space-y-2">
+        <div className="rounded-xl border border-theme-prime/35 bg-theme-prime/[0.06] p-4 space-y-3">
           <p className="text-sm text-muted-foreground leading-relaxed">
             {claimableNestCount === 1
               ? 'OWL is ready on 1 nest.'
               : `${claimableNestCount} nests have OWL ready — claim in one payout instead of tapping each nest.`}
           </p>
+          {claimAllBusy ? (
+            <div
+              className="flex items-center gap-3 rounded-lg border border-theme-prime/30 bg-background/60 px-3 py-2.5"
+              role="status"
+              aria-live="polite"
+            >
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-theme-prime" aria-hidden />
+              <p className="text-sm font-medium text-foreground">
+                {nestingTxPhaseLabel(claimAllTxPhase, 'claim') || 'Processing your claim…'}
+              </p>
+            </div>
+          ) : null}
           <Button
             type="button"
             variant="default"
@@ -1982,7 +1905,7 @@ export function DashboardNestingClient() {
           >
             {claimAllBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
             {claimAllBusy
-              ? nestingTxPhaseLabel(claimAllTxPhase)
+              ? nestingTxPhaseLabel(claimAllTxPhase, 'claim') || 'Processing…'
               : `Claim all · ${claimAllPreview.totalOwl.toFixed(6)} OWL`}
           </Button>
           {claimAllDisabledReason ? (
@@ -1990,7 +1913,11 @@ export function DashboardNestingClient() {
               {claimAllDisabledReason}
             </p>
           ) : null}
-          <NestingActionStatusLine phase={claimAllTxPhase} className="min-h-[1.25rem] text-center" />
+          <NestingActionStatusLine
+            phase={claimAllTxPhase}
+            labelContext="claim"
+            className="min-h-[1.25rem] text-center"
+          />
         </div>
       ) : null}
 

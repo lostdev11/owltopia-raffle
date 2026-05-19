@@ -7,6 +7,7 @@ import {
 } from '@metaplex-foundation/umi'
 import { fetchAsset, fetchCollection, thawAsset, updatePlugin } from '@metaplex-foundation/mpl-core'
 import {
+  assetOwnerAddress,
   isMplCoreNestingLockHeld,
   mplCoreNestCanServerRefreeze,
   mplCoreNestNeedsWalletRelock,
@@ -178,6 +179,26 @@ export function getNestingNftFreezeDelegateAddress(): string {
   const configured = getNestingNftFreezeAuthorityWallet()
   if (configured) return configured
   return getNestingNftFreezeAuthorityKeypair()?.publicKey.toBase58() ?? ''
+}
+
+/** Owner-delegate Owl Nest that is thawed but still in the holder wallet — OK to pay OWL claims without a wallet re-lock. */
+export async function isOwnerThawedOwlNestEligibleForClaim(params: {
+  assetId: string
+  ownerWallet: string
+  collectionMint?: string | null
+}): Promise<boolean> {
+  try {
+    const { umi } = await createCoreAuthorityUmi()
+    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+    const fd = readMplCoreFreezeDelegate(asset)
+    return (
+      fd?.authorityType === 'Owner' &&
+      fd.frozen !== true &&
+      assetOwnerAddress(asset) === params.ownerWallet.trim()
+    )
+  } catch {
+    return false
+  }
 }
 
 /** Read-only: true when the nest lock is active on-chain (nesting delegate or Owner freeze). */

@@ -257,7 +257,7 @@ export async function executeClaim(params: {
   if (!pool) {
     throw new StakingUserError('Pool not found', 400)
   }
-  await assertActiveNftNestOnChainLock(row, pool, { repairMissingFreeze: true })
+  await assertActiveNftNestOnChainLock(row, pool, { allowOwnerThawedForClaim: true })
 
   const stakedAtMs = new Date(row.staked_at).getTime()
   const asOfMs = Date.now()
@@ -364,7 +364,7 @@ export async function executeClaimAll(params: { wallet: string }) {
     if (!rowPool) {
       throw new StakingUserError('Pool not found', 400)
     }
-    await assertActiveNftNestOnChainLock(row, rowPool, { repairMissingFreeze: true })
+    await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
   }
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()

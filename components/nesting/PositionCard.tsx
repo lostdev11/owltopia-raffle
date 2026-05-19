@@ -334,7 +334,7 @@ export function PositionNestRow({
                 'Claim OWL'
               )
             ) : (
-              nestingTxPhaseLabel(claimPhase)
+              nestingTxPhaseLabel(claimPhase, 'claim')
             )}
           </Button>
         )}

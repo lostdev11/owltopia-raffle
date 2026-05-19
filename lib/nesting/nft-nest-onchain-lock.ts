@@ -3,6 +3,7 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { StakingUserError } from '@/lib/nesting/errors'
 import {
   assertWalletNftFrozenForNesting,
+  isOwnerThawedOwlNestEligibleForClaim,
   isWalletNftFrozenForNestingDelegate,
 } from '@/lib/nesting/nft-freeze'
 
@@ -31,6 +32,8 @@ export async function assertNftNestOnChainLockHeld(params: {
   assetId: string
   collectionMint?: string | null
   repairMissingFreeze?: boolean
+  /** Pay OWL rewards without forcing a wallet re-lock when the coin uses Owner freeze (thawed). */
+  allowOwnerThawedForClaim?: boolean
 }): Promise<void> {
   const assetId = params.assetId.trim()
   const ownerWallet = params.ownerWallet.trim()
@@ -41,8 +44,18 @@ export async function assertNftNestOnChainLockHeld(params: {
   const alreadyFrozen = await isWalletNftFrozenForNestingDelegate({
     assetId,
     collectionMint: params.collectionMint,
+    ownerWallet,
   })
   if (alreadyFrozen) return
+
+  if (params.allowOwnerThawedForClaim) {
+    const ownerThawed = await isOwnerThawedOwlNestEligibleForClaim({
+      assetId,
+      ownerWallet,
+      collectionMint: params.collectionMint,
+    })
+    if (ownerThawed) return
+  }
 
   if (params.repairMissingFreeze) {
     await assertWalletNftFrozenForNesting({
@@ -62,7 +75,7 @@ export async function assertNftNestOnChainLockHeld(params: {
 export async function assertActiveNftNestOnChainLock(
   position: StakingPositionRow,
   pool: StakingPoolRow,
-  options?: { repairMissingFreeze?: boolean }
+  options?: { repairMissingFreeze?: boolean; allowOwnerThawedForClaim?: boolean }
 ): Promise<void> {
   if (!positionRequiresOnChainNftFreezeLock(position, pool)) return
   await assertNftNestOnChainLockHeld({
@@ -70,6 +83,7 @@ export async function assertActiveNftNestOnChainLock(
     assetId: position.asset_identifier!,
     collectionMint: pool.collection_key,
     repairMissingFreeze: options?.repairMissingFreeze ?? false,
+    allowOwnerThawedForClaim: options?.allowOwnerThawedForClaim ?? false,
   })
 }
 
