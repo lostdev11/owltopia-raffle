@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth-server'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
 import { healPendingNftNestsForWallet } from '@/lib/nesting/heal-pending-nft-freeze'
+import { healOrphanedOnChainFrozenNestsForWallet } from '@/lib/nesting/heal-orphaned-onchain-frozen'
 import { reconcileActiveNftFreezeLocksForWallet } from '@/lib/nesting/reconcile-active-nft-freeze'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -35,6 +36,8 @@ export async function GET(request: NextRequest) {
 
     const { cleared_count, results: clear_results } =
       await clearOrphanedPendingNftNestsForWallet(session.wallet)
+    const { healed_count: healed_orphan_frozen_count, results: heal_orphan_frozen_results } =
+      await healOrphanedOnChainFrozenNestsForWallet(session.wallet)
     const { positions: afterHeal, results: heal_results } = await healPendingNftNestsForWallet(session.wallet)
     const { results: reconcile_results } = await reconcileActiveNftFreezeLocksForWallet(session.wallet)
     const positions = afterHeal
@@ -45,6 +48,12 @@ export async function GET(request: NextRequest) {
       wallet: session.wallet,
       positions,
       ...(cleared_count > 0 ? { cleared_orphaned_count: cleared_count, clear_orphaned_results: clear_results.filter((r) => r.cleared) } : {}),
+      ...(healed_orphan_frozen_count > 0
+        ? {
+            healed_orphan_frozen_count,
+            heal_orphan_frozen_results: heal_orphan_frozen_results.filter((r) => r.healed),
+          }
+        : {}),
       ...(healed_count > 0 ? { healed_count, heal_results } : {}),
       ...(reconciled_count > 0 ? { reconciled_freeze_count: reconciled_count } : {}),
       ...(reconcile_failures.length > 0

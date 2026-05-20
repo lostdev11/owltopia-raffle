@@ -1342,6 +1342,7 @@ export function DashboardNestingClient() {
                   positionAssetId,
                   delegateAddress
                 )
+                // Wallet returns null when already locked or when only the server delegate can re-freeze.
                 await confirmNftNestFreeze(walletSig ?? json.position?.stake_signature ?? null)
               }
             }

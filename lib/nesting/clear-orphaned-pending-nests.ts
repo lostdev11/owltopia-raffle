@@ -14,7 +14,18 @@ export type ClearOrphanedPendingNestResult = {
   positionId: string
   asset_identifier: string | null
   cleared: boolean
-  reason?: 'not_orphaned' | 'still_frozen_on_chain' | 'pool_not_found'
+  reason?: 'not_orphaned' | 'still_frozen_on_chain' | 'pool_not_found' | 'opening_grace'
+}
+
+/** Do not clear in-flight opens until the holder has had time to approve the wallet lock (mobile). */
+const DEFAULT_ORPHANED_PENDING_CLEAR_GRACE_MS = 10 * 60 * 1000
+
+function orphanedPendingClearGraceMs(): number {
+  const raw = process.env.NESTING_ORPHANED_PENDING_CLEAR_GRACE_MS?.trim()
+  if (!raw) return DEFAULT_ORPHANED_PENDING_CLEAR_GRACE_MS
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_ORPHANED_PENDING_CLEAR_GRACE_MS
+  return Math.floor(n)
 }
 
 /**
@@ -56,6 +67,11 @@ async function tryClearOrphanedPendingNest(
   const pool = await getStakingPoolById(position.pool_id)
   if (!pool || pool.asset_type !== 'nft') {
     return { ...base, reason: 'pool_not_found' }
+  }
+
+  const createdMs = new Date(position.created_at).getTime()
+  if (!Number.isNaN(createdMs) && Date.now() - createdMs < orphanedPendingClearGraceMs()) {
+    return { ...base, reason: 'opening_grace' }
   }
 
   const frozen = await isWalletNftFrozenForNestingDelegate({

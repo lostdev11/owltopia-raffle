@@ -8,6 +8,7 @@ import { addPlugin, fetchAsset, updatePlugin } from '@metaplex-foundation/mpl-co
 import bs58 from 'bs58'
 import {
   isMplCoreNestingLockHeld,
+  mplCoreNestCanServerRefreeze,
   mplCoreNestNeedsWalletRelock,
   readMplCoreFreezeDelegate,
 } from '@/lib/solana/mpl-core-nest-lock'
@@ -90,6 +91,10 @@ export async function batchRelockMplCoreNestAssetsInWallet({
       nestingDelegateAddress: delegate,
       ownerWallet,
     })
+
+    if (mplCoreNestCanServerRefreeze({ asset: assetAccount, nestingDelegateAddress: delegate })) {
+      continue
+    }
 
     if (existing && !needsRelock) {
       throw new Error(
@@ -178,6 +183,10 @@ export async function addMplCoreFreezeDelegate({
     nestingDelegateAddress: delegate,
     ownerWallet,
   })
+
+  if (mplCoreNestCanServerRefreeze({ asset: assetAccount, nestingDelegateAddress: delegate })) {
+    return null
+  }
 
   if (existing && !needsRelock) {
     throw new Error(
