@@ -21,8 +21,11 @@ import {
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import type { Raffle } from '@/lib/types'
 
-/** PostgREST page size; must paginate — a hard .limit() undercounts once row count exceeds the cap. */
-const LEADERBOARD_PAGE_SIZE = 2500
+/**
+ * PostgREST page size for `.range()` pagination. Supabase caps each response at 1000 rows;
+ * requesting a larger range still returns at most 1000, so the loop must use ≤1000 or it stops early.
+ */
+const LEADERBOARD_PAGE_SIZE = 1000
 
 /** Raffles likely did not exist before this year; clamps year picker / API. */
 const LEADERBOARD_MIN_YEAR = 2024

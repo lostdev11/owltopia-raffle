@@ -60,8 +60,11 @@ export async function GET(request: NextRequest) {
     }
 
     const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
-    // Cap holder enrichment so a huge unique-creator count cannot run unbounded (Pro maxDuration is still finite).
-    const enriched = await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 45_000 })
+    // Cart browse (`active=true`) only needs purchasability fields — skip Helius holder enrichment (timeouts).
+    const skipHolderEnrich = activeOnly || searchParams.get('lite') === 'true'
+    const enriched = skipHolderEnrich
+      ? filtered
+      : await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 45_000 })
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

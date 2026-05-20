@@ -91,8 +91,8 @@ function LeaderboardTable({
   return (
     <Card className="border-green-500/20 bg-black/40 overflow-visible">
       <CardHeader className="pb-2 sm:pb-6">
-        <details className="group" open>
-          <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+        <details className="group">
+          <summary className="list-none cursor-pointer touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Icon className="h-5 w-5 text-green-500 shrink-0" aria-hidden />
               <span className="underline-offset-2 group-open:underline hover:underline">{title}</span>

@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { getCachedAdmin } from '@/lib/admin-check-cache'
+import { fetchCartBrowseRaffles } from '@/lib/cart/fetch-cart-browse-raffles'
 import { Input } from '@/components/ui/input'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import type { Raffle } from '@/lib/types'
@@ -85,30 +88,35 @@ function sortPurchasable(a: Raffle, b: Raffle): number {
 }
 
 export function CartBrowseRaffles() {
+  const { publicKey } = useWallet()
   const { lines, addItem } = useCart()
   const [list, setList] = useState<Raffle[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [flashError, setFlashError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const cartCurrency = lines[0]?.snapshot.currency ?? null
+  const viewerWallet = publicKey?.toBase58() ?? null
 
   useEffect(() => {
+    const ac = new AbortController()
     let cancelled = false
+    setList(null)
+    setLoadError(null)
     ;(async () => {
+      const viewerIsAdmin = viewerWallet ? getCachedAdmin(viewerWallet) === true : false
       try {
-        const res = await fetch('/api/raffles?active=true', { credentials: 'include' })
-        if (!res.ok) {
-          setLoadError('Could not load raffles. Try again in a moment.')
-          setList([])
-          return
-        }
-        const data = (await res.json()) as Raffle[]
+        const { raffles, error } = await fetchCartBrowseRaffles({
+          viewerWallet,
+          viewerIsAdmin,
+          signal: ac.signal,
+        })
         if (cancelled) return
-        setList(Array.isArray(data) ? data : [])
-        setLoadError(null)
+        setList(raffles)
+        setLoadError(error)
       } catch {
-        if (!cancelled) {
+        if (!cancelled && !ac.signal.aborted) {
           setLoadError('Network error loading raffles.')
           setList([])
         }
@@ -116,8 +124,9 @@ export function CartBrowseRaffles() {
     })()
     return () => {
       cancelled = true
+      ac.abort()
     }
-  }, [])
+  }, [viewerWallet, reloadKey])
 
   const purchasable = useMemo(() => {
     if (!list) return []
@@ -160,7 +169,26 @@ export function CartBrowseRaffles() {
   }
 
   if (loadError) {
-    return <p className="text-sm text-destructive py-4">{loadError}</p>
+    return (
+      <div className="py-4 space-y-3">
+        <p className="text-sm text-destructive">{loadError}</p>
+        <p className="text-sm text-muted-foreground">
+          You can still check out tickets already in your cart, or browse{' '}
+          <Link href="/raffles" className="text-primary underline-offset-2 hover:underline">
+            all raffles
+          </Link>
+          .
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-[44px] touch-manipulation"
+          onClick={() => setReloadKey(k => k + 1)}
+        >
+          Try again
+        </Button>
+      </div>
+    )
   }
 
   if (purchasable.length === 0) {

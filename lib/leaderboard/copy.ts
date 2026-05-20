@@ -44,8 +44,8 @@ export function leaderboardTableDescriptions(meta: LeaderboardTableCopyMeta | nu
 
   const created =
     meta == null || meta.kind === 'all'
-      ? 'Creators who have launched the most raffles.'
-      : `Creators who launched the most raffles in this period (${scope}).`
+      ? `Creators who have launched the most qualifying raffles. ${antiAbuse}`
+      : `Creators who launched the most qualifying raffles in this period (${scope}). ${antiAbuse}`
 
   const won =
     meta == null || meta.kind === 'all'
