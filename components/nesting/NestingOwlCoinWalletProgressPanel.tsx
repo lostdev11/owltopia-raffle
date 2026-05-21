@@ -66,7 +66,7 @@ export function NestingOwlCoinWalletProgressPanel({
     const addr = publicKey.toBase58()
     setPositionsLoaded(false)
     try {
-      const res = await fetch('/api/me/staking/positions', {
+      const res = await fetch('/api/me/staking/positions?heal=0', {
         credentials: 'include',
         cache: 'no-store',
         headers: { 'X-Connected-Wallet': addr },

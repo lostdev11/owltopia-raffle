@@ -47,7 +47,7 @@ export function NestingLandingClient({
     const addr = publicKey.toBase58()
     setPositionPreview(null)
     setClaimableOwlPreview(null)
-    fetch('/api/me/staking/positions', {
+    fetch('/api/me/staking/positions?heal=0', {
       credentials: 'include',
       cache: 'no-store',
       headers: { 'X-Connected-Wallet': addr },

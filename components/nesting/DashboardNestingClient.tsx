@@ -84,8 +84,17 @@ import { getTokenInfo } from '@/lib/tokens'
 import { addMplCoreFreezeDelegate } from '@/lib/solana/mpl-core-freeze'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import { formatNestingWalletError } from '@/lib/nesting/wallet-error'
+import {
+  fetchNestingJson,
+  formatNestingApiFetchError,
+  nestingClientApiUrl,
+  NESTING_CLAIM_FETCH_TIMEOUT_MS,
+  nestingFetchNetworkErrorMessage,
+  nestingFetchTimeoutMessage,
+} from '@/lib/nesting/fetch-json'
 
 const MOBILE_401_RETRY_MS = 800
+const MOBILE_NETWORK_RETRY_MS = 1_200
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
 
 function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
@@ -234,42 +243,72 @@ export function DashboardNestingClient() {
     setClaimLedgerEvents(Array.isArray(json.events) ? json.events : [])
   }, [connected, publicKey])
 
-  const loadPositions = useCallback(async () => {
-    if (!connected || !publicKey) return
-    const addr = publicKey.toBase58()
-    const res = await fetch('/api/me/staking/positions', {
-      credentials: 'include',
-      cache: 'no-store',
-      headers: { 'X-Connected-Wallet': addr },
-    })
-    if (res.status === 401) {
-      setNeedsSignIn(true)
-      setPositions([])
-      setClaimLedgerEvents([])
-      return false
-    }
-    const json = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setError(typeof json?.error === 'string' ? json.error : 'Failed to load positions')
-      return false
-    }
-    setNeedsSignIn(false)
-    setPositions(Array.isArray(json.positions) ? json.positions : [])
-    const healedCount =
-      typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
-    if (healedCount > 0) {
-      setSuccessNotice({
-        placement: 'page',
-        message:
-          healedCount === 1
-            ? 'Finished opening 1 nest on-chain — rewards are ready to claim.'
-            : `Finished opening ${healedCount} nests on-chain — rewards are ready to claim.`,
+  const applyPositionsPayload = useCallback(
+    (json: Record<string, unknown>) => {
+      setPositions(Array.isArray(json.positions) ? (json.positions as StakingPositionRow[]) : [])
+      const healedCount =
+        typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
+      if (healedCount > 0) {
+        setSuccessNotice({
+          placement: 'page',
+          message:
+            healedCount === 1
+              ? 'Finished opening 1 nest on-chain — rewards are ready to claim.'
+              : `Finished opening ${healedCount} nests on-chain — rewards are ready to claim.`,
+        })
+      }
+      clearStalePositionPhases()
+    },
+    [clearStalePositionPhases]
+  )
+
+  const loadPositions = useCallback(
+    async (opts?: { heal?: boolean; silent?: boolean }): Promise<boolean> => {
+      if (!connected || !publicKey) return false
+      const addr = publicKey.toBase58()
+      const heal = opts?.heal !== false
+      const url = heal
+        ? '/api/me/staking/positions'
+        : '/api/me/staking/positions?heal=0'
+      const result = await fetchNestingJson<Record<string, unknown>>(url, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'X-Connected-Wallet': addr },
       })
-    }
-    clearStalePositionPhases()
-    void loadClaimLedger()
-    return true
-  }, [connected, publicKey, loadClaimLedger, clearStalePositionPhases])
+
+      if (result.status === 0 && !result.ok) {
+        if (!opts?.silent) {
+          setError(
+            result.clientTimeout
+              ? nestingFetchTimeoutMessage('positions')
+              : nestingFetchNetworkErrorMessage('positions')
+          )
+        }
+        return false
+      }
+
+      if (result.status === 401) {
+        setNeedsSignIn(true)
+        setPositions([])
+        setClaimLedgerEvents([])
+        return false
+      }
+
+      const json = result.json ?? {}
+      if (!result.ok) {
+        if (!opts?.silent) {
+          setError(typeof json.error === 'string' ? json.error : 'Failed to load positions')
+        }
+        return false
+      }
+
+      setNeedsSignIn(false)
+      applyPositionsPayload(json)
+      void loadClaimLedger()
+      return true
+    },
+    [connected, publicKey, loadClaimLedger, applyPositionsPayload]
+  )
 
   const refreshAll = useCallback(async () => {
     if (!connected || !publicKey) {
@@ -281,7 +320,7 @@ export function DashboardNestingClient() {
     setLoading(true)
     setError(null)
     await loadPools()
-    const ok = await loadPositions()
+    let ok = await loadPositions({ heal: false })
     if (
       !ok &&
       typeof window !== 'undefined' &&
@@ -289,9 +328,21 @@ export function DashboardNestingClient() {
       document.visibilityState === 'visible'
     ) {
       await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
-      await loadPositions()
+      ok = await loadPositions({ heal: false, silent: true })
+    }
+    if (
+      !ok &&
+      typeof window !== 'undefined' &&
+      isMobileDevice() &&
+      document.visibilityState === 'visible'
+    ) {
+      await new Promise((r) => setTimeout(r, MOBILE_NETWORK_RETRY_MS))
+      ok = await loadPositions({ heal: false, silent: true })
     }
     setLoading(false)
+    if (ok) {
+      void loadPositions({ heal: true, silent: true })
+    }
   }, [connected, publicKey, loadPools, loadPositions])
 
   useEffect(() => {
@@ -301,7 +352,11 @@ export function DashboardNestingClient() {
   useEffect(() => {
     if (!connected || !publicKey) return
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void loadPositions()
+      if (document.visibilityState === 'visible') {
+        void loadPositions({ heal: false, silent: true }).then((ok) => {
+          if (ok) void loadPositions({ heal: true, silent: true })
+        })
+      }
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
@@ -619,7 +674,9 @@ export function DashboardNestingClient() {
 
     try {
       const res = await fetch(
-        `/api/me/nesting/wallet-owl-nest-nfts?pool_id=${encodeURIComponent(poolId)}`,
+        nestingClientApiUrl(
+          `/api/me/nesting/wallet-owl-nest-nfts?pool_id=${encodeURIComponent(poolId)}`
+        ),
         {
           credentials: 'include',
           cache: 'no-store',
@@ -678,7 +735,7 @@ export function DashboardNestingClient() {
         status: 'done',
         mints: [],
         configured: true,
-        hint: 'Network error while loading Owltopia coins.',
+        hint: nestingFetchNetworkErrorMessage('generic'),
         resolvedCollectionAddress: undefined,
       })
     }
@@ -1073,7 +1130,7 @@ export function DashboardNestingClient() {
     setSigningIn(true)
     try {
       const addr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(addr)}`, {
+      const nonceRes = await fetch(nestingClientApiUrl(`/api/auth/nonce?wallet=${encodeURIComponent(addr)}`), {
         credentials: 'include',
       })
       if (!nonceRes.ok) {
@@ -1088,7 +1145,7 @@ export function DashboardNestingClient() {
           ? btoa(signature)
           : btoa(String.fromCharCode(...new Uint8Array(signature)))
 
-      const verifyRes = await fetch('/api/auth/verify', {
+      const verifyRes = await fetch(nestingClientApiUrl('/api/auth/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -1106,11 +1163,11 @@ export function DashboardNestingClient() {
 
       await refreshAll()
     } catch (e) {
-      setSignInError(formatNestingWalletError(e, wallet?.adapter?.name))
+      setSignInError(formatNestingApiFetchError(e, 'generic'))
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, refreshAll, wallet?.adapter?.name])
+  }, [publicKey, signMessage, refreshAll])
 
   const sendOnChainTokenStakeTransfer = useCallback(
     async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
@@ -1466,7 +1523,7 @@ export function DashboardNestingClient() {
       })
     } catch (e) {
       if (e instanceof Error && e.message === 'unstake') throw e
-      setActionError(e instanceof Error ? e.message : 'Unstake failed')
+      setActionError(formatNestingApiFetchError(e, 'generic'))
     }
   }
 
@@ -1480,25 +1537,34 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
-          const res = await fetch('/api/me/staking/claim', {
+          const result = await fetchNestingJson<{
+            error?: string
+            claimed?: number
+            claimed_rewards_total?: number
+            transaction_signature?: string | null
+            execution?: { path?: 'onchain_transfer' | 'database_only' }
+          }>('/api/me/staking/claim', {
             method: 'POST',
             credentials: 'include',
+            timeoutMs: NESTING_CLAIM_FETCH_TIMEOUT_MS,
             headers: {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
             body: JSON.stringify({ position_id: positionId, amount }),
           })
-          const json = (await res.json().catch(() => ({}))) as {
-            error?: string
-            claimed?: number
-            claimed_rewards_total?: number
-            transaction_signature?: string | null
-            execution?: { path?: 'onchain_transfer' | 'database_only' }
+          if (result.status === 0 && !result.ok) {
+            setActionError(
+              result.clientTimeout
+                ? nestingFetchTimeoutMessage('claim')
+                : nestingFetchNetworkErrorMessage('claim')
+            )
+            throw new Error('claim')
           }
-          if (!res.ok) {
+          const json = result.json ?? {}
+          if (!result.ok) {
             const err =
-              res.status === 501
+              result.status === 501
                 ? typeof json.error === 'string'
                   ? json.error
                   : 'This perch is not open yet.'
@@ -1540,7 +1606,7 @@ export function DashboardNestingClient() {
       })
     } catch (e) {
       if (e instanceof Error && e.message === 'claim') throw e
-      setActionError(formatNestingWalletError(e, wallet?.adapter?.name))
+      setActionError(formatNestingApiFetchError(e, 'claim'))
     }
   }
 
@@ -1705,15 +1771,7 @@ export function DashboardNestingClient() {
       const claimJson = await runNestingTxAction({
         onPhase: setClaimAllTxPhase,
         async execute() {
-          const res = await fetch('/api/me/staking/claim-all', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-          })
-          const json = (await res.json().catch(() => ({}))) as {
+          const result = await fetchNestingJson<{
             error?: string
             ledger_sync_failed?: boolean
             total_claimed?: number
@@ -1725,9 +1783,26 @@ export function DashboardNestingClient() {
             }>
             execution?: { path?: 'onchain_transfer' | 'database_only' }
             transaction_signature?: string | null
+          }>('/api/me/staking/claim-all', {
+            method: 'POST',
+            credentials: 'include',
+            timeoutMs: NESTING_CLAIM_FETCH_TIMEOUT_MS,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+          })
+          if (result.status === 0 && !result.ok) {
+            setActionError(
+              result.clientTimeout
+                ? nestingFetchTimeoutMessage('claim')
+                : nestingFetchNetworkErrorMessage('claim')
+            )
+            throw new Error('claim-all')
           }
+          const json = result.json ?? {}
 
-          if (!res.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
+          if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
             const pending: PendingClaimLedgerSync = {
               transaction_signature: json.transaction_signature.trim(),
               total_claimed:
@@ -1780,7 +1855,7 @@ export function DashboardNestingClient() {
             throw new Error('claim-all')
           }
 
-          if (!res.ok) {
+          if (!result.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
             setActionError(err)
             throw new Error('claim-all')
@@ -1827,7 +1902,7 @@ export function DashboardNestingClient() {
       })
     } catch (e) {
       if (e instanceof Error && e.message === 'claim-all') throw e
-      setActionError(e instanceof Error ? e.message : 'Claim all failed')
+      setActionError(formatNestingApiFetchError(e, 'claim'))
     }
   }
 

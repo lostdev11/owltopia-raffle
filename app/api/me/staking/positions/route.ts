@@ -8,8 +8,12 @@ import { reconcileActiveNftFreezeLocksForWallet } from '@/lib/nesting/reconcile-
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+/** Heal/reconcile can fan out to Helius + MPL Core; stay under Vercel's function cap. */
+export const maxDuration = 60
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
+/** Wall-clock budget for on-chain heal passes (ms). Returns DB positions even if heal is partial. */
+const HEAL_WALL_CLOCK_MS = 22_000
 
 /**
  * GET /api/me/staking/positions
@@ -34,12 +38,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ wallet: session.wallet, positions })
     }
 
+    const healStarted = Date.now()
+    const healBudgetExceeded = () => Date.now() - healStarted >= HEAL_WALL_CLOCK_MS
+
     const { cleared_count, results: clear_results } =
       await clearOrphanedPendingNftNestsForWallet(session.wallet)
     const { healed_count: healed_orphan_frozen_count, results: heal_orphan_frozen_results } =
-      await healOrphanedOnChainFrozenNestsForWallet(session.wallet)
-    const { positions: afterHeal, results: heal_results } = await healPendingNftNestsForWallet(session.wallet)
-    const { results: reconcile_results } = await reconcileActiveNftFreezeLocksForWallet(session.wallet)
+      healBudgetExceeded()
+        ? { healed_count: 0, results: [] as Awaited<ReturnType<typeof healOrphanedOnChainFrozenNestsForWallet>>['results'] }
+        : await healOrphanedOnChainFrozenNestsForWallet(session.wallet)
+    const { positions: afterHeal, results: heal_results } = healBudgetExceeded()
+      ? {
+          positions: await listStakingPositionsByWallet(session.wallet),
+          results: [] as Awaited<ReturnType<typeof healPendingNftNestsForWallet>>['results'],
+        }
+      : await healPendingNftNestsForWallet(session.wallet)
+    const { results: reconcile_results } = healBudgetExceeded()
+      ? { results: [] as Awaited<ReturnType<typeof reconcileActiveNftFreezeLocksForWallet>>['results'] }
+      : await reconcileActiveNftFreezeLocksForWallet(session.wallet)
     const positions = afterHeal
     const healed_count = heal_results.filter((r) => r.healed).length
     const reconciled_count = reconcile_results.filter((r) => r.reconciled).length
@@ -59,6 +75,7 @@ export async function GET(request: NextRequest) {
       ...(reconcile_failures.length > 0
         ? { reconcile_freeze_issues: reconcile_failures }
         : {}),
+      ...(healBudgetExceeded() ? { heal_partial: true } : {}),
     })
   } catch (e) {
     console.error('[me/staking/positions]', e)

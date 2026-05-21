@@ -6,6 +6,7 @@ import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
