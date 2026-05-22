@@ -98,9 +98,37 @@ export function AdminNestingClient() {
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
-  const [orphanHealWallet, setOrphanHealWallet] = useState('')
-  const [orphanHealRunning, setOrphanHealRunning] = useState(false)
-  const [orphanHealMsg, setOrphanHealMsg] = useState<string | null>(null)
+  const [supportWallet, setSupportWallet] = useState('')
+  const [walletDiagRunning, setWalletDiagRunning] = useState(false)
+  const [walletHealRunning, setWalletHealRunning] = useState(false)
+  const [walletDiagReport, setWalletDiagReport] = useState<{
+    wallet: string
+    wallet_nest_mint_count: number
+    positions_under_wallet: { active: number; pending: number; unstaked: number }
+    cross_wallet_rows: Array<{
+      position_id: string
+      prior_wallet: string
+      asset_identifier: string
+      status: string
+    }>
+    issues: Array<{
+      kind: string
+      severity: string
+      message: string
+      suggested_action: string
+      other_wallet?: string
+    }>
+    summary?: {
+      issue_count: number
+      high_severity_count: number
+      recommended_heal?: {
+        clear_pending: boolean
+        clear_active: boolean
+        clear_cross_wallet: boolean
+      }
+    }
+  } | null>(null)
+  const [walletSupportMsg, setWalletSupportMsg] = useState<string | null>(null)
 
   const [landingPublic, setLandingPublic] = useState(false)
   const [landingPublicLoading, setLandingPublicLoading] = useState(false)
@@ -543,47 +571,70 @@ export function AdminNestingClient() {
     }
   }
 
-  const runOrphanNestHeal = async () => {
-    const wallet = orphanHealWallet.trim()
-    setOrphanHealMsg(null)
+  const runWalletNestDiagnostics = async () => {
+    const wallet = supportWallet.trim()
+    setWalletSupportMsg(null)
+    setSaveError(null)
+    setWalletDiagReport(null)
+    if (!wallet) {
+      setSaveError('Enter the holder wallet address.')
+      return
+    }
+    setWalletDiagRunning(true)
+    try {
+      const res = await fetch(
+        `/api/admin/staking/wallet-diagnostics?wallet=${encodeURIComponent(wallet)}`,
+        { credentials: 'include' }
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Diagnostics failed')
+        return
+      }
+      setWalletDiagReport(json as typeof walletDiagReport)
+    } finally {
+      setWalletDiagRunning(false)
+    }
+  }
+
+  const runWalletNestHeal = async () => {
+    const wallet = supportWallet.trim()
+    setWalletSupportMsg(null)
     setSaveError(null)
     if (!wallet) {
       setSaveError('Enter the holder wallet address.')
       return
     }
-    setOrphanHealRunning(true)
+    setWalletHealRunning(true)
     try {
-      const pendingRes = await fetch('/api/admin/staking/clear-orphaned-pending', {
+      const res = await fetch('/api/admin/staking/heal-wallet', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet }),
+        body: JSON.stringify({ wallet, full: true }),
       })
-      const pendingJson = await pendingRes.json().catch(() => ({}))
-      if (!pendingRes.ok) {
-        setSaveError(typeof pendingJson?.error === 'string' ? pendingJson.error : 'Clear pending failed')
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Heal failed')
         return
       }
-      const activeRes = await fetch('/api/admin/staking/clear-orphaned-active', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet }),
-      })
-      const activeJson = await activeRes.json().catch(() => ({}))
-      if (!activeRes.ok) {
-        setSaveError(typeof activeJson?.error === 'string' ? activeJson.error : 'Clear active failed')
-        return
-      }
-      const pendingCleared =
-        typeof pendingJson?.cleared_count === 'number' ? pendingJson.cleared_count : 0
-      const activeCleared =
-        typeof activeJson?.cleared_count === 'number' ? activeJson.cleared_count : 0
-      setOrphanHealMsg(
-        `Ledger heal for ${wallet}: cleared ${pendingCleared} pending and ${activeCleared} active orphan nest(s). User can refresh nesting and open nests again.`
+      const pending = typeof json?.cleared_pending_count === 'number' ? json.cleared_pending_count : 0
+      const active = typeof json?.cleared_active_count === 'number' ? json.cleared_active_count : 0
+      const cross = typeof json?.cleared_cross_wallet_count === 'number' ? json.cleared_cross_wallet_count : 0
+      const remaining =
+        typeof json?.summary?.remaining_high_severity === 'number'
+          ? json.summary.remaining_high_severity
+          : null
+      setWalletSupportMsg(
+        `Healed ${wallet}: ${pending} pending, ${active} active orphan, ${cross} cross-wallet row(s) cleared.${
+          remaining != null ? ` ${remaining} high-severity issue(s) remain — re-run diagnostics.` : ''
+        } User should refresh nesting and re-open nests with wallet lock.`
       )
+      if (json.diagnostics_after) {
+        setWalletDiagReport(json.diagnostics_after as typeof walletDiagReport)
+      }
     } finally {
-      setOrphanHealRunning(false)
+      setWalletHealRunning(false)
     }
   }
 
@@ -1167,35 +1218,101 @@ export function AdminNestingClient() {
 
       <section className="space-y-4">
         <SectionHeader
-          title="Support: stuck nest ledger (wallet)"
-          description='When stake says “already in an open staking position” but claim says the coin is not locked on-chain, the DB row is out of sync. Enter the holder wallet to clear orphaned pending and active rows (no on-chain thaw).'
+          title="Support: wallet nest diagnostics & heal"
+          description="Run diagnostics on the holder wallet (current address in Phantom). Detects ledger/on-chain mismatch, orphaned rows, and nests still open under a prior wallet after NFT transfer. Heal clears DB rows only — no on-chain thaw."
         />
         <Card className="rounded-xl border-border/60">
           <CardContent className="pt-6 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="orphan-heal-wallet">Holder wallet</Label>
+              <Label htmlFor="support-wallet">Holder wallet</Label>
               <Input
-                id="orphan-heal-wallet"
+                id="support-wallet"
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="Solana address"
-                value={orphanHealWallet}
-                onChange={(e) => setOrphanHealWallet(e.target.value)}
+                value={supportWallet}
+                onChange={(e) => setSupportWallet(e.target.value)}
                 className="font-mono text-xs min-h-[44px] touch-manipulation"
               />
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-[44px] touch-manipulation"
-              disabled={orphanHealRunning || !orphanHealWallet.trim()}
-              onClick={() => void runOrphanNestHeal()}
-            >
-              {orphanHealRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Clear stuck nest ledger
-            </Button>
-            {orphanHealMsg ? (
-              <p className="text-sm text-muted-foreground max-w-xl">{orphanHealMsg}</p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={walletDiagRunning || walletHealRunning || !supportWallet.trim()}
+                onClick={() => void runWalletNestDiagnostics()}
+              >
+                {walletDiagRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Run diagnostics
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
+                disabled={walletHealRunning || walletDiagRunning || !supportWallet.trim()}
+                onClick={() => void runWalletNestHeal()}
+              >
+                {walletHealRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Apply full heal
+              </Button>
+            </div>
+            {walletSupportMsg ? (
+              <p className="text-sm text-muted-foreground max-w-xl">{walletSupportMsg}</p>
+            ) : null}
+            {walletDiagReport ? (
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3 text-sm">
+                <p>
+                  <span className="text-muted-foreground">Owl Nest coins in wallet:</span>{' '}
+                  <span className="font-medium tabular-nums">{walletDiagReport.wallet_nest_mint_count}</span>
+                  {' · '}
+                  <span className="text-muted-foreground">DB rows:</span>{' '}
+                  {walletDiagReport.positions_under_wallet.active} active,{' '}
+                  {walletDiagReport.positions_under_wallet.pending} pending
+                </p>
+                {walletDiagReport.cross_wallet_rows.length > 0 ? (
+                  <div>
+                    <p className="text-amber-200/95 font-medium mb-1">
+                      Cross-wallet blockers ({walletDiagReport.cross_wallet_rows.length})
+                    </p>
+                    <ul className="space-y-1 text-xs font-mono break-all text-muted-foreground">
+                      {walletDiagReport.cross_wallet_rows.slice(0, 8).map((row) => (
+                        <li key={row.position_id}>
+                          {row.asset_identifier.slice(0, 12)}… → prior {row.prior_wallet.slice(0, 12)}… (
+                          {row.status})
+                        </li>
+                      ))}
+                      {walletDiagReport.cross_wallet_rows.length > 8 ? (
+                        <li>…and {walletDiagReport.cross_wallet_rows.length - 8} more</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                ) : null}
+                {walletDiagReport.issues.length > 0 ? (
+                  <ul className="space-y-2">
+                    {walletDiagReport.issues
+                      .filter((i) => i.severity !== 'low' || i.kind === 'cross_wallet_blocker')
+                      .slice(0, 12)
+                      .map((issue, idx) => (
+                        <li
+                          key={`${issue.kind}-${idx}`}
+                          className={
+                            issue.severity === 'high'
+                              ? 'text-amber-200/95'
+                              : 'text-muted-foreground'
+                          }
+                        >
+                          <span className="font-mono text-[10px] uppercase mr-2 opacity-70">
+                            {issue.kind}
+                          </span>
+                          {issue.message}
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground">No issues detected for this wallet.</p>
+                )}
+              </div>
             ) : null}
           </CardContent>
         </Card>
