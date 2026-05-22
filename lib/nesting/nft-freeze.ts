@@ -162,8 +162,13 @@ async function createCoreAuthorityUmi() {
   return { umi, signer }
 }
 
+/** Lock eligibility / frozen checks only need the asset account (skip collection fetch + RPC 429 risk). */
+async function fetchCoreAssetOnly(umi: any, assetId: string) {
+  return fetchAsset(umi as any, umiPublicKey(assetId.trim()))
+}
+
 async function fetchCoreAssetAndCollection(umi: any, assetId: string, collectionMint?: string | null) {
-  const asset = await fetchAsset(umi as any, umiPublicKey(assetId))
+  const asset = await fetchCoreAssetOnly(umi, assetId)
   const collectionAddress =
     collectionMint?.trim() ||
     ((asset as any)?.updateAuthority?.type === 'Collection'
@@ -194,7 +199,7 @@ export async function readOwlClaimNftNestLockEligibility(params: {
 }): Promise<OwlClaimNftNestLockRead | null> {
   try {
     const { umi, signer } = await createCoreAuthorityUmi()
-    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+    const asset = await fetchCoreAssetOnly(umi, params.assetId.trim())
     const ownerWallet = params.ownerWallet.trim()
     const locked = isMplCoreNestingLockHeld({
       asset,

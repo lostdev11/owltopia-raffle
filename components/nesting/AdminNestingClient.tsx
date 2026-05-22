@@ -98,6 +98,10 @@ export function AdminNestingClient() {
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
+  const [orphanHealWallet, setOrphanHealWallet] = useState('')
+  const [orphanHealRunning, setOrphanHealRunning] = useState(false)
+  const [orphanHealMsg, setOrphanHealMsg] = useState<string | null>(null)
+
   const [landingPublic, setLandingPublic] = useState(false)
   const [landingPublicLoading, setLandingPublicLoading] = useState(false)
   const [landingPublicSaving, setLandingPublicSaving] = useState(false)
@@ -536,6 +540,50 @@ export function AdminNestingClient() {
       if (!dryRun) await runClaimLedgerAudit()
     } finally {
       setClaimCatchupRunning(false)
+    }
+  }
+
+  const runOrphanNestHeal = async () => {
+    const wallet = orphanHealWallet.trim()
+    setOrphanHealMsg(null)
+    setSaveError(null)
+    if (!wallet) {
+      setSaveError('Enter the holder wallet address.')
+      return
+    }
+    setOrphanHealRunning(true)
+    try {
+      const pendingRes = await fetch('/api/admin/staking/clear-orphaned-pending', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      })
+      const pendingJson = await pendingRes.json().catch(() => ({}))
+      if (!pendingRes.ok) {
+        setSaveError(typeof pendingJson?.error === 'string' ? pendingJson.error : 'Clear pending failed')
+        return
+      }
+      const activeRes = await fetch('/api/admin/staking/clear-orphaned-active', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      })
+      const activeJson = await activeRes.json().catch(() => ({}))
+      if (!activeRes.ok) {
+        setSaveError(typeof activeJson?.error === 'string' ? activeJson.error : 'Clear active failed')
+        return
+      }
+      const pendingCleared =
+        typeof pendingJson?.cleared_count === 'number' ? pendingJson.cleared_count : 0
+      const activeCleared =
+        typeof activeJson?.cleared_count === 'number' ? activeJson.cleared_count : 0
+      setOrphanHealMsg(
+        `Ledger heal for ${wallet}: cleared ${pendingCleared} pending and ${activeCleared} active orphan nest(s). User can refresh nesting and open nests again.`
+      )
+    } finally {
+      setOrphanHealRunning(false)
     }
   }
 
@@ -1113,6 +1161,42 @@ export function AdminNestingClient() {
               Reconcile pending positions
             </Button>
             {reconcileMsg ? <p className="text-sm text-muted-foreground">{reconcileMsg}</p> : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Support: stuck nest ledger (wallet)"
+          description='When stake says “already in an open staking position” but claim says the coin is not locked on-chain, the DB row is out of sync. Enter the holder wallet to clear orphaned pending and active rows (no on-chain thaw).'
+        />
+        <Card className="rounded-xl border-border/60">
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="orphan-heal-wallet">Holder wallet</Label>
+              <Input
+                id="orphan-heal-wallet"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Solana address"
+                value={orphanHealWallet}
+                onChange={(e) => setOrphanHealWallet(e.target.value)}
+                className="font-mono text-xs min-h-[44px] touch-manipulation"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[44px] touch-manipulation"
+              disabled={orphanHealRunning || !orphanHealWallet.trim()}
+              onClick={() => void runOrphanNestHeal()}
+            >
+              {orphanHealRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Clear stuck nest ledger
+            </Button>
+            {orphanHealMsg ? (
+              <p className="text-sm text-muted-foreground max-w-xl">{orphanHealMsg}</p>
+            ) : null}
           </CardContent>
         </Card>
       </section>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
+import { clearOrphanedActiveNftNestsForWallet } from '@/lib/nesting/clear-orphaned-active-nests'
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
 import { healPendingNftNestsForWallet } from '@/lib/nesting/heal-pending-nft-freeze'
 import { healOrphanedOnChainFrozenNestsForWallet } from '@/lib/nesting/heal-orphaned-onchain-frozen'
@@ -56,7 +57,16 @@ export async function GET(request: NextRequest) {
     const { results: reconcile_results } = healBudgetExceeded()
       ? { results: [] as Awaited<ReturnType<typeof reconcileActiveNftFreezeLocksForWallet>>['results'] }
       : await reconcileActiveNftFreezeLocksForWallet(session.wallet)
-    const positions = afterHeal
+    const { cleared_count: cleared_active_count, results: clear_active_results } =
+      healBudgetExceeded()
+        ? {
+            cleared_count: 0,
+            results: [] as Awaited<ReturnType<typeof clearOrphanedActiveNftNestsForWallet>>['results'],
+          }
+        : await clearOrphanedActiveNftNestsForWallet(session.wallet)
+    const positions = healBudgetExceeded()
+      ? afterHeal
+      : (await listStakingPositionsByWallet(session.wallet))
     const healed_count = heal_results.filter((r) => r.healed).length
     const reconciled_count = reconcile_results.filter((r) => r.reconciled).length
     const reconcile_failures = reconcile_results.filter((r) => !r.reconciled)
@@ -74,6 +84,12 @@ export async function GET(request: NextRequest) {
       ...(reconciled_count > 0 ? { reconciled_freeze_count: reconciled_count } : {}),
       ...(reconcile_failures.length > 0
         ? { reconcile_freeze_issues: reconcile_failures }
+        : {}),
+      ...(cleared_active_count > 0
+        ? {
+            cleared_orphaned_active_count: cleared_active_count,
+            clear_orphaned_active_results: clear_active_results.filter((r) => r.cleared),
+          }
         : {}),
       ...(healBudgetExceeded() ? { heal_partial: true } : {}),
     })
