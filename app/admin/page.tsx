@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +15,7 @@ import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import type { CreatorHealthRow } from '@/lib/db/creator-health'
+import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 
@@ -151,6 +152,10 @@ export default function AdminDashboardPage() {
 
   const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
   const [loadingCreatorHealth, setLoadingCreatorHealth] = useState(false)
+
+  const [hotCommunities, setHotCommunities] = useState<HotCommunityRow[]>([])
+  const [loadingHotCommunities, setLoadingHotCommunities] = useState(false)
+  const [hotCommunitiesGeneratedAt, setHotCommunitiesGeneratedAt] = useState<string | null>(null)
 
   const [siteMaint, setSiteMaint] = useState<{
     starts_at: string | null
@@ -545,6 +550,30 @@ export default function AdminDashboardPage() {
       .catch((e) => console.error('Error fetching creator health:', e))
       .finally(() => {
         if (!cancelled) setLoadingCreatorHealth(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    let cancelled = false
+    setLoadingHotCommunities(true)
+    fetch('/api/admin/hot-communities', { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load hot communities')
+        return res.json() as Promise<{ communities: HotCommunityRow[]; generatedAt?: string }>
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setHotCommunities(data.communities || [])
+          setHotCommunitiesGeneratedAt(data.generatedAt ?? null)
+        }
+      })
+      .catch((e) => console.error('Error fetching hot communities:', e))
+      .finally(() => {
+        if (!cancelled) setLoadingHotCommunities(false)
       })
     return () => {
       cancelled = true
@@ -2009,6 +2038,132 @@ export default function AdminDashboardPage() {
               {!loadingCreatorHealth && creatorHealth.length > 0 && (
                 <p className="text-xs text-muted-foreground mt-4">
                   <strong className="text-foreground">Health</strong> is a 0–100 heuristic (higher is better): it down-weights extensions, post-entry edits, moderation flags, cancellations, weak sell-through, and pending verifications. Use it for triage, not as proof of bad behavior.
+                </p>
+              )}
+            </div>
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="amber-soft"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Flame className="h-5 w-5 shrink-0 text-orange-600 dark:text-orange-400" />
+                Hot communities right now
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              NFT communities with the most momentum in the last 7 days: live raffles, confirmed ticket volume, unique
+              buyers, and recent completions. Names are inferred from raffle titles (collection field is rarely set).
+              Use for promo picks, creator outreach, and spotting what entrants are engaging with.
+            </CardDescription>
+            <div>
+              {loadingHotCommunities ? (
+                <p className="text-muted-foreground flex items-center gap-2 touch-manipulation min-h-[44px]">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Loading community momentum…
+                </p>
+              ) : hotCommunities.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No communities with recent activity yet.</p>
+              ) : (
+                <div className="overflow-x-auto -mx-1 px-1 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-sm border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-3 font-medium">Community</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Heuristic sort score">
+                          Hot
+                        </th>
+                        <th className="py-2 pr-2 font-medium">Trend</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Live or ready to draw">
+                          Live
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Confirmed tickets (7d)">
+                          7d tickets
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Unique buyers (7d)">
+                          7d buyers
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Completed last 30 days">
+                          30d ✓
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Success rate last 90 days">
+                          90d rate
+                        </th>
+                        <th className="py-2 font-medium">Sample raffles</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hotCommunities.map((row) => {
+                        const trendIcon =
+                          row.trend === 'rising' ? (
+                            <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                          ) : row.trend === 'cooling' ? (
+                            <ArrowDownRight className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden />
+                          ) : (
+                            <Minus className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-hidden />
+                          )
+                        const trendLabel =
+                          row.trend === 'rising' ? 'Rising' : row.trend === 'cooling' ? 'Cooling' : 'Steady'
+                        return (
+                          <tr key={row.brand} className="border-b border-border/60">
+                            <td className="py-2.5 pr-3 align-top font-medium">{row.brand}</td>
+                            <td className="py-2.5 pr-2 tabular-nums font-semibold text-orange-600 dark:text-orange-400">
+                              {row.hotScore}
+                            </td>
+                            <td className="py-2.5 pr-2 align-top">
+                              <span className="inline-flex items-center gap-1 capitalize text-xs">
+                                {trendIcon}
+                                {trendLabel}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.liveCount > 0 ? row.liveCount : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.ticketsLast7d > 0 ? row.ticketsLast7d : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.buyersLast7d > 0 ? row.buyersLast7d : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">
+                              {row.completedLast30d > 0 ? row.completedLast30d : '—'}
+                              {row.failedLast30d > 0 ? (
+                                <span className="text-red-600 dark:text-red-400"> / {row.failedLast30d} fail</span>
+                              ) : null}
+                            </td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">
+                              {row.successRate != null ? `${row.successRate}%` : '—'}
+                            </td>
+                            <td className="py-2.5 align-top">
+                              <ul className="space-y-1 text-xs">
+                                {row.sampleRaffles.map((r) => (
+                                  <li key={r.id}>
+                                    <Link
+                                      href={`/raffles/${encodeURIComponent(r.slug)}`}
+                                      className="text-primary underline-offset-2 hover:underline touch-manipulation inline-flex flex-wrap items-center gap-1 min-h-[44px] py-1"
+                                    >
+                                      <span className="line-clamp-1">{r.title}</span>
+                                      <span className="text-muted-foreground tabular-nums shrink-0">
+                                        ({r.uniqueBuyers}b · {r.ticketsSold}t)
+                                      </span>
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!loadingHotCommunities && hotCommunities.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  <strong className="text-foreground">Hot</strong> scores weight live raffles, 7-day ticket velocity,
+                  buyers, and recent completions. <strong className="text-foreground">Trend</strong> compares 7-day
+                  tickets to the prior 7 days.
+                  {hotCommunitiesGeneratedAt ? (
+                    <> Updated {new Date(hotCommunitiesGeneratedAt).toLocaleString()}.</>
+                  ) : null}
                 </p>
               )}
             </div>
