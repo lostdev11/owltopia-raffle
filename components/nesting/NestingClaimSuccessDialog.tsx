@@ -14,12 +14,19 @@ import { Button } from '@/components/ui/button'
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  title?: string
   message: string
   hint?: string
 }
 
-/** Mobile-friendly success popup after OWL claim (single nest or claim all). */
-export function NestingClaimSuccessDialog({ open, onOpenChange, message, hint }: Props) {
+/** Mobile-friendly success popup after nesting, OWL claim, or heal-on-load. */
+export function NestingClaimSuccessDialog({
+  open,
+  onOpenChange,
+  title = 'Claim successful',
+  message,
+  hint,
+}: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm border-theme-prime/45 sm:max-w-md">
@@ -30,7 +37,7 @@ export function NestingClaimSuccessDialog({ open, onOpenChange, message, hint }:
           >
             <CheckCircle2 className="h-8 w-8 text-theme-prime" />
           </div>
-          <DialogTitle className="text-xl">Claim successful</DialogTitle>
+          <DialogTitle className="text-xl">{title}</DialogTitle>
           <DialogDescription className="text-base text-foreground leading-relaxed pt-1">
             {message}
           </DialogDescription>

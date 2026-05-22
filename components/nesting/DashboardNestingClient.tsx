@@ -159,12 +159,11 @@ export function DashboardNestingClient() {
   const [successNotice, setSuccessNotice] = useState<{
     message: string
     hint?: string
-    placement: 'form' | 'page' | 'modal'
+    title?: string
+    placement: 'modal'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
   const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
-  const stakeSuccessRef = useRef<HTMLDivElement | null>(null)
-
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeAssetId, setStakeAssetId] = useState('')
   const [stakeAssetIds, setStakeAssetIds] = useState<string[]>([])
@@ -282,11 +281,13 @@ export function DashboardNestingClient() {
         typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
       if (healedCount > 0) {
         setSuccessNotice({
-          placement: 'page',
+          placement: 'modal',
+          title: healedCount === 1 ? 'Nest opened successfully' : 'Nests opened successfully',
           message:
             healedCount === 1
-              ? 'Finished opening 1 nest on-chain — rewards are ready to claim.'
-              : `Finished opening ${healedCount} nests on-chain — rewards are ready to claim.`,
+              ? 'Your Owltopia coin is nested and the wallet lock is confirmed on-chain.'
+              : `${healedCount} Owltopia coins are nested and wallet locks are confirmed on-chain.`,
+          hint: 'OWL rewards are accruing. Claim anytime in Your nests below.',
         })
       }
       clearStalePositionPhases()
@@ -415,16 +416,6 @@ export function DashboardNestingClient() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [connected, publicKey, loadPositions])
 
-  useEffect(() => {
-    if (!successNotice || successNotice.placement === 'modal') return
-    const t = window.setTimeout(() => setSuccessNotice(null), 12_000)
-    return () => window.clearTimeout(t)
-  }, [successNotice])
-
-  useEffect(() => {
-    if (successNotice?.placement !== 'form') return
-    stakeSuccessRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [successNotice])
 
   const [rewardsNowMs, setRewardsNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -1709,19 +1700,25 @@ export function DashboardNestingClient() {
       })
       const nestedCount = result.nestedCount
       setSuccessNotice({
-        placement: 'form',
+        placement: 'modal',
+        title:
+          pool.asset_type === 'nft'
+            ? nestedCount === 1
+              ? 'Nest opened successfully'
+              : 'Nests opened successfully'
+            : 'Nest opened successfully',
         message:
           pool.asset_type === 'nft'
             ? nestedCount === 1
-              ? 'Owltopia coin nested successfully! Wallet lock confirmed.'
-              : `${nestedCount} Owltopia coins nested successfully! Wallet lock confirmed.`
-            : 'Nest opened successfully! Stake confirmed.',
+              ? 'Your Owltopia coin is nested and the wallet lock is confirmed.'
+              : `${nestedCount} Owltopia coins are nested and wallet locks are confirmed.`
+            : 'Your stake is confirmed for this perch.',
         hint:
           pool.asset_type === 'nft'
             ? nestedCount === 1
               ? 'Your coin stays in your wallet while rewards accrue. Claim OWL anytime in Your nests below.'
-              : 'Your coins stay in your wallet while rewards accrue for each perch. Claim OWL anytime in Your nests below.'
-            : 'Your stake is on file for this perch. Claim OWL anytime in Your nests below.',
+              : 'Your coins stay in your wallet while rewards accrue. Claim OWL anytime in Your nests below.'
+            : 'OWL rewards accrue on this perch. Claim anytime in Your nests below.',
       })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -1857,6 +1854,7 @@ export function DashboardNestingClient() {
       const claimedLabel = claimedAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })
       setSuccessNotice({
         placement: 'modal',
+        title: 'Claim successful',
         message:
           claimJson.execution?.path === 'database_only'
             ? `${claimedLabel} OWL recorded for this nest.`
@@ -1968,6 +1966,7 @@ export function DashboardNestingClient() {
       const totalLabel = pending.total_claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })
       setSuccessNotice({
         placement: 'modal',
+        title: 'Claim successful',
         message: `Nest records updated — your ${totalLabel} OWL claim is recorded.`,
         hint: 'Your dashboard now matches the payout already in your wallet.',
       })
@@ -2006,6 +2005,7 @@ export function DashboardNestingClient() {
       await loadClaimLedger()
       setSuccessNotice({
         placement: 'modal',
+        title: 'Claim successful',
         message:
           'Nest records updated — your dashboard now matches the OWL already in your wallet.',
         hint: 'You can claim new rewards as they accrue.',
@@ -2160,6 +2160,7 @@ export function DashboardNestingClient() {
       const totalLabel = total.toLocaleString(undefined, { maximumFractionDigits: 6 })
       setSuccessNotice({
         placement: 'modal',
+        title: 'Claim successful',
         message:
           claimJson.execution?.path === 'database_only'
             ? `${totalLabel} OWL recorded from ${count} nests.`
@@ -2385,27 +2386,6 @@ export function DashboardNestingClient() {
               size="sm"
               className="min-h-[44px] shrink-0 touch-manipulation self-start sm:self-center"
               onClick={() => setClaimLedgerNotice(null)}
-            >
-              Dismiss
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {successNotice?.placement === 'page' ? (
-        <div
-          className="rounded-lg border border-green-500 bg-green-500/10 px-4 py-3 text-sm text-green-600 dark:text-green-500 space-y-2"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-            <p className="leading-relaxed min-w-0 flex-1 font-medium">{successNotice.message}</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-h-[44px] shrink-0 touch-manipulation border-green-500/40 bg-background/80 sm:self-center"
-              onClick={() => setSuccessNotice(null)}
             >
               Dismiss
             </Button>
@@ -3238,19 +3218,6 @@ export function DashboardNestingClient() {
           }
           actions={
             <>
-            {successNotice?.placement === 'form' ? (
-              <div
-                ref={stakeSuccessRef}
-                className="rounded-lg border border-green-500 bg-green-500/10 p-3 text-sm text-green-600 dark:text-green-500 space-y-2"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="font-medium leading-snug">{successNotice.message}</p>
-                {successNotice.hint ? (
-                  <p className="text-xs opacity-90 leading-relaxed">{successNotice.hint}</p>
-                ) : null}
-              </div>
-            ) : null}
             <NestingActionStatusLine phase={stakeTxPhase} className="min-h-[1.25rem] text-center sm:text-left" />
             {nftStakeBatchHint ? (
               <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="status">
@@ -3397,12 +3364,13 @@ export function DashboardNestingClient() {
       ) : null}
 
       <NestingClaimSuccessDialog
-        open={successNotice?.placement === 'modal'}
+        open={successNotice !== null}
         onOpenChange={(open) => {
           if (!open) setSuccessNotice(null)
         }}
-        message={successNotice?.placement === 'modal' ? successNotice.message : ''}
-        hint={successNotice?.placement === 'modal' ? successNotice.hint : undefined}
+        title={successNotice?.title}
+        message={successNotice?.message ?? ''}
+        hint={successNotice?.hint}
       />
     </main>
   )
