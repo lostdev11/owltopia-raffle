@@ -141,6 +141,8 @@ export default function AdminDashboardPage() {
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
+  const [revenueLoadError, setRevenueLoadError] = useState<string | null>(null)
+  const revenueHasDataRef = useRef(false)
   const [revShareSchedule, setRevShareSchedule] = useState<{ next_date: string | null; total_sol: number | null; total_usdc: number | null } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
@@ -487,25 +489,45 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) {
+      revenueHasDataRef.current = false
+      setRevenue(null)
+      setRevenueLoadError(null)
+      setLoadingRevenue(false)
+      return
+    }
     const fetchRevenue = async () => {
-      if (!connected || !publicKey || !isAdmin || !sessionReady) return
-      setLoadingRevenue(true)
+      const isInitialLoad = !revenueHasDataRef.current
+      if (isInitialLoad) setLoadingRevenue(true)
       try {
         const res = await fetch(
           `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
           { credentials: 'include', cache: 'no-store' }
         )
-        if (res.ok) {
-          const data = await res.json()
-          setRevenue(data)
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const msg =
+            (typeof data?.error === 'string' && data.error) || 'Failed to load projected revenue'
+          if (!revenueHasDataRef.current) {
+            setRevenue(null)
+            setRevenueLoadError(msg)
+          }
+          return
         }
+        setRevenue(data as import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse)
+        setRevenueLoadError(null)
+        revenueHasDataRef.current = true
       } catch (e) {
         console.error('Error fetching projected revenue:', e)
+        if (!revenueHasDataRef.current) {
+          setRevenue(null)
+          setRevenueLoadError('Network error while loading projected revenue.')
+        }
       } finally {
-        setLoadingRevenue(false)
+        if (isInitialLoad) setLoadingRevenue(false)
       }
     }
-    if (isAdmin && sessionReady) fetchRevenue()
+    void fetchRevenue()
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
@@ -1632,12 +1654,25 @@ export default function AdminDashboardPage() {
             Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
           </CardDescription>
           <div>
-            {loadingRevenue ? (
-              <p className="text-muted-foreground flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading…
+            {revenueLoadError && revenue === null ? (
+              <div className="space-y-3">
+                <p className="text-sm text-destructive">{revenueLoadError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 touch-manipulation"
+                  onClick={() => setAutoRefreshTick((t) => t + 1)}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : loadingRevenue || revenue === null ? (
+              <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                Loading projected revenue…
               </p>
-            ) : revenue ? (
+            ) : (
               <div className="space-y-6">
                 {/* All-time totals */}
                 <div>
@@ -1800,8 +1835,6 @@ export default function AdminDashboardPage() {
                   </div>
                 )}
               </div>
-            ) : (
-              <p className="text-muted-foreground">No revenue data</p>
             )}
           </div>
         </OwlVisionDisclosure>
