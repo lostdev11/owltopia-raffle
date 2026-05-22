@@ -1,6 +1,6 @@
 /** Client fetch helper — avoids indefinite "Warming up your nest" when heal/RPC is slow. */
 
-import { isMobileDevice } from '@/lib/utils'
+import { isAndroidDevice, isMobileDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export const NESTING_POSITIONS_FETCH_TIMEOUT_MS = 28_000
 export const NESTING_CLAIM_FETCH_TIMEOUT_MS = 55_000
@@ -69,21 +69,36 @@ export async function fetchNestingJson<T = Record<string, unknown>>(
   }
 }
 
+function mobileBrowserFallbackHint(): string {
+  if (typeof window === 'undefined') return ''
+  if (isSolanaMobileEnvironment()) {
+    return ' On Seeker, try Chrome or Brave with Solana Mobile in the wallet list, or Phantom/Solflare if the built-in wallet does not connect.'
+  }
+  if (isAndroidDevice()) {
+    return ' On Android, try Chrome with Phantom/Solflare, or pick Solana Mobile in the wallet list.'
+  }
+  if (isMobileDevice()) {
+    return ' Try opening the site in your phone\'s browser (Safari or Chrome), not only inside the wallet app.'
+  }
+  return ''
+}
+
 /** User-facing copy when fetch never got an HTTP response (common in Phantom/Solflare in-app browsers). */
 export function nestingFetchNetworkErrorMessage(kind: 'positions' | 'claim' | 'generic'): string {
   const mobile = typeof window !== 'undefined' && isMobileDevice()
+  const fallback = mobileBrowserFallbackHint()
   if (kind === 'claim') {
     return mobile
-      ? 'Could not reach Owltopia to finish your claim (wallet browser lost the connection). Wait a few seconds, refresh, and check your OWL balance before claiming again. If it repeats, open owltopia.xyz in Safari or Chrome, connect the same wallet, and claim there.'
+      ? `Could not reach Owltopia to finish your claim (connection dropped). Wait a few seconds, refresh, and check your OWL balance before claiming again.${fallback}`
       : 'Could not reach the server to finish your claim. Refresh the page and check your OWL balance before trying again.'
   }
   if (kind === 'positions') {
     return mobile
-      ? 'Could not load your nest (wallet browser connection dropped). Try WiFi or mobile data, wait a few seconds, and tap Retry. If you still see "Failed to fetch", open the site in Safari or Chrome instead of only inside the wallet app, then connect the same wallet.'
+      ? `Could not load your nest (connection dropped). Try WiFi or mobile data, wait a few seconds, and tap Retry.${fallback}`
       : 'Could not load your nest — the connection to Owltopia was interrupted. Check your network and tap Retry.'
   }
   return mobile
-    ? 'Network error — try again on WiFi or mobile data, or open the site in your phone\'s browser.'
+    ? `Network error — try again on WiFi or mobile data.${fallback}`
     : 'Network error — check your connection and try again.'
 }
 

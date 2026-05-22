@@ -3,8 +3,7 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { StakingUserError } from '@/lib/nesting/errors'
 import {
   assertWalletNftFrozenForNesting,
-  isOwnerThawedOwlNestEligibleForClaim,
-  isWalletNftFrozenForNestingDelegate,
+  readOwlClaimNftNestLockEligibility,
 } from '@/lib/nesting/nft-freeze'
 
 /** NFT perches that use MPL Core FreezeDelegate (holder wallet, non-transferable while nested). */
@@ -41,22 +40,6 @@ export async function assertNftNestOnChainLockHeld(params: {
     throw new StakingUserError('NFT asset id and wallet are required for nest lock checks.', 400)
   }
 
-  const alreadyFrozen = await isWalletNftFrozenForNestingDelegate({
-    assetId,
-    collectionMint: params.collectionMint,
-    ownerWallet,
-  })
-  if (alreadyFrozen) return
-
-  if (params.allowOwnerThawedForClaim) {
-    const ownerThawed = await isOwnerThawedOwlNestEligibleForClaim({
-      assetId,
-      ownerWallet,
-      collectionMint: params.collectionMint,
-    })
-    if (ownerThawed) return
-  }
-
   if (params.repairMissingFreeze) {
     await assertWalletNftFrozenForNesting({
       ownerWallet,
@@ -65,6 +48,14 @@ export async function assertNftNestOnChainLockHeld(params: {
     })
     return
   }
+
+  const lockState = await readOwlClaimNftNestLockEligibility({
+    assetId,
+    ownerWallet,
+    collectionMint: params.collectionMint,
+  })
+  if (lockState?.locked) return
+  if (params.allowOwnerThawedForClaim && lockState?.ownerThawedEligible) return
 
   throw new StakingUserError(
     'This Owl Nest coin is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.',

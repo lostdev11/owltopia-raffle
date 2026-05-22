@@ -1,4 +1,9 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
+import {
+  defaultOwltopiaCoinPerch,
+  findStakingPoolByIdOrSlug,
+  isNftStakingPool,
+} from '@/lib/nesting/format'
 
 export function countNestedOwlCoinsForPool(positions: StakingPositionRow[], poolId: string): number {
   let count = 0
@@ -28,17 +33,16 @@ export function resolveOwlCoinNftPoolId(
 ): string | null {
   const preferred = options?.preferredPoolId?.trim()
   if (preferred) {
-    const match = pools.find((p) => p.id === preferred)
-    if (match?.asset_type === 'nft') return preferred
+    const match = findStakingPoolByIdOrSlug(pools, preferred)
+    if (match && isNftStakingPool(match)) return match.id
   }
   const locked = options?.positionLockedPoolId?.trim()
   if (locked) {
-    const match = pools.find((p) => p.id === locked)
-    if (match?.asset_type === 'nft') return locked
+    const match = findStakingPoolByIdOrSlug(pools, locked)
+    if (match && isNftStakingPool(match)) return match.id
   }
-  const nftPools = pools.filter((p) => p.asset_type === 'nft')
-  if (nftPools.length === 1) return nftPools[0]!.id
-  return null
+  const fallback = defaultOwltopiaCoinPerch(pools)
+  return fallback?.id ?? null
 }
 
 export function positionLockedPoolIdFromRows(positions: StakingPositionRow[]): string | null {

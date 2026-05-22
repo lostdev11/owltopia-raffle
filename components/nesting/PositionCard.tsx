@@ -57,7 +57,7 @@ export type PositionNestRowProps = {
   cancelOpeningAllowed?: boolean
   /** When false, position actions are disabled and shown grayed (e.g. until user acknowledges security notice). */
   actionsEnabled?: boolean
-  /** True when claim/leave are blocked until the safeguards checkbox is checked. */
+  /** True when claim/leave are blocked until safeguards are wallet-signed. */
   securityAckRequired?: boolean
   /** Blocks Leave nest / cancel opening (admin pause or deploy kill switch). */
   nestingPaused?: boolean
@@ -267,8 +267,8 @@ export function PositionNestRow({
       <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
       {securityAckRequired ? (
         <p className="w-full text-xs text-amber-200/95 leading-relaxed">
-          Check the safeguards box near the top of this page (Peek at safeguards before you nest) to unlock claim and
-          leave actions.
+          Sign the nesting safeguards with your wallet near the top of this page (Peek at safeguards before you nest) to
+          unlock claim and leave actions.
         </p>
       ) : null}
       {paysOwlRewards && claimable > 0 && !canClaimOwl ? (

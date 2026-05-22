@@ -2,9 +2,12 @@
 
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { nestingClaimAccruingButtonClass, nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
-import { nestingTxPhaseLabel, type NestingTxPhase } from '@/lib/nesting/tx-states'
+import {
+  isNestingTxPhaseInFlight,
+  nestingTxPhaseLabel,
+  type NestingTxPhase,
+} from '@/lib/nesting/tx-states'
 import { MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
 import { cn } from '@/lib/utils'
 
@@ -38,6 +41,8 @@ export function NestingClaimAllPanel({
 
   const canClaim = totalOwl >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
   const claimDisabled = disabled || !canClaim || busy
+  const txInFlight = isNestingTxPhaseInFlight(phase)
+  const statusLabel = txInFlight ? nestingTxPhaseLabel(phase, 'claim') || 'Processing your claim…' : null
 
   return (
     <div
@@ -75,42 +80,41 @@ export function NestingClaimAllPanel({
           </>
         )}
       </p>
-      {busy ? (
+      {txInFlight && statusLabel ? (
         <div
-          className="flex items-center gap-3 rounded-lg border border-theme-prime/30 bg-background/60 px-3 py-2.5"
+          className={cn(
+            'flex min-h-[52px] w-full items-center justify-center gap-3 rounded-lg border border-theme-prime/40 px-4 py-3',
+            canClaim ? 'bg-theme-prime/15' : 'bg-muted/30'
+          )}
           role="status"
           aria-live="polite"
+          aria-busy="true"
         >
           <Loader2 className="h-5 w-5 shrink-0 animate-spin text-theme-prime" aria-hidden />
-          <p className="text-sm font-medium text-foreground">
-            {nestingTxPhaseLabel(phase, 'claim') || 'Processing your claim…'}
-          </p>
+          <p className="text-sm font-medium text-foreground text-center">{statusLabel}</p>
         </div>
-      ) : null}
-      <Button
-        type="button"
-        variant={canClaim ? 'default' : 'outline'}
-        className={cn(
-          'min-h-[52px] w-full touch-manipulation text-base',
-          canClaim ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
-        )}
-        disabled={claimDisabled}
-        onClick={onClaimAll}
-        aria-disabled={claimDisabled}
-      >
-        {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
-        {busy
-          ? nestingTxPhaseLabel(phase, 'claim') || 'Processing…'
-          : canClaim
+      ) : (
+        <Button
+          type="button"
+          variant={canClaim ? 'default' : 'outline'}
+          className={cn(
+            'min-h-[52px] w-full touch-manipulation text-base',
+            canClaim ? nestingClaimReadyButtonClass : nestingClaimAccruingButtonClass
+          )}
+          disabled={claimDisabled}
+          onClick={onClaimAll}
+          aria-disabled={claimDisabled}
+        >
+          {canClaim
             ? `Claim all · ${totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`
             : 'Claim all — accruing OWL'}
-      </Button>
-      {disabledReason && canClaim ? (
+        </Button>
+      )}
+      {disabledReason && canClaim && !txInFlight ? (
         <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
           {disabledReason}
         </p>
       ) : null}
-      <NestingActionStatusLine phase={phase} labelContext="claim" className="min-h-[1.25rem] text-center" />
     </div>
   )
 }

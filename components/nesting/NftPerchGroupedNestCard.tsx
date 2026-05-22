@@ -12,6 +12,7 @@ import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
 import type { NestingTxPhase } from '@/lib/nesting/tx-states'
 import { estimateClaimableRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
 import { cn } from '@/lib/utils'
+import { NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX } from '@/lib/solana/mpl-core-freeze'
 
 type Props = {
   pool: StakingPoolRow
@@ -169,7 +170,7 @@ export function NftPerchGroupedNestCard({
             {expanded && needsWalletLock > 0 ? (
               <p className="text-xs text-amber-300/95 leading-relaxed pt-0.5">
                 {needsWalletLock === positions.length
-                  ? 'Each row still needs the wallet lock: select the matching coin in the nest form above, then tap Confirm nest — your wallet may ask once per coin (Backpack, etc.).'
+                  ? `Each row still needs the wallet lock: select coins in the nest form above, then Confirm nest — your wallet batches up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per approval (Backpack, etc.).`
                   : `${needsWalletLock} still need the wallet lock — use Confirm nest above for each coin that shows Opening.`}
               </p>
             ) : null}

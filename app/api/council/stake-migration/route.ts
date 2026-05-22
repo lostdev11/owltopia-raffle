@@ -39,7 +39,7 @@ export async function GET() {
       legacyEscrowDepositsClosed: councilLegacyEscrowDepositsAreClosed(now),
       nestingVoteSourceReady: nestingConfigured,
       nestingCouncilPoolSlug: getOwlCouncilGovernanceNestingPoolSlug(),
-      nestingDashboardUrl: '/dashboard/nesting',
+      nestingDashboardUrl: `/dashboard/nesting?pool=${encodeURIComponent(getOwlCouncilGovernanceNestingPoolSlug())}`,
       operationalNote,
     })
   } catch (e) {

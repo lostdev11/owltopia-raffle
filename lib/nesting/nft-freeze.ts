@@ -181,24 +181,45 @@ export function getNestingNftFreezeDelegateAddress(): string {
   return getNestingNftFreezeAuthorityKeypair()?.publicKey.toBase58() ?? ''
 }
 
+export type OwlClaimNftNestLockRead = {
+  locked: boolean
+  ownerThawedEligible: boolean
+}
+
+/** One MPL Core fetch for claim lock checks (avoids duplicate asset reads per nest). */
+export async function readOwlClaimNftNestLockEligibility(params: {
+  assetId: string
+  ownerWallet: string
+  collectionMint?: string | null
+}): Promise<OwlClaimNftNestLockRead | null> {
+  try {
+    const { umi, signer } = await createCoreAuthorityUmi()
+    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+    const ownerWallet = params.ownerWallet.trim()
+    const locked = isMplCoreNestingLockHeld({
+      asset,
+      nestingDelegateAddress: signer.publicKey.toString(),
+      ownerWallet,
+    })
+    const fd = readMplCoreFreezeDelegate(asset)
+    const ownerThawedEligible =
+      fd?.authorityType === 'Owner' &&
+      fd.frozen !== true &&
+      assetOwnerAddress(asset) === ownerWallet
+    return { locked, ownerThawedEligible }
+  } catch {
+    return null
+  }
+}
+
 /** Owner-delegate Owl Nest that is thawed but still in the holder wallet — OK to pay OWL claims without a wallet re-lock. */
 export async function isOwnerThawedOwlNestEligibleForClaim(params: {
   assetId: string
   ownerWallet: string
   collectionMint?: string | null
 }): Promise<boolean> {
-  try {
-    const { umi } = await createCoreAuthorityUmi()
-    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
-    const fd = readMplCoreFreezeDelegate(asset)
-    return (
-      fd?.authorityType === 'Owner' &&
-      fd.frozen !== true &&
-      assetOwnerAddress(asset) === params.ownerWallet.trim()
-    )
-  } catch {
-    return false
-  }
+  const state = await readOwlClaimNftNestLockEligibility(params)
+  return state?.ownerThawedEligible === true
 }
 
 /** Read-only: true when the nest lock is active on-chain (nesting delegate or Owner freeze). */
@@ -207,17 +228,25 @@ export async function isWalletNftFrozenForNestingDelegate(params: {
   collectionMint?: string | null
   ownerWallet?: string | null
 }): Promise<boolean> {
-  try {
-    const { umi, signer } = await createCoreAuthorityUmi()
-    const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
-    return isMplCoreNestingLockHeld({
-      asset,
-      nestingDelegateAddress: signer.publicKey.toString(),
-      ownerWallet: params.ownerWallet,
-    })
-  } catch {
-    return false
+  if (!params.ownerWallet?.trim()) {
+    try {
+      const { umi, signer } = await createCoreAuthorityUmi()
+      const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+      return isMplCoreNestingLockHeld({
+        asset,
+        nestingDelegateAddress: signer.publicKey.toString(),
+        ownerWallet: params.ownerWallet,
+      })
+    } catch {
+      return false
+    }
   }
+  const state = await readOwlClaimNftNestLockEligibility({
+    assetId: params.assetId,
+    ownerWallet: params.ownerWallet,
+    collectionMint: params.collectionMint,
+  })
+  return state?.locked === true
 }
 
 export async function assertWalletNftFrozenForNesting(params: {

@@ -363,20 +363,30 @@ export async function executeClaimAll(params: { wallet: string }) {
   }
 
   const planPositionIds = new Set(plans.map((p) => p.positionId))
+  const rowsToVerify = owlRows.filter((row) => planPositionIds.has(row.id))
   const poolById = new Map<string, StakingPoolRow>()
   poolById.set(pool.id, pool)
-  for (const row of owlRows) {
-    if (!planPositionIds.has(row.id)) continue
-    let rowPool = poolById.get(row.pool_id)
-    if (!rowPool) {
-      rowPool = (await getStakingPoolById(row.pool_id)) ?? undefined
-      if (rowPool) poolById.set(row.pool_id, rowPool)
+
+  const missingPoolIds = [
+    ...new Set(rowsToVerify.map((row) => row.pool_id).filter((id) => !poolById.has(id))),
+  ]
+  if (missingPoolIds.length > 0) {
+    const loaded = await Promise.all(missingPoolIds.map((id) => getStakingPoolById(id)))
+    for (let i = 0; i < missingPoolIds.length; i++) {
+      const rowPool = loaded[i]
+      if (rowPool) poolById.set(missingPoolIds[i]!, rowPool)
     }
-    if (!rowPool) {
-      throw new StakingUserError('Pool not found', 400)
-    }
-    await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
   }
+
+  await Promise.all(
+    rowsToVerify.map(async (row) => {
+      const rowPool = poolById.get(row.pool_id)
+      if (!rowPool) {
+        throw new StakingUserError('Pool not found', 400)
+      }
+      await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
+    })
+  )
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {

@@ -27,7 +27,7 @@ export function NestingHero() {
             <Link href="#perches">See perches</Link>
           </Button>
           <Button asChild variant="outline" size="lg" className={cn(nestingMutedActionButtonClass, 'text-base')}>
-            <Link href="/dashboard/nesting">My nest</Link>
+            <Link href="/nesting#perches">My nest</Link>
           </Button>
         </div>
       </div>

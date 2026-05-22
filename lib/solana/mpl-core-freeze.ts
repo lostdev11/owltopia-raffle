@@ -25,6 +25,28 @@ type AddMplCoreFreezeDelegateArgs = MplCoreFreezeWalletBase & {
   assetId: string
 }
 
+/** Max Owltopia coins per wallet transaction (Solana tx size / compute). */
+export const NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX = 20
+
+/** Max coins per Confirm nest click and per Select all (run in batches for larger flocks). */
+export const NESTING_NFT_STAKE_MAX_PER_RUN = NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX
+
+export function capNftStakeAssetIds(assetIds: string[]): string[] {
+  return assetIds.slice(0, NESTING_NFT_STAKE_MAX_PER_RUN)
+}
+
+export function chunkNftFreezeAssetIds(
+  assetIds: string[],
+  maxPerTx: number = NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX
+): string[][] {
+  const uniq = [...new Set(assetIds.map((id) => id.trim()).filter(Boolean))]
+  const chunks: string[][] = []
+  for (let i = 0; i < uniq.length; i += maxPerTx) {
+    chunks.push(uniq.slice(i, i + maxPerTx))
+  }
+  return chunks
+}
+
 function signatureToString(result: any): string {
   const sig = result?.signature ?? result
   if (sig instanceof Uint8Array) return bs58.encode(sig)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, Bird, Coins, Layers, Shield } from 'lucide-react'
@@ -15,6 +15,14 @@ import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
+
+/** One perch per dashboard visit — multi-perch sites start at the perch list. */
+function defaultDashboardNestingHref(pools: StakingPoolRow[]): string {
+  if (pools.length === 1) {
+    return `/dashboard/nesting?pool=${encodeURIComponent(pools[0]!.slug)}`
+  }
+  return '/nesting#perches'
+}
 
 type Props = {
   initialPools: StakingPoolRow[]
@@ -36,6 +44,10 @@ export function NestingLandingClient({
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
   const [claimableOwlPreview, setClaimableOwlPreview] = useState<number | null>(null)
+  const dashboardNestHref = useMemo(
+    () => defaultDashboardNestingHref(initialPools),
+    [initialPools]
+  )
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -47,11 +59,16 @@ export function NestingLandingClient({
     const addr = publicKey.toBase58()
     setPositionPreview(null)
     setClaimableOwlPreview(null)
-    fetch('/api/me/staking/positions?heal=0', {
-      credentials: 'include',
-      cache: 'no-store',
-      headers: { 'X-Connected-Wallet': addr },
-    })
+    fetch(
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/api/me/staking/positions?heal=0`
+        : '/api/me/staking/positions?heal=0',
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'X-Connected-Wallet': addr },
+      }
+    )
       .then((res) => {
         if (cancelled) return
         if (res.status === 401) {
@@ -202,7 +219,7 @@ export function NestingLandingClient({
                 </Button>
               ) : null}
               <Button asChild variant="outline" className={cn(nestingMutedActionButtonClass, 'min-h-[48px]')}>
-                <Link href="/dashboard/nesting">Open my nest</Link>
+                <Link href={dashboardNestHref}>Open my nest</Link>
               </Button>
             </div>
           </CardHeader>
