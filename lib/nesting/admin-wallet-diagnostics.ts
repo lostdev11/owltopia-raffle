@@ -11,14 +11,44 @@ import { clearOrphanedActiveNftNestsForWallet } from '@/lib/nesting/clear-orphan
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
 import { clearCrossWalletStaleNestsForHolder } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import {
-  isWalletNftFrozenForNestingDelegate,
   readOwlClaimNftNestLockEligibility,
 } from '@/lib/nesting/nft-freeze'
 import { positionRequiresOnChainNftFreezeLock } from '@/lib/nesting/nft-nest-onchain-lock'
 import { resolveWalletOwlNestCollectionCandidates } from '@/lib/nesting/owl-nest-collection'
 import { isPendingNftNestBeforeFreezeConfirmed } from '@/lib/nesting/position-lifecycle'
+import { NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS, NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS } from '@/lib/nesting/rpc-policy'
 
 const LOCK_SAMPLE_MAX = 8
+const LOCK_RPC_CONCURRENCY = 4
+
+export type DiagnoseNestingWalletOptions = {
+  /** Cap per-active-nest MPL Core lock reads (default NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS). */
+  maxActiveLockChecks?: number
+  /** Skip redundant lock_samples RPC block (support playbook). */
+  skipLockSamples?: boolean
+  /** Cap per-mint DB cross-checks when wallet holds many NFTs. */
+  maxWalletMintCrossChecks?: number
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex
+      nextIndex += 1
+      if (index >= items.length) break
+      results[index] = await fn(items[index], index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()))
+  return results
+}
 
 export type NestingWalletIssueKind =
   | 'cross_wallet_blocker'
@@ -75,7 +105,10 @@ async function listCrossWalletOpenRows(holderWallet: string, mints: string[]) {
   return data ?? []
 }
 
-export async function diagnoseNestingWallet(wallet: string): Promise<NestingWalletDiagnostics> {
+export async function diagnoseNestingWallet(
+  wallet: string,
+  options: DiagnoseNestingWalletOptions = {}
+): Promise<NestingWalletDiagnostics> {
   const holder = wallet.trim()
   const pool = await getStakingPoolBySlug('owl-nest-365')
   const issues: NestingWalletIssue[] = []
@@ -159,23 +192,46 @@ export async function diagnoseNestingWallet(wallet: string): Promise<NestingWall
         })
       }
     }
+  }
 
-    if (position.status !== 'active' || !positionRequiresOnChainNftFreezeLock(position, pool)) {
-      continue
+  const lockCheckCap = Math.max(
+    1,
+    Math.min(
+      options.maxActiveLockChecks ?? NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS,
+      NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS
+    )
+  )
+  const activeLockPositions = positions.filter(
+    (p) => p.status === 'active' && positionRequiresOnChainNftFreezeLock(p, pool)
+  )
+  const positionsForLockRpc = activeLockPositions.slice(0, lockCheckCap)
+  const lockChecksSkipped = Math.max(0, activeLockPositions.length - positionsForLockRpc.length)
+
+  if (lockChecksSkipped > 0) {
+    issues.push({
+      kind: 'ledger_active_onchain_locked',
+      severity: 'low',
+      message: `On-chain lock scan sampled ${positionsForLockRpc.length} of ${activeLockPositions.length} active nest(s) to stay within RPC limits.`,
+      suggested_action:
+        'Use claim ledger audit for payout drift; re-run diagnostics on a single mint if one nest looks wrong.',
+    })
+  }
+
+  const lockResults = await mapWithConcurrency(
+    positionsForLockRpc,
+    LOCK_RPC_CONCURRENCY,
+    async (position) => {
+      const assetId = position.asset_identifier!.trim()
+      const lockState = await readOwlClaimNftNestLockEligibility({
+        assetId,
+        ownerWallet: holder,
+        collectionMint: pool.collection_key,
+      })
+      return { position, assetId, lockState }
     }
+  )
 
-    const assetId = position.asset_identifier!.trim()
-    const frozen = await isWalletNftFrozenForNestingDelegate({
-      assetId,
-      collectionMint: pool.collection_key,
-      ownerWallet: holder,
-    })
-    const lockState = await readOwlClaimNftNestLockEligibility({
-      assetId,
-      ownerWallet: holder,
-      collectionMint: pool.collection_key,
-    })
-
+  for (const { position, assetId, lockState } of lockResults) {
     if (lockState?.ownerThawedEligible === true) {
       issues.push({
         kind: 'owner_thawed_active',
@@ -185,7 +241,7 @@ export async function diagnoseNestingWallet(wallet: string): Promise<NestingWall
         position_id: position.id,
         suggested_action: 'User can claim OWL, or heal active orphan if they need to re-open nest.',
       })
-    } else if (!frozen) {
+    } else if (!lockState?.locked) {
       issues.push({
         kind: 'orphaned_active',
         severity: 'high',
@@ -206,7 +262,24 @@ export async function diagnoseNestingWallet(wallet: string): Promise<NestingWall
     }
   }
 
-  for (const mint of walletMints) {
+  const mintCrossCap = Math.max(
+    1,
+    Math.min(
+      options.maxWalletMintCrossChecks ?? NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS,
+      NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS
+    )
+  )
+  const mintsForCrossCheck = walletMints.slice(0, mintCrossCap)
+  if (walletMints.length > mintsForCrossCheck.length) {
+    issues.push({
+      kind: 'ledger_active_onchain_locked',
+      severity: 'low',
+      message: `Cross-wallet mint scan sampled ${mintsForCrossCheck.length} of ${walletMints.length} Owl Nest coin(s) in wallet.`,
+      suggested_action: 'Cross-wallet rows from Supabase are still listed when found.',
+    })
+  }
+
+  for (const mint of mintsForCrossCheck) {
     const open = await getActivePositionByAssetIdentifier(pool.id, mint)
     if (
       open &&
@@ -226,18 +299,20 @@ export async function diagnoseNestingWallet(wallet: string): Promise<NestingWall
   }
 
   const lock_samples: NestingWalletDiagnostics['lock_samples'] = []
-  const sampleMints = walletMints.slice(0, LOCK_SAMPLE_MAX)
-  for (const assetId of sampleMints) {
-    const lockState = await readOwlClaimNftNestLockEligibility({
-      assetId,
-      ownerWallet: holder,
-      collectionMint: pool.collection_key,
-    })
-    lock_samples.push({
-      asset_identifier: assetId,
-      locked: lockState?.locked ?? null,
-      owner_thawed_eligible: lockState?.ownerThawedEligible ?? null,
-    })
+  if (!options.skipLockSamples) {
+    const sampleMints = walletMints.slice(0, LOCK_SAMPLE_MAX)
+    for (const assetId of sampleMints) {
+      const lockState = await readOwlClaimNftNestLockEligibility({
+        assetId,
+        ownerWallet: holder,
+        collectionMint: pool.collection_key,
+      })
+      lock_samples.push({
+        asset_identifier: assetId,
+        locked: lockState?.locked ?? null,
+        owner_thawed_eligible: lockState?.ownerThawedEligible ?? null,
+      })
+    }
   }
 
   return {

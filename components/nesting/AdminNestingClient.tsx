@@ -132,6 +132,7 @@ export function AdminNestingClient() {
 
   const [supportPlaybook, setSupportPlaybook] = useState<{
     wallet: string
+    generated_at: string
     claim_audit: {
       estimated_claimable_owl: number
       active_nest_count: number
@@ -157,6 +158,7 @@ export function AdminNestingClient() {
     }
   } | null>(null)
   const [supportPlaybookRunning, setSupportPlaybookRunning] = useState(false)
+  const [supportPlaybookMsg, setSupportPlaybookMsg] = useState<string | null>(null)
   const [overrideCatchUpBlock, setOverrideCatchUpBlock] = useState(false)
   const [overrideWalletHealBlock, setOverrideWalletHealBlock] = useState(false)
 
@@ -573,15 +575,21 @@ export function AdminNestingClient() {
     setClaimAuditReport(null)
     setWalletSupportMsg(null)
     setClaimCatchupMsg(null)
+    setSupportPlaybookMsg(null)
     setSaveError(null)
     setOverrideCatchUpBlock(false)
     setOverrideWalletHealBlock(false)
     if (!wallet) {
-      setSaveError('Enter the holder wallet address.')
+      setSupportPlaybookMsg('Enter the holder wallet address.')
+      return
+    }
+    if (!isProbableSolanaPubkey(wallet)) {
+      setSupportPlaybookMsg('Wallet address does not look like a valid Solana public key.')
       return
     }
     setClaimAuditWallet(wallet)
     setSupportPlaybookRunning(true)
+    setSupportPlaybookMsg('Running claim audit and nest diagnostics (large wallets may take 30–60s)…')
     try {
       const res = await fetch(
         `/api/admin/staking/support-playbook?wallet=${encodeURIComponent(wallet)}`,
@@ -589,7 +597,14 @@ export function AdminNestingClient() {
       )
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setSaveError(typeof json?.error === 'string' ? json.error : 'Support playbook failed')
+        const err =
+          typeof json?.error === 'string'
+            ? json.error
+            : res.status === 504
+              ? 'Support playbook timed out. Try again, or run wallet diagnostics and claim audit separately below.'
+              : 'Support playbook failed'
+        setSupportPlaybookMsg(err)
+        setSaveError(err)
         return
       }
       setSupportPlaybook(json as typeof supportPlaybook)
@@ -602,6 +617,17 @@ export function AdminNestingClient() {
           wallets: [json.claim_audit],
         })
       }
+      const warningCount = Array.isArray(json.warnings) ? json.warnings.length : 0
+      const activeNests = json.claim_audit?.active_nest_count ?? json.nest_diagnostics?.positions_under_wallet?.active
+      setSupportPlaybookMsg(
+        `Playbook complete${typeof activeNests === 'number' ? ` · ${activeNests} active nest(s)` : ''}${
+          warningCount > 0 ? ` · ${warningCount} warning(s)` : ''
+        }.`
+      )
+    } catch {
+      const err = 'Support playbook failed — check your connection and try again.'
+      setSupportPlaybookMsg(err)
+      setSaveError(err)
     } finally {
       setSupportPlaybookRunning(false)
     }
@@ -1239,8 +1265,24 @@ export function AdminNestingClient() {
               {supportPlaybookRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Run support playbook
             </Button>
+            {supportPlaybookMsg ? (
+              <p
+                className={
+                  supportPlaybook || supportPlaybookRunning
+                    ? 'text-sm text-muted-foreground'
+                    : 'text-sm text-destructive'
+                }
+                role="status"
+              >
+                {supportPlaybookMsg}
+              </p>
+            ) : null}
             {supportPlaybook ? (
               <div className="space-y-3 text-sm">
+                <p className="text-xs text-muted-foreground">
+                  {supportPlaybook.wallet.slice(0, 4)}…{supportPlaybook.wallet.slice(-4)} ·{' '}
+                  {new Date(supportPlaybook.generated_at).toLocaleString()}
+                </p>
                 {supportPlaybook.claim_audit ? (
                   <p className="text-muted-foreground">
                     <span className="font-medium text-foreground tabular-nums">
@@ -1252,6 +1294,11 @@ export function AdminNestingClient() {
                   </p>
                 ) : null}
                 <ul className="space-y-2">
+                  {supportPlaybook.warnings.length === 0 ? (
+                    <li className="rounded-lg border border-border/50 p-3 text-muted-foreground text-xs">
+                      No blocking patterns detected in this scan.
+                    </li>
+                  ) : null}
                   {supportPlaybook.warnings.map((w) => (
                     <li
                       key={w.code}

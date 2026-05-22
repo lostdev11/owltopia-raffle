@@ -4,6 +4,10 @@ import {
   type NestingWalletDiagnostics,
 } from '@/lib/nesting/admin-wallet-diagnostics'
 import { MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
+import {
+  NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS,
+  NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS,
+} from '@/lib/nesting/rpc-policy'
 
 export type SupportPlaybookWarning = {
   severity: 'block' | 'caution' | 'info'
@@ -124,6 +128,30 @@ export function buildAdminSupportPlaybook(params: {
     })
   }
 
+  if (audit != null && audit.risk_flags.length > 0) {
+    warnings.push({
+      severity: audit.risk_flags.some((f) =>
+        f === 'ledger_behind_onchain_payouts' || f === 'position_claimed_above_accrued'
+      )
+        ? 'block'
+        : 'caution',
+      code: 'claim_ledger_audit_flags',
+      title: 'Claim ledger audit',
+      detail: audit.risk_summary,
+    })
+    if (
+      !catchUpRecommended &&
+      audit.risk_flags.some((f) => CATCH_UP_SAFE_FLAGS.has(f)) &&
+      (onchain24h > 0 || audit.ledger_claim_owl_total > 0)
+    ) {
+      recommendations.push({
+        action: 'Review catch-up (dry-run)',
+        detail:
+          'On-chain claim activity is ahead of per-nest UI claimable. Dry-run catch-up if they were already paid SPL; do not apply if rewards were never sent.',
+      })
+    }
+  }
+
   if (ownerThawedCount > 0 && significantUnpaid && !walletHealRecommended) {
     recommendations.push({
       action: 'User: Claim all (or per-nest claim)',
@@ -156,7 +184,7 @@ export function buildAdminSupportPlaybook(params: {
     })
   }
 
-  if (warnings.length === 0 && !significantUnpaid) {
+  if (warnings.length === 0 && !significantUnpaid && !(audit?.risk_flags.length)) {
     recommendations.push({
       action: 'No high-risk pattern',
       detail: 'If the user still has issues, get the exact error text and one NFT mint address.',
@@ -185,7 +213,11 @@ export async function loadAdminSupportPlaybook(wallet: string): Promise<AdminSup
   const trimmed = wallet.trim()
   const [auditResult, nestDiagnostics] = await Promise.all([
     auditNestingClaimLedger({ wallet: trimmed, flaggedOnly: false, lookbackHours: 168 }),
-    diagnoseNestingWallet(trimmed),
+    diagnoseNestingWallet(trimmed, {
+      maxActiveLockChecks: NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS,
+      maxWalletMintCrossChecks: NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS,
+      skipLockSamples: true,
+    }),
   ])
   const claimAudit =
     auditResult.wallets.find((w) => w.wallet_address === trimmed) ??

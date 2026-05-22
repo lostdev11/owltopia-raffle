@@ -12,6 +12,12 @@
 /** Max rows processed in one admin reconcile call (one RPC per row with a signature). */
 export const NESTING_RECONCILE_MAX_BATCH = 25
 
+/** Max active nests to on-chain lock-check per wallet diagnostics / support playbook (one RPC each). */
+export const NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS = 8
+
+/** Max wallet NFT mints to cross-check against DB open rows (one query each). */
+export const NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS = 16
+
 /** Base58 transaction signature min/max rough bounds (ed25519 sig in tx id). */
 export const NESTING_SIGNATURE_MIN_LEN = 80
 export const NESTING_SIGNATURE_MAX_LEN = 100
