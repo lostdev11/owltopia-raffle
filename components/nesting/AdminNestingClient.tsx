@@ -1283,11 +1283,12 @@ export function AdminNestingClient() {
                 {supportPlaybook.guards.block_apply_catch_up ? (
                   <div className="flex items-start gap-3">
                     <Switch
+                      id="support-override-catch-up"
                       ariaLabel="Override catch-up block"
                       checked={overrideCatchUpBlock}
                       onCheckedChange={setOverrideCatchUpBlock}
                     />
-                    <Label className="text-xs leading-relaxed text-muted-foreground">
+                    <Label htmlFor="support-override-catch-up" className="text-xs leading-relaxed text-muted-foreground">
                       Override: allow catch-up anyway (only if OWL was already sent on-chain)
                     </Label>
                   </div>
@@ -1295,11 +1296,12 @@ export function AdminNestingClient() {
                 {supportPlaybook.guards.block_wallet_heal ? (
                   <div className="flex items-start gap-3">
                     <Switch
+                      id="support-override-wallet-heal"
                       ariaLabel="Override wallet heal block"
                       checked={overrideWalletHealBlock}
                       onCheckedChange={setOverrideWalletHealBlock}
                     />
-                    <Label className="text-xs leading-relaxed text-muted-foreground">
+                    <Label htmlFor="support-override-wallet-heal" className="text-xs leading-relaxed text-muted-foreground">
                       Override: allow full wallet heal anyway (will close active nests in DB)
                     </Label>
                   </div>
