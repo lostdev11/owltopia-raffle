@@ -378,15 +378,19 @@ export async function executeClaimAll(params: { wallet: string }) {
     }
   }
 
-  await Promise.all(
-    rowsToVerify.map(async (row) => {
-      const rowPool = poolById.get(row.pool_id)
-      if (!rowPool) {
-        throw new StakingUserError('Pool not found', 400)
-      }
-      await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
-    })
-  )
+  const CLAIM_LOCK_VERIFY_CONCURRENCY = 6
+  for (let i = 0; i < rowsToVerify.length; i += CLAIM_LOCK_VERIFY_CONCURRENCY) {
+    const chunk = rowsToVerify.slice(i, i + CLAIM_LOCK_VERIFY_CONCURRENCY)
+    await Promise.all(
+      chunk.map(async (row) => {
+        const rowPool = poolById.get(row.pool_id)
+        if (!rowPool) {
+          throw new StakingUserError('Pool not found', 400)
+        }
+        await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
+      })
+    )
+  }
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {

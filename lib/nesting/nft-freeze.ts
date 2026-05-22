@@ -191,27 +191,37 @@ export type OwlClaimNftNestLockRead = {
   ownerThawedEligible: boolean
 }
 
-/** One MPL Core fetch for claim lock checks (avoids duplicate asset reads per nest). */
+function readLockEligibilityFromAsset(asset: unknown, ownerWallet: string): OwlClaimNftNestLockRead {
+  const delegate = getNestingNftFreezeDelegateAddress()
+  const locked = isMplCoreNestingLockHeld({
+    asset,
+    nestingDelegateAddress: delegate,
+    ownerWallet,
+  })
+  const fd = readMplCoreFreezeDelegate(asset)
+  const ownerThawedEligible =
+    fd?.authorityType === 'Owner' &&
+    fd.frozen !== true &&
+    assetOwnerAddress(asset) === ownerWallet.trim()
+  return { locked, ownerThawedEligible }
+}
+
+/** One MPL Core fetch for claim lock checks (read-only RPC — no freeze authority keypair). */
 export async function readOwlClaimNftNestLockEligibility(params: {
   assetId: string
   ownerWallet: string
   collectionMint?: string | null
 }): Promise<OwlClaimNftNestLockRead | null> {
+  void params.collectionMint
+  const ownerWallet = params.ownerWallet.trim()
+  const assetId = params.assetId.trim()
+  if (!ownerWallet || !assetId) return null
+
   try {
-    const { umi, signer } = await createCoreAuthorityUmi()
-    const asset = await fetchCoreAssetOnly(umi, params.assetId.trim())
-    const ownerWallet = params.ownerWallet.trim()
-    const locked = isMplCoreNestingLockHeld({
-      asset,
-      nestingDelegateAddress: signer.publicKey.toString(),
-      ownerWallet,
-    })
-    const fd = readMplCoreFreezeDelegate(asset)
-    const ownerThawedEligible =
-      fd?.authorityType === 'Owner' &&
-      fd.frozen !== true &&
-      assetOwnerAddress(asset) === ownerWallet
-    return { locked, ownerThawedEligible }
+    const endpoint = resolveServerSolanaRpcUrl()
+    const umi: any = (createUmi as any)(endpoint as any)
+    const asset = await fetchCoreAssetOnly(umi, assetId)
+    return readLockEligibilityFromAsset(asset, ownerWallet)
   } catch {
     return null
   }

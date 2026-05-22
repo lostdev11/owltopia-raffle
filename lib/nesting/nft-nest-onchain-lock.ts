@@ -57,6 +57,14 @@ export async function assertNftNestOnChainLockHeld(params: {
   if (lockState?.locked) return
   if (params.allowOwnerThawedForClaim && lockState?.ownerThawedEligible) return
 
+  if (params.allowOwnerThawedForClaim && lockState === null) {
+    throw new StakingUserError(
+      'Unable to verify nest lock on-chain right now. Wait a moment and try Claim again, or claim from one nest at a time.',
+      503,
+      { code: 'nest_lock_read_failed', asset_id: assetId }
+    )
+  }
+
   throw new StakingUserError(
     'This Owl Nest coin is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.',
     400
