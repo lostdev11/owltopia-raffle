@@ -18,7 +18,7 @@ type MintScanState = {
 }
 
 type Props = {
-  pools: { id: string; asset_type: string }[]
+  pools: { id: string; slug: string; asset_type: string }[]
   /** When set (e.g. dashboard `?pool=`), prefer this NFT perch. */
   preferredPoolId?: string | null
   className?: string

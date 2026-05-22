@@ -25,7 +25,7 @@ export function countNestedOwlCoinsForPool(positions: StakingPositionRow[], pool
 
 /** Pick the Owl Nest / Owltopia coin NFT perch to measure wallet coverage against. */
 export function resolveOwlCoinNftPoolId(
-  pools: { id: string; asset_type: string }[],
+  pools: { id: string; slug: string; asset_type: string }[],
   options?: {
     preferredPoolId?: string | null
     positionLockedPoolId?: string | null
