@@ -43,6 +43,7 @@ import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
+import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
 /** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
@@ -289,6 +290,21 @@ export async function handleCreateRafflePost(
     const adminRole = await getAdminRole(walletAddress)
     const canCreateBambooTicketRaffle =
       adminRole !== null || canWalletUseBambooTicketCurrency(walletAddress)
+
+    let promoXHandle: string | null = null
+    if (body.promo_x_handle !== undefined && body.promo_x_handle !== null && body.promo_x_handle !== '') {
+      if (adminRole === null) {
+        return NextResponse.json(
+          { error: 'Only admins can set a promo X handle on create.' },
+          { status: 403 }
+        )
+      }
+      const parsedPromo = parsePromoXHandleInput(body.promo_x_handle)
+      if (!parsedPromo.ok) {
+        return NextResponse.json({ error: parsedPromo.error }, { status: 400 })
+      }
+      promoXHandle = parsedPromo.value
+    }
 
     // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo is supported but permission-gated below.
     const validCurrencies: string[] = ['USDC', 'SOL']
@@ -569,6 +585,7 @@ export async function handleCreateRafflePost(
         discord_partner_tenant_id: discordPartnerTenantId,
         list_on_platform,
         sol_domains_hub: false,
+        promo_x_handle: promoXHandle,
       }
     } else {
       const prizeType: 'nft' = 'nft'
@@ -759,6 +776,7 @@ export async function handleCreateRafflePost(
         discord_partner_tenant_id: discordPartnerTenantId,
         list_on_platform,
         sol_domains_hub: snsDomainHubOnly,
+        promo_x_handle: promoXHandle,
       }
     }
 

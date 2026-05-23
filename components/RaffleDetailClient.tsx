@@ -30,7 +30,6 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency } from '@/lib/types'
-import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import {
@@ -135,7 +134,6 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
-import { RaffleSentimentBar } from '@/components/RaffleSentimentBar'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
 import {
@@ -155,6 +153,7 @@ import {
   needsPayCancellationFeeBeforePrizeReturn,
 } from '@/lib/raffles/creator-prize-return-eligibility'
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -183,8 +182,6 @@ interface RaffleDetailClientProps {
   entries: Entry[]
   owlVisionScore: OwlVisionScore
   sessionWallet: string | null
-  sentimentTotals: RaffleSentimentTotals
-  initialSentiment: RaffleSentimentChoice | null
 }
 
 export function RaffleDetailClient({
@@ -192,8 +189,6 @@ export function RaffleDetailClient({
   entries: initialEntries,
   owlVisionScore,
   sessionWallet,
-  sentimentTotals,
-  initialSentiment,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -2440,45 +2435,18 @@ export function RaffleDetailClient({
     !raffle.nft_transfer_transaction &&
     !prizeReturnRecorded
 
+  const isFullAdminForShare = adminRole === 'full' || adminSessionActive === true
+
   const handleShareRaffle = useCallback(async () => {
-    if (typeof window === 'undefined') return
-    const url = `${window.location.origin}/raffles/${raffle.slug}`
-    const shareData = {
-      title: raffle.title,
-      text: `Check out this raffle: ${raffle.title}`,
-      url,
-    }
-
-    const canUseNativeShare =
-      typeof navigator !== 'undefined' &&
-      typeof navigator.share === 'function' &&
-      // Prefer native share sheet on mobile/tablet; desktop UX is more reliable with copy.
-      ((typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
-        (typeof window.matchMedia === 'function' &&
-          window.matchMedia('(hover: none), (pointer: coarse)').matches))
-
-    if (canUseNativeShare) {
-      try {
-        await navigator.share(shareData)
-        return
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-      }
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(url)
+    await shareRaffleFromBrowser({
+      raffle,
+      isFullAdmin: isFullAdminForShare,
+      onCopied: () => {
         setShareCopied(true)
         window.setTimeout(() => setShareCopied(false), 1800)
-        return
-      } catch {
-        // If clipboard fails (permissions/unsupported), use prompt fallback.
-      }
-    }
-
-    window.prompt('Copy raffle link:', url)
-  }, [raffle.slug, raffle.title])
+      },
+    })
+  }, [raffle, isFullAdminForShare])
 
   // Size-based styling classes
   const sizeClasses = {
@@ -3528,13 +3496,6 @@ export function RaffleDetailClient({
               </div>
             </div>
           </CardHeader>
-
-          <RaffleSentimentBar
-            raffleId={raffle.id}
-            sessionWallet={sessionWallet}
-            initialTotals={sentimentTotals}
-            initialMine={initialSentiment}
-          />
 
           {showPublicBrowseListAdminControl && (
             <div className={`${classes.headerPadding} pt-0 pb-3 border-b border-border/60`}>

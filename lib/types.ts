@@ -138,6 +138,8 @@ export interface Raffle {
   prize_currency: string | null
   nft_mint_address: string | null
   nft_collection_name: string | null
+  /** Optional X handle (no @) for official Owltopia share copy — e.g. THC_Labz. */
+  promo_x_handle: string | null
   nft_token_id: string | null
   nft_metadata_uri: string | null
   ticket_price: number

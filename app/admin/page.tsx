@@ -71,6 +71,16 @@ interface LiveRaffleXTemplate {
   intentUrl: string
 }
 
+interface DailyRaidRaffleItem {
+  id: string
+  title: string
+  slug: string
+  endTime: string
+  shareText: string
+  intentUrl: string
+  shortUrl: string
+}
+
 interface PendingCancellationRow {
   id: string
   slug: string
@@ -183,6 +193,16 @@ export default function AdminDashboardPage() {
     raffleTitle?: string
     xTemplates?: LiveRaffleXTemplate[]
   } | null>(null)
+
+  const [dailyRaidRaffles, setDailyRaidRaffles] = useState<DailyRaidRaffleItem[] | null>(null)
+  const [dailyRaidEveryoneMessage, setDailyRaidEveryoneMessage] = useState<string | null>(null)
+  const [loadingDailyRaid, setLoadingDailyRaid] = useState(false)
+  const [dailyRaidLoadError, setDailyRaidLoadError] = useState<string | null>(null)
+  const [pushingDailyRaidDiscord, setPushingDailyRaidDiscord] = useState(false)
+  const [dailyRaidMessage, setDailyRaidMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  )
+  const [dailyRaidCopied, setDailyRaidCopied] = useState(false)
 
   const [devTasks, setDevTasks] = useState<DevTask[]>([])
   const [loadingDevTasks, setLoadingDevTasks] = useState(false)
@@ -605,6 +625,80 @@ export default function AdminDashboardPage() {
     if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
     void fetchLiveRafflesForDiscord()
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchLiveRafflesForDiscord])
+
+  const fetchDailyRaidBatch = useCallback(async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    setLoadingDailyRaid(true)
+    setDailyRaidLoadError(null)
+    setDailyRaidMessage(null)
+    try {
+      const res = await fetch('/api/admin/daily-raid', { credentials: 'include', cache: 'no-store' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || 'Failed to load daily raid batch')
+      }
+      const data = (await res.json()) as {
+        raffles?: DailyRaidRaffleItem[]
+        suggestedEveryoneMessage?: string
+      }
+      setDailyRaidRaffles(data.raffles ?? [])
+      setDailyRaidEveryoneMessage(
+        typeof data.suggestedEveryoneMessage === 'string' ? data.suggestedEveryoneMessage : null
+      )
+    } catch (e) {
+      console.error('fetchDailyRaidBatch:', e)
+      setDailyRaidRaffles(null)
+      setDailyRaidEveryoneMessage(null)
+      setDailyRaidLoadError(e instanceof Error ? e.message : 'Failed to load')
+    } finally {
+      setLoadingDailyRaid(false)
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    void fetchDailyRaidBatch()
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchDailyRaidBatch])
+
+  const handlePushDailyRaidToDiscord = async () => {
+    setPushingDailyRaidDiscord(true)
+    setDailyRaidMessage(null)
+    try {
+      const res = await fetch('/api/admin/daily-raid/discord', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDailyRaidMessage({
+          type: 'error',
+          text: (data as { error?: string }).error || 'Could not post raid bundle to Discord',
+        })
+        return
+      }
+      const count = (data as { count?: number }).count ?? dailyRaidRaffles?.length ?? 0
+      setDailyRaidMessage({
+        type: 'success',
+        text: `Posted daily raid bundle (${count} raffle${count === 1 ? '' : 's'}) to #x-post.`,
+      })
+    } catch (e) {
+      console.error('handlePushDailyRaidToDiscord:', e)
+      setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setPushingDailyRaidDiscord(false)
+    }
+  }
+
+  const handleCopyDailyRaidEveryoneMessage = async () => {
+    if (!dailyRaidEveryoneMessage || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+    try {
+      await navigator.clipboard.writeText(dailyRaidEveryoneMessage)
+      setDailyRaidCopied(true)
+      window.setTimeout(() => setDailyRaidCopied(false), 1800)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const handlePushLiveToDiscord = async (r: LiveRaffleDiscordRow) => {
     setPushingDiscordRaffleId(r.id)
@@ -2166,6 +2260,158 @@ export default function AdminDashboardPage() {
                   ) : null}
                 </p>
               )}
+            </div>
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="violet"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Megaphone className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
+                Daily X raid (ending today / tomorrow)
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              Up to 5 live raffles ending today or tomorrow (UTC). Post each on @Owltopia_sol via{' '}
+              <strong className="text-foreground">Share</strong> on the raffle page (OWLTOPIA template), or use{' '}
+              <strong className="text-foreground">Post to X</strong> below. Then post the bundle to{' '}
+              <span className="font-mono text-xs">#x-post</span> and send one manual{' '}
+              <span className="font-mono text-xs">@everyone</span> with the suggested raid message.
+            </CardDescription>
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void fetchDailyRaidBatch()}
+                  disabled={loadingDailyRaid}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {loadingDailyRaid ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Refreshing…
+                    </>
+                  ) : (
+                    'Refresh raid batch'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handlePushDailyRaidToDiscord()}
+                  disabled={
+                    pushingDailyRaidDiscord ||
+                    loadingDailyRaid ||
+                    !dailyRaidRaffles ||
+                    dailyRaidRaffles.length === 0
+                  }
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {pushingDailyRaidDiscord ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Posting…
+                    </>
+                  ) : (
+                    'Post bundle to #x-post'
+                  )}
+                </Button>
+              </div>
+              {dailyRaidLoadError && dailyRaidRaffles === null && (
+                <p className="text-sm text-destructive">{dailyRaidLoadError}</p>
+              )}
+              {dailyRaidMessage && (
+                <p
+                  className={
+                    dailyRaidMessage.type === 'success'
+                      ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                      : 'text-sm text-destructive'
+                  }
+                >
+                  {dailyRaidMessage.text}
+                </p>
+              )}
+              {dailyRaidEveryoneMessage && dailyRaidRaffles && dailyRaidRaffles.length > 0 && (
+                <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Suggested @everyone message (copy & paste):</p>
+                  <p className="text-sm font-medium text-foreground">{dailyRaidEveryoneMessage}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyDailyRaidEveryoneMessage()}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {dailyRaidCopied ? 'Copied!' : 'Copy @everyone message'}
+                  </Button>
+                </div>
+              )}
+              {!dailyRaidLoadError &&
+                (loadingDailyRaid || dailyRaidRaffles === null ? (
+                  <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    Loading…
+                  </p>
+                ) : dailyRaidRaffles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No live raffles ending today or tomorrow (UTC). Check back later.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {dailyRaidRaffles.map((r, index) => (
+                      <div
+                        key={r.id}
+                        className="rounded-lg border border-border/60 p-3 space-y-2 bg-background/40"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-medium text-foreground">
+                              {index + 1}. {r.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Ends{' '}
+                              {(() => {
+                                const d = new Date(r.endTime)
+                                return Number.isNaN(d.getTime()) ? r.endTime : d.toLocaleString()
+                              })()}{' '}
+                              ·{' '}
+                              <span className="font-mono break-all">{r.shortUrl}</span>
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              <a href={r.intentUrl} target="_blank" rel="noopener noreferrer">
+                                Post to X
+                              </a>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              <Link href={`/raffles/${encodeURIComponent(r.slug)}`}>Share on site</Link>
+                            </Button>
+                          </div>
+                        </div>
+                        <pre className="text-xs whitespace-pre-wrap font-sans text-muted-foreground bg-muted/30 rounded p-2 overflow-x-auto">
+                          {r.shareText}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                ))}
             </div>
           </OwlVisionDisclosure>
         )}

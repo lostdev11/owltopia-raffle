@@ -19,11 +19,6 @@ import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
-import {
-  getRaffleSentimentForWallet,
-  getRaffleSentimentTotals,
-} from '@/lib/db/raffle-sentiment'
-
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -180,10 +175,6 @@ export default async function RaffleDetailPage({
   const entries = await getEntriesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle])
-  const sentimentTotals = await getRaffleSentimentTotals(enrichedRaffle.id)
-  const initialSentiment =
-    viewerWallet ? await getRaffleSentimentForWallet(enrichedRaffle.id, viewerWallet) : null
-
   return (
     <RaffleDetailClient
       key={enrichedRaffle.id}
@@ -191,8 +182,6 @@ export default async function RaffleDetailPage({
       entries={entries}
       owlVisionScore={owlVisionScore}
       sessionWallet={viewerWallet}
-      sentimentTotals={sentimentTotals}
-      initialSentiment={initialSentiment}
     />
   )
 }

@@ -148,6 +148,11 @@ let discordPartnerTenantColumnCache: { applied: boolean; checked: boolean } = {
   checked: false,
 }
 
+let promoXHandleColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
 /**
  * Whether migration 044 (`image_fallback_url`) exists — avoids 42703 when the column was never applied.
  */
@@ -192,6 +197,25 @@ async function checkDiscordPartnerTenantColumnApplied(): Promise<boolean> {
   }
 }
 
+async function checkPromoXHandleColumnApplied(): Promise<boolean> {
+  if (promoXHandleColumnCache.checked) {
+    return promoXHandleColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,promo_x_handle')
+      .limit(1)
+    const applied = !error
+    promoXHandleColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check promo_x_handle column:', err)
+    promoXHandleColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
@@ -205,9 +229,11 @@ async function getRaffleColumns(): Promise<string> {
   const hasNftSupport = await checkNftMigrationApplied()
   const hasImageFallback = await checkImageFallbackColumnApplied()
   const hasDiscordTenant = await checkDiscordPartnerTenantColumnApplied()
+  const hasPromoXHandle = await checkPromoXHandleColumnApplied()
   const base =
     getBaseRaffleColumnsCore(hasImageFallback) +
-    (hasDiscordTenant ? ',discord_partner_tenant_id' : '')
+    (hasDiscordTenant ? ',discord_partner_tenant_id' : '') +
+    (hasPromoXHandle ? ',promo_x_handle' : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -823,6 +849,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     prize_standard: (row.prize_standard as any) ?? null,
     nft_mint_address: (row.nft_mint_address as string | null) ?? null,
     nft_collection_name: (row.nft_collection_name as string | null) ?? null,
+    promo_x_handle: (row.promo_x_handle as string | null) ?? null,
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
@@ -1413,6 +1440,10 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     insertData.image_fallback_url = raffle.image_fallback_url ?? null
   }
 
+  if ((await checkPromoXHandleColumnApplied()) && raffle.promo_x_handle !== undefined) {
+    insertData.promo_x_handle = raffle.promo_x_handle
+  }
+
   // Only include NFT fields if prize_type is 'nft' or if NFT fields are provided
   // This helps avoid errors if the migration hasn't been run yet
   if (raffle.prize_type === 'nft' || raffle.nft_mint_address || raffle.nft_token_id || 
@@ -1557,6 +1588,9 @@ export async function updateRaffle(
   const payload = omitUndefinedKeys({ ...updates } as Record<string, unknown>)
   if (!(await checkImageFallbackColumnApplied()) && 'image_fallback_url' in payload) {
     delete payload.image_fallback_url
+  }
+  if (!(await checkPromoXHandleColumnApplied()) && 'promo_x_handle' in payload) {
+    delete payload.promo_x_handle
   }
 
   const { data, error } = await getSupabaseAdmin()

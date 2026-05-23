@@ -686,6 +686,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
     }
+    if (viewerIsAdmin === true) {
+      const promo = (formData.get('promo_x_handle') as string)?.trim()
+      if (promo) data.promo_x_handle = promo
+    }
     if (canUseBambooTicketCurrency) {
       if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
         const ap = parseNftTicketPrice(alternateBambooTicketPrice.trim())
@@ -1894,6 +1898,23 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               className="min-h-[44px] touch-manipulation"
             />
           </div>
+
+          {viewerIsAdmin === true && (
+            <div className="space-y-2">
+              <Label htmlFor="promo_x_handle">Promo X @handle (optional, admin)</Label>
+              <Input
+                id="promo_x_handle"
+                name="promo_x_handle"
+                type="text"
+                placeholder="e.g. THC_Labz"
+                className="min-h-[44px] touch-manipulation"
+                maxLength={15}
+              />
+              <p className="text-xs text-muted-foreground">
+                Official @Owltopia_sol share copy uses this for the NFT line (e.g. NFT: @THC_Labz).
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="status">Status *</Label>

@@ -1,6 +1,7 @@
 /**
  * Optional Discord webhook notifications for raffle lifecycle events.
- * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER / DISCORD_WEBHOOK_LIVE_RAFFLES,
+ * Set DISCORD_WEBHOOK_RAFFLE_CREATED / DISCORD_WEBHOOK_RAFFLE_WINNER / DISCORD_WEBHOOK_LIVE_RAFFLES /
+ * DISCORD_WEBHOOK_X_POSTS,
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_WINNER (optional; falls back to raffle winner URL),
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN (optional; when a pool giveaway is opened for entries; falls back to LIVE_RAFFLES URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
@@ -16,6 +17,7 @@ import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
+import { buildOwltopiaRaffleShareText, buildOwltopiaRaffleShareShortUrl } from '@/lib/raffles/owltopia-share-text'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -67,6 +69,11 @@ function webhookUrlLiveShare(): string | undefined {
   const specific = process.env.DISCORD_WEBHOOK_LIVE_RAFFLES?.trim()
   if (specific) return specific
   return process.env.DISCORD_WEBHOOK_URL?.trim() || undefined
+}
+
+/** Admin Owltopia X share mirror (#official-x-posts / #x-post). No fallback — dedicated channel only. */
+function webhookUrlXPosts(): string | undefined {
+  return process.env.DISCORD_WEBHOOK_X_POSTS?.trim() || undefined
 }
 
 function shortenWallet(addr: string): string {
@@ -186,6 +193,32 @@ type WebhookExtras = {
   allowed_mentions?: { parse: []; users: string[] }
 }
 
+async function postDiscordWebhookContentOnce(
+  webhookUrl: string,
+  content: string,
+  signal: AbortSignal
+): Promise<{ ok: boolean; retryable: boolean }> {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        username: PLATFORM_NAME,
+        content,
+      }),
+    })
+    if (res.ok) return { ok: true, retryable: false }
+    const text = await res.text().catch(() => '')
+    console.error(`Discord webhook failed: ${res.status} ${res.statusText}`, text.slice(0, 200))
+    const retryable = res.status === 429 || res.status >= 500
+    return { ok: false, retryable }
+  } catch (e) {
+    console.error('Discord webhook request error:', e)
+    return { ok: false, retryable: true }
+  }
+}
+
 async function postDiscordWebhookOnce(
   webhookUrl: string,
   embed: DiscordEmbed,
@@ -234,6 +267,32 @@ async function postDiscordWebhook(
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
     try {
       return await postDiscordWebhookOnce(webhookUrl, embed, controller.signal, extras)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  const first = await attempt()
+  if (first.ok) return true
+  if (!first.retryable) return false
+  await delay(900)
+  const second = await attempt()
+  return second.ok
+}
+
+async function postDiscordWebhookContent(webhookUrl: string, content: string): Promise<boolean> {
+  if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
+    console.error(
+      'Discord webhook URL rejected: must be https://discord.com/api/webhooks/{id}/{token} (or canary/ptb/discordapp host)'
+    )
+    return false
+  }
+
+  const attempt = async (): Promise<{ ok: boolean; retryable: boolean }> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
+    try {
+      return await postDiscordWebhookContentOnce(webhookUrl, content, controller.signal)
     } finally {
       clearTimeout(timer)
     }
@@ -587,6 +646,69 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
     timestamp: new Date().toISOString(),
   })
 
+  if (!sent) {
+    return { ok: false, error: 'Discord returned an error or the request failed' }
+  }
+  return { ok: true }
+}
+
+/**
+ * Mirror an admin Owltopia X share into #x-post (DISCORD_WEBHOOK_X_POSTS).
+ * Plain-text post matching the OWLTOPIA share template.
+ */
+export async function pushAdminRaffleXShareToDiscord(raffle: Raffle): Promise<{ ok: boolean; error?: string }> {
+  const url = webhookUrlXPosts()
+  if (!url) {
+    return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set' }
+  }
+  if (!isAllowedDiscordIncomingWebhookUrl(url)) {
+    return {
+      ok: false,
+      error: 'X-post webhook URL in env is not a valid Discord incoming webhook URL (https only, discord.com/api/webhooks/…)',
+    }
+  }
+
+  const text = buildOwltopiaRaffleShareText(raffle)
+  const content = text.length > 2000 ? `${text.slice(0, 1997)}...` : text
+  const sent = await postDiscordWebhookContent(url, content)
+  if (!sent) {
+    return { ok: false, error: 'Discord returned an error or the request failed' }
+  }
+  return { ok: true }
+}
+
+/**
+ * One bundle post for the daily X raid (ending today/tomorrow, max 5).
+ * Uses DISCORD_WEBHOOK_X_POSTS — separate from live-raffles feed.
+ */
+export async function pushDailyRaidBundleToDiscord(
+  raffles: Raffle[]
+): Promise<{ ok: boolean; error?: string }> {
+  const url = webhookUrlXPosts()
+  if (!url) {
+    return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set' }
+  }
+  if (!isAllowedDiscordIncomingWebhookUrl(url)) {
+    return {
+      ok: false,
+      error: 'X-post webhook URL in env is not a valid Discord incoming webhook URL (https only, discord.com/api/webhooks/…)',
+    }
+  }
+  if (raffles.length === 0) {
+    return { ok: false, error: 'No raffles to post' }
+  }
+
+  const lines = raffles.map((r, i) => {
+    const short = buildOwltopiaRaffleShareShortUrl(r)
+    return `${i + 1}. **${r.title.trim()}** — ${short}`
+  })
+  const header = `**Daily X raid — ${raffles.length} raffle${raffles.length === 1 ? '' : 's'} ending today/tomorrow (UTC)**`
+  const footer =
+    '\nPost each on @Owltopia_sol (Share on owltopia.xyz or links above), then tag @everyone here for the raid.'
+  const contentRaw = [header, '', ...lines, footer].join('\n')
+  const content = contentRaw.length > 2000 ? `${contentRaw.slice(0, 1997)}...` : contentRaw
+
+  const sent = await postDiscordWebhookContent(url, content)
   if (!sent) {
     return { ok: false, error: 'Discord returned an error or the request failed' }
   }
