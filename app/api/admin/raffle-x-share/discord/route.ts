@@ -4,7 +4,7 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { isRaffleLiveForManualDiscordShare } from '@/lib/raffles/discord-live-share'
 import { pushAdminRaffleXShareToDiscord } from '@/lib/discord-raffle-webhooks'
-import { buildOwltopiaRaffleShareText } from '@/lib/raffles/owltopia-share-text'
+import { buildOwltopiaRaffleShareTextForDiscord } from '@/lib/raffles/owltopia-share-text'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { isRaffleIdUuid } from '@/lib/raffle-id'
 
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       raffleId: raffle.id,
-      shareText: buildOwltopiaRaffleShareText(raffle),
+      shareText: buildOwltopiaRaffleShareTextForDiscord(raffle),
     })
   } catch (error) {
     console.error('POST /api/admin/raffle-x-share/discord:', error)

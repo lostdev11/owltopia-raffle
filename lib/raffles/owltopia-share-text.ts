@@ -57,11 +57,20 @@ export function buildOwltopiaRaffleShareShortUrl(raffle: Pick<Raffle, 'slug'>): 
   return `${host}/raffles/${raffle.slug}`
 }
 
-export function buildOwltopiaRaffleShareText(raffle: Raffle, nowMs?: number): string {
+/** Full https link for Discord (bare domains are not auto-linked). */
+export function buildOwltopiaRaffleShareFullUrl(raffle: Pick<Raffle, 'slug'>): string {
+  const base = getSiteBaseUrl().replace(/\/$/, '')
+  return `${base}/raffles/${encodeURIComponent(raffle.slug)}`
+}
+
+function buildOwltopiaRaffleShareBody(
+  raffle: Raffle,
+  url: string,
+  nowMs?: number
+): string {
   const promoLine = formatPromoLine(raffle)
   const ticket = formatRaffleTicketPriceSummary(raffle)
   const duration = formatRaffleRemainingDuration(raffle.end_time, nowMs)
-  const url = buildOwltopiaRaffleShareShortUrl(raffle)
 
   return [
     'RAFFLE LIVE ON OWLTOPIA',
@@ -72,6 +81,15 @@ export function buildOwltopiaRaffleShareText(raffle: Raffle, nowMs?: number): st
     '',
     `Enter here: ${url}`,
   ].join('\n')
+}
+
+export function buildOwltopiaRaffleShareText(raffle: Raffle, nowMs?: number): string {
+  return buildOwltopiaRaffleShareBody(raffle, buildOwltopiaRaffleShareShortUrl(raffle), nowMs)
+}
+
+/** Same copy as X share, but with a clickable https URL for Discord webhooks. */
+export function buildOwltopiaRaffleShareTextForDiscord(raffle: Raffle, nowMs?: number): string {
+  return buildOwltopiaRaffleShareBody(raffle, buildOwltopiaRaffleShareFullUrl(raffle), nowMs)
 }
 
 export function buildOwltopiaRaffleXIntentUrl(raffle: Raffle, nowMs?: number): string {
