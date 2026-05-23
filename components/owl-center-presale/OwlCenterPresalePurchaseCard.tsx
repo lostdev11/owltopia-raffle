@@ -245,18 +245,25 @@ export function OwlCenterPresalePurchaseCard({
             onClick={() => void buy()}
             style={{ backgroundColor: `${primary}22`, borderColor: `${primary}66`, color: '#EAFBF4' }}
           >
-            {busy ? (
+            {phase === 'building' && (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {phase === 'signing' ? 'Approve in wallet…' : phase === 'confirming' ? 'Confirming…' : 'Preparing…'}
+                Preparing…
               </>
-            ) : presaleSoldOut ? (
-              'Sold out'
-            ) : purchasesOpen ? (
-              `Buy ${qty} spot${qty === 1 ? '' : 's'}`
-            ) : (
-              'Presale paused'
             )}
+            {phase === 'signing' && 'Approve in wallet…'}
+            {phase === 'confirming' && (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Confirming…
+              </>
+            )}
+            {phase === 'idle' &&
+              (presaleSoldOut
+                ? 'Sold out'
+                : purchasesOpen
+                  ? `Buy ${qty} spot${qty === 1 ? '' : 's'}`
+                  : 'Presale paused')}
           </Button>
           {walletRemaining < maxCredits && (
             <p className="mt-2 text-center text-xs" style={{ color: muted }}>
