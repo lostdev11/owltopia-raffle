@@ -28,6 +28,7 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
@@ -696,14 +697,9 @@ export async function handleCreateRafflePost(
           'supabase error'
         )
         if (existingForPrize) {
-          return NextResponse.json(
-            {
-              error:
-                'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
-              existing_slug: existingForPrize.slug,
-            },
-            { status: 409 }
-          )
+          return NextResponse.json(buildDuplicateNftPrizeConflictBody(existingForPrize), {
+            status: 409,
+          })
         }
       }
 
@@ -833,11 +829,15 @@ export async function handleCreateRafflePost(
             ).catch(() => null)
           : null
         return NextResponse.json(
-          {
-            error:
-              'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
-            existing_slug: existing?.slug,
-          },
+          existing
+            ? buildDuplicateNftPrizeConflictBody(existing)
+            : {
+                error:
+                  'This NFT already has an active raffle listing. Open that listing or wait until it completes or is cancelled.',
+                existing_slug: '',
+                existing_status: null,
+                conflict_reason: 'active_listing' as const,
+              },
           { status: 409 }
         )
       }

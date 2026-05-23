@@ -1304,15 +1304,28 @@ export class DuplicateActiveNftPrizeError extends Error {
  * Any non-terminal raffle anywhere listing this prize mint/token id (normalized).
  * Prevents duplicate listings for the same on-chain NFT across creators.
  */
+export type NonTerminalNftRaffleByPrizeAsset = {
+  id: string
+  slug: string
+  status: RaffleStatus | null
+  winner_selected_at: string | null
+  end_time: string
+  winner_wallet: string | null
+  nft_transfer_transaction: string | null
+  prize_returned_at: string | null
+}
+
 export async function findNonTerminalNftRaffleByPrizeAssetId(
   prizeMintOrAssetId: string
-): Promise<{ id: string; slug: string; status: RaffleStatus } | null> {
+): Promise<NonTerminalNftRaffleByPrizeAsset | null> {
   const mint = normalizePrizeMintQueryValue(prizeMintOrAssetId)
   if (!mint) return null
 
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
-    .select('id, slug, status')
+    .select(
+      'id, slug, status, winner_selected_at, end_time, winner_wallet, nft_transfer_transaction, prize_returned_at'
+    )
     .or(`nft_mint_address.eq.${mint},nft_token_id.eq.${mint}`)
     .or(`status.in.(${NON_TERMINAL_DUPLICATE_STATUSES.join(',')}),status.is.null`)
     .order('created_at', { ascending: false })
@@ -1328,6 +1341,11 @@ export async function findNonTerminalNftRaffleByPrizeAssetId(
     id: String(data.id),
     slug: String(data.slug),
     status: (data.status as RaffleStatus) ?? null,
+    winner_selected_at: (data.winner_selected_at as string | null) ?? null,
+    end_time: String(data.end_time ?? ''),
+    winner_wallet: (data.winner_wallet as string | null) ?? null,
+    nft_transfer_transaction: (data.nft_transfer_transaction as string | null) ?? null,
+    prize_returned_at: (data.prize_returned_at as string | null) ?? null,
   }
 }
 

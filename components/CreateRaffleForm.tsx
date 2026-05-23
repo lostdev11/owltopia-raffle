@@ -48,7 +48,8 @@ import {
   getThemeAccentClasses,
   THEME_ACCENT_SELECT_OPTIONS,
 } from '@/lib/theme-accent'
-import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
+import { formatDateTimeWithTimezone, localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
+import type { DuplicateNftPrizeConflictReason } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
@@ -1395,7 +1396,22 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           )
           router.push('/dashboard')
         } else if (response.status === 409 && existingSlug) {
-          alert(`${msg}\n\nOpening your existing raffle…`)
+          const conflictReason = errorData?.conflict_reason as DuplicateNftPrizeConflictReason | undefined
+          const offerEndsRaw =
+            typeof errorData?.offer_window_ends_at === 'string' ? errorData.offer_window_ends_at.trim() : ''
+          const offerEndsLabel =
+            offerEndsRaw && !Number.isNaN(new Date(offerEndsRaw).getTime())
+              ? formatDateTimeWithTimezone(offerEndsRaw)
+              : ''
+          let alertBody = typeof msg === 'string' && msg.trim() ? msg.trim() : 'This NFT cannot be listed yet.'
+          if (conflictReason === 'post_draw_offers' && offerEndsLabel) {
+            alertBody += `\n\nYou can try again after buyout offers close (${offerEndsLabel}).`
+          }
+          const openHint =
+            conflictReason === 'post_draw_offers' || conflictReason === 'settlement_in_progress'
+              ? 'Opening the previous raffle…'
+              : 'Opening your existing raffle…'
+          alert(`${alertBody}\n\n${openHint}`)
           router.push(`/raffles/${encodeURIComponent(existingSlug)}`)
         } else {
           const friendly = formatCreateRaffleApiError(response.status, typeof msg === 'string' ? msg : '')
