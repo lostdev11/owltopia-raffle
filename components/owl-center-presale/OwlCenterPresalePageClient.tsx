@@ -216,7 +216,7 @@ export function OwlCenterPresalePageClient({ slug }: Props) {
 
   return (
     <div className="min-h-[70vh] pb-24" style={{ backgroundColor: bg, color: '#EAFBF4' }}>
-      <motion
+      <div
         className="pointer-events-none absolute inset-x-0 top-0 h-72 opacity-40"
         style={{ background: `radial-gradient(ellipse 80% 60% at 50% -20%, ${accent}44, transparent)` }}
         aria-hidden
@@ -227,7 +227,7 @@ export function OwlCenterPresalePageClient({ slug }: Props) {
           className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium touch-manipulation"
           style={{ color: muted }}
         >
-          <ChevronLeft className="h-4 w-4" />content          Owl Center
+          <ChevronLeft className="h-4 w-4" /> Owl Center
         </Link>
 
         <div className="mt-6 grid gap-10 lg:grid-cols-2 lg:items-start">
@@ -262,7 +262,7 @@ export function OwlCenterPresalePageClient({ slug }: Props) {
                   / {stats?.presale_supply ?? '—'} spots
                 </span>
               </p>
-              <motion className="mt-3 h-3 overflow-hidden rounded-full bg-black/40">
+              <div className="mt-3 h-3 overflow-hidden rounded-full bg-black/40">
                 <div
                   className="h-full rounded-full transition-[width] duration-700"
                   style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${accent}, ${primary})` }}
@@ -318,7 +318,7 @@ export function OwlCenterPresalePageClient({ slug }: Props) {
                       {balLoading ? '…' : balance?.available_mints ?? 0}
                     </dd>
                   </div>
-                  <motion className="rounded-xl bg-black/30 p-4 ring-1 ring-white/5">
+                  <div className="rounded-xl bg-black/30 p-4 ring-1 ring-white/5">
                     <dt className="text-xs uppercase tracking-wider" style={{ color: muted }}>
                       Purchased
                     </dt>
@@ -330,24 +330,6 @@ export function OwlCenterPresalePageClient({ slug }: Props) {
           </section>
         </div>
       </main>
-    </div>
-  )
-}
-
-function motion({
-  className,
-  style,
-  children,
-  'aria-hidden': ariaHidden,
-}: {
-  className?: string
-  style?: React.CSSProperties
-  children?: React.ReactNode
-  'aria-hidden'?: boolean
-}) {
-  return (
-    <div className={className} style={style} aria-hidden={ariaHidden}>
-      {children}
     </div>
   )
 }
