@@ -2277,9 +2277,8 @@ export default function AdminDashboardPage() {
           >
             <CardDescription className="mb-4">
               Up to 5 live raffles ending today or tomorrow (UTC). Post each on @Owltopia_sol via{' '}
-              <strong className="text-foreground">Share</strong> on the raffle page (OWLTOPIA template), or use{' '}
-              <strong className="text-foreground">Post to X</strong> below. Then post the bundle to{' '}
-              <span className="font-mono text-xs">#x-post</span> and send one manual{' '}
+              <strong className="text-foreground">Share</strong> on the raffle page (OWLTOPIA template), then mirror
+              each tweet to <span className="font-mono text-xs">#x-post</span> with the fixupx link. Send one manual{' '}
               <span className="font-mono text-xs">@everyone</span> with the suggested raid message.
             </CardDescription>
             <div className="space-y-4">

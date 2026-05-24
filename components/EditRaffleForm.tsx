@@ -40,6 +40,7 @@ import {
   buildOwltopiaRaffleShareText,
   buildOwltopiaRaffleXIntentUrl,
 } from '@/lib/raffles/owltopia-share-text'
+import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
 
 function editFormTicketCurrencyDefault(
   raffleCurrency: string | null | undefined,
@@ -160,6 +161,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [listPlatformSaving, setListPlatformSaving] = useState(false)
   const [listPlatformError, setListPlatformError] = useState<string | null>(null)
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
+  const [mirrorTweetUrl, setMirrorTweetUrl] = useState('')
+  const [mirroringTweet, setMirroringTweet] = useState(false)
+  const [mirrorTweetMessage, setMirrorTweetMessage] = useState<{
+    type: 'success' | 'error'
+    text: string
+  } | null>(null)
 
   useEffect(() => {
     setListOnPlatform(raffle.list_on_platform !== false)
@@ -740,6 +747,31 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const handleMirrorTweetToDiscord = async () => {
+    const tweetUrl = mirrorTweetUrl.trim()
+    if (!tweetUrl) {
+      setMirrorTweetMessage({ type: 'error', text: 'Paste the @Owltopia_sol tweet URL first.' })
+      return
+    }
+    setMirroringTweet(true)
+    setMirrorTweetMessage(null)
+    try {
+      const result = await mirrorAdminTweetShareToDiscord(raffle.id, tweetUrl)
+      if (!result.ok) {
+        setMirrorTweetMessage({ type: 'error', text: result.error ?? 'Discord mirror failed' })
+        return
+      }
+      setMirrorTweetMessage({
+        type: 'success',
+        text: result.discordContent
+          ? `Mirrored to #x-post: ${result.discordContent}`
+          : 'Mirrored to #x-post in Discord.',
+      })
+    } finally {
+      setMirroringTweet(false)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -859,6 +891,45 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       Post to X (OWLTOPIA template)
                     </a>
                   </Button>
+                </div>
+                <div className="space-y-2 rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3">
+                  <Label htmlFor="mirror_tweet_x_post_url">
+                    After you post on X, mirror the tweet to Discord #x-post. The bot posts a fixupx embed of the tweet
+                    (not an owltopia.xyz raffle link).
+                  </Label>
+                  <Input
+                    id="mirror_tweet_x_post_url"
+                    name="mirror_tweet_x_post_url"
+                    type="url"
+                    inputMode="url"
+                    autoComplete="off"
+                    placeholder="https://x.com/Owltopia_sol/status/…"
+                    value={mirrorTweetUrl}
+                    onChange={(e) => setMirrorTweetUrl(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="touch-manipulation min-h-[44px]"
+                    disabled={mirroringTweet}
+                    onClick={() => void handleMirrorTweetToDiscord()}
+                  >
+                    {mirroringTweet ? 'Mirroring…' : 'Mirror to #x-post'}
+                  </Button>
+                  {mirrorTweetMessage && (
+                    <div
+                      role="status"
+                      className={`rounded-lg border p-3 ${
+                        mirrorTweetMessage.type === 'success'
+                          ? 'border-green-500/20 bg-green-500/10 text-green-500'
+                          : 'border-red-500/20 bg-red-500/10 text-red-500'
+                      }`}
+                    >
+                      <p className="text-sm">{mirrorTweetMessage.text}</p>
+                    </div>
+                  )}
                 </div>
               </>
             )}

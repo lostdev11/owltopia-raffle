@@ -17,10 +17,7 @@ import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
-import {
-  buildOwltopiaRaffleShareFullUrl,
-  buildOwltopiaRaffleShareTextForDiscord,
-} from '@/lib/raffles/owltopia-share-text'
+import { buildDiscordXTweetMirrorContent } from '@/lib/raffles/x-tweet-discord-mirror'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -196,20 +193,28 @@ type WebhookExtras = {
   allowed_mentions?: { parse: []; users: string[] }
 }
 
+type ContentWebhookExtras = {
+  allowed_mentions?: { parse: ('everyone' | 'roles' | 'users')[]; users?: string[] }
+}
+
 async function postDiscordWebhookContentOnce(
   webhookUrl: string,
   content: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  extras?: ContentWebhookExtras
 ): Promise<{ ok: boolean; retryable: boolean }> {
   try {
+    const body: Record<string, unknown> = {
+      username: PLATFORM_NAME,
+      content,
+    }
+    if (extras?.allowed_mentions) body.allowed_mentions = extras.allowed_mentions
+
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,
-      body: JSON.stringify({
-        username: PLATFORM_NAME,
-        content,
-      }),
+      body: JSON.stringify(body),
     })
     if (res.ok) return { ok: true, retryable: false }
     const text = await res.text().catch(() => '')
@@ -283,7 +288,11 @@ async function postDiscordWebhook(
   return second.ok
 }
 
-async function postDiscordWebhookContent(webhookUrl: string, content: string): Promise<boolean> {
+async function postDiscordWebhookContent(
+  webhookUrl: string,
+  content: string,
+  extras?: ContentWebhookExtras
+): Promise<boolean> {
   if (!isAllowedDiscordIncomingWebhookUrl(webhookUrl)) {
     console.error(
       'Discord webhook URL rejected: must be https://discord.com/api/webhooks/{id}/{token} (or canary/ptb/discordapp host)'
@@ -295,7 +304,7 @@ async function postDiscordWebhookContent(webhookUrl: string, content: string): P
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
     try {
-      return await postDiscordWebhookContentOnce(webhookUrl, content, controller.signal)
+      return await postDiscordWebhookContentOnce(webhookUrl, content, controller.signal, extras)
     } finally {
       clearTimeout(timer)
     }
@@ -656,10 +665,12 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
 }
 
 /**
- * Mirror an admin Owltopia X share into #x-post (DISCORD_WEBHOOK_X_POSTS).
- * Plain-text post matching the OWLTOPIA share template.
+ * Mirror an admin @Owltopia_sol tweet into #x-post (DISCORD_WEBHOOK_X_POSTS).
+ * Posts `@everyone Owltopia_sol just tweeted: https://fixupx.com/…` so Discord embeds the X post.
  */
-export async function pushAdminRaffleXShareToDiscord(raffle: Raffle): Promise<{ ok: boolean; error?: string }> {
+export async function pushAdminRaffleXShareToDiscord(
+  tweetUrl: string
+): Promise<{ ok: boolean; error?: string; discordContent?: string }> {
   const url = webhookUrlXPosts()
   if (!url) {
     return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set' }
@@ -671,13 +682,19 @@ export async function pushAdminRaffleXShareToDiscord(raffle: Raffle): Promise<{ 
     }
   }
 
-  const text = buildOwltopiaRaffleShareTextForDiscord(raffle)
-  const content = text.length > 2000 ? `${text.slice(0, 1997)}...` : text
-  const sent = await postDiscordWebhookContent(url, content)
+  const mirror = buildDiscordXTweetMirrorContent(tweetUrl)
+  if (!mirror.ok) {
+    return { ok: false, error: mirror.error }
+  }
+
+  const content = mirror.content.length > 2000 ? `${mirror.content.slice(0, 1997)}...` : mirror.content
+  const sent = await postDiscordWebhookContent(url, content, {
+    allowed_mentions: { parse: ['everyone'] },
+  })
   if (!sent) {
     return { ok: false, error: 'Discord returned an error or the request failed' }
   }
-  return { ok: true }
+  return { ok: true, discordContent: mirror.content }
 }
 
 /**
@@ -701,13 +718,10 @@ export async function pushDailyRaidBundleToDiscord(
     return { ok: false, error: 'No raffles to post' }
   }
 
-  const lines = raffles.map((r, i) => {
-    const url = buildOwltopiaRaffleShareFullUrl(r)
-    return `${i + 1}. **${r.title.trim()}** — ${url}`
-  })
+  const lines = raffles.map((r, i) => `${i + 1}. **${r.title.trim()}**`)
   const header = `**Daily X raid — ${raffles.length} raffle${raffles.length === 1 ? '' : 's'} ending today/tomorrow (UTC)**`
   const footer =
-    '\nPost each on @Owltopia_sol (Share on owltopia.xyz or links above), then tag @everyone here for the raid.'
+    '\nPost each on @Owltopia_sol (Share on owltopia.xyz), then mirror each tweet here with @everyone + fixupx link.'
   const contentRaw = [header, '', ...lines, footer].join('\n')
   const content = contentRaw.length > 2000 ? `${contentRaw.slice(0, 1997)}...` : contentRaw
 

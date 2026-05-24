@@ -14,29 +14,52 @@ function isMobileNativeSharePreferred(): boolean {
   )
 }
 
-async function mirrorAdminShareToDiscord(raffleId: string): Promise<void> {
+export async function mirrorAdminTweetShareToDiscord(
+  raffleId: string,
+  tweetUrl: string
+): Promise<{ ok: boolean; error?: string; discordContent?: string }> {
   try {
     const res = await fetch('/api/admin/raffle-x-share/discord', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raffleId }),
+      body: JSON.stringify({ raffleId, tweetUrl }),
     })
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string
+      discordContent?: string
+    }
     if (!res.ok) {
-      console.warn('[raffle-share] Discord mirror failed', await res.text().catch(() => ''))
+      return { ok: false, error: typeof data.error === 'string' ? data.error : 'Discord mirror failed' }
+    }
+    return {
+      ok: true,
+      discordContent: typeof data.discordContent === 'string' ? data.discordContent : undefined,
     }
   } catch (e) {
     console.warn('[raffle-share] Discord mirror error', e)
+    return { ok: false, error: 'Discord mirror request failed' }
   }
+}
+
+function promptForTweetUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  const value = window.prompt(
+    'Post on @Owltopia_sol first, then paste the tweet URL to mirror to #x-post in Discord:',
+    'https://x.com/Owltopia_sol/status/'
+  )
+  const trimmed = value?.trim()
+  return trimmed || null
 }
 
 export async function shareRaffleFromBrowser(params: {
   raffle: Raffle
-  /** Full admin (Owl Vision) — uses OWLTOPIA block + mirrors to #x-post. */
+  /** Full admin (Owl Vision) — uses OWLTOPIA block + optional #x-post mirror after tweet URL. */
   isFullAdmin: boolean
   onCopied?: () => void
+  onDiscordMirrored?: (result: { ok: boolean; error?: string; discordContent?: string }) => void
 }): Promise<void> {
-  const { raffle, isFullAdmin, onCopied } = params
+  const { raffle, isFullAdmin, onCopied, onDiscordMirrored } = params
   if (typeof window === 'undefined') return
 
   const pageUrl = `${window.location.origin}/raffles/${raffle.slug}`
@@ -45,18 +68,24 @@ export async function shareRaffleFromBrowser(params: {
     const text = buildOwltopiaRaffleShareText(raffle)
     const intentUrl = buildOwltopiaRaffleXIntentUrl(raffle)
 
+    let postedViaNativeShare = false
     if (isMobileNativeSharePreferred()) {
       try {
         await navigator.share({ text, title: 'Owltopia raffle' })
-        await mirrorAdminShareToDiscord(raffle.id)
-        return
+        postedViaNativeShare = true
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return
       }
     }
+    if (!postedViaNativeShare) {
+      window.open(intentUrl, '_blank', 'noopener,noreferrer')
+    }
 
-    window.open(intentUrl, '_blank', 'noopener,noreferrer')
-    void mirrorAdminShareToDiscord(raffle.id)
+    const tweetUrl = promptForTweetUrl()
+    if (tweetUrl) {
+      const mirror = await mirrorAdminTweetShareToDiscord(raffle.id, tweetUrl)
+      onDiscordMirrored?.(mirror)
+    }
 
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       try {
@@ -64,7 +93,7 @@ export async function shareRaffleFromBrowser(params: {
         onCopied?.()
         return
       } catch {
-        // Clipboard denied — X intent + Discord mirror still ran.
+        // Clipboard denied — X intent still ran.
       }
     }
     return

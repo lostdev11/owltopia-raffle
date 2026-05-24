@@ -4,7 +4,7 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { isRaffleLiveForManualDiscordShare } from '@/lib/raffles/discord-live-share'
 import { pushAdminRaffleXShareToDiscord } from '@/lib/discord-raffle-webhooks'
-import { buildOwltopiaRaffleShareTextForDiscord } from '@/lib/raffles/owltopia-share-text'
+import { parseXTweetStatusUrl } from '@/lib/raffles/x-tweet-discord-mirror'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { isRaffleIdUuid } from '@/lib/raffle-id'
 
@@ -14,7 +14,8 @@ const RAFFLE_DEDUPE_MS = 2 * 60 * 60 * 1000 // 2h — same raffle not mirrored t
 
 /**
  * POST /api/admin/raffle-x-share/discord
- * Body: { raffleId: string }. Mirrors an admin Owltopia X share into DISCORD_WEBHOOK_X_POSTS (#x-post).
+ * Body: { raffleId: string, tweetUrl: string }.
+ * Mirrors an @Owltopia_sol tweet into DISCORD_WEBHOOK_X_POSTS (#x-post) with a fixupx embed.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -32,8 +33,24 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}))
     const raffleId = typeof body.raffleId === 'string' ? body.raffleId.trim() : ''
+    const tweetUrl = typeof body.tweetUrl === 'string' ? body.tweetUrl.trim() : ''
     if (!raffleId) {
       return NextResponse.json({ error: 'raffleId is required' }, { status: 400 })
+    }
+    if (!tweetUrl) {
+      return NextResponse.json(
+        { error: 'tweetUrl is required — paste the @Owltopia_sol post link after you publish on X.' },
+        { status: 400 }
+      )
+    }
+    if (!parseXTweetStatusUrl(tweetUrl)) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid tweetUrl. Use https://x.com/Owltopia_sol/status/… (or fixupx.com / twitter.com equivalent).',
+        },
+        { status: 400 }
+      )
     }
     if (!isRaffleIdUuid(raffleId)) {
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
@@ -64,7 +81,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await pushAdminRaffleXShareToDiscord(raffle)
+    const result = await pushAdminRaffleXShareToDiscord(tweetUrl)
     if (!result.ok) {
       return NextResponse.json({ error: result.error ?? 'Discord post failed' }, { status: 502 })
     }
@@ -72,7 +89,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       raffleId: raffle.id,
-      shareText: buildOwltopiaRaffleShareTextForDiscord(raffle),
+      discordContent: result.discordContent,
     })
   } catch (error) {
     console.error('POST /api/admin/raffle-x-share/discord:', error)
