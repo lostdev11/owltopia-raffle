@@ -3,6 +3,7 @@ import {
   buildOwltopiaRaffleShareText,
   buildOwltopiaRaffleXIntentUrl,
 } from '@/lib/raffles/owltopia-share-text'
+import { openAdminTweetMirrorRequest } from '@/lib/client/admin-tweet-mirror-host'
 
 function isMobileNativeSharePreferred(): boolean {
   return (
@@ -42,16 +43,6 @@ export async function mirrorAdminTweetShareToDiscord(
   }
 }
 
-function promptForTweetUrl(): string | null {
-  if (typeof window === 'undefined') return null
-  const value = window.prompt(
-    'Post on @Owltopia_sol first, then paste the tweet URL to mirror to #x-post (one embed per link; @everyone raid is separate):',
-    'https://x.com/Owltopia_sol/status/'
-  )
-  const trimmed = value?.trim()
-  return trimmed || null
-}
-
 export async function mirrorAdminTweetSharesBatchToDiscord(
   tweetUrlsText: string
 ): Promise<{ ok: boolean; error?: string; posted?: number }> {
@@ -75,12 +66,11 @@ export async function mirrorAdminTweetSharesBatchToDiscord(
 
 export async function shareRaffleFromBrowser(params: {
   raffle: Raffle
-  /** Full admin (Owl Vision) — uses OWLTOPIA block + optional #x-post mirror after tweet URL. */
+  /** Full admin (Owl Vision) — uses OWLTOPIA block + platform #x-post mirror dialog. */
   isFullAdmin: boolean
   onCopied?: () => void
-  onDiscordMirrored?: (result: { ok: boolean; error?: string; discordContent?: string }) => void
 }): Promise<void> {
-  const { raffle, isFullAdmin, onCopied, onDiscordMirrored } = params
+  const { raffle, isFullAdmin, onCopied } = params
   if (typeof window === 'undefined') return
 
   const pageUrl = `${window.location.origin}/raffles/${raffle.slug}`
@@ -102,11 +92,10 @@ export async function shareRaffleFromBrowser(params: {
       window.open(intentUrl, '_blank', 'noopener,noreferrer')
     }
 
-    const tweetUrl = promptForTweetUrl()
-    if (tweetUrl) {
-      const mirror = await mirrorAdminTweetShareToDiscord(raffle.id, tweetUrl)
-      onDiscordMirrored?.(mirror)
-    }
+    openAdminTweetMirrorRequest({
+      raffleId: raffle.id,
+      raffleTitle: raffle.title.trim() || 'Raffle',
+    })
 
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       try {
@@ -114,7 +103,7 @@ export async function shareRaffleFromBrowser(params: {
         onCopied?.()
         return
       } catch {
-        // Clipboard denied — X intent still ran.
+        // Clipboard denied — X intent + mirror dialog still ran.
       }
     }
     return

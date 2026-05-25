@@ -19,6 +19,7 @@ import { ErrorHandler } from '@/components/ErrorHandler'
 import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
+import { AdminTweetMirrorHost } from '@/components/admin/AdminTweetMirrorHost'
 import { MaintenanceBanner } from '@/components/MaintenanceBanner'
 import { MobileClientUpdateBanner } from '@/components/MobileClientUpdateBanner'
 import { ReferralCapture } from '@/components/ReferralCapture'
@@ -264,6 +265,7 @@ export default function RootLayout({
                 </main>
                 <ConditionalFooter />
               </div>
+              <AdminTweetMirrorHost />
             </CartProvider>
           </WalletContextProvider>
         </PlatformMusicProvider>

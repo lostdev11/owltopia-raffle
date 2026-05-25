@@ -11,8 +11,7 @@ import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megap
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { mirrorAdminTweetSharesBatchToDiscord } from '@/lib/client/raffle-share'
+import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
@@ -201,8 +200,9 @@ export default function AdminDashboardPage() {
   const [loadingDailyRaid, setLoadingDailyRaid] = useState(false)
   const [dailyRaidLoadError, setDailyRaidLoadError] = useState<string | null>(null)
   const [pushingDailyRaidDiscord, setPushingDailyRaidDiscord] = useState(false)
-  const [batchTweetUrlsText, setBatchTweetUrlsText] = useState('')
-  const [pushingBatchTweetMirror, setPushingBatchTweetMirror] = useState(false)
+  const [raidTweetUrls, setRaidTweetUrls] = useState<Record<string, string>>({})
+  const [raidMirrorPostingId, setRaidMirrorPostingId] = useState<string | null>(null)
+  const [raidMirroredIds, setRaidMirroredIds] = useState<string[]>([])
   const [dailyRaidMessage, setDailyRaidMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   )
@@ -649,6 +649,8 @@ export default function AdminDashboardPage() {
       setDailyRaidEveryoneMessage(
         typeof data.suggestedEveryoneMessage === 'string' ? data.suggestedEveryoneMessage : null
       )
+      setRaidTweetUrls({})
+      setRaidMirroredIds([])
     } catch (e) {
       console.error('fetchDailyRaidBatch:', e)
       setDailyRaidRaffles(null)
@@ -693,35 +695,54 @@ export default function AdminDashboardPage() {
     }
   }
 
-  const handleMirrorBatchTweetsToDiscord = async () => {
-    const text = batchTweetUrlsText.trim()
-    if (!text) {
+  const handleMirrorRaidTweet = async (raffleId: string, raffleTitle: string) => {
+    const tweetUrl = (raidTweetUrls[raffleId] ?? '').trim()
+    if (!tweetUrl) {
       setDailyRaidMessage({
         type: 'error',
-        text: 'Paste one tweet URL per line (up to 5) after posting on @Owltopia_sol.',
+        text: `Paste the tweet link for "${raffleTitle}" first (from X, not owltopia.xyz).`,
       })
       return
     }
-    setPushingBatchTweetMirror(true)
+    setRaidMirrorPostingId(raffleId)
     setDailyRaidMessage(null)
     try {
-      const result = await mirrorAdminTweetSharesBatchToDiscord(text)
+      const result = await mirrorAdminTweetShareToDiscord(raffleId, tweetUrl)
       if (!result.ok) {
         setDailyRaidMessage({
           type: 'error',
-          text: result.error ?? 'Could not mirror tweets to Discord',
+          text: result.error ?? `Could not post "${raffleTitle}" to Discord`,
         })
         return
       }
-      setDailyRaidMessage({
-        type: 'success',
-        text: `Posted ${result.posted ?? 0} tweet embed${result.posted === 1 ? '' : 's'} to #x-post. Copy the @everyone raid message below.`,
-      })
+      setRaidMirroredIds((prev) => (prev.includes(raffleId) ? prev : [...prev, raffleId]))
+      const nextMirrored = raidMirroredIds.includes(raffleId)
+        ? raidMirroredIds
+        : [...raidMirroredIds, raffleId]
+      const total = dailyRaidRaffles?.length ?? 0
+      if (total > 0 && nextMirrored.length >= total && dailyRaidEveryoneMessage) {
+        try {
+          await navigator.clipboard.writeText(dailyRaidEveryoneMessage)
+          setDailyRaidCopied(true)
+          window.setTimeout(() => setDailyRaidCopied(false), 2500)
+        } catch {
+          /* ignore */
+        }
+        setDailyRaidMessage({
+          type: 'success',
+          text: `All ${total} tweets are in #x-post. @everyone raid message copied — paste it in Discord.`,
+        })
+      } else {
+        setDailyRaidMessage({
+          type: 'success',
+          text: `"${raffleTitle}" posted to #x-post (${nextMirrored.length}/${total}).`,
+        })
+      }
     } catch (e) {
-      console.error('handleMirrorBatchTweetsToDiscord:', e)
+      console.error('handleMirrorRaidTweet:', e)
       setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
     } finally {
-      setPushingBatchTweetMirror(false)
+      setRaidMirrorPostingId(null)
     }
   }
 
@@ -2312,40 +2333,35 @@ export default function AdminDashboardPage() {
             }
           >
             <CardDescription className="mb-4">
-              Up to 5 live raffles ending today or tomorrow (UTC). Use <strong className="text-foreground">Share</strong>{' '}
-              on each raffle (tag the project in the NFT line), post on @Owltopia_sol, then paste all tweet links below —
-              the webhook posts one Discord embed per tweet. You send one manual{' '}
-              <span className="font-mono text-xs">@everyone</span> raid message after.
+              Three steps: post each raffle on X → paste each tweet link → send one @everyone raid in Discord.
             </CardDescription>
-            <div className="space-y-4">
-              <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
-                <Label htmlFor="batch_tweet_urls">Mirror tweets to #x-post</Label>
-                <Textarea
-                  id="batch_tweet_urls"
-                  value={batchTweetUrlsText}
-                  onChange={(e) => setBatchTweetUrlsText(e.target.value)}
-                  placeholder={
-                    'https://x.com/Owltopia_sol/status/…\nhttps://x.com/Owltopia_sol/status/…\n(one per line, up to 5)'
-                  }
-                  rows={4}
-                  className="min-h-[88px] touch-manipulation font-mono text-xs"
-                />
+            <ol className="mb-4 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+              <li>
+                <span className="text-foreground">Post to X</span> for each raffle below (tag the project in the NFT line)
+              </li>
+              <li>
+                <span className="text-foreground">Post to Discord</span> — paste the tweet link under each raffle
+              </li>
+              <li>
+                <span className="text-foreground">@everyone raid</span> — copy the message below and paste in Discord
+              </li>
+            </ol>
+            {dailyRaidEveryoneMessage && dailyRaidRaffles && dailyRaidRaffles.length > 0 && (
+              <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2 mb-4">
+                <p className="text-xs text-muted-foreground">Step 3 — @everyone raid message:</p>
+                <p className="text-sm font-medium text-foreground">{dailyRaidEveryoneMessage}</p>
                 <Button
                   type="button"
-                  onClick={() => void handleMirrorBatchTweetsToDiscord()}
-                  disabled={pushingBatchTweetMirror || !batchTweetUrlsText.trim()}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleCopyDailyRaidEveryoneMessage()}
                   className="touch-manipulation min-h-[44px]"
                 >
-                  {pushingBatchTweetMirror ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
-                      Posting embeds…
-                    </>
-                  ) : (
-                    'Mirror tweets to #x-post'
-                  )}
+                  {dailyRaidCopied ? 'Copied!' : 'Copy @everyone message'}
                 </Button>
               </div>
+            )}
+            <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -2398,21 +2414,6 @@ export default function AdminDashboardPage() {
                 >
                   {dailyRaidMessage.text}
                 </p>
-              )}
-              {dailyRaidEveryoneMessage && dailyRaidRaffles && dailyRaidRaffles.length > 0 && (
-                <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
-                  <p className="text-xs text-muted-foreground">Suggested @everyone message (copy & paste):</p>
-                  <p className="text-sm font-medium text-foreground">{dailyRaidEveryoneMessage}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleCopyDailyRaidEveryoneMessage()}
-                    className="touch-manipulation min-h-[44px]"
-                  >
-                    {dailyRaidCopied ? 'Copied!' : 'Copy @everyone message'}
-                  </Button>
-                </div>
               )}
               {!dailyRaidLoadError &&
                 (loadingDailyRaid || dailyRaidRaffles === null ? (
@@ -2468,6 +2469,41 @@ export default function AdminDashboardPage() {
                               <Link href={`/raffles/${encodeURIComponent(r.slug)}`}>Share on site</Link>
                             </Button>
                           </div>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <Input
+                            type="url"
+                            inputMode="url"
+                            autoComplete="off"
+                            placeholder="Step 2: paste tweet link from X"
+                            value={raidTweetUrls[r.id] ?? ''}
+                            onChange={(e) =>
+                              setRaidTweetUrls((prev) => ({ ...prev, [r.id]: e.target.value }))
+                            }
+                            className="min-h-[44px] touch-manipulation font-mono text-xs flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant={raidMirroredIds.includes(r.id) ? 'secondary' : 'default'}
+                            size="sm"
+                            disabled={raidMirrorPostingId === r.id || raidMirroredIds.includes(r.id)}
+                            onClick={() => void handleMirrorRaidTweet(r.id, r.title)}
+                            className="touch-manipulation min-h-[44px] shrink-0"
+                          >
+                            {raidMirrorPostingId === r.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                                Posting…
+                              </>
+                            ) : raidMirroredIds.includes(r.id) ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 mr-2 shrink-0" />
+                                In Discord
+                              </>
+                            ) : (
+                              'Post to Discord'
+                            )}
+                          </Button>
                         </div>
                         <pre className="text-xs whitespace-pre-wrap font-sans text-muted-foreground bg-muted/30 rounded p-2 overflow-x-auto">
                           {r.shareText}
