@@ -894,8 +894,8 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                 </div>
                 <div className="space-y-2 rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3">
                   <Label htmlFor="mirror_tweet_x_post_url">
-                    After you post on X, mirror the tweet to Discord #x-post. The bot posts a fixupx embed of the tweet
-                    (not an owltopia.xyz raffle link).
+                    After you post on X, mirror the tweet to #x-post (fixupx embed; no @everyone — raid ping is
+                    separate). For 2–5 tweets at once, use Admin → Daily X raid batch box.
                   </Label>
                   <Input
                     id="mirror_tweet_x_post_url"

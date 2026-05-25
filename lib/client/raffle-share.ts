@@ -45,11 +45,32 @@ export async function mirrorAdminTweetShareToDiscord(
 function promptForTweetUrl(): string | null {
   if (typeof window === 'undefined') return null
   const value = window.prompt(
-    'Post on @Owltopia_sol first, then paste the tweet URL to mirror to #x-post in Discord:',
+    'Post on @Owltopia_sol first, then paste the tweet URL to mirror to #x-post (one embed per link; @everyone raid is separate):',
     'https://x.com/Owltopia_sol/status/'
   )
   const trimmed = value?.trim()
   return trimmed || null
+}
+
+export async function mirrorAdminTweetSharesBatchToDiscord(
+  tweetUrlsText: string
+): Promise<{ ok: boolean; error?: string; posted?: number }> {
+  try {
+    const res = await fetch('/api/admin/raffle-x-share/discord/batch', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tweetUrlsText }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { error?: string; posted?: number }
+    if (!res.ok) {
+      return { ok: false, error: typeof data.error === 'string' ? data.error : 'Discord batch mirror failed' }
+    }
+    return { ok: true, posted: typeof data.posted === 'number' ? data.posted : undefined }
+  } catch (e) {
+    console.warn('[raffle-share] Discord batch mirror error', e)
+    return { ok: false, error: 'Discord batch mirror request failed' }
+  }
 }
 
 export async function shareRaffleFromBrowser(params: {

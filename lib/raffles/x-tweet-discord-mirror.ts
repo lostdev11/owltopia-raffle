@@ -1,6 +1,8 @@
 /** Official Owltopia X account used in #x-post Discord mirrors. */
 export const OWLTOPIA_X_HANDLE = 'Owltopia_sol'
 
+export const MAX_X_POST_TWEET_MIRRORS = 5
+
 const X_STATUS_PATH_RE =
   /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com|fixupx\.com|fxtwitter\.com|vxtwitter\.com)\/([^/?#\s]+)\/status\/(\d+)/i
 
@@ -46,8 +48,27 @@ export function buildDiscordXTweetMirrorContent(
   }
 
   const handle = (opts?.xHandle ?? OWLTOPIA_X_HANDLE).replace(/^@/, '')
-  const prefix = opts?.mentionEveryone === false ? '' : '@everyone '
+  const prefix = opts?.mentionEveryone === true ? '@everyone ' : ''
   const content = `${prefix}${handle} just tweeted: ${fixupxUrl}`
 
   return { ok: true, content, fixupxUrl }
+}
+
+/** One URL per line (or whitespace-separated); dedupes by status id; max 5. */
+export function parseTweetUrlsFromMultiline(input: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const chunk of input.split(/\s+/)) {
+    const raw = chunk.trim()
+    if (!raw) continue
+    const parsed = parseXTweetStatusUrl(raw)
+    if (!parsed) continue
+    const key = `${parsed.handle.toLowerCase()}:${parsed.statusId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const fixupx = buildFixupxTweetUrl(parsed.handle, parsed.statusId)
+    out.push(fixupx)
+    if (out.length >= MAX_X_POST_TWEET_MIRRORS) break
+  }
+  return out
 }

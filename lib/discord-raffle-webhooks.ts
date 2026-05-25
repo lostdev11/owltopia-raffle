@@ -17,7 +17,11 @@ import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
-import { buildDiscordXTweetMirrorContent } from '@/lib/raffles/x-tweet-discord-mirror'
+import {
+  buildDiscordXTweetMirrorContent,
+  MAX_X_POST_TWEET_MIRRORS,
+  parseTweetUrlsFromMultiline,
+} from '@/lib/raffles/x-tweet-discord-mirror'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -665,36 +669,92 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
 }
 
 /**
- * Mirror an admin @Owltopia_sol tweet into #x-post (DISCORD_WEBHOOK_X_POSTS).
- * Posts `@everyone Owltopia_sol just tweeted: https://fixupx.com/…` so Discord embeds the X post.
+ * Mirror one @Owltopia_sol tweet into #x-post (DISCORD_WEBHOOK_X_POSTS).
+ * Posts `Owltopia_sol just tweeted: https://fixupx.com/…` (no @everyone — raid ping is manual).
  */
 export async function pushAdminRaffleXShareToDiscord(
   tweetUrl: string
 ): Promise<{ ok: boolean; error?: string; discordContent?: string }> {
+  const batch = await pushAdminXTweetMirrorsBatchToDiscord([tweetUrl])
+  if (!batch.ok) return { ok: false, error: batch.error }
+  if (batch.posted === 0) {
+    return { ok: false, error: batch.errors[0] ?? 'Could not mirror tweet' }
+  }
+  return { ok: true, discordContent: batch.contents[0] }
+}
+
+/**
+ * Mirror up to 5 tweets as separate #x-post messages (e.g. 3 raffles posted on X at once).
+ */
+export async function pushAdminXTweetMirrorsBatchToDiscord(
+  tweetUrls: string[]
+): Promise<{
+  ok: boolean
+  error?: string
+  posted: number
+  contents: string[]
+  errors: string[]
+}> {
   const url = webhookUrlXPosts()
   if (!url) {
-    return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set' }
+    return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set', posted: 0, contents: [], errors: [] }
   }
   if (!isAllowedDiscordIncomingWebhookUrl(url)) {
     return {
       ok: false,
       error: 'X-post webhook URL in env is not a valid Discord incoming webhook URL (https only, discord.com/api/webhooks/…)',
+      posted: 0,
+      contents: [],
+      errors: [],
     }
   }
 
-  const mirror = buildDiscordXTweetMirrorContent(tweetUrl)
-  if (!mirror.ok) {
-    return { ok: false, error: mirror.error }
+  const uniqueInputs = [...tweetUrls]
+  const fixupxUrls = parseTweetUrlsFromMultiline(uniqueInputs.join('\n'))
+  if (fixupxUrls.length === 0) {
+    return {
+      ok: false,
+      error: `No valid tweet URLs. Paste up to ${MAX_X_POST_TWEET_MIRRORS} links (x.com/Owltopia_sol/status/…).`,
+      posted: 0,
+      contents: [],
+      errors: [],
+    }
   }
 
-  const content = mirror.content.length > 2000 ? `${mirror.content.slice(0, 1997)}...` : mirror.content
-  const sent = await postDiscordWebhookContent(url, content, {
-    allowed_mentions: { parse: ['everyone'] },
-  })
-  if (!sent) {
-    return { ok: false, error: 'Discord returned an error or the request failed' }
+  const contents: string[] = []
+  const errors: string[] = []
+
+  for (let i = 0; i < fixupxUrls.length; i++) {
+    const fixupxUrl = fixupxUrls[i]
+    const mirror = buildDiscordXTweetMirrorContent(fixupxUrl, { mentionEveryone: false })
+    if (!mirror.ok) {
+      errors.push(mirror.error)
+      continue
+    }
+
+    const content = mirror.content.length > 2000 ? `${mirror.content.slice(0, 1997)}...` : mirror.content
+    const sent = await postDiscordWebhookContent(url, content)
+    if (!sent) {
+      errors.push(`Discord failed for ${fixupxUrl}`)
+      break
+    }
+    contents.push(mirror.content)
+    if (i < fixupxUrls.length - 1) {
+      await delay(650)
+    }
   }
-  return { ok: true, discordContent: mirror.content }
+
+  if (contents.length === 0) {
+    return {
+      ok: false,
+      error: errors[0] ?? 'Discord returned an error or the request failed',
+      posted: 0,
+      contents: [],
+      errors,
+    }
+  }
+
+  return { ok: true, posted: contents.length, contents, errors }
 }
 
 /**
@@ -721,7 +781,7 @@ export async function pushDailyRaidBundleToDiscord(
   const lines = raffles.map((r, i) => `${i + 1}. **${r.title.trim()}**`)
   const header = `**Daily X raid — ${raffles.length} raffle${raffles.length === 1 ? '' : 's'} ending today/tomorrow (UTC)**`
   const footer =
-    '\nPost each on @Owltopia_sol (Share on owltopia.xyz), then mirror each tweet here with @everyone + fixupx link.'
+    '\nPost each on @Owltopia_sol (Share on owltopia.xyz), mirror each tweet to #x-post, then send one manual @everyone raid message.'
   const contentRaw = [header, '', ...lines, footer].join('\n')
   const content = contentRaw.length > 2000 ? `${contentRaw.slice(0, 1997)}...` : contentRaw
 

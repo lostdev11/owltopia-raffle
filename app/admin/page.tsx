@@ -11,6 +11,8 @@ import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megap
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { mirrorAdminTweetSharesBatchToDiscord } from '@/lib/client/raffle-share'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
@@ -199,6 +201,8 @@ export default function AdminDashboardPage() {
   const [loadingDailyRaid, setLoadingDailyRaid] = useState(false)
   const [dailyRaidLoadError, setDailyRaidLoadError] = useState<string | null>(null)
   const [pushingDailyRaidDiscord, setPushingDailyRaidDiscord] = useState(false)
+  const [batchTweetUrlsText, setBatchTweetUrlsText] = useState('')
+  const [pushingBatchTweetMirror, setPushingBatchTweetMirror] = useState(false)
   const [dailyRaidMessage, setDailyRaidMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   )
@@ -686,6 +690,38 @@ export default function AdminDashboardPage() {
       setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
     } finally {
       setPushingDailyRaidDiscord(false)
+    }
+  }
+
+  const handleMirrorBatchTweetsToDiscord = async () => {
+    const text = batchTweetUrlsText.trim()
+    if (!text) {
+      setDailyRaidMessage({
+        type: 'error',
+        text: 'Paste one tweet URL per line (up to 5) after posting on @Owltopia_sol.',
+      })
+      return
+    }
+    setPushingBatchTweetMirror(true)
+    setDailyRaidMessage(null)
+    try {
+      const result = await mirrorAdminTweetSharesBatchToDiscord(text)
+      if (!result.ok) {
+        setDailyRaidMessage({
+          type: 'error',
+          text: result.error ?? 'Could not mirror tweets to Discord',
+        })
+        return
+      }
+      setDailyRaidMessage({
+        type: 'success',
+        text: `Posted ${result.posted ?? 0} tweet embed${result.posted === 1 ? '' : 's'} to #x-post. Copy the @everyone raid message below.`,
+      })
+    } catch (e) {
+      console.error('handleMirrorBatchTweetsToDiscord:', e)
+      setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setPushingBatchTweetMirror(false)
     }
   }
 
@@ -2276,12 +2312,40 @@ export default function AdminDashboardPage() {
             }
           >
             <CardDescription className="mb-4">
-              Up to 5 live raffles ending today or tomorrow (UTC). Post each on @Owltopia_sol via{' '}
-              <strong className="text-foreground">Share</strong> on the raffle page (OWLTOPIA template), then mirror
-              each tweet to <span className="font-mono text-xs">#x-post</span> with the fixupx link. Send one manual{' '}
-              <span className="font-mono text-xs">@everyone</span> with the suggested raid message.
+              Up to 5 live raffles ending today or tomorrow (UTC). Use <strong className="text-foreground">Share</strong>{' '}
+              on each raffle (tag the project in the NFT line), post on @Owltopia_sol, then paste all tweet links below —
+              the webhook posts one Discord embed per tweet. You send one manual{' '}
+              <span className="font-mono text-xs">@everyone</span> raid message after.
             </CardDescription>
             <div className="space-y-4">
+              <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
+                <Label htmlFor="batch_tweet_urls">Mirror tweets to #x-post</Label>
+                <Textarea
+                  id="batch_tweet_urls"
+                  value={batchTweetUrlsText}
+                  onChange={(e) => setBatchTweetUrlsText(e.target.value)}
+                  placeholder={
+                    'https://x.com/Owltopia_sol/status/…\nhttps://x.com/Owltopia_sol/status/…\n(one per line, up to 5)'
+                  }
+                  rows={4}
+                  className="min-h-[88px] touch-manipulation font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  onClick={() => void handleMirrorBatchTweetsToDiscord()}
+                  disabled={pushingBatchTweetMirror || !batchTweetUrlsText.trim()}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {pushingBatchTweetMirror ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Posting embeds…
+                    </>
+                  ) : (
+                    'Mirror tweets to #x-post'
+                  )}
+                </Button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -2301,6 +2365,7 @@ export default function AdminDashboardPage() {
                 </Button>
                 <Button
                   type="button"
+                  variant="outline"
                   onClick={() => void handlePushDailyRaidToDiscord()}
                   disabled={
                     pushingDailyRaidDiscord ||
@@ -2316,7 +2381,7 @@ export default function AdminDashboardPage() {
                       Posting…
                     </>
                   ) : (
-                    'Post bundle to #x-post'
+                    'Post raid checklist (optional)'
                   )}
                 </Button>
               </div>
