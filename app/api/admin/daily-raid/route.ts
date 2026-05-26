@@ -45,6 +45,11 @@ export async function GET(request: NextRequest) {
       maxRaffles: DAILY_RAID_MAX_RAFFLES,
       count: raffles.length,
       raffles,
+      suggestedRaidMessage:
+        raffles.length > 0
+          ? buildSuggestedDiscordRaidMessage(raffles.length)
+          : 'No raffles ending today or tomorrow — check back later.',
+      /** @deprecated Use suggestedRaidMessage — still returned for older admin UI */
       suggestedEveryoneMessage:
         raffles.length > 0
           ? buildSuggestedDiscordRaidMessage(raffles.length)

@@ -207,6 +207,7 @@ export default function AdminDashboardPage() {
     null
   )
   const [dailyRaidCopied, setDailyRaidCopied] = useState(false)
+  const [pushingRaidPing, setPushingRaidPing] = useState(false)
 
   const [devTasks, setDevTasks] = useState<DevTask[]>([])
   const [loadingDevTasks, setLoadingDevTasks] = useState(false)
@@ -643,12 +644,17 @@ export default function AdminDashboardPage() {
       }
       const data = (await res.json()) as {
         raffles?: DailyRaidRaffleItem[]
+        suggestedRaidMessage?: string
         suggestedEveryoneMessage?: string
       }
       setDailyRaidRaffles(data.raffles ?? [])
-      setDailyRaidEveryoneMessage(
-        typeof data.suggestedEveryoneMessage === 'string' ? data.suggestedEveryoneMessage : null
-      )
+      const raidMsg =
+        typeof data.suggestedRaidMessage === 'string'
+          ? data.suggestedRaidMessage
+          : typeof data.suggestedEveryoneMessage === 'string'
+            ? data.suggestedEveryoneMessage
+            : null
+      setDailyRaidEveryoneMessage(raidMsg)
       setRaidTweetUrls({})
       setRaidMirroredIds([])
     } catch (e) {
@@ -695,6 +701,24 @@ export default function AdminDashboardPage() {
     }
   }
 
+  const postDailyRaidPingToDiscord = async (count: number): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/daily-raid/raid-ping/discord', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) {
+        return { ok: false, error: data.error ?? 'Could not post @raid ping' }
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'Network error' }
+    }
+  }
+
   const handleMirrorRaidTweet = async (raffleId: string, raffleTitle: string) => {
     const tweetUrl = (raidTweetUrls[raffleId] ?? '').trim()
     if (!tweetUrl) {
@@ -720,18 +744,19 @@ export default function AdminDashboardPage() {
         ? raidMirroredIds
         : [...raidMirroredIds, raffleId]
       const total = dailyRaidRaffles?.length ?? 0
-      if (total > 0 && nextMirrored.length >= total && dailyRaidEveryoneMessage) {
-        try {
-          await navigator.clipboard.writeText(dailyRaidEveryoneMessage)
-          setDailyRaidCopied(true)
-          window.setTimeout(() => setDailyRaidCopied(false), 2500)
-        } catch {
-          /* ignore */
+      if (total > 0 && nextMirrored.length >= total) {
+        const ping = await postDailyRaidPingToDiscord(total)
+        if (ping.ok) {
+          setDailyRaidMessage({
+            type: 'success',
+            text: `All ${total} tweets are in #x-post. @raid ping posted to Discord.`,
+          })
+        } else {
+          setDailyRaidMessage({
+            type: 'success',
+            text: `All ${total} tweets are in #x-post. Post @raid ping manually (Step 3).${ping.error ? ` (${ping.error})` : ''}`,
+          })
         }
-        setDailyRaidMessage({
-          type: 'success',
-          text: `All ${total} tweets are in #x-post. @everyone raid message copied — paste it in Discord.`,
-        })
       } else {
         setDailyRaidMessage({
           type: 'success',
@@ -743,6 +768,25 @@ export default function AdminDashboardPage() {
       setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
     } finally {
       setRaidMirrorPostingId(null)
+    }
+  }
+
+  const handlePostDailyRaidPingToDiscord = async () => {
+    const count = dailyRaidRaffles?.length ?? 1
+    setPushingRaidPing(true)
+    setDailyRaidMessage(null)
+    try {
+      const result = await postDailyRaidPingToDiscord(count)
+      if (!result.ok) {
+        setDailyRaidMessage({ type: 'error', text: result.error ?? 'Could not post @raid ping' })
+        return
+      }
+      setDailyRaidMessage({
+        type: 'success',
+        text: `@raid ping posted to #x-post for ${count} tweet${count === 1 ? '' : 's'}.`,
+      })
+    } finally {
+      setPushingRaidPing(false)
     }
   }
 
@@ -2333,7 +2377,7 @@ export default function AdminDashboardPage() {
             }
           >
             <CardDescription className="mb-4">
-              Three steps: post each raffle on X → paste each tweet link → send one @everyone raid in Discord.
+              Three steps: post each raffle on X → paste each tweet link → one @raid ping in Discord.
             </CardDescription>
             <ol className="mb-4 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
               <li>
@@ -2343,22 +2387,40 @@ export default function AdminDashboardPage() {
                 <span className="text-foreground">Post to Discord</span> — paste the tweet link under each raffle
               </li>
               <li>
-                <span className="text-foreground">@everyone raid</span> — copy the message below and paste in Discord
+                <span className="text-foreground">@raid ping</span> — post automatically or copy the message below
               </li>
             </ol>
             {dailyRaidEveryoneMessage && dailyRaidRaffles && dailyRaidRaffles.length > 0 && (
               <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2 mb-4">
-                <p className="text-xs text-muted-foreground">Step 3 — @everyone raid message:</p>
+                <p className="text-xs text-muted-foreground">Step 3 — @raid ping message:</p>
                 <p className="text-sm font-medium text-foreground">{dailyRaidEveryoneMessage}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleCopyDailyRaidEveryoneMessage()}
-                  className="touch-manipulation min-h-[44px]"
-                >
-                  {dailyRaidCopied ? 'Copied!' : 'Copy @everyone message'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handlePostDailyRaidPingToDiscord()}
+                    disabled={pushingRaidPing}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {pushingRaidPing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                        Posting…
+                      </>
+                    ) : (
+                      'Post @raid ping to Discord'
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyDailyRaidEveryoneMessage()}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {dailyRaidCopied ? 'Copied!' : 'Copy message'}
+                  </Button>
+                </div>
               </div>
             )}
             <div className="space-y-4">

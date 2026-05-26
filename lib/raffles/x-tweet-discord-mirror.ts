@@ -1,3 +1,9 @@
+import {
+  allowedMentionsForRaidRole,
+  formatDiscordRaidRoleMention,
+  type DiscordWebhookContentAllowedMentions,
+} from '@/lib/discord-raid-role'
+
 /** Official Owltopia X account used in #x-post Discord mirrors. */
 export const OWLTOPIA_X_HANDLE = 'Owltopia_sol'
 
@@ -36,8 +42,10 @@ export function normalizeTweetUrlToFixupx(input: string): string | null {
 
 export function buildDiscordXTweetMirrorContent(
   tweetUrl: string,
-  opts?: { mentionEveryone?: boolean; xHandle?: string }
-): { ok: true; content: string; fixupxUrl: string } | { ok: false; error: string } {
+  opts?: { mentionRaidRole?: boolean; mentionEveryone?: boolean; xHandle?: string }
+):
+  | { ok: true; content: string; fixupxUrl: string; allowedMentions?: DiscordWebhookContentAllowedMentions }
+  | { ok: false; error: string } {
   const fixupxUrl = normalizeTweetUrlToFixupx(tweetUrl)
   if (!fixupxUrl) {
     return {
@@ -48,10 +56,18 @@ export function buildDiscordXTweetMirrorContent(
   }
 
   const handle = (opts?.xHandle ?? OWLTOPIA_X_HANDLE).replace(/^@/, '')
-  const prefix = opts?.mentionEveryone === true ? '@everyone ' : ''
+  let prefix = ''
+  let allowedMentions: DiscordWebhookContentAllowedMentions | undefined
+  if (opts?.mentionRaidRole === true) {
+    prefix = formatDiscordRaidRoleMention()
+    allowedMentions = allowedMentionsForRaidRole()
+  } else if (opts?.mentionEveryone === true) {
+    prefix = '@everyone '
+    allowedMentions = { parse: ['everyone'] }
+  }
   const content = `${prefix}${handle} just tweeted: ${fixupxUrl}`
 
-  return { ok: true, content, fixupxUrl }
+  return { ok: true, content, fixupxUrl, allowedMentions }
 }
 
 /** One URL per line (or whitespace-separated); dedupes by status id; max 5. */

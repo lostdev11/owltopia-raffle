@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/admin/raffle-x-share/discord/batch
  * Body: { tweetUrls?: string[], tweetUrlsText?: string } — up to 5 @Owltopia_sol posts.
- * Each becomes its own #x-post message with a fixupx embed (no @everyone).
+ * Each becomes its own #x-post message with a fixupx embed (@raid role ping).
  */
 export async function POST(request: NextRequest) {
   try {

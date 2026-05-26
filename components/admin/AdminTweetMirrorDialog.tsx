@@ -63,7 +63,7 @@ export function AdminTweetMirrorDialog({
       }
       setMessage({
         type: 'success',
-        text: 'Posted to #x-post. Repeat for each raffle, then send one @everyone raid message in Discord.',
+        text: 'Posted to #x-post. Repeat for each raffle, then post one @raid ping in Discord (Daily X raid).',
       })
       window.setTimeout(() => onOpenChange(false), 1400)
     } finally {

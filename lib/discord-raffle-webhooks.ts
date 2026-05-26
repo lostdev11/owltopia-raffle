@@ -18,10 +18,16 @@ import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
 import { getDiscordGiveawayPartnerById, isPartnerTenantEntitled } from '@/lib/db/discord-giveaway-partners'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import {
+  allowedMentionsForRaidRole,
+  formatDiscordRaidRoleMention,
+  getDiscordRaidRoleId,
+} from '@/lib/discord-raid-role'
+import {
   buildDiscordXTweetMirrorContent,
   MAX_X_POST_TWEET_MIRRORS,
   parseTweetUrlsFromMultiline,
 } from '@/lib/raffles/x-tweet-discord-mirror'
+import { buildSuggestedDiscordRaidMessage } from '@/lib/raffles/daily-raid-batch'
 
 const WEBHOOK_TIMEOUT_MS = 8_000
 
@@ -198,7 +204,11 @@ type WebhookExtras = {
 }
 
 type ContentWebhookExtras = {
-  allowed_mentions?: { parse: ('everyone' | 'roles' | 'users')[]; users?: string[] }
+  allowed_mentions?: {
+    parse: ('everyone' | 'roles' | 'users')[]
+    users?: string[]
+    roles?: string[]
+  }
 }
 
 async function postDiscordWebhookContentOnce(
@@ -670,7 +680,7 @@ export async function pushLiveRaffleToDiscord(raffle: Raffle): Promise<{ ok: boo
 
 /**
  * Mirror one @Owltopia_sol tweet into #x-post (DISCORD_WEBHOOK_X_POSTS).
- * Posts `Owltopia_sol just tweeted: https://fixupx.com/…` (no @everyone — raid ping is manual).
+ * Posts `@raid Owltopia_sol just tweeted: https://fixupx.com/…` (DISCORD_RAID_ROLE_ID, not @everyone).
  */
 export async function pushAdminRaffleXShareToDiscord(
   tweetUrl: string
@@ -726,14 +736,18 @@ export async function pushAdminXTweetMirrorsBatchToDiscord(
 
   for (let i = 0; i < fixupxUrls.length; i++) {
     const fixupxUrl = fixupxUrls[i]
-    const mirror = buildDiscordXTweetMirrorContent(fixupxUrl, { mentionEveryone: false })
+    const mirror = buildDiscordXTweetMirrorContent(fixupxUrl, { mentionRaidRole: true })
     if (!mirror.ok) {
       errors.push(mirror.error)
       continue
     }
 
     const content = mirror.content.length > 2000 ? `${mirror.content.slice(0, 1997)}...` : mirror.content
-    const sent = await postDiscordWebhookContent(url, content)
+    const sent = await postDiscordWebhookContent(
+      url,
+      content,
+      mirror.allowedMentions ? { allowed_mentions: mirror.allowedMentions } : undefined
+    )
     if (!sent) {
       errors.push(`Discord failed for ${fixupxUrl}`)
       break
@@ -781,7 +795,7 @@ export async function pushDailyRaidBundleToDiscord(
   const lines = raffles.map((r, i) => `${i + 1}. **${r.title.trim()}**`)
   const header = `**Daily X raid — ${raffles.length} raffle${raffles.length === 1 ? '' : 's'} ending today/tomorrow (UTC)**`
   const footer =
-    '\nPost each on @Owltopia_sol (Share on owltopia.xyz), mirror each tweet to #x-post, then send one manual @everyone raid message.'
+    '\nPost each on @Owltopia_sol (Share on owltopia.xyz), mirror each tweet to #x-post, then send one manual @raid raid message.'
   const contentRaw = [header, '', ...lines, footer].join('\n')
   const content = contentRaw.length > 2000 ? `${contentRaw.slice(0, 1997)}...` : contentRaw
 
@@ -790,4 +804,37 @@ export async function pushDailyRaidBundleToDiscord(
     return { ok: false, error: 'Discord returned an error or the request failed' }
   }
   return { ok: true }
+}
+
+/** One @raid ping after mirroring daily raid tweets (same copy as before; @raid instead of @everyone). */
+export async function pushDiscordRaidPingToXPosts(
+  tweetCount: number
+): Promise<{ ok: boolean; error?: string; content?: string }> {
+  const url = webhookUrlXPosts()
+  if (!url) {
+    return { ok: false, error: 'DISCORD_WEBHOOK_X_POSTS is not set' }
+  }
+  if (!isAllowedDiscordIncomingWebhookUrl(url)) {
+    return {
+      ok: false,
+      error: 'X-post webhook URL in env is not a valid Discord incoming webhook URL (https only, discord.com/api/webhooks/…)',
+    }
+  }
+  if (!getDiscordRaidRoleId()) {
+    return { ok: false, error: 'DISCORD_RAID_ROLE_ID is not set or invalid' }
+  }
+
+  const body = buildSuggestedDiscordRaidMessage(tweetCount)
+  const contentRaw = `${formatDiscordRaidRoleMention()}${body}`
+  const content = contentRaw.length > 2000 ? `${contentRaw.slice(0, 1997)}...` : contentRaw
+  const raidMentions = allowedMentionsForRaidRole()
+  const sent = await postDiscordWebhookContent(
+    url,
+    content,
+    raidMentions ? { allowed_mentions: raidMentions } : undefined
+  )
+  if (!sent) {
+    return { ok: false, error: 'Discord returned an error or the request failed' }
+  }
+  return { ok: true, content: contentRaw }
 }
