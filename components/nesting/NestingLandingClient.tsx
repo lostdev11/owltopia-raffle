@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, Bird, Coins, Layers, Shield } from 'lucide-react'
@@ -15,6 +15,14 @@ import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
+
+/** One perch per dashboard visit — multi-perch sites start at the perch list. */
+function defaultDashboardNestingHref(pools: StakingPoolRow[]): string {
+  if (pools.length === 1) {
+    return `/dashboard/nesting?pool=${encodeURIComponent(pools[0]!.slug)}`
+  }
+  return '/nesting#perches'
+}
 
 type Props = {
   initialPools: StakingPoolRow[]
@@ -35,20 +43,32 @@ export function NestingLandingClient({
   const { connected, publicKey } = useWallet()
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
+  const [claimableOwlPreview, setClaimableOwlPreview] = useState<number | null>(null)
+  const dashboardNestHref = useMemo(
+    () => defaultDashboardNestingHref(initialPools),
+    [initialPools]
+  )
 
   useEffect(() => {
     if (!connected || !publicKey) {
       setPositionPreview(null)
+      setClaimableOwlPreview(null)
       return
     }
     let cancelled = false
     const addr = publicKey.toBase58()
     setPositionPreview(null)
-    fetch('/api/me/staking/positions', {
-      credentials: 'include',
-      cache: 'no-store',
-      headers: { 'X-Connected-Wallet': addr },
-    })
+    setClaimableOwlPreview(null)
+    fetch(
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/api/me/staking/positions?heal=0`
+        : '/api/me/staking/positions?heal=0',
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'X-Connected-Wallet': addr },
+      }
+    )
       .then((res) => {
         if (cancelled) return
         if (res.status === 401) {
@@ -59,10 +79,40 @@ export function NestingLandingClient({
       })
       .then((json) => {
         if (cancelled || !json?.positions) return
-        const active = (json.positions as unknown[]).filter(
-          (p: unknown) => (p as { status?: string })?.status === 'active'
-        ).length
+        const rows = json.positions as Array<{
+          status?: string
+          amount?: number
+          reward_rate_snapshot?: number
+          reward_rate_unit_snapshot?: string
+          reward_token_snapshot?: string
+          claimed_rewards?: number
+          staked_at?: string
+        }>
+        const active = rows.filter((p) => p.status === 'active').length
         setPositionPreview(active)
+        const now = Date.now()
+        let claimable = 0
+        for (const row of rows) {
+          if (row.status !== 'active') continue
+          if ((row.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') continue
+          const stakedAtMs = row.staked_at ? new Date(row.staked_at).getTime() : 0
+          if (!stakedAtMs) continue
+          const elapsedMs = now - stakedAtMs
+          if (elapsedMs <= 0) continue
+          const amount = Number(row.amount) || 0
+          const rate = Number(row.reward_rate_snapshot) || 0
+          let accrued = 0
+          if (row.reward_rate_unit_snapshot === 'hourly') {
+            accrued = amount * rate * (elapsedMs / 3_600_000)
+          } else if (row.reward_rate_unit_snapshot === 'weekly') {
+            accrued = amount * rate * (elapsedMs / 604_800_000)
+          } else {
+            accrued = amount * rate * (elapsedMs / 86_400_000)
+          }
+          const pending = Math.max(0, accrued - Number(row.claimed_rewards ?? 0))
+          if (pending >= 1) claimable += pending
+        }
+        setClaimableOwlPreview(claimable)
       })
       .catch(() => {
         if (!cancelled) setPositionPreview(null)
@@ -96,8 +146,8 @@ export function NestingLandingClient({
               </>
             ) : nestingPausedByAdmin ? (
               <>
-                New nests, claims, and leaving a nest are temporarily turned off from the Owl Nesting admin pause. Your
-                existing nests stay put—check back soon or follow announcements for the all-clear.
+                New nests and leaving a nest are paused. You can still claim OWL from{' '}
+                <span className="font-medium text-foreground">My nest</span> on the dashboard.
               </>
             ) : (
               <>
@@ -160,9 +210,18 @@ export function NestingLandingClient({
                     : `${positionPreview} nest${positionPreview === 1 ? '' : 's'} whooing along.`}
               </CardDescription>
             </div>
-            <Button asChild variant="outline" className={cn(nestingMutedActionButtonClass)}>
-              <Link href="/dashboard/nesting">Open my nest</Link>
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {claimableOwlPreview != null && claimableOwlPreview >= 1 ? (
+                <Button asChild variant="default" className="min-h-[48px] touch-manipulation font-semibold">
+                  <Link href="/dashboard/nesting#nesting-claim-all-banner">
+                    Claim {claimableOwlPreview.toLocaleString(undefined, { maximumFractionDigits: 2 })} OWL
+                  </Link>
+                </Button>
+              ) : null}
+              <Button asChild variant="outline" className={cn(nestingMutedActionButtonClass, 'min-h-[48px]')}>
+                <Link href={dashboardNestHref}>Open my nest</Link>
+              </Button>
+            </div>
           </CardHeader>
         </Card>
       )}

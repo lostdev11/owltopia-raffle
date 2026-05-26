@@ -18,7 +18,7 @@ type MintScanState = {
 }
 
 type Props = {
-  pools: { id: string; asset_type: string }[]
+  pools: { id: string; slug: string; asset_type: string }[]
   /** When set (e.g. dashboard `?pool=`), prefer this NFT perch. */
   preferredPoolId?: string | null
   className?: string
@@ -66,7 +66,7 @@ export function NestingOwlCoinWalletProgressPanel({
     const addr = publicKey.toBase58()
     setPositionsLoaded(false)
     try {
-      const res = await fetch('/api/me/staking/positions', {
+      const res = await fetch('/api/me/staking/positions?heal=0', {
         credentials: 'include',
         cache: 'no-store',
         headers: { 'X-Connected-Wallet': addr },

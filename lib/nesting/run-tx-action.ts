@@ -11,6 +11,8 @@ export type RunNestingTxActionParams<T> = {
    * Omit for DB-mock / SIWS-only flows to avoid a wallet popup step.
    */
   signStep?: () => Promise<void>
+  /** Skip the brief preparing step (e.g. OWL claim POST has no local prep). */
+  skipPreparing?: boolean
   /** When aborted, phases return to `idle` without flashing `failed`. */
   signal?: AbortSignal
 }
@@ -40,12 +42,14 @@ if (typeof queueMicrotask === 'function') {
  * Rethrows `execute` errors; caller sets user-facing `actionError`. Always returns phase to `idle` on end.
  */
 export async function runNestingTxAction<T>(params: RunNestingTxActionParams<T>): Promise<T> {
-  const { onPhase, execute, afterSuccess, signStep, signal } = params
+  const { onPhase, execute, afterSuccess, signStep, skipPreparing, signal } = params
   try {
     throwIfNestingAborted(signal)
-    onPhase('preparing')
-    await microDelay()
-    throwIfNestingAborted(signal)
+    if (!skipPreparing) {
+      onPhase('preparing')
+      await microDelay()
+      throwIfNestingAborted(signal)
+    }
     if (signStep) {
       onPhase('awaiting_wallet_signature')
       await signStep()

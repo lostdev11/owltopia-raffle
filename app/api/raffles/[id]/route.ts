@@ -23,6 +23,7 @@ import {
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 import { isOwlEnabled } from '@/lib/tokens'
+import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -652,6 +653,14 @@ export async function PATCH(
     }
     if (floorPrice !== undefined) {
       updates.floor_price = floorPrice
+    }
+
+    if (body.promo_x_handle !== undefined) {
+      const parsed = parsePromoXHandleInput(body.promo_x_handle)
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 })
+      }
+      updates.promo_x_handle = parsed.value
     }
 
     // Only update prize_amount and prize_currency if explicitly provided

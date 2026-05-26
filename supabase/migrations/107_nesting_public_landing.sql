@@ -27,4 +27,8 @@ CREATE POLICY "Anyone can read nesting public settings"
   FOR SELECT
   USING (true);
 
+-- Data API grants (required on new Supabase projects / new tables after Oct 2026).
+GRANT SELECT ON public.nesting_public_settings TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.nesting_public_settings TO service_role;
+
 COMMENT ON TABLE public.nesting_public_settings IS 'Single row (id=default). Public read; writes via service role admin API only.';

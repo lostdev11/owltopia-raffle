@@ -3,15 +3,24 @@
 import Link from 'next/link'
 
 import { Button } from '@/components/ui/button'
+import { GEN2_OWL_CENTER_PATH } from '@/lib/gen2-presale/purchase-availability'
 import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
-  /** When false, CTA scrolls to details only (no “live” purchase messaging). */
-  presaleLive?: boolean
+  /** When true, CTA promotes buying presale spots. */
+  purchasesOpen?: boolean
+  presaleSoldOut?: boolean
 }
 
-export function Gen2StickyCta({ className, presaleLive = true }: Props) {
+export function Gen2StickyCta({ className, purchasesOpen = false, presaleSoldOut = false }: Props) {
+  const href = presaleSoldOut ? GEN2_OWL_CENTER_PATH : '#gen2-purchase'
+  const label = presaleSoldOut
+    ? 'Owl Center'
+    : purchasesOpen
+      ? 'Join Presale'
+      : 'Presale info'
+
   return (
     <>
       {/* Desktop: floating */}
@@ -26,12 +35,14 @@ export function Gen2StickyCta({ className, presaleLive = true }: Props) {
           size="lg"
           className={cn(
             'min-h-[48px] touch-manipulation border px-6 font-bold',
-            presaleLive
+            purchasesOpen
               ? 'border-[#00FF9C]/45 bg-[#00E58B]/20 text-[#EAFBF4] shadow-[0_0_28px_rgba(0,255,156,0.35)] animate-button-glow-pulse hover:bg-[#00E58B]/35'
-              : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] shadow-none animate-none hover:bg-[#151D24]'
+              : presaleSoldOut
+                ? 'border-[#00FF9C]/40 bg-[#00E58B]/15 text-[#EAFBF4] shadow-[0_0_24px_rgba(0,255,156,0.2)] hover:bg-[#00E58B]/25'
+                : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] shadow-none animate-none hover:bg-[#151D24]'
           )}
         >
-          <Link href="#gen2-purchase">{presaleLive ? 'Join Presale' : 'Presale info'}</Link>
+          <Link href={href}>{label}</Link>
         </Button>
       </div>
 
@@ -41,12 +52,14 @@ export function Gen2StickyCta({ className, presaleLive = true }: Props) {
           asChild
           className={cn(
             'h-12 w-full touch-manipulation border font-bold',
-            presaleLive
+            purchasesOpen
               ? 'border-[#00FF9C]/40 bg-[#00E58B]/20 text-[#EAFBF4] shadow-[0_0_24px_rgba(0,255,156,0.28)] animate-button-glow-pulse'
-              : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] animate-none'
+              : presaleSoldOut
+                ? 'border-[#00FF9C]/35 bg-[#00E58B]/15 text-[#EAFBF4]'
+                : 'border-[#1F6F54] bg-[#10161C] text-[#A9CBB9] animate-none'
           )}
         >
-          <Link href="#gen2-purchase">{presaleLive ? 'Join Presale' : 'Presale info'}</Link>
+          <Link href={href}>{label}</Link>
         </Button>
       </div>
     </>

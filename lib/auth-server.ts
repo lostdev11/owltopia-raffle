@@ -8,7 +8,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 import { isAdmin } from '@/lib/db/admins'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 
 export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
@@ -71,11 +71,45 @@ export function consumeNonce(nonce: string, wallet: string): boolean {
   }
 }
 
-const MESSAGE_PREFIX = `Sign in to ${PLATFORM_NAME}.\nNonce: `
-const MESSAGE_SUFFIX = '\nExpires: '
+function signInSiteHost(): string {
+  try {
+    return new URL(getSiteBaseUrl()).host
+  } catch {
+    return 'owltopia.xyz'
+  }
+}
 
-export function buildSignInMessage(nonce: string, expiresAt: Date): string {
-  return `${MESSAGE_PREFIX}${nonce}${MESSAGE_SUFFIX}${expiresAt.toISOString()}`
+function formatSignInExpiry(expiresAt: Date): string {
+  return (
+    expiresAt.toLocaleString('en-US', {
+      timeZone: 'UTC',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }) + ' UTC'
+  )
+}
+
+/** Extract nonce from any SIWS message we have issued (current or legacy format). */
+export function parseNonceFromSignInMessage(message: string): string | null {
+  const match = message.match(/(?:^|\n)Nonce:\s*([^\n]+)/i)
+  return match?.[1]?.trim() ?? null
+}
+
+export function buildSignInMessage(wallet: string, nonce: string, expiresAt: Date): string {
+  const host = signInSiteHost()
+  return [
+    `Verify wallet for ${host}`,
+    '',
+    `This proves you control the wallet below. ${PLATFORM_NAME} will not charge fees or send a transaction from this signature.`,
+    '',
+    `Wallet: ${wallet}`,
+    `Nonce: ${nonce}`,
+    `Valid until: ${formatSignInExpiry(expiresAt)}`,
+  ].join('\n')
 }
 
 /**

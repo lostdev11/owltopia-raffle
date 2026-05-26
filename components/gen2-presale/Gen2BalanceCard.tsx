@@ -1,11 +1,11 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { Loader2, LogIn, RefreshCw, ScanLine } from 'lucide-react'
+import { Loader2, RefreshCw, ScanLine } from 'lucide-react'
 
+import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import {
   GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE,
   gen2PresaleCreditsRemainingForWallet,
@@ -52,17 +52,10 @@ export function Gen2BalanceCard({
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncErr, setSyncErr] = useState<string | null>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
-  const { signIn, signingIn, error: signInError } = useSiwsSignIn()
-
   const recordQtyMax = useMemo(
     () => Math.min(GEN2_PRESALE_MAX_SPOTS_PER_PURCHASE, gen2PresaleCreditsRemainingForWallet(balance)),
     [balance]
   )
-
-  const signInAndRefresh = useCallback(async () => {
-    await signIn()
-    onRefresh?.()
-  }, [signIn, onRefresh])
 
   const syncFromChain = useCallback(async () => {
     const w = walletAddress?.trim()
@@ -229,29 +222,12 @@ export function Gen2BalanceCard({
         )}
       </div>
       {!loading && balanceError ? (
-        <div
-          className="mt-5 rounded-xl border border-amber-400/35 bg-amber-950/35 p-4 text-sm text-amber-50"
-          role="alert"
-        >
-          <p className="font-semibold">Balance needs wallet sign-in</p>
-          <p className="mt-1 text-amber-50/90">{balanceError}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3 min-h-[44px] touch-manipulation border-amber-300/45 bg-[#10161C] text-amber-50 hover:bg-[#151D24]"
-            onClick={() => void signInAndRefresh()}
-            disabled={signingIn}
-          >
-            {signingIn ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <LogIn className="mr-2 h-4 w-4" aria-hidden />
-            )}
-            Sign in with this wallet
-          </Button>
-          {signInError && <p className="mt-2 text-sm text-red-300">{signInError}</p>}
-        </div>
+        <Gen2PresaleSignInPrompt
+          className="mt-5"
+          title="Balance needs wallet sign-in"
+          message={balanceError}
+          onSignedIn={onRefresh}
+        />
       ) : null}
 
       {loading ? (

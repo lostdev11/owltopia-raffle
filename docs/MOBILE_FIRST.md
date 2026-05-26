@@ -23,6 +23,12 @@
 6. **Performance** – Prefer smaller bundles and lazy load below-the-fold content; mobile networks are slower.
 7. **Errors** – Messages should mention mobile (e.g. “Try WiFi or mobile data”, “Use a private RPC for mobile”).
 
+## Android & Seeker (nesting + wallets)
+
+- **Solana Mobile / Seeker**: `WalletProvider` registers `SolanaMobileWalletAdapter` on all mobile UAs. On Seeker, users should pick **Solana Mobile** in the wallet list when the built-in wallet does not appear; Phantom/Solflare are valid fallbacks (same wallet address).
+- **Nesting dashboard**: After returning from the wallet app, wait ~450ms before API calls; refresh positions after tab visibility with a short delay. Do not rely on relative `/api/...` URLs in wallet WebViews — use `nestingClientApiUrl()` from `lib/nesting/fetch-json.ts`.
+- **QA matrix**: Desktop Chrome; iOS Safari + Phantom in-app; Android Chrome + Phantom/Solflare; Seeker Chrome/Brave with Solana Mobile and with Phantom-only.
+
 ## Key files
 
 - `lib/utils.ts` – `isMobileDevice()`, `isAndroidDevice()`; use these for all mobile detection.
@@ -31,5 +37,7 @@
 - `components/SolflareTouchFix.tsx` – Touch→click fallback for all mobile (uses `isMobileDevice()`).
 - `components/Header.tsx` – Mobile hamburger; wallet always visible on small screens.
 - `app/dashboard/page.tsx` – Mobile wallet stabilize delay, 401 retry, “Preparing…” state.
+- `app/dashboard/nesting/page.tsx` + `components/nesting/DashboardNestingClient.tsx` – Same stabilize delay, absolute API URLs, Seeker/Android connect hints, network retries.
+- `lib/nesting/fetch-json.ts` – Timeouts and user-facing network errors (incl. Seeker/Chrome fallback copy).
 - `app/globals.css` – `mobile-wallet-context`, touch targets, safe area.
 - `app/manifest.ts` – PWA manifest for install and standalone.

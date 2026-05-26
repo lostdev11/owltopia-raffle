@@ -64,16 +64,24 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
       {!compact && (
         <CardFooter className="flex flex-wrap gap-2 border-t border-border/60 pt-4">
           {nestingPaused ? (
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Nesting is paused—open the dashboard later to land on this perch.
-            </p>
+            <div className="flex flex-wrap gap-2 w-full">
+              <p className="text-sm text-muted-foreground leading-relaxed w-full">
+                New nests are paused—you can still claim OWL you already earned.
+              </p>
+              <Button asChild variant="default" size="sm" className="min-h-[44px] touch-manipulation font-semibold">
+                <Link href="/dashboard/nesting#nesting-claim-all-banner">Claim OWL</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
+                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
+              </Button>
+            </div>
           ) : (
             <>
               <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
-                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>Nest here</Link>
+                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>Nest here</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
-                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>My nest</Link>
+                <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
               </Button>
             </>
           )}

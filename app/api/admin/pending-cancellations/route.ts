@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/auth-server'
+import { RAFFLES_PENDING_CANCELLATION_QUEUE_STATUSES } from '@/lib/raffles/list-query-statuses'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * GET — any admin: raffles with a creator cancellation signal still awaiting completion
- * (not the same as the truncated /api/raffles list, which is capped for cold-start resilience).
+ * GET — any admin: live / ready_to_draw raffles with a creator cancellation signal still awaiting
+ * admin accept (not the same as the truncated /api/raffles list, which is capped for cold-start resilience).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
       .from('raffles')
       .select('id, slug, title, status, cancellation_requested_at, cancellation_fee_paid_at')
       .or('cancellation_requested_at.not.is.null,cancellation_fee_paid_at.not.is.null')
-      .neq('status', 'cancelled')
+      .in('status', [...RAFFLES_PENDING_CANCELLATION_QUEUE_STATUSES])
       .order('cancellation_requested_at', { ascending: false })
 
     if (error) {

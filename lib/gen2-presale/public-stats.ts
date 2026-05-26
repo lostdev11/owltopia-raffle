@@ -2,6 +2,7 @@ import { getGen2PresalePublicOffer } from '@/lib/gen2-presale/config'
 import { sumConfirmedPresaleSold } from '@/lib/gen2-presale/db'
 import { getGen2PresaleSettings } from '@/lib/db/gen2-presale-settings'
 import { getOptionalUnitLamportsQuote } from '@/lib/gen2-presale/pricing'
+import { deriveGen2PresaleAvailabilityFlags } from '@/lib/gen2-presale/purchase-availability'
 import type { Gen2PresaleStats } from '@/lib/gen2-presale/types'
 
 function isTransientNetworkFailure(err: unknown): boolean {
@@ -72,6 +73,13 @@ export async function buildGen2PresalePublicStats(): Promise<Gen2PresaleStats> {
 
   const quote = await getOptionalUnitLamportsQuote()
 
+  const availabilityBase = {
+    presale_live: settings.is_live,
+    remaining,
+    ...(soldSyncUnavailable ? { sold_sync_unavailable: true as const } : {}),
+  }
+  const { presale_sold_out, purchases_open } = deriveGen2PresaleAvailabilityFlags(availabilityBase)
+
   return {
     presale_supply,
     sold,
@@ -81,6 +89,8 @@ export async function buildGen2PresalePublicStats(): Promise<Gen2PresaleStats> {
     unit_lamports: quote ? quote.unitLamports.toString() : null,
     sol_usd_price: quote ? quote.solUsdPrice : null,
     presale_live: settings.is_live,
+    presale_sold_out,
+    purchases_open,
     ...(soldSyncUnavailable ? { sold_sync_unavailable: true as const } : {}),
   }
 }

@@ -7,14 +7,16 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import type { CreatorHealthRow } from '@/lib/db/creator-health'
+import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 
@@ -68,6 +70,16 @@ interface LiveRaffleXTemplate {
   label: string
   text: string
   intentUrl: string
+}
+
+interface DailyRaidRaffleItem {
+  id: string
+  title: string
+  slug: string
+  endTime: string
+  shareText: string
+  intentUrl: string
+  shortUrl: string
 }
 
 interface PendingCancellationRow {
@@ -141,6 +153,8 @@ export default function AdminDashboardPage() {
 
   // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
+  const [revenueLoadError, setRevenueLoadError] = useState<string | null>(null)
+  const revenueHasDataRef = useRef(false)
   const [revShareSchedule, setRevShareSchedule] = useState<{ next_date: string | null; total_sol: number | null; total_usdc: number | null } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
@@ -149,6 +163,10 @@ export default function AdminDashboardPage() {
 
   const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
   const [loadingCreatorHealth, setLoadingCreatorHealth] = useState(false)
+
+  const [hotCommunities, setHotCommunities] = useState<HotCommunityRow[]>([])
+  const [loadingHotCommunities, setLoadingHotCommunities] = useState(false)
+  const [hotCommunitiesGeneratedAt, setHotCommunitiesGeneratedAt] = useState<string | null>(null)
 
   const [siteMaint, setSiteMaint] = useState<{
     starts_at: string | null
@@ -176,6 +194,20 @@ export default function AdminDashboardPage() {
     raffleTitle?: string
     xTemplates?: LiveRaffleXTemplate[]
   } | null>(null)
+
+  const [dailyRaidRaffles, setDailyRaidRaffles] = useState<DailyRaidRaffleItem[] | null>(null)
+  const [dailyRaidEveryoneMessage, setDailyRaidEveryoneMessage] = useState<string | null>(null)
+  const [loadingDailyRaid, setLoadingDailyRaid] = useState(false)
+  const [dailyRaidLoadError, setDailyRaidLoadError] = useState<string | null>(null)
+  const [pushingDailyRaidDiscord, setPushingDailyRaidDiscord] = useState(false)
+  const [raidTweetUrls, setRaidTweetUrls] = useState<Record<string, string>>({})
+  const [raidMirrorPostingId, setRaidMirrorPostingId] = useState<string | null>(null)
+  const [raidMirroredIds, setRaidMirroredIds] = useState<string[]>([])
+  const [dailyRaidMessage, setDailyRaidMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  )
+  const [dailyRaidCopied, setDailyRaidCopied] = useState(false)
+  const [pushingRaidPing, setPushingRaidPing] = useState(false)
 
   const [devTasks, setDevTasks] = useState<DevTask[]>([])
   const [loadingDevTasks, setLoadingDevTasks] = useState(false)
@@ -487,25 +519,45 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady) {
+      revenueHasDataRef.current = false
+      setRevenue(null)
+      setRevenueLoadError(null)
+      setLoadingRevenue(false)
+      return
+    }
     const fetchRevenue = async () => {
-      if (!connected || !publicKey || !isAdmin || !sessionReady) return
-      setLoadingRevenue(true)
+      const isInitialLoad = !revenueHasDataRef.current
+      if (isInitialLoad) setLoadingRevenue(true)
       try {
         const res = await fetch(
           `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
           { credentials: 'include', cache: 'no-store' }
         )
-        if (res.ok) {
-          const data = await res.json()
-          setRevenue(data)
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const msg =
+            (typeof data?.error === 'string' && data.error) || 'Failed to load projected revenue'
+          if (!revenueHasDataRef.current) {
+            setRevenue(null)
+            setRevenueLoadError(msg)
+          }
+          return
         }
+        setRevenue(data as import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse)
+        setRevenueLoadError(null)
+        revenueHasDataRef.current = true
       } catch (e) {
         console.error('Error fetching projected revenue:', e)
+        if (!revenueHasDataRef.current) {
+          setRevenue(null)
+          setRevenueLoadError('Network error while loading projected revenue.')
+        }
       } finally {
-        setLoadingRevenue(false)
+        if (isInitialLoad) setLoadingRevenue(false)
       }
     }
-    if (isAdmin && sessionReady) fetchRevenue()
+    void fetchRevenue()
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
@@ -523,6 +575,30 @@ export default function AdminDashboardPage() {
       .catch((e) => console.error('Error fetching creator health:', e))
       .finally(() => {
         if (!cancelled) setLoadingCreatorHealth(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    let cancelled = false
+    setLoadingHotCommunities(true)
+    fetch('/api/admin/hot-communities', { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load hot communities')
+        return res.json() as Promise<{ communities: HotCommunityRow[]; generatedAt?: string }>
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setHotCommunities(data.communities || [])
+          setHotCommunitiesGeneratedAt(data.generatedAt ?? null)
+        }
+      })
+      .catch((e) => console.error('Error fetching hot communities:', e))
+      .finally(() => {
+        if (!cancelled) setLoadingHotCommunities(false)
       })
     return () => {
       cancelled = true
@@ -554,6 +630,176 @@ export default function AdminDashboardPage() {
     if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
     void fetchLiveRafflesForDiscord()
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchLiveRafflesForDiscord])
+
+  const fetchDailyRaidBatch = useCallback(async () => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    setLoadingDailyRaid(true)
+    setDailyRaidLoadError(null)
+    setDailyRaidMessage(null)
+    try {
+      const res = await fetch('/api/admin/daily-raid', { credentials: 'include', cache: 'no-store' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || 'Failed to load daily raid batch')
+      }
+      const data = (await res.json()) as {
+        raffles?: DailyRaidRaffleItem[]
+        suggestedRaidMessage?: string
+        suggestedEveryoneMessage?: string
+      }
+      setDailyRaidRaffles(data.raffles ?? [])
+      const raidMsg =
+        typeof data.suggestedRaidMessage === 'string'
+          ? data.suggestedRaidMessage
+          : typeof data.suggestedEveryoneMessage === 'string'
+            ? data.suggestedEveryoneMessage
+            : null
+      setDailyRaidEveryoneMessage(raidMsg)
+      setRaidTweetUrls({})
+      setRaidMirroredIds([])
+    } catch (e) {
+      console.error('fetchDailyRaidBatch:', e)
+      setDailyRaidRaffles(null)
+      setDailyRaidEveryoneMessage(null)
+      setDailyRaidLoadError(e instanceof Error ? e.message : 'Failed to load')
+    } finally {
+      setLoadingDailyRaid(false)
+    }
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole])
+
+  useEffect(() => {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    void fetchDailyRaidBatch()
+  }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchDailyRaidBatch])
+
+  const handlePushDailyRaidToDiscord = async () => {
+    setPushingDailyRaidDiscord(true)
+    setDailyRaidMessage(null)
+    try {
+      const res = await fetch('/api/admin/daily-raid/discord', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDailyRaidMessage({
+          type: 'error',
+          text: (data as { error?: string }).error || 'Could not post raid bundle to Discord',
+        })
+        return
+      }
+      const count = (data as { count?: number }).count ?? dailyRaidRaffles?.length ?? 0
+      setDailyRaidMessage({
+        type: 'success',
+        text: `Posted daily raid bundle (${count} raffle${count === 1 ? '' : 's'}) to #x-post.`,
+      })
+    } catch (e) {
+      console.error('handlePushDailyRaidToDiscord:', e)
+      setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setPushingDailyRaidDiscord(false)
+    }
+  }
+
+  const postDailyRaidPingToDiscord = async (count: number): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/daily-raid/raid-ping/discord', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) {
+        return { ok: false, error: data.error ?? 'Could not post @raid ping' }
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'Network error' }
+    }
+  }
+
+  const handleMirrorRaidTweet = async (raffleId: string, raffleTitle: string) => {
+    const tweetUrl = (raidTweetUrls[raffleId] ?? '').trim()
+    if (!tweetUrl) {
+      setDailyRaidMessage({
+        type: 'error',
+        text: `Paste the tweet link for "${raffleTitle}" first (from X, not owltopia.xyz).`,
+      })
+      return
+    }
+    setRaidMirrorPostingId(raffleId)
+    setDailyRaidMessage(null)
+    try {
+      const result = await mirrorAdminTweetShareToDiscord(raffleId, tweetUrl)
+      if (!result.ok) {
+        setDailyRaidMessage({
+          type: 'error',
+          text: result.error ?? `Could not post "${raffleTitle}" to Discord`,
+        })
+        return
+      }
+      setRaidMirroredIds((prev) => (prev.includes(raffleId) ? prev : [...prev, raffleId]))
+      const nextMirrored = raidMirroredIds.includes(raffleId)
+        ? raidMirroredIds
+        : [...raidMirroredIds, raffleId]
+      const total = dailyRaidRaffles?.length ?? 0
+      if (total > 0 && nextMirrored.length >= total) {
+        const ping = await postDailyRaidPingToDiscord(total)
+        if (ping.ok) {
+          setDailyRaidMessage({
+            type: 'success',
+            text: `All ${total} tweets are in #x-post. @raid ping posted to Discord.`,
+          })
+        } else {
+          setDailyRaidMessage({
+            type: 'success',
+            text: `All ${total} tweets are in #x-post. Post @raid ping manually (Step 3).${ping.error ? ` (${ping.error})` : ''}`,
+          })
+        }
+      } else {
+        setDailyRaidMessage({
+          type: 'success',
+          text: `"${raffleTitle}" posted to #x-post (${nextMirrored.length}/${total}).`,
+        })
+      }
+    } catch (e) {
+      console.error('handleMirrorRaidTweet:', e)
+      setDailyRaidMessage({ type: 'error', text: 'Network error. Try again.' })
+    } finally {
+      setRaidMirrorPostingId(null)
+    }
+  }
+
+  const handlePostDailyRaidPingToDiscord = async () => {
+    const count = dailyRaidRaffles?.length ?? 1
+    setPushingRaidPing(true)
+    setDailyRaidMessage(null)
+    try {
+      const result = await postDailyRaidPingToDiscord(count)
+      if (!result.ok) {
+        setDailyRaidMessage({ type: 'error', text: result.error ?? 'Could not post @raid ping' })
+        return
+      }
+      setDailyRaidMessage({
+        type: 'success',
+        text: `@raid ping posted to #x-post for ${count} tweet${count === 1 ? '' : 's'}.`,
+      })
+    } finally {
+      setPushingRaidPing(false)
+    }
+  }
+
+  const handleCopyDailyRaidEveryoneMessage = async () => {
+    if (!dailyRaidEveryoneMessage || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+    try {
+      await navigator.clipboard.writeText(dailyRaidEveryoneMessage)
+      setDailyRaidCopied(true)
+      window.setTimeout(() => setDailyRaidCopied(false), 1800)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const handlePushLiveToDiscord = async (r: LiveRaffleDiscordRow) => {
     setPushingDiscordRaffleId(r.id)
@@ -1632,12 +1878,25 @@ export default function AdminDashboardPage() {
             Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
           </CardDescription>
           <div>
-            {loadingRevenue ? (
-              <p className="text-muted-foreground flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading…
+            {revenueLoadError && revenue === null ? (
+              <div className="space-y-3">
+                <p className="text-sm text-destructive">{revenueLoadError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 touch-manipulation"
+                  onClick={() => setAutoRefreshTick((t) => t + 1)}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : loadingRevenue || revenue === null ? (
+              <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                Loading projected revenue…
               </p>
-            ) : revenue ? (
+            ) : (
               <div className="space-y-6">
                 {/* All-time totals */}
                 <div>
@@ -1800,8 +2059,6 @@ export default function AdminDashboardPage() {
                   </div>
                 )}
               </div>
-            ) : (
-              <p className="text-muted-foreground">No revenue data</p>
             )}
           </div>
         </OwlVisionDisclosure>
@@ -1978,6 +2235,345 @@ export default function AdminDashboardPage() {
                   <strong className="text-foreground">Health</strong> is a 0–100 heuristic (higher is better): it down-weights extensions, post-entry edits, moderation flags, cancellations, weak sell-through, and pending verifications. Use it for triage, not as proof of bad behavior.
                 </p>
               )}
+            </div>
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="amber-soft"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Flame className="h-5 w-5 shrink-0 text-orange-600 dark:text-orange-400" />
+                Hot communities right now
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              NFT communities with the most momentum in the last 7 days: live raffles, confirmed ticket volume, unique
+              buyers, and recent completions. Names are inferred from raffle titles (collection field is rarely set).
+              Use for promo picks, creator outreach, and spotting what entrants are engaging with.
+            </CardDescription>
+            <div>
+              {loadingHotCommunities ? (
+                <p className="text-muted-foreground flex items-center gap-2 touch-manipulation min-h-[44px]">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Loading community momentum…
+                </p>
+              ) : hotCommunities.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No communities with recent activity yet.</p>
+              ) : (
+                <div className="overflow-x-auto -mx-1 px-1 touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-sm border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-3 font-medium">Community</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Heuristic sort score">
+                          Hot
+                        </th>
+                        <th className="py-2 pr-2 font-medium">Trend</th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Live or ready to draw">
+                          Live
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Confirmed tickets (7d)">
+                          7d tickets
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Unique buyers (7d)">
+                          7d buyers
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Completed last 30 days">
+                          30d ✓
+                        </th>
+                        <th className="py-2 pr-2 font-medium tabular-nums" title="Success rate last 90 days">
+                          90d rate
+                        </th>
+                        <th className="py-2 font-medium">Sample raffles</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hotCommunities.map((row) => {
+                        const trendIcon =
+                          row.trend === 'rising' ? (
+                            <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                          ) : row.trend === 'cooling' ? (
+                            <ArrowDownRight className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden />
+                          ) : (
+                            <Minus className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-hidden />
+                          )
+                        const trendLabel =
+                          row.trend === 'rising' ? 'Rising' : row.trend === 'cooling' ? 'Cooling' : 'Steady'
+                        return (
+                          <tr key={row.brand} className="border-b border-border/60">
+                            <td className="py-2.5 pr-3 align-top font-medium">{row.brand}</td>
+                            <td className="py-2.5 pr-2 tabular-nums font-semibold text-orange-600 dark:text-orange-400">
+                              {row.hotScore}
+                            </td>
+                            <td className="py-2.5 pr-2 align-top">
+                              <span className="inline-flex items-center gap-1 capitalize text-xs">
+                                {trendIcon}
+                                {trendLabel}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.liveCount > 0 ? row.liveCount : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.ticketsLast7d > 0 ? row.ticketsLast7d : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums">{row.buyersLast7d > 0 ? row.buyersLast7d : '—'}</td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">
+                              {row.completedLast30d > 0 ? row.completedLast30d : '—'}
+                              {row.failedLast30d > 0 ? (
+                                <span className="text-red-600 dark:text-red-400"> / {row.failedLast30d} fail</span>
+                              ) : null}
+                            </td>
+                            <td className="py-2.5 pr-2 tabular-nums text-muted-foreground">
+                              {row.successRate != null ? `${row.successRate}%` : '—'}
+                            </td>
+                            <td className="py-2.5 align-top">
+                              <ul className="space-y-1 text-xs">
+                                {row.sampleRaffles.map((r) => (
+                                  <li key={r.id}>
+                                    <Link
+                                      href={`/raffles/${encodeURIComponent(r.slug)}`}
+                                      className="text-primary underline-offset-2 hover:underline touch-manipulation inline-flex flex-wrap items-center gap-1 min-h-[44px] py-1"
+                                    >
+                                      <span className="line-clamp-1">{r.title}</span>
+                                      <span className="text-muted-foreground tabular-nums shrink-0">
+                                        ({r.uniqueBuyers}b · {r.ticketsSold}t)
+                                      </span>
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!loadingHotCommunities && hotCommunities.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  <strong className="text-foreground">Hot</strong> scores weight live raffles, 7-day ticket velocity,
+                  buyers, and recent completions. <strong className="text-foreground">Trend</strong> compares 7-day
+                  tickets to the prior 7 days.
+                  {hotCommunitiesGeneratedAt ? (
+                    <> Updated {new Date(hotCommunitiesGeneratedAt).toLocaleString()}.</>
+                  ) : null}
+                </p>
+              )}
+            </div>
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="violet"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Megaphone className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
+                Daily X raid (ending today / tomorrow)
+              </span>
+            }
+          >
+            <CardDescription className="mb-4">
+              Three steps: post each raffle on X → paste each tweet link → one @raid ping in Discord.
+            </CardDescription>
+            <ol className="mb-4 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+              <li>
+                <span className="text-foreground">Post to X</span> for each raffle below (tag the project in the NFT line)
+              </li>
+              <li>
+                <span className="text-foreground">Post to Discord</span> — paste the tweet link under each raffle
+              </li>
+              <li>
+                <span className="text-foreground">@raid ping</span> — post automatically or copy the message below
+              </li>
+            </ol>
+            {dailyRaidEveryoneMessage && dailyRaidRaffles && dailyRaidRaffles.length > 0 && (
+              <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2 mb-4">
+                <p className="text-xs text-muted-foreground">Step 3 — @raid ping message:</p>
+                <p className="text-sm font-medium text-foreground">{dailyRaidEveryoneMessage}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handlePostDailyRaidPingToDiscord()}
+                    disabled={pushingRaidPing}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {pushingRaidPing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                        Posting…
+                      </>
+                    ) : (
+                      'Post @raid ping to Discord'
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyDailyRaidEveryoneMessage()}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {dailyRaidCopied ? 'Copied!' : 'Copy message'}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void fetchDailyRaidBatch()}
+                  disabled={loadingDailyRaid}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {loadingDailyRaid ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Refreshing…
+                    </>
+                  ) : (
+                    'Refresh raid batch'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handlePushDailyRaidToDiscord()}
+                  disabled={
+                    pushingDailyRaidDiscord ||
+                    loadingDailyRaid ||
+                    !dailyRaidRaffles ||
+                    dailyRaidRaffles.length === 0
+                  }
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {pushingDailyRaidDiscord ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                      Posting…
+                    </>
+                  ) : (
+                    'Post raid checklist (optional)'
+                  )}
+                </Button>
+              </div>
+              {dailyRaidLoadError && dailyRaidRaffles === null && (
+                <p className="text-sm text-destructive">{dailyRaidLoadError}</p>
+              )}
+              {dailyRaidMessage && (
+                <p
+                  className={
+                    dailyRaidMessage.type === 'success'
+                      ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                      : 'text-sm text-destructive'
+                  }
+                >
+                  {dailyRaidMessage.text}
+                </p>
+              )}
+              {!dailyRaidLoadError &&
+                (loadingDailyRaid || dailyRaidRaffles === null ? (
+                  <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    Loading…
+                  </p>
+                ) : dailyRaidRaffles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No live raffles ending today or tomorrow (UTC). Check back later.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {dailyRaidRaffles.map((r, index) => (
+                      <div
+                        key={r.id}
+                        className="rounded-lg border border-border/60 p-3 space-y-2 bg-background/40"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-medium text-foreground">
+                              {index + 1}. {r.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Ends{' '}
+                              {(() => {
+                                const d = new Date(r.endTime)
+                                return Number.isNaN(d.getTime()) ? r.endTime : d.toLocaleString()
+                              })()}{' '}
+                              ·{' '}
+                              <span className="font-mono break-all">{r.shortUrl}</span>
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              <a href={r.intentUrl} target="_blank" rel="noopener noreferrer">
+                                Post to X
+                              </a>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              <Link href={`/raffles/${encodeURIComponent(r.slug)}`}>Share on site</Link>
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <Input
+                            type="url"
+                            inputMode="url"
+                            autoComplete="off"
+                            placeholder="Step 2: paste tweet link from X"
+                            value={raidTweetUrls[r.id] ?? ''}
+                            onChange={(e) =>
+                              setRaidTweetUrls((prev) => ({ ...prev, [r.id]: e.target.value }))
+                            }
+                            className="min-h-[44px] touch-manipulation font-mono text-xs flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant={raidMirroredIds.includes(r.id) ? 'secondary' : 'default'}
+                            size="sm"
+                            disabled={raidMirrorPostingId === r.id || raidMirroredIds.includes(r.id)}
+                            onClick={() => void handleMirrorRaidTweet(r.id, r.title)}
+                            className="touch-manipulation min-h-[44px] shrink-0"
+                          >
+                            {raidMirrorPostingId === r.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                                Posting…
+                              </>
+                            ) : raidMirroredIds.includes(r.id) ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 mr-2 shrink-0" />
+                                In Discord
+                              </>
+                            ) : (
+                              'Post to Discord'
+                            )}
+                          </Button>
+                        </div>
+                        <pre className="text-xs whitespace-pre-wrap font-sans text-muted-foreground bg-muted/30 rounded p-2 overflow-x-auto">
+                          {r.shareText}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                ))}
             </div>
           </OwlVisionDisclosure>
         )}

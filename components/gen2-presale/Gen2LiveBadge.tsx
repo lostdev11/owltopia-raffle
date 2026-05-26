@@ -6,10 +6,11 @@ type Props = {
   className?: string
   /** From `/api/gen2-presale/stats` → `presale_live`. Omit while loading. */
   live?: boolean
+  soldOut?: boolean
   loading?: boolean
 }
 
-export function Gen2LiveBadge({ className, live, loading }: Props) {
+export function Gen2LiveBadge({ className, live, soldOut = false, loading }: Props) {
   if (loading || live === undefined) {
     return (
       <span
@@ -20,6 +21,20 @@ export function Gen2LiveBadge({ className, live, loading }: Props) {
       >
         <span className="relative flex h-2 w-2 rounded-full bg-[#A9CBB9]/40" />
         Checking status…
+      </span>
+    )
+  }
+
+  if (soldOut) {
+    return (
+      <span
+        className={cn(
+          'inline-flex items-center gap-2 rounded-full border border-[#00FF9C]/45 bg-[#00E58B]/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-[#00FF9C]',
+          className
+        )}
+      >
+        <span className="relative flex h-2 w-2 rounded-full bg-[#00FF9C]" />
+        PRESALE SOLD OUT
       </span>
     )
   }

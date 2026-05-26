@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
+import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import {
   Loader2,
   ArrowLeft,
@@ -27,7 +28,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
-const MOBILE_401_RETRY_DELAY_MS = 500
+const MOBILE_401_RETRY_DELAY_MS = 800
 
 /** Shared layout + card chrome for a consistent partner hub look */
 const PAGE_SHELL =
@@ -145,14 +146,15 @@ function normalizeRaffleRow(raw: unknown): DashboardRaffle | null {
  * Anyone can open the URL; content requires connect + sign-in and (partner allowlist or site admin wallet).
  */
 export default function PartnerHostDashboardPage() {
-  const { publicKey, connected } = useWallet()
+  const { publicKey, connected, signMessage } = useWallet()
+  const { signIn, signingIn, error: signInError } = useSiwsSignIn()
   const wallet = publicKey?.toBase58() ?? ''
   const [loading, setLoading] = useState(true)
   const [needsSignIn, setNeedsSignIn] = useState(false)
   const [data, setData] = useState<DashboardPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [retried401, setRetried401] = useState(false)
+  const hasRetried401OnMobile = useRef(false)
   const [exportingRaffleId, setExportingRaffleId] = useState<string | null>(null)
 
   const load = useCallback(async (silent: boolean) => {
@@ -170,13 +172,14 @@ export default function PartnerHostDashboardPage() {
         headers: { 'X-Connected-Wallet': addr },
       })
       if (res.status === 401) {
-        if (isMobileDevice() && !retried401 && !silent) {
-          setRetried401(true)
+        if (isMobileDevice() && !hasRetried401OnMobile.current && !silent) {
+          hasRetried401OnMobile.current = true
           setTimeout(() => void load(true), MOBILE_401_RETRY_DELAY_MS)
           return
         }
         setNeedsSignIn(true)
         setData(null)
+        setLoading(false)
         return
       }
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string }
@@ -236,11 +239,15 @@ export default function PartnerHostDashboardPage() {
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [publicKey, retried401])
+  }, [publicKey])
 
   useEffect(() => {
-    if (connected && publicKey) void load(false)
-  }, [connected, publicKey, load])
+    hasRetried401OnMobile.current = false
+  }, [wallet])
+
+  useEffect(() => {
+    if (connected && publicKey && !needsSignIn) void load(false)
+  }, [connected, publicKey, needsSignIn, load])
 
   const isPartner = data?.feeTier.reason === 'partner_community'
   const viewerIsSiteAdmin = data?.viewerIsSiteAdmin === true
@@ -355,16 +362,45 @@ export default function PartnerHostDashboardPage() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl">Sign in required</CardTitle>
             <CardDescription className="text-base leading-relaxed">
-              Sign the message in your wallet to use the partner hub (same as the main dashboard).
+              Sign the message in your wallet to use the partner hub. Same one-time sign-in as the main dashboard — no
+              transaction or fee.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <Button type="button" onClick={() => void load(false)} className="min-h-[44px] touch-manipulation w-full sm:w-auto">
-              Retry
-            </Button>
-            <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
-              <Link href="/dashboard">Open full dashboard</Link>
-            </Button>
+          <CardContent className="flex flex-col gap-3">
+            {signInError ? <p className="text-sm text-destructive">{signInError}</p> : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <Button
+                type="button"
+                onClick={() =>
+                  void signIn({
+                    onSuccess: async () => {
+                      setNeedsSignIn(false)
+                      await load(false)
+                    },
+                  })
+                }
+                disabled={signingIn || !signMessage}
+                className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              >
+                {signingIn ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    Signing in…
+                  </>
+                ) : (
+                  'Sign in with wallet'
+                )}
+              </Button>
+              <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+                <Link href="/dashboard">Open full dashboard</Link>
+              </Button>
+            </div>
+            {!signMessage ? (
+              <p className="text-sm text-muted-foreground">
+                Your connected wallet does not support message signing. Try Phantom or Solflare, or open the full
+                dashboard.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>

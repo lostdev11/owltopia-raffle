@@ -91,6 +91,12 @@ export const authVerifyBody = z.object({
   signature: z.string().min(1),
 })
 
+export const walletLinkVerifyBody = z.object({
+  linked_wallet: solanaAddress,
+  message: z.string().min(1),
+  signature: z.string().min(1),
+})
+
 export const profileUpdateBody = z.object({
   displayName: z.string().min(1).max(32).trim(),
 })
@@ -103,10 +109,6 @@ const councilSlug = z
 
 export const councilVoteBody = z.object({
   vote_choice: z.enum(['yes', 'no', 'abstain']),
-})
-
-export const raffleSentimentBody = z.object({
-  sentiment: z.enum(['up', 'down']),
 })
 
 /** Status is always `draft` at create — only admins may publish (set active). `slug` optional (server derives from title). */

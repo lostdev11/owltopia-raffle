@@ -58,6 +58,7 @@ import {
   isDirectRaffleImageHost,
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
+import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 
 /** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
 function raffleImageUnoptimized(src: string): boolean {
@@ -500,34 +501,11 @@ export function RaffleCard({
   }
 
   const handleShareRaffle = useCallback(async () => {
-    if (typeof window === 'undefined') return
-    const url = `${window.location.origin}/raffles/${raffle.slug}`
-    const shareData = {
-      title: raffle.title,
-      text: `Check out this raffle: ${raffle.title}`,
-      url,
-    }
-
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      try {
-        await navigator.share(shareData)
-        return
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-      }
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(url)
-        return
-      } catch {
-        // Last resort below when clipboard permissions are denied.
-      }
-    }
-
-    window.prompt('Copy raffle link:', url)
-  }, [raffle.slug, raffle.title])
+    await shareRaffleFromBrowser({
+      raffle,
+      isFullAdmin: isAdmin,
+    })
+  }, [raffle, isAdmin])
 
   // Small size - List format (horizontal)
   if (size === 'small') {

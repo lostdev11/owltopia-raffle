@@ -100,10 +100,23 @@ export async function tryTransferOwlRewardClaim(params: {
     ASSOCIATED_TOKEN_PROGRAM_ID
   )
 
+  const splAtaExists = async (ata: typeof fromAta): Promise<boolean> => {
+    try {
+      await getAccount(readConn, ata, 'confirmed', programId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const tx = new Transaction()
-  try {
-    await getAccount(readConn, fromAta, 'confirmed', programId)
-  } catch {
+  const [{ blockhash, lastValidBlockHeight }, fromAtaExists, toAtaExists] = await Promise.all([
+    connection.getLatestBlockhash('confirmed'),
+    splAtaExists(fromAta),
+    splAtaExists(toAta),
+  ])
+
+  if (!fromAtaExists) {
     tx.add(
       createAssociatedTokenAccountInstruction(
         treasuryPk,
@@ -115,9 +128,7 @@ export async function tryTransferOwlRewardClaim(params: {
       )
     )
   }
-  try {
-    await getAccount(readConn, toAta, 'confirmed', programId)
-  } catch {
+  if (!toAtaExists) {
     tx.add(
       createAssociatedTokenAccountInstruction(
         treasuryPk,
@@ -129,20 +140,18 @@ export async function tryTransferOwlRewardClaim(params: {
       )
     )
   }
-  tx.add(
-    createTransferInstruction(fromAta, toAta, treasuryPk, amountRaw, [], programId)
-  )
+  tx.add(createTransferInstruction(fromAta, toAta, treasuryPk, amountRaw, [], programId))
 
   try {
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
     tx.recentBlockhash = blockhash
     tx.feePayer = treasuryPk
     const signature = await connection.sendTransaction(tx, [treasury], {
       skipPreflight: false,
-      preflightCommitment: 'confirmed',
+      preflightCommitment: 'processed',
       maxRetries: 3,
     })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+    // Processed is enough for treasury→user SPL payouts; avoids an extra confirmed round-trip.
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'processed')
     return { kind: 'sent', signature }
   } catch (e) {
     return { kind: 'failed', error: e instanceof Error ? e.message : 'OWL reward transfer failed' }

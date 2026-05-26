@@ -36,6 +36,11 @@ import {
   ADMIN_HARD_DELETE_REASON_MIN_CHARS,
 } from '@/lib/raffles/admin-hard-delete'
 import { isOwlEnabled } from '@/lib/tokens'
+import {
+  buildOwltopiaRaffleShareText,
+  buildOwltopiaRaffleXIntentUrl,
+} from '@/lib/raffles/owltopia-share-text'
+import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
 
 function editFormTicketCurrencyDefault(
   raffleCurrency: string | null | undefined,
@@ -156,6 +161,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   const [listPlatformSaving, setListPlatformSaving] = useState(false)
   const [listPlatformError, setListPlatformError] = useState<string | null>(null)
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
+  const [mirrorTweetUrl, setMirrorTweetUrl] = useState('')
+  const [mirroringTweet, setMirroringTweet] = useState(false)
+  const [mirrorTweetMessage, setMirrorTweetMessage] = useState<{
+    type: 'success' | 'error'
+    text: string
+  } | null>(null)
 
   useEffect(() => {
     setListOnPlatform(raffle.list_on_platform !== false)
@@ -223,6 +234,14 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     raffle.creator_payout_amount != null &&
     raffle.fee_bps_applied != null &&
     typeof raffle.fee_tier_reason === 'string'
+  const owltopiaSharePreview = useMemo(
+    () => buildOwltopiaRaffleShareText(raffle),
+    [raffle]
+  )
+  const owltopiaShareIntentUrl = useMemo(
+    () => buildOwltopiaRaffleXIntentUrl(raffle),
+    [raffle]
+  )
   const xTemplates = useMemo<LiveRaffleXTemplate[]>(() => {
     const siteBase = (
       process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
@@ -400,6 +419,10 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     if (adminRole !== null) {
       const fb = (formData.get('image_fallback_url') as string)?.trim()
       data.image_fallback_url = fb ? fb : null
+    }
+    if (adminRole === 'full') {
+      const rawPromo = (formData.get('promo_x_handle') as string)?.trim()
+      data.promo_x_handle = rawPromo ? rawPromo : null
     }
 
     try {
@@ -724,6 +747,31 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     }
   }
 
+  const handleMirrorTweetToDiscord = async () => {
+    const tweetUrl = mirrorTweetUrl.trim()
+    if (!tweetUrl) {
+      setMirrorTweetMessage({ type: 'error', text: 'Paste the @Owltopia_sol tweet URL first.' })
+      return
+    }
+    setMirroringTweet(true)
+    setMirrorTweetMessage(null)
+    try {
+      const result = await mirrorAdminTweetShareToDiscord(raffle.id, tweetUrl)
+      if (!result.ok) {
+        setMirrorTweetMessage({ type: 'error', text: result.error ?? 'Discord mirror failed' })
+        return
+      }
+      setMirrorTweetMessage({
+        type: 'success',
+        text: result.discordContent
+          ? `Mirrored to #x-post: ${result.discordContent}`
+          : 'Mirrored to #x-post in Discord.',
+      })
+    } finally {
+      setMirroringTweet(false)
+    }
+  }
+
   const borderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
 
   // Show loading state while checking admin status
@@ -805,10 +853,86 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           <CardHeader>
             <CardTitle>Share this raffle on X</CardTitle>
             <CardDescription>
-              One-click templates to market this raffle. Opens X with prefilled text and your raffle link.
+              {adminRole === 'full'
+                ? 'Official @Owltopia_sol copy (OWLTOPIA block) for raids and #x-post. Set promo handle below when the NFT line should tag a project account.'
+                : 'One-click templates to market this raffle. Opens X with prefilled text and your raffle link.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {adminRole === 'full' && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="promo_x_handle">Promo X @handle (optional)</Label>
+                  <Input
+                    id="promo_x_handle"
+                    name="promo_x_handle"
+                    type="text"
+                    defaultValue={raffle.promo_x_handle ?? ''}
+                    placeholder="e.g. THC_Labz (no @)"
+                    className="min-h-[44px] touch-manipulation"
+                    maxLength={15}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Used in the NFT line for official shares. Save the form to apply; falls back to collection name if
+                    empty.
+                  </p>
+                </div>
+                <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Official Owltopia share preview:</p>
+                  <pre className="text-xs whitespace-pre-wrap font-sans text-foreground">{owltopiaSharePreview}</pre>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    <a href={owltopiaShareIntentUrl} target="_blank" rel="noopener noreferrer">
+                      Post to X (OWLTOPIA template)
+                    </a>
+                  </Button>
+                </div>
+                <div className="space-y-2 rounded-md border border-violet-500/30 bg-violet-500/[0.05] p-3">
+                  <Label htmlFor="mirror_tweet_x_post_url">
+                    After you post on X, mirror the tweet to #x-post (fixupx embed; @raid ping is
+                    separate). For 2–5 tweets at once, use Admin → Daily X raid batch box.
+                  </Label>
+                  <Input
+                    id="mirror_tweet_x_post_url"
+                    name="mirror_tweet_x_post_url"
+                    type="url"
+                    inputMode="url"
+                    autoComplete="off"
+                    placeholder="https://x.com/Owltopia_sol/status/…"
+                    value={mirrorTweetUrl}
+                    onChange={(e) => setMirrorTweetUrl(e.target.value)}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="touch-manipulation min-h-[44px]"
+                    disabled={mirroringTweet}
+                    onClick={() => void handleMirrorTweetToDiscord()}
+                  >
+                    {mirroringTweet ? 'Mirroring…' : 'Mirror to #x-post'}
+                  </Button>
+                  {mirrorTweetMessage && (
+                    <div
+                      role="status"
+                      className={`rounded-lg border p-3 ${
+                        mirrorTweetMessage.type === 'success'
+                          ? 'border-green-500/20 bg-green-500/10 text-green-500'
+                          : 'border-red-500/20 bg-red-500/10 text-red-500'
+                      }`}
+                    >
+                      <p className="text-sm">{mirrorTweetMessage.text}</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
             <div className="flex flex-wrap gap-2">
               {xTemplates.map((template) => (
                 <Button

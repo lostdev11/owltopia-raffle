@@ -48,7 +48,8 @@ import {
   getThemeAccentClasses,
   THEME_ACCENT_SELECT_OPTIONS,
 } from '@/lib/theme-accent'
-import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
+import { formatDateTimeWithTimezone, localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
+import type { DuplicateNftPrizeConflictReason } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
 import {
@@ -685,6 +686,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
+    }
+    if (viewerIsAdmin === true) {
+      const promo = (formData.get('promo_x_handle') as string)?.trim()
+      if (promo) data.promo_x_handle = promo
     }
     if (canUseBambooTicketCurrency) {
       if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
@@ -1391,7 +1396,22 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           )
           router.push('/dashboard')
         } else if (response.status === 409 && existingSlug) {
-          alert(`${msg}\n\nOpening your existing raffle…`)
+          const conflictReason = errorData?.conflict_reason as DuplicateNftPrizeConflictReason | undefined
+          const offerEndsRaw =
+            typeof errorData?.offer_window_ends_at === 'string' ? errorData.offer_window_ends_at.trim() : ''
+          const offerEndsLabel =
+            offerEndsRaw && !Number.isNaN(new Date(offerEndsRaw).getTime())
+              ? formatDateTimeWithTimezone(offerEndsRaw)
+              : ''
+          let alertBody = typeof msg === 'string' && msg.trim() ? msg.trim() : 'This NFT cannot be listed yet.'
+          if (conflictReason === 'post_draw_offers' && offerEndsLabel) {
+            alertBody += `\n\nYou can try again after buyout offers close (${offerEndsLabel}).`
+          }
+          const openHint =
+            conflictReason === 'post_draw_offers' || conflictReason === 'settlement_in_progress'
+              ? 'Opening the previous raffle…'
+              : 'Opening your existing raffle…'
+          alert(`${alertBody}\n\n${openHint}`)
           router.push(`/raffles/${encodeURIComponent(existingSlug)}`)
         } else {
           const friendly = formatCreateRaffleApiError(response.status, typeof msg === 'string' ? msg : '')
@@ -1894,6 +1914,23 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               className="min-h-[44px] touch-manipulation"
             />
           </div>
+
+          {viewerIsAdmin === true && (
+            <div className="space-y-2">
+              <Label htmlFor="promo_x_handle">Promo X @handle (optional, admin)</Label>
+              <Input
+                id="promo_x_handle"
+                name="promo_x_handle"
+                type="text"
+                placeholder="e.g. THC_Labz"
+                className="min-h-[44px] touch-manipulation"
+                maxLength={15}
+              />
+              <p className="text-xs text-muted-foreground">
+                Official @Owltopia_sol share copy uses this for the NFT line (e.g. NFT: @THC_Labz).
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="status">Status *</Label>

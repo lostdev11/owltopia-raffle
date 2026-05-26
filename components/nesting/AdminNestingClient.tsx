@@ -78,10 +78,89 @@ export function AdminNestingClient() {
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
+  const [claimAuditWallet, setClaimAuditWallet] = useState('')
+  const [claimAuditing, setClaimAuditing] = useState(false)
+  const [claimAuditReport, setClaimAuditReport] = useState<{
+    generated_at: string
+    wallets: Array<{
+      wallet_address: string
+      estimated_claimable_owl: number
+      onchain_claim_owl_24h: number
+      onchain_claim_tx_count_24h: number
+      risk_flags: string[]
+      risk_summary: string
+    }>
+  } | null>(null)
+  const [claimCatchupMsg, setClaimCatchupMsg] = useState<string | null>(null)
+  const [claimCatchupRunning, setClaimCatchupRunning] = useState(false)
 
   const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
+
+  const [supportWallet, setSupportWallet] = useState('')
+  const [walletDiagRunning, setWalletDiagRunning] = useState(false)
+  const [walletHealRunning, setWalletHealRunning] = useState(false)
+  const [walletDiagReport, setWalletDiagReport] = useState<{
+    wallet: string
+    wallet_nest_mint_count: number
+    positions_under_wallet: { active: number; pending: number; unstaked: number }
+    cross_wallet_rows: Array<{
+      position_id: string
+      prior_wallet: string
+      asset_identifier: string
+      status: string
+    }>
+    issues: Array<{
+      kind: string
+      severity: string
+      message: string
+      suggested_action: string
+      other_wallet?: string
+    }>
+    summary?: {
+      issue_count: number
+      high_severity_count: number
+      recommended_heal?: {
+        clear_pending: boolean
+        clear_active: boolean
+        clear_cross_wallet: boolean
+      }
+    }
+  } | null>(null)
+  const [walletSupportMsg, setWalletSupportMsg] = useState<string | null>(null)
+
+  const [supportPlaybook, setSupportPlaybook] = useState<{
+    wallet: string
+    generated_at: string
+    claim_audit: {
+      estimated_claimable_owl: number
+      active_nest_count: number
+      onchain_claim_owl_24h: number
+      onchain_claim_tx_count_24h: number
+      risk_flags: string[]
+      risk_summary: string
+    } | null
+    nest_diagnostics: {
+      wallet_nest_mint_count: number
+      positions_under_wallet: { active: number; pending: number; unstaked: number }
+      cross_wallet_rows: unknown[]
+    }
+    warnings: Array<{ severity: string; code: string; title: string; detail: string }>
+    recommendations: Array<{ action: string; detail: string }>
+    guards: {
+      block_apply_catch_up: boolean
+      block_apply_catch_up_reason: string | null
+      block_wallet_heal: boolean
+      block_wallet_heal_reason: string | null
+      wallet_heal_recommended: boolean
+      catch_up_recommended: boolean
+    }
+  } | null>(null)
+  const [supportPlaybookRunning, setSupportPlaybookRunning] = useState(false)
+  const [supportPlaybookMsg, setSupportPlaybookMsg] = useState<string | null>(null)
+  const [overrideCatchUpBlock, setOverrideCatchUpBlock] = useState(false)
+  const [overrideWalletHealBlock, setOverrideWalletHealBlock] = useState(false)
 
   const [landingPublic, setLandingPublic] = useState(false)
   const [landingPublicLoading, setLandingPublicLoading] = useState(false)
@@ -464,6 +543,220 @@ export function AdminNestingClient() {
     }
   }
 
+  const runClaimLedgerAudit = async () => {
+    setClaimAuditing(true)
+    setClaimCatchupMsg(null)
+    setSaveError(null)
+    try {
+      const q = new URLSearchParams()
+      const w = claimAuditWallet.trim()
+      if (w) {
+        q.set('wallet', w)
+        q.set('flagged_only', 'false')
+      }
+      const res = await fetch(`/api/admin/staking/claim-ledger-audit?${q.toString()}`, {
+        credentials: 'include',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Claim ledger audit failed')
+        return
+      }
+      setClaimAuditReport(json as typeof claimAuditReport)
+    } finally {
+      setClaimAuditing(false)
+    }
+  }
+
+  const runSupportPlaybook = async () => {
+    const wallet = supportWallet.trim()
+    setSupportPlaybook(null)
+    setWalletDiagReport(null)
+    setClaimAuditReport(null)
+    setWalletSupportMsg(null)
+    setClaimCatchupMsg(null)
+    setSupportPlaybookMsg(null)
+    setSaveError(null)
+    setOverrideCatchUpBlock(false)
+    setOverrideWalletHealBlock(false)
+    if (!wallet) {
+      setSupportPlaybookMsg('Enter the holder wallet address.')
+      return
+    }
+    if (!isProbableSolanaPubkey(wallet)) {
+      setSupportPlaybookMsg('Wallet address does not look like a valid Solana public key.')
+      return
+    }
+    setClaimAuditWallet(wallet)
+    setSupportPlaybookRunning(true)
+    setSupportPlaybookMsg('Running claim audit and nest diagnostics (large wallets may take 30–60s)…')
+    try {
+      const res = await fetch(
+        `/api/admin/staking/support-playbook?wallet=${encodeURIComponent(wallet)}`,
+        { credentials: 'include' }
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const err =
+          typeof json?.error === 'string'
+            ? json.error
+            : res.status === 504
+              ? 'Support playbook timed out. Try again, or run wallet diagnostics and claim audit separately below.'
+              : 'Support playbook failed'
+        setSupportPlaybookMsg(err)
+        setSaveError(err)
+        return
+      }
+      setSupportPlaybook(json as typeof supportPlaybook)
+      if (json.nest_diagnostics) {
+        setWalletDiagReport(json.nest_diagnostics as typeof walletDiagReport)
+      }
+      if (json.claim_audit) {
+        setClaimAuditReport({
+          generated_at: json.generated_at ?? new Date().toISOString(),
+          wallets: [json.claim_audit],
+        })
+      }
+      const warningCount = Array.isArray(json.warnings) ? json.warnings.length : 0
+      const activeNests = json.claim_audit?.active_nest_count ?? json.nest_diagnostics?.positions_under_wallet?.active
+      setSupportPlaybookMsg(
+        `Playbook complete${typeof activeNests === 'number' ? ` · ${activeNests} active nest(s)` : ''}${
+          warningCount > 0 ? ` · ${warningCount} warning(s)` : ''
+        }.`
+      )
+    } catch {
+      const err = 'Support playbook failed — check your connection and try again.'
+      setSupportPlaybookMsg(err)
+      setSaveError(err)
+    } finally {
+      setSupportPlaybookRunning(false)
+    }
+  }
+
+  const runClaimLedgerCatchup = async (dryRun: boolean) => {
+    const wallet = claimAuditWallet.trim()
+    if (!wallet) {
+      setSaveError('Enter holder wallet for catch-up.')
+      return
+    }
+    if (
+      supportPlaybook?.guards.block_apply_catch_up &&
+      !overrideCatchUpBlock &&
+      supportPlaybook.wallet === wallet
+    ) {
+      setSaveError(
+        supportPlaybook.guards.block_apply_catch_up_reason ??
+          'Catch-up is blocked for this wallet. Run support playbook or enable override only if they were already paid on-chain.'
+      )
+      return
+    }
+    setClaimCatchupRunning(true)
+    setClaimCatchupMsg(null)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/admin/staking/claim-ledger-catchup', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, dry_run: dryRun }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Catch-up failed')
+        return
+      }
+      const updated = typeof json?.positions_updated === 'number' ? json.positions_updated : 0
+      const zeroed =
+        typeof json?.total_claimable_zeroed_owl === 'number' ? json.total_claimable_zeroed_owl : 0
+      setClaimCatchupMsg(
+        dryRun
+          ? `Dry run: would update ${updated} nest(s), zero ~${zeroed.toFixed(6)} OWL of claimable UI.`
+          : `Updated ${updated} nest(s); zeroed ~${zeroed.toFixed(6)} OWL claimable in UI.`
+      )
+      if (!dryRun) await runClaimLedgerAudit()
+    } finally {
+      setClaimCatchupRunning(false)
+    }
+  }
+
+  const runWalletNestDiagnostics = async () => {
+    const wallet = supportWallet.trim()
+    setWalletSupportMsg(null)
+    setSaveError(null)
+    setWalletDiagReport(null)
+    if (!wallet) {
+      setSaveError('Enter the holder wallet address.')
+      return
+    }
+    setWalletDiagRunning(true)
+    try {
+      const res = await fetch(
+        `/api/admin/staking/wallet-diagnostics?wallet=${encodeURIComponent(wallet)}`,
+        { credentials: 'include' }
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Diagnostics failed')
+        return
+      }
+      setWalletDiagReport(json as typeof walletDiagReport)
+    } finally {
+      setWalletDiagRunning(false)
+    }
+  }
+
+  const runWalletNestHeal = async () => {
+    const wallet = supportWallet.trim()
+    setWalletSupportMsg(null)
+    setSaveError(null)
+    if (!wallet) {
+      setSaveError('Enter the holder wallet address.')
+      return
+    }
+    if (
+      supportPlaybook?.guards.block_wallet_heal &&
+      !overrideWalletHealBlock &&
+      supportPlaybook.wallet === wallet
+    ) {
+      setSaveError(
+        supportPlaybook.guards.block_wallet_heal_reason ??
+          'Wallet heal is blocked for this wallet. Run support playbook first.'
+      )
+      return
+    }
+    setWalletHealRunning(true)
+    try {
+      const res = await fetch('/api/admin/staking/heal-wallet', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, full: true }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Heal failed')
+        return
+      }
+      const pending = typeof json?.cleared_pending_count === 'number' ? json.cleared_pending_count : 0
+      const active = typeof json?.cleared_active_count === 'number' ? json.cleared_active_count : 0
+      const cross = typeof json?.cleared_cross_wallet_count === 'number' ? json.cleared_cross_wallet_count : 0
+      const remaining =
+        typeof json?.summary?.remaining_high_severity === 'number'
+          ? json.summary.remaining_high_severity
+          : null
+      setWalletSupportMsg(
+        `Healed ${wallet}: ${pending} pending, ${active} active orphan, ${cross} cross-wallet row(s) cleared.${
+          remaining != null ? ` ${remaining} high-severity issue(s) remain — re-run diagnostics.` : ''
+        } User should refresh nesting and re-open nests with wallet lock.`
+      )
+      if (json.diagnostics_after) {
+        setWalletDiagReport(json.diagnostics_after as typeof walletDiagReport)
+      }
+    } finally {
+      setWalletHealRunning(false)
+    }
+  }
+
   const runForceUnstake = async () => {
     const id = forceUnstakePositionId.trim()
     setForceUnstakeMsg(null)
@@ -620,7 +913,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Live nesting actions"
-          description="Controls the “Nesting is paused” banner and server blocks for new nests, claims, and leaving a nest. This is not the same as showing the public /nesting page."
+          description="Controls the “Nesting is paused” banner and server blocks for new nests and leaving a nest. Holders can still claim accrued OWL while this is on. Use NESTING_DISABLED in deployment env to block claims too. This is not the same as showing the public /nesting page."
         />
         <Card className="rounded-xl border-amber-500/20">
           <CardHeader>
@@ -643,9 +936,10 @@ export function AdminNestingClient() {
             ) : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1 min-w-0">
-                <p className="text-sm font-medium">Pause new nests, claims, and leaving</p>
+                <p className="text-sm font-medium">Pause new nests and leaving</p>
                 <p className="text-xs text-muted-foreground">
-                  Turn off when you want holders to use the nest dashboard again. Existing nests stay as they are on
+                  Claims stay enabled so holders can collect OWL they already earned. Turn off when you want holders to
+                  open or leave nests again. Existing nests stay as they are on
                   chain / in the database. Switch <span className="text-foreground font-medium">off</span> = live
                   holder actions; <span className="text-foreground font-medium">on</span> = paused.
                 </p>
@@ -936,6 +1230,228 @@ export function AdminNestingClient() {
 
       <section className="space-y-4">
         <SectionHeader
+          title="Support playbook (start here)"
+          description="Runs claim-ledger audit + nest diagnostics together and shows when catch-up or wallet heal would harm unpaid rewards. Always run this before catch-up or full heal."
+        />
+        <Card className="rounded-xl border-primary/40 bg-primary/5">
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="playbook-wallet">Holder wallet</Label>
+              <Input
+                id="playbook-wallet"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Solana address"
+                value={supportWallet}
+                onChange={(e) => {
+                  setSupportWallet(e.target.value)
+                  setClaimAuditWallet(e.target.value)
+                }}
+                className="font-mono text-xs min-h-[44px] touch-manipulation"
+              />
+            </div>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation"
+              disabled={
+                supportPlaybookRunning ||
+                walletDiagRunning ||
+                walletHealRunning ||
+                claimCatchupRunning ||
+                !supportWallet.trim()
+              }
+              onClick={() => void runSupportPlaybook()}
+            >
+              {supportPlaybookRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Run support playbook
+            </Button>
+            {supportPlaybookMsg ? (
+              <p
+                className={
+                  supportPlaybook || supportPlaybookRunning
+                    ? 'text-sm text-muted-foreground'
+                    : 'text-sm text-destructive'
+                }
+                role="status"
+              >
+                {supportPlaybookMsg}
+              </p>
+            ) : null}
+            {supportPlaybook ? (
+              <div className="space-y-3 text-sm">
+                <p className="text-xs text-muted-foreground">
+                  {supportPlaybook.wallet.slice(0, 4)}…{supportPlaybook.wallet.slice(-4)} ·{' '}
+                  {new Date(supportPlaybook.generated_at).toLocaleString()}
+                </p>
+                {supportPlaybook.claim_audit ? (
+                  <p className="text-muted-foreground">
+                    <span className="font-medium text-foreground tabular-nums">
+                      {supportPlaybook.claim_audit.estimated_claimable_owl.toFixed(4)}
+                    </span>{' '}
+                    OWL claimable · {supportPlaybook.claim_audit.active_nest_count} active nests · 24h on-chain
+                    claims {supportPlaybook.claim_audit.onchain_claim_owl_24h.toFixed(4)} OWL (
+                    {supportPlaybook.claim_audit.onchain_claim_tx_count_24h} tx)
+                  </p>
+                ) : null}
+                <ul className="space-y-2">
+                  {supportPlaybook.warnings.length === 0 ? (
+                    <li className="rounded-lg border border-border/50 p-3 text-muted-foreground text-xs">
+                      No blocking patterns detected in this scan.
+                    </li>
+                  ) : null}
+                  {supportPlaybook.warnings.map((w) => (
+                    <li
+                      key={w.code}
+                      className={
+                        w.severity === 'block'
+                          ? 'rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-destructive-foreground'
+                          : w.severity === 'caution'
+                            ? 'rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-100'
+                            : 'rounded-lg border border-border/50 p-3 text-muted-foreground'
+                      }
+                    >
+                      <p className="font-medium">{w.title}</p>
+                      <p className="text-xs mt-1 leading-relaxed opacity-90">{w.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+                {supportPlaybook.recommendations.length > 0 ? (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Recommended</p>
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {supportPlaybook.recommendations.map((r, i) => (
+                        <li key={i}>
+                          <span className="text-foreground">{r.action}</span> — {r.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {supportPlaybook.guards.block_apply_catch_up ? (
+                  <div className="flex items-start gap-3">
+                    <Switch
+                      id="support-override-catch-up"
+                      ariaLabel="Override catch-up block"
+                      checked={overrideCatchUpBlock}
+                      onCheckedChange={setOverrideCatchUpBlock}
+                    />
+                    <Label htmlFor="support-override-catch-up" className="text-xs leading-relaxed text-muted-foreground">
+                      Override: allow catch-up anyway (only if OWL was already sent on-chain)
+                    </Label>
+                  </div>
+                ) : null}
+                {supportPlaybook.guards.block_wallet_heal ? (
+                  <div className="flex items-start gap-3">
+                    <Switch
+                      id="support-override-wallet-heal"
+                      ariaLabel="Override wallet heal block"
+                      checked={overrideWalletHealBlock}
+                      onCheckedChange={setOverrideWalletHealBlock}
+                    />
+                    <Label htmlFor="support-override-wallet-heal" className="text-xs leading-relaxed text-muted-foreground">
+                      Override: allow full wallet heal anyway (will close active nests in DB)
+                    </Label>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Claim ledger audit (incident)"
+          description="Find wallets with repeat Claim-all on-chain payouts while the UI still shows high claimable. Catch-up syncs claimed_rewards to accrued (no extra SPL) after you confirm they were already paid."
+        />
+        <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="min-w-[200px] flex-1 space-y-1">
+                <Label htmlFor="claim-audit-wallet">Holder wallet (optional)</Label>
+                <Input
+                  id="claim-audit-wallet"
+                  value={claimAuditWallet}
+                  onChange={(e) => setClaimAuditWallet(e.target.value)}
+                  placeholder="Leave empty for flagged wallets"
+                  className="min-h-[44px] font-mono text-sm"
+                  autoComplete="off"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={claimAuditing || claimCatchupRunning}
+                onClick={() => void runClaimLedgerAudit()}
+              >
+                {claimAuditing ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Run audit
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
+                disabled={claimCatchupRunning || !claimAuditWallet.trim()}
+                onClick={() => void runClaimLedgerCatchup(true)}
+              >
+                Dry-run catch-up
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="min-h-[44px] touch-manipulation"
+                disabled={
+                  claimCatchupRunning ||
+                  !claimAuditWallet.trim() ||
+                  (supportPlaybook?.guards.block_apply_catch_up === true &&
+                    !overrideCatchUpBlock &&
+                    supportPlaybook.wallet === claimAuditWallet.trim())
+                }
+                onClick={() => void runClaimLedgerCatchup(false)}
+              >
+                {claimCatchupRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+                Apply catch-up
+              </Button>
+            </div>
+            {claimCatchupMsg ? <p className="text-sm text-muted-foreground">{claimCatchupMsg}</p> : null}
+            {claimAuditReport ? (
+              <div className="space-y-2 text-sm">
+                <p className="text-muted-foreground">
+                  Generated {new Date(claimAuditReport.generated_at).toLocaleString()} —{' '}
+                  {claimAuditReport.wallets.length} wallet(s)
+                </p>
+                <ul className="space-y-3 max-h-80 overflow-y-auto">
+                  {claimAuditReport.wallets.map((row) => (
+                    <li
+                      key={row.wallet_address}
+                      className="rounded-lg border border-border/50 bg-background/40 p-3 space-y-1"
+                    >
+                      <p className="font-mono text-xs break-all">{row.wallet_address}</p>
+                      <p>
+                        Claimable (est.):{' '}
+                        <span className="font-mono tabular-nums">{row.estimated_claimable_owl.toFixed(6)}</span> OWL
+                        {' · '}
+                        24h on-chain:{' '}
+                        <span className="font-mono tabular-nums">{row.onchain_claim_owl_24h.toFixed(6)}</span> OWL (
+                        {row.onchain_claim_tx_count_24h} tx)
+                      </p>
+                      {row.risk_flags.length > 0 ? (
+                        <p className="text-amber-200/95 text-xs leading-relaxed">{row.risk_summary}</p>
+                      ) : (
+                        <p className="text-muted-foreground text-xs">{row.risk_summary}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
           title="Sparse reconcile (RPC)"
           description={`Runs up to ${NESTING_RECONCILE_MAX_BATCH} pending/stale positions — one getTransaction each. Trigger manually; do not wire to aggressive polling.`}
         />
@@ -952,6 +1468,115 @@ export function AdminNestingClient() {
               Reconcile pending positions
             </Button>
             {reconcileMsg ? <p className="text-sm text-muted-foreground">{reconcileMsg}</p> : null}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeader
+          title="Support: wallet nest diagnostics & heal"
+          description="Run diagnostics on the holder wallet (current address in Phantom). Detects ledger/on-chain mismatch, orphaned rows, and nests still open under a prior wallet after NFT transfer. Heal clears DB rows only — no on-chain thaw."
+        />
+        <Card className="rounded-xl border-border/60">
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="support-wallet">Holder wallet</Label>
+              <Input
+                id="support-wallet"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Solana address"
+                value={supportWallet}
+                onChange={(e) => setSupportWallet(e.target.value)}
+                className="font-mono text-xs min-h-[44px] touch-manipulation"
+              />
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={walletDiagRunning || walletHealRunning || !supportWallet.trim()}
+                onClick={() => void runWalletNestDiagnostics()}
+              >
+                {walletDiagRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Run diagnostics
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-[44px] touch-manipulation"
+                disabled={
+                  walletHealRunning ||
+                  walletDiagRunning ||
+                  !supportWallet.trim() ||
+                  (supportPlaybook?.guards.block_wallet_heal === true &&
+                    !overrideWalletHealBlock &&
+                    supportPlaybook.wallet === supportWallet.trim())
+                }
+                onClick={() => void runWalletNestHeal()}
+              >
+                {walletHealRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Apply full heal
+              </Button>
+            </div>
+            {walletSupportMsg ? (
+              <p className="text-sm text-muted-foreground max-w-xl">{walletSupportMsg}</p>
+            ) : null}
+            {walletDiagReport ? (
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3 text-sm">
+                <p>
+                  <span className="text-muted-foreground">Owl Nest coins in wallet:</span>{' '}
+                  <span className="font-medium tabular-nums">{walletDiagReport.wallet_nest_mint_count}</span>
+                  {' · '}
+                  <span className="text-muted-foreground">DB rows:</span>{' '}
+                  {walletDiagReport.positions_under_wallet.active} active,{' '}
+                  {walletDiagReport.positions_under_wallet.pending} pending
+                </p>
+                {walletDiagReport.cross_wallet_rows.length > 0 ? (
+                  <div>
+                    <p className="text-amber-200/95 font-medium mb-1">
+                      Cross-wallet blockers ({walletDiagReport.cross_wallet_rows.length})
+                    </p>
+                    <ul className="space-y-1 text-xs font-mono break-all text-muted-foreground">
+                      {walletDiagReport.cross_wallet_rows.slice(0, 8).map((row) => (
+                        <li key={row.position_id}>
+                          {row.asset_identifier.slice(0, 12)}… → prior {row.prior_wallet.slice(0, 12)}… (
+                          {row.status})
+                        </li>
+                      ))}
+                      {walletDiagReport.cross_wallet_rows.length > 8 ? (
+                        <li>…and {walletDiagReport.cross_wallet_rows.length - 8} more</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                ) : null}
+                {walletDiagReport.issues.length > 0 ? (
+                  <ul className="space-y-2">
+                    {walletDiagReport.issues
+                      .filter((i) => i.severity !== 'low' || i.kind === 'cross_wallet_blocker')
+                      .slice(0, 12)
+                      .map((issue, idx) => (
+                        <li
+                          key={`${issue.kind}-${idx}`}
+                          className={
+                            issue.severity === 'high'
+                              ? 'text-amber-200/95'
+                              : 'text-muted-foreground'
+                          }
+                        >
+                          <span className="font-mono text-[10px] uppercase mr-2 opacity-70">
+                            {issue.kind}
+                          </span>
+                          {issue.message}
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground">No issues detected for this wallet.</p>
+                )}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>

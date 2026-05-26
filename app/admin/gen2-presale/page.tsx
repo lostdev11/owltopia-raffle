@@ -53,6 +53,24 @@ type WalletPurchaseGroup = {
   purchases: PurchaseRow[]
 }
 
+type DiscordRoleClaimRow = {
+  id: string
+  wallet_address: string
+  discord_id: string
+  role_type: string
+  status: string
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+type WhitelistWalletRow = {
+  wallet_address: string
+  created_at: string
+  created_by_wallet: string | null
+  note: string | null
+}
+
 export default function AdminGen2PresalePage() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
@@ -80,6 +98,11 @@ export default function AdminGen2PresalePage() {
   const [repairLoading, setRepairLoading] = useState(false)
   const [repairMsg, setRepairMsg] = useState<string | null>(null)
   const [repairResult, setRepairResult] = useState<Record<string, unknown> | null>(null)
+  const [discordClaims, setDiscordClaims] = useState<DiscordRoleClaimRow[]>([])
+  const [whitelistWallets, setWhitelistWallets] = useState<WhitelistWalletRow[]>([])
+  const [wlWallet, setWlWallet] = useState('')
+  const [wlNote, setWlNote] = useState('')
+  const [wlMsg, setWlMsg] = useState<string | null>(null)
 
   const groupedPurchases = useMemo<WalletPurchaseGroup[]>(() => {
     const groups = new Map<string, WalletPurchaseGroup>()
@@ -106,9 +129,11 @@ export default function AdminGen2PresalePage() {
     setLoading(true)
     setError(null)
     try {
-      const [sRes, pRes] = await Promise.all([
+      const [sRes, pRes, claimsRes, wlRes] = await Promise.all([
         fetch('/api/admin/gen2-presale/stats', { credentials: 'include' }),
         fetch('/api/admin/gen2-presale/purchases?limit=40', { credentials: 'include' }),
+        fetch('/api/admin/gen2-presale/discord-claims?limit=80', { credentials: 'include' }),
+        fetch('/api/admin/gen2-presale/whitelist?limit=200', { credentials: 'include' }),
       ])
       if (sRes.status === 401) {
         setError('Sign in required — use the Sign in button below after connecting your wallet.')
@@ -128,6 +153,18 @@ export default function AdminGen2PresalePage() {
       const pJson = (await pRes.json()) as { purchases?: PurchaseRow[] }
       setStats(sJson)
       setPurchases(pJson.purchases ?? [])
+      if (claimsRes.ok) {
+        const cJson = (await claimsRes.json()) as { claims?: DiscordRoleClaimRow[] }
+        setDiscordClaims(cJson.claims ?? [])
+      } else {
+        setDiscordClaims([])
+      }
+      if (wlRes.ok) {
+        const wJson = (await wlRes.json()) as { wallets?: WhitelistWalletRow[] }
+        setWhitelistWallets(wJson.wallets ?? [])
+      } else {
+        setWhitelistWallets([])
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Load failed')
     } finally {
@@ -143,6 +180,44 @@ export default function AdminGen2PresalePage() {
       setPurchases([])
     }
   }, [connected, wallet, load])
+
+  const addWhitelistWallet = async () => {
+    setWlMsg(null)
+    const w = wlWallet.trim()
+    if (!w) return
+    try {
+      const res = await fetch('/api/admin/gen2-presale/whitelist', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: w, note: wlNote.trim() || undefined }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((j as { error?: string }).error || 'Add failed')
+      setWlWallet('')
+      setWlNote('')
+      setWlMsg('Whitelist wallet saved.')
+      await load()
+    } catch (e) {
+      setWlMsg(e instanceof Error ? e.message : 'Add failed')
+    }
+  }
+
+  const removeWhitelistWallet = async (w: string) => {
+    setWlMsg(null)
+    try {
+      const res = await fetch(
+        `/api/admin/gen2-presale/whitelist?wallet=${encodeURIComponent(w)}`,
+        { method: 'DELETE', credentials: 'include' }
+      )
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((j as { error?: string }).error || 'Remove failed')
+      setWlMsg('Removed from whitelist.')
+      await load()
+    } catch (e) {
+      setWlMsg(e instanceof Error ? e.message : 'Remove failed')
+    }
+  }
 
   const searchBalance = async () => {
     setError(null)
@@ -701,6 +776,111 @@ export default function AdminGen2PresalePage() {
                 </div>
                 {refundMsg && <p className="mt-2 text-sm text-muted-foreground">{refundMsg}</p>}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Gen2 whitelist (Discord role)</CardTitle>
+              <CardDescription>
+                Wallets on this list can claim the Gen2 whitelist Discord role after linking Discord.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <Label htmlFor="wl-wallet">Wallet</Label>
+                  <Input
+                    id="wl-wallet"
+                    value={wlWallet}
+                    onChange={(e) => setWlWallet(e.target.value)}
+                    placeholder="Solana wallet address"
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label htmlFor="wl-note">Note (optional)</Label>
+                  <Input id="wl-note" value={wlNote} onChange={(e) => setWlNote(e.target.value)} />
+                </div>
+                <Button type="button" className="touch-manipulation min-h-[44px]" onClick={() => void addWhitelistWallet()}>
+                  Add
+                </Button>
+              </div>
+              {wlMsg && <p className="text-sm text-muted-foreground">{wlMsg}</p>}
+              <div className="max-h-48 overflow-y-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="p-2">Wallet</th>
+                      <th className="p-2">Note</th>
+                      <th className="p-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {whitelistWallets.map((row) => (
+                      <tr key={row.wallet_address} className="border-b border-border/50">
+                        <td className="p-2 font-mono text-xs">{row.wallet_address}</td>
+                        <td className="p-2 text-muted-foreground">{row.note || '—'}</td>
+                        <td className="p-2 text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="touch-manipulation"
+                            onClick={() => void removeWhitelistWallet(row.wallet_address)}
+                          >
+                            Remove
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {whitelistWallets.length === 0 && (
+                  <p className="p-3 text-sm text-muted-foreground">No whitelist wallets yet.</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Discord role claims</CardTitle>
+              <CardDescription>Audit log of Gen2 presale / whitelist Discord role grants.</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-3">When</th>
+                    <th className="py-2 pr-3">Wallet</th>
+                    <th className="py-2 pr-3">Discord</th>
+                    <th className="py-2 pr-3">Role</th>
+                    <th className="py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {discordClaims.map((c) => (
+                    <tr key={c.id} className="border-b border-border/50">
+                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+                        {new Date(c.created_at).toLocaleString()}
+                      </td>
+                      <td className="max-w-[120px] truncate py-2 pr-3 font-mono text-xs">{c.wallet_address}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">{c.discord_id}</td>
+                      <td className="py-2 pr-3">{c.role_type}</td>
+                      <td className="py-2">
+                        {c.status}
+                        {c.error_message ? (
+                          <span className="block text-xs text-red-400">{c.error_message}</span>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {discordClaims.length === 0 && (
+                <p className="py-4 text-muted-foreground">No Discord role claims yet.</p>
+              )}
             </CardContent>
           </Card>
 

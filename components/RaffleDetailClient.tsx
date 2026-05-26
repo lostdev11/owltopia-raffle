@@ -30,7 +30,6 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency } from '@/lib/types'
-import type { RaffleSentimentChoice, RaffleSentimentTotals } from '@/lib/db/raffle-sentiment'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import {
@@ -135,7 +134,6 @@ import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
-import { RaffleSentimentBar } from '@/components/RaffleSentimentBar'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
 import {
@@ -155,6 +153,7 @@ import {
   needsPayCancellationFeeBeforePrizeReturn,
 } from '@/lib/raffles/creator-prize-return-eligibility'
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -183,8 +182,6 @@ interface RaffleDetailClientProps {
   entries: Entry[]
   owlVisionScore: OwlVisionScore
   sessionWallet: string | null
-  sentimentTotals: RaffleSentimentTotals
-  initialSentiment: RaffleSentimentChoice | null
 }
 
 export function RaffleDetailClient({
@@ -192,8 +189,6 @@ export function RaffleDetailClient({
   entries: initialEntries,
   owlVisionScore,
   sessionWallet,
-  sentimentTotals,
-  initialSentiment,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -268,6 +263,7 @@ export function RaffleDetailClient({
   const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
   const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
+  const [isClaimingAllRefunds, setIsClaimingAllRefunds] = useState(false)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
   const [raffleOffers, setRaffleOffers] = useState<RaffleOffer[]>([])
   const [offersLoading, setOffersLoading] = useState(false)
@@ -1218,14 +1214,12 @@ export function RaffleDetailClient({
     router.refresh()
   }
 
-  const handleClaimTicketRefund = useCallback(
-    async (entryId: string) => {
+  const claimTicketRefundOnce = useCallback(
+    async (entryId: string): Promise<boolean> => {
       if (!connected || !publicKey) {
         setClaimRefundError('Please connect your wallet first.')
-        return
+        return false
       }
-      setClaimRefundLoadingEntryId(entryId)
-      setClaimRefundError(null)
 
       const signInForRefund = async (): Promise<boolean> => {
         if (!publicKey || !signMessage) {
@@ -1275,40 +1269,66 @@ export function RaffleDetailClient({
         }
       }
 
-      try {
-        let res = await fetch('/api/entries/claim-refund', {
+      let res = await fetch('/api/entries/claim-refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ entryId }),
+      })
+      if (res.status === 401) {
+        const ok = await signInForRefund()
+        if (!ok) return false
+        res = await fetch('/api/entries/claim-refund', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ entryId }),
         })
-        if (res.status === 401) {
-          const ok = await signInForRefund()
-          if (!ok) return
-          res = await fetch('/api/entries/claim-refund', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ entryId }),
-          })
-        }
-        const json = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          const msg =
-            typeof (json as { error?: string }).error === 'string'
-              ? (json as { error: string }).error
-              : 'Could not claim refund'
-          throw new Error(msg)
-        }
-        router.refresh()
-      } catch (e) {
-        setClaimRefundError(e instanceof Error ? e.message : 'Could not claim refund')
+      }
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg =
+          typeof (json as { error?: string }).error === 'string'
+            ? (json as { error: string }).error
+            : 'Could not claim refund'
+        setClaimRefundError(msg)
+        return false
+      }
+      return true
+    },
+    [connected, publicKey, signMessage]
+  )
+
+  const handleClaimTicketRefund = useCallback(
+    async (entryId: string) => {
+      setClaimRefundLoadingEntryId(entryId)
+      setClaimRefundError(null)
+      try {
+        const ok = await claimTicketRefundOnce(entryId)
+        if (ok) router.refresh()
       } finally {
         setClaimRefundLoadingEntryId(null)
       }
     },
-    [connected, publicKey, signMessage, router]
+    [claimTicketRefundOnce, router]
   )
+
+  const handleClaimAllTicketRefunds = useCallback(async () => {
+    if (buyerRefundableEntries.length === 0) return
+    setClaimRefundError(null)
+    setIsClaimingAllRefunds(true)
+    try {
+      for (const entry of buyerRefundableEntries) {
+        setClaimRefundLoadingEntryId(entry.id)
+        const ok = await claimTicketRefundOnce(entry.id)
+        if (!ok) return
+      }
+      router.refresh()
+    } finally {
+      setClaimRefundLoadingEntryId(null)
+      setIsClaimingAllRefunds(false)
+    }
+  }, [buyerRefundableEntries, claimTicketRefundOnce, router])
 
   const handleEnsureRefundTerminal = useCallback(async () => {
     setRefundTerminalLoading(true)
@@ -2061,43 +2081,48 @@ export function RaffleDetailClient({
 
   const postRequestCancellation = useCallback(
     async (feeTransactionSignature: string | null) => {
-      const res = await fetch(`/api/raffles/${raffle.id}/request-cancellation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(
-          feeTransactionSignature ? { feeTransactionSignature } : {}
-        ),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const err =
-          (data as { error?: string }).error ?? 'Failed to request cancellation'
-        setError(err)
-        return { ok: false as const, data }
+      const path =
+        (raffle.status ?? '').toLowerCase() === 'cancelled'
+          ? `/api/raffles/${raffle.id}/pay-cancellation-fee`
+          : `/api/raffles/${raffle.id}/request-cancellation`
+      const body = JSON.stringify(
+        feeTransactionSignature ? { feeTransactionSignature } : {}
+      )
+      let lastError = 'Failed to request cancellation'
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body,
+          })
+          const data = await res.json().catch(() => ({}))
+          if (res.ok) {
+            return { ok: true as const, data }
+          }
+          lastError =
+            (data as { error?: string }).error ?? 'Failed to request cancellation'
+          const retryable = res.status === 429 || res.status >= 500
+          if (!retryable) break
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : lastError
+        }
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+        }
       }
-      return { ok: true as const, data }
+      setError(lastError)
+      return { ok: false as const, data: {} }
     },
-    [raffle.id]
+    [raffle.id, raffle.status]
   )
 
   const postPayCancellationFeeWhenCancelled = useCallback(
     async (feeTransactionSignature: string) => {
-      const res = await fetch(`/api/raffles/${raffle.id}/pay-cancellation-fee`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ feeTransactionSignature }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const err = (data as { error?: string }).error ?? 'Failed to record cancellation fee'
-        setError(err)
-        return { ok: false as const }
-      }
-      return { ok: true as const }
+      return postRequestCancellation(feeTransactionSignature)
     },
-    [raffle.id]
+    [postRequestCancellation]
   )
 
   const sendCancellationFeeAndGetSignature = useCallback(async () => {
@@ -2410,45 +2435,18 @@ export function RaffleDetailClient({
     !raffle.nft_transfer_transaction &&
     !prizeReturnRecorded
 
+  const isFullAdminForShare = adminRole === 'full' || adminSessionActive === true
+
   const handleShareRaffle = useCallback(async () => {
-    if (typeof window === 'undefined') return
-    const url = `${window.location.origin}/raffles/${raffle.slug}`
-    const shareData = {
-      title: raffle.title,
-      text: `Check out this raffle: ${raffle.title}`,
-      url,
-    }
-
-    const canUseNativeShare =
-      typeof navigator !== 'undefined' &&
-      typeof navigator.share === 'function' &&
-      // Prefer native share sheet on mobile/tablet; desktop UX is more reliable with copy.
-      ((typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
-        (typeof window.matchMedia === 'function' &&
-          window.matchMedia('(hover: none), (pointer: coarse)').matches))
-
-    if (canUseNativeShare) {
-      try {
-        await navigator.share(shareData)
-        return
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-      }
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(url)
+    await shareRaffleFromBrowser({
+      raffle,
+      isFullAdmin: isFullAdminForShare,
+      onCopied: () => {
         setShareCopied(true)
         window.setTimeout(() => setShareCopied(false), 1800)
-        return
-      } catch {
-        // If clipboard fails (permissions/unsupported), use prompt fallback.
-      }
-    }
-
-    window.prompt('Copy raffle link:', url)
-  }, [raffle.slug, raffle.title])
+      },
+    })
+  }, [raffle, isFullAdminForShare])
 
   // Size-based styling classes
   const sizeClasses = {
@@ -2555,7 +2553,8 @@ export function RaffleDetailClient({
           )}
           {isCreator &&
             (raffle.status === 'live' || raffle.status === 'ready_to_draw') &&
-            !raffle.cancellation_requested_at && (
+            !raffle.cancellation_requested_at &&
+            (
               <Button
                 variant="outline"
                 size="default"
@@ -3498,13 +3497,6 @@ export function RaffleDetailClient({
             </div>
           </CardHeader>
 
-          <RaffleSentimentBar
-            raffleId={raffle.id}
-            sessionWallet={sessionWallet}
-            initialTotals={sentimentTotals}
-            initialMine={initialSentiment}
-          />
-
           {showPublicBrowseListAdminControl && (
             <div className={`${classes.headerPadding} pt-0 pb-3 border-b border-border/60`}>
               <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -4045,6 +4037,24 @@ export function RaffleDetailClient({
                         </p>
                       </div>
                     </div>
+                    {buyerRefundableEntries.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="default"
+                        className="w-full touch-manipulation min-h-[44px]"
+                        disabled={claimRefundLoadingEntryId !== null || isClaimingAllRefunds}
+                        onClick={() => void handleClaimAllTicketRefunds()}
+                      >
+                        {isClaimingAllRefunds ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Claiming all…
+                          </>
+                        ) : (
+                          `Claim all (${buyerRefundableEntries.length})`
+                        )}
+                      </Button>
+                    )}
                     <ul className="space-y-2">
                       {buyerRefundableEntries.map((entry) => {
                         const cur = String(entry.currency ?? raffle.currency ?? 'SOL').toUpperCase()
@@ -4063,7 +4073,7 @@ export function RaffleDetailClient({
                               variant="secondary"
                               size="sm"
                               className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
-                              disabled={claimRefundLoadingEntryId === entry.id}
+                              disabled={claimRefundLoadingEntryId !== null}
                               onClick={() => void handleClaimTicketRefund(entry.id)}
                             >
                               {claimRefundLoadingEntryId === entry.id ? (

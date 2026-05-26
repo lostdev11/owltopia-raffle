@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { executeClaimAll } from '@/lib/nesting/service'
+import { isBatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
@@ -42,6 +44,20 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     if (isStakingUserError(e)) {
       return NextResponse.json({ error: e.message, ...e.extra }, { status: e.status })
+    }
+    if (isBatchClaimLedgerSyncError(e)) {
+      console.error('[me/staking/claim-all] ledger sync failed after transfer', e.txSignature, e)
+      return NextResponse.json(
+        {
+          error:
+            'OWL was sent to your wallet. Finishing nest record sync — wait a moment or refresh the page.',
+          ledger_sync_failed: true,
+          transaction_signature: e.txSignature,
+          total_claimed: e.payload.total_claimed,
+          claims: e.payload.claims,
+        },
+        { status: 503 }
+      )
     }
     console.error('[me/staking/claim-all]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

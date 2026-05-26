@@ -5,7 +5,14 @@ import {
   publicKey as umiPublicKey,
   signerIdentity,
 } from '@metaplex-foundation/umi'
-import { fetchAsset, fetchCollection, freezeAsset, thawAsset } from '@metaplex-foundation/mpl-core'
+import { fetchAsset, fetchCollection, thawAsset, updatePlugin } from '@metaplex-foundation/mpl-core'
+import {
+  assetOwnerAddress,
+  isMplCoreNestingLockHeld,
+  mplCoreNestCanServerRefreeze,
+  mplCoreNestNeedsWalletRelock,
+  readMplCoreFreezeDelegate,
+} from '@/lib/solana/mpl-core-nest-lock'
 import bs58 from 'bs58'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { dasAssetBelongsToCollection } from '@/lib/helius/das-asset-collection'
@@ -155,8 +162,13 @@ async function createCoreAuthorityUmi() {
   return { umi, signer }
 }
 
+/** Lock eligibility / frozen checks only need the asset account (skip collection fetch + RPC 429 risk). */
+async function fetchCoreAssetOnly(umi: any, assetId: string) {
+  return fetchAsset(umi as any, umiPublicKey(assetId.trim()))
+}
+
 async function fetchCoreAssetAndCollection(umi: any, assetId: string, collectionMint?: string | null) {
-  const asset = await fetchAsset(umi as any, umiPublicKey(assetId))
+  const asset = await fetchCoreAssetOnly(umi, assetId)
   const collectionAddress =
     collectionMint?.trim() ||
     ((asset as any)?.updateAuthority?.type === 'Collection'
@@ -168,21 +180,88 @@ async function fetchCoreAssetAndCollection(umi: any, assetId: string, collection
   return { asset, collection }
 }
 
-function corePluginAlreadyFrozen(asset: any): boolean {
-  return asset?.freezeDelegate?.frozen === true
-}
-
 export function getNestingNftFreezeDelegateAddress(): string {
   const configured = getNestingNftFreezeAuthorityWallet()
   if (configured) return configured
   return getNestingNftFreezeAuthorityKeypair()?.publicKey.toBase58() ?? ''
 }
 
-function coreFreezeDelegateAuthorityMatches(asset: any, delegateAddress: string): boolean {
-  const authority = asset?.freezeDelegate?.authority
-  if (!authority || !delegateAddress) return false
-  const address = authority.address ?? authority.pubkey ?? authority.publicKey
-  return Boolean(address) && String(address) === delegateAddress
+export type OwlClaimNftNestLockRead = {
+  locked: boolean
+  ownerThawedEligible: boolean
+}
+
+function readLockEligibilityFromAsset(asset: unknown, ownerWallet: string): OwlClaimNftNestLockRead {
+  const delegate = getNestingNftFreezeDelegateAddress()
+  const locked = isMplCoreNestingLockHeld({
+    asset,
+    nestingDelegateAddress: delegate,
+    ownerWallet,
+  })
+  const fd = readMplCoreFreezeDelegate(asset)
+  const ownerThawedEligible =
+    fd?.authorityType === 'Owner' &&
+    fd.frozen !== true &&
+    assetOwnerAddress(asset) === ownerWallet.trim()
+  return { locked, ownerThawedEligible }
+}
+
+/** One MPL Core fetch for claim lock checks (read-only RPC — no freeze authority keypair). */
+export async function readOwlClaimNftNestLockEligibility(params: {
+  assetId: string
+  ownerWallet: string
+  collectionMint?: string | null
+}): Promise<OwlClaimNftNestLockRead | null> {
+  void params.collectionMint
+  const ownerWallet = params.ownerWallet.trim()
+  const assetId = params.assetId.trim()
+  if (!ownerWallet || !assetId) return null
+
+  try {
+    const endpoint = resolveServerSolanaRpcUrl()
+    const umi: any = (createUmi as any)(endpoint as any)
+    const asset = await fetchCoreAssetOnly(umi, assetId)
+    return readLockEligibilityFromAsset(asset, ownerWallet)
+  } catch {
+    return null
+  }
+}
+
+/** Owner-delegate Owl Nest that is thawed but still in the holder wallet — OK to pay OWL claims without a wallet re-lock. */
+export async function isOwnerThawedOwlNestEligibleForClaim(params: {
+  assetId: string
+  ownerWallet: string
+  collectionMint?: string | null
+}): Promise<boolean> {
+  const state = await readOwlClaimNftNestLockEligibility(params)
+  return state?.ownerThawedEligible === true
+}
+
+/** Read-only: true when the nest lock is active on-chain (nesting delegate or Owner freeze). */
+export async function isWalletNftFrozenForNestingDelegate(params: {
+  assetId: string
+  collectionMint?: string | null
+  ownerWallet?: string | null
+}): Promise<boolean> {
+  if (!params.ownerWallet?.trim()) {
+    try {
+      const { umi, signer } = await createCoreAuthorityUmi()
+      const { asset } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+      return isMplCoreNestingLockHeld({
+        asset,
+        nestingDelegateAddress: signer.publicKey.toString(),
+        ownerWallet: params.ownerWallet,
+      })
+    } catch {
+      return false
+    }
+  }
+  const state = await readOwlClaimNftNestLockEligibility({
+    assetId: params.assetId,
+    ownerWallet: params.ownerWallet,
+    collectionMint: params.collectionMint,
+  })
+  return state?.locked === true
 }
 
 export async function assertWalletNftFrozenForNesting(params: {
@@ -202,24 +281,57 @@ export async function assertWalletNftFrozenForNesting(params: {
   const { umi, signer } = await createCoreAuthorityUmi()
   const { asset, collection } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
   const delegateAddress = signer.publicKey.toString()
+  const ownerWallet = params.ownerWallet.trim()
 
-  if (corePluginAlreadyFrozen(asset) && coreFreezeDelegateAuthorityMatches(asset, delegateAddress)) {
+  if (isMplCoreNestingLockHeld({ asset, nestingDelegateAddress: delegateAddress, ownerWallet })) {
     return { tokenAccount: params.assetId.trim() }
   }
 
+  if (
+    mplCoreNestNeedsWalletRelock({
+      asset,
+      nestingDelegateAddress: delegateAddress,
+      ownerWallet,
+    })
+  ) {
+    throw new StakingUserError(
+      'This Owl Nest coin must be re-locked from your wallet before nesting or claiming. On the nesting dashboard, approve the wallet lock when prompted (or open the nest again for that coin).',
+      400,
+      { code: 'nest_relock_required', asset_id: params.assetId.trim() }
+    )
+  }
+
+  if (!mplCoreNestCanServerRefreeze({ asset, nestingDelegateAddress: delegateAddress })) {
+    const fd = readMplCoreFreezeDelegate(asset)
+    throw new StakingUserError(
+      fd
+        ? 'This Owl Nest coin has an incompatible on-chain freeze lock. Contact Owltopia support with the coin mint address.'
+        : 'This Owl Nest coin is missing a nest lock on-chain. Finish opening the nest in your wallet first.',
+      400,
+      { code: 'nest_lock_incompatible', asset_id: params.assetId.trim() }
+    )
+  }
+
   try {
-    const result = await freezeAsset(umi as any, {
+    await updatePlugin(umi as any, {
       asset,
       ...(collection ? { collection } : {}),
-      authority: signer,
-      delegate: signer,
-    } as any).sendAndConfirm(umi as any)
+      plugin: { type: 'FreezeDelegate', frozen: true },
+    } as any)
+      .sendAndConfirm(umi as any)
     const refreshed = await fetchAsset(umi as any, umiPublicKey(params.assetId.trim()))
-    if (!corePluginAlreadyFrozen(refreshed)) {
+    if (
+      !isMplCoreNestingLockHeld({
+        asset: refreshed,
+        nestingDelegateAddress: delegateAddress,
+        ownerWallet,
+      })
+    ) {
       throw new Error('MPL Core asset is not frozen after freeze attempt.')
     }
     return { tokenAccount: params.assetId.trim() }
   } catch (e) {
+    if (e instanceof StakingUserError) throw e
     throw new StakingUserError(
       e instanceof Error ? e.message : 'MPL Core freeze verification failed.',
       503
@@ -255,9 +367,25 @@ export async function thawWalletNftForNesting(params: {
 
   const { umi, signer } = await createCoreAuthorityUmi()
   const { asset, collection } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+  const delegateAddress = signer.publicKey.toString()
+  const fd = readMplCoreFreezeDelegate(asset)
 
-  if (!corePluginAlreadyFrozen(asset)) {
+  if (!fd?.frozen) {
     return { signature: null, tokenAccount: params.assetId.trim() }
+  }
+
+  if (fd.authorityType === 'Owner') {
+    throw new StakingUserError(
+      'This nest uses a wallet-controlled freeze lock. Close the nest from your wallet so it can thaw the coin.',
+      400
+    )
+  }
+
+  if (fd.authorityType !== 'Address' || fd.authorityAddress !== delegateAddress) {
+    throw new StakingUserError(
+      'This Owl Nest coin has a freeze lock that Owltopia cannot thaw automatically. Contact support.',
+      503
+    )
   }
 
   try {

@@ -1,4 +1,5 @@
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+import { isMplCoreNoApprovalsError } from '@/lib/solana/mpl-core-transfer-errors'
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -26,6 +27,14 @@ export function formatNestingWalletError(err: unknown, walletName?: string | nul
 
   const hay = errorHaystack(err)
   const isBackpack = (walletName ?? '').toLowerCase().includes('backpack')
+
+  if (isMplCoreNoApprovalsError(hay)) {
+    return (
+      'This Owltopia coin could not be locked for nesting because its on-chain plugins did not approve the change (Metaplex error 0x1a). ' +
+      'That often happens after a previous nest or when the collection restricts plugin changes. ' +
+      'Close any old nest, confirm the coin is not listed for sale, or contact Owltopia support with the mint address.'
+    )
+  }
 
   if (isSolanaRpcRateLimitError(err)) {
     return (

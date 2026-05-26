@@ -1,36 +1,53 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 
+/** Oldest nests first — used by heal/reconcile so early nesters are not starved by per-request caps. */
+export function sortStakingPositionsOldestFirst<T extends { staked_at: string }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => new Date(a.staked_at).getTime() - new Date(b.staked_at).getTime()
+  )
+}
+
 /** Active nest or in-progress open (pending) — not closed (`unstaked`). */
 export function isOpenStakingPosition(pos: Pick<StakingPositionRow, 'status'>): boolean {
   return pos.status === 'active' || pos.status === 'pending'
 }
 
-/**
- * NFT is fully nested for gallery / picker — active, or pending after freeze confirmed.
- * Mid-open pending (before freeze) is excluded.
- */
-export function isNftNestedForGallery(
+/** Pending NFT nest before freeze is reflected in DB (`nft_freeze_confirmed:`). */
+export function isPendingNftNestBeforeFreezeConfirmed(
   position: Pick<StakingPositionRow, 'status' | 'external_reference'>
 ): boolean {
-  if (position.status === 'active') return true
-  if (position.status === 'pending') {
-    return (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
-  }
-  return false
+  return (
+    position.status === 'pending' &&
+    !(position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+  )
 }
 
-/** Pending on-chain NFT nest before wallet freeze is confirmed — user may cancel without waiting for lock. */
+/** Freeze recorded in DB but row never promoted to `active` (manual patch / partial write). */
+export function isPendingNftNestFreezeConfirmedButNotActive(
+  position: Pick<StakingPositionRow, 'status' | 'external_reference'>
+): boolean {
+  return (
+    position.status === 'pending' &&
+    (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+  )
+}
+
+/**
+ * Pending on-chain NFT nest before wallet freeze is confirmed — user may cancel without waiting for lock.
+ * Also true for orphaned `awaiting_nft_freeze` rows that never completed the wallet lock step.
+ */
 export function isOpeningNftNestAbortable(
   position: Pick<StakingPositionRow, 'status' | 'external_reference'>,
   pool: Pick<StakingPoolRow, 'asset_type' | 'adapter_mode'>
 ): boolean {
-  return (
-    position.status === 'pending' &&
-    pool.asset_type === 'nft' &&
-    pool.adapter_mode === 'onchain_enabled' &&
-    !(position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
-  )
+  if (pool.asset_type !== 'nft' || !isPendingNftNestBeforeFreezeConfirmed(position)) {
+    return false
+  }
+  if ((position.external_reference ?? '').trim() === 'awaiting_nft_freeze') {
+    return true
+  }
+  return pool.adapter_mode === 'onchain_enabled'
 }
 
 /**

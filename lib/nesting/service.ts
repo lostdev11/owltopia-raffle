@@ -3,23 +3,37 @@
  */
 
 import { getStakingPoolById } from '@/lib/db/staking-pools'
-import type { RewardRateUnit } from '@/lib/db/staking-pools'
+import type { RewardRateUnit, StakingPoolRow } from '@/lib/db/staking-pools'
 import {
   getActivePositionByAssetIdentifier,
   getStakingPositionById,
   getStakingPositionForWallet,
   listStakingPositionsByWallet,
 } from '@/lib/db/staking-positions'
-import { estimateAccruedRewards, meetsMinOwlClaimThreshold, MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
-import { buildFullPositionClaimPlan, minOwlClaimThresholdMessage } from '@/lib/nesting/claim-plan'
+import {
+  estimateAccruedRewards,
+  isValidOwlClaimPayoutAmount,
+  meetsMinOwlClaimThreshold,
+  MIN_OWL_CLAIMABLE_TO_CLAIM,
+} from '@/lib/staking/rewards'
+import {
+  buildFullPositionClaimPlan,
+  buildOwlClaimAllPreview,
+  isOwlRewardPosition,
+  minOwlClaimPayoutRejectedMessage,
+  minOwlClaimThresholdMessage,
+  noClaimableRewardsMessage,
+} from '@/lib/nesting/claim-plan'
 import { executeBatchOwlClaims } from '@/lib/nesting/batch-claim'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import {
+  assertNestingClaimsAllowed,
   assertNestingOperationsAllowed,
   assertNestingSelloutReached,
   assertRewardTreasuryConfigured,
+  isNestingClaimAllDisabled,
   isNestingDbOnlyOwlClaimsAllowed,
   validatePoolAgainstNestingEmissionPolicy,
 } from '@/lib/nesting/policy'
@@ -31,6 +45,10 @@ import {
 import { getOwlCouncilNestingVoteLockedRaw } from '@/lib/council/council-nesting-stake'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
+import {
+  assertActiveNftNestOnChainLock,
+  assertPoolConfiguredForOnChainNftFreeze,
+} from '@/lib/nesting/nft-nest-onchain-lock'
 
 export async function executeStake(params: {
   wallet: string
@@ -50,6 +68,7 @@ export async function executeStake(params: {
     throw new StakingUserError('Pool not found or inactive', 400)
   }
   validatePoolAgainstNestingEmissionPolicy(pool)
+  assertPoolConfiguredForOnChainNftFreeze(pool)
 
   let amount =
     params.rawAmount !== undefined && params.rawAmount !== null ? Number(params.rawAmount) : NaN
@@ -76,9 +95,10 @@ export async function executeStake(params: {
       const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
       const resumeNftFreezeLock =
         existing.status === 'pending' &&
-        pool.adapter_mode === 'onchain_enabled' &&
         !nftFreezeConfirmed &&
-        existing.wallet_address.trim() === params.wallet.trim()
+        existing.wallet_address.trim() === params.wallet.trim() &&
+        (pool.adapter_mode === 'onchain_enabled' ||
+          (existing.external_reference ?? '').trim() === 'awaiting_nft_freeze')
 
       if (resumeNftFreezeLock) {
         return { position: existing, pool }
@@ -136,6 +156,10 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
 
   if (!openingNftNestAbortable) {
     await assertNestingOperationsAllowed()
+  }
+
+  if (existing.status === 'active') {
+    await assertActiveNftNestOnChainLock(existing, pool, { repairMissingFreeze: true })
   }
 
   if (existing.status === 'active' && existing.unlock_at) {
@@ -213,7 +237,7 @@ export async function executeClaim(params: {
   position_id: string
   rawAmount: unknown
 }) {
-  await assertNestingOperationsAllowed()
+  assertNestingClaimsAllowed()
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -231,6 +255,12 @@ export async function executeClaim(params: {
   if (row.status !== 'active') {
     throw new StakingUserError('Position is not active', 400)
   }
+
+  const pool = await getStakingPoolById(row.pool_id)
+  if (!pool) {
+    throw new StakingUserError('Pool not found', 400)
+  }
+  await assertActiveNftNestOnChainLock(row, pool, { allowOwnerThawedForClaim: true })
 
   const stakedAtMs = new Date(row.staked_at).getTime()
   const asOfMs = Date.now()
@@ -250,20 +280,18 @@ export async function executeClaim(params: {
   const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
 
   if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) {
-    throw new StakingUserError(
-      `Claim unlocks once at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL has accrued for this nest.`,
-      400,
-      { claimable: claimableNow, min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM }
-    )
+    throw new StakingUserError(minOwlClaimThresholdMessage(), 400, {
+      claimable: claimableNow,
+      min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM,
+    })
+  }
+
+  if (!paysOwlRewards && claimableNow <= 1e-12) {
+    throw new StakingUserError('No rewards to claim yet for this nest.', 400, { claimable: claimableNow })
   }
 
   if (amount > claimableNow + 1e-9) {
     throw new StakingUserError('amount exceeds claimable rewards', 400, { claimable: claimableNow })
-  }
-
-  const pool = await getStakingPoolById(row.pool_id)
-  if (!pool) {
-    throw new StakingUserError('Pool not found', 400)
   }
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
@@ -288,6 +316,14 @@ export async function executeClaim(params: {
   const payoutAmount = isFullClaim ? claimableNow : amount
   const newClaimedTotal = isFullClaim ? accruedNow : oldClaimed + amount
 
+  if (paysOwlRewards && !isValidOwlClaimPayoutAmount(payoutAmount)) {
+    throw new StakingUserError(minOwlClaimPayoutRejectedMessage(payoutAmount), 400, {
+      payout: payoutAmount,
+      claimable: claimableNow,
+      min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM,
+    })
+  }
+
   const adapter = resolveMutationAdapter(pool)
   return adapter.claimPositionRewards({
     wallet: params.wallet,
@@ -299,19 +335,23 @@ export async function executeClaim(params: {
 
 /** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
 export async function executeClaimAll(params: { wallet: string }) {
-  await assertNestingOperationsAllowed()
+  assertNestingClaimsAllowed()
+
+  if (isNestingClaimAllDisabled()) {
+    throw new StakingUserError(
+      'Claim all is temporarily unavailable. Claim from each nest individually, or try again later.',
+      503
+    )
+  }
 
   const rows = await listStakingPositionsByWallet(params.wallet)
-  const owlRows = rows.filter(
-    (r) => r.status === 'active' && (r.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
-  )
-  const plans = owlRows
-    .map((r) => buildFullPositionClaimPlan(r))
-    .filter((p): p is NonNullable<typeof p> => p !== null)
+  const asOfMs = Date.now()
+  const { plans, ready: claimAllReady } = buildOwlClaimAllPreview(rows, asOfMs)
+  const owlRows = rows.filter((r) => r.status === 'active' && isOwlRewardPosition(r))
 
-  if (plans.length === 0) {
+  if (plans.length === 0 || !claimAllReady) {
     throw new StakingUserError(
-      `No nests have claimable OWL right now. ${minOwlClaimThresholdMessage()}`,
+      noClaimableRewardsMessage(),
       400,
       { claimable_count: 0 }
     )
@@ -320,6 +360,36 @@ export async function executeClaimAll(params: { wallet: string }) {
   const pool = await getStakingPoolById(owlRows[0]!.pool_id)
   if (!pool) {
     throw new StakingUserError('Pool not found', 400)
+  }
+
+  const planPositionIds = new Set(plans.map((p) => p.positionId))
+  const rowsToVerify = owlRows.filter((row) => planPositionIds.has(row.id))
+  const poolById = new Map<string, StakingPoolRow>()
+  poolById.set(pool.id, pool)
+
+  const missingPoolIds = [
+    ...new Set(rowsToVerify.map((row) => row.pool_id).filter((id) => !poolById.has(id))),
+  ]
+  if (missingPoolIds.length > 0) {
+    const loaded = await Promise.all(missingPoolIds.map((id) => getStakingPoolById(id)))
+    for (let i = 0; i < missingPoolIds.length; i++) {
+      const rowPool = loaded[i]
+      if (rowPool) poolById.set(missingPoolIds[i]!, rowPool)
+    }
+  }
+
+  const CLAIM_LOCK_VERIFY_CONCURRENCY = 6
+  for (let i = 0; i < rowsToVerify.length; i += CLAIM_LOCK_VERIFY_CONCURRENCY) {
+    const chunk = rowsToVerify.slice(i, i + CLAIM_LOCK_VERIFY_CONCURRENCY)
+    await Promise.all(
+      chunk.map(async (row) => {
+        const rowPool = poolById.get(row.pool_id)
+        if (!rowPool) {
+          throw new StakingUserError('Pool not found', 400)
+        }
+        await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
+      })
+    )
   }
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()

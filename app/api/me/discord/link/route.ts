@@ -5,6 +5,7 @@ import {
   getDiscordOAuthAuthorizeUrl,
   getDiscordOAuthRedirectUriFromRequest,
   getRequestOriginForOAuth,
+  sanitizeDiscordOAuthReturnPath,
 } from '@/lib/discord-oauth'
 
 export const dynamic = 'force-dynamic'
@@ -21,8 +22,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${base}/dashboard?discord_error=sign_in_required`)
     }
 
+    const returnTo = sanitizeDiscordOAuthReturnPath(request.nextUrl.searchParams.get('return_to'))
     const redirectUri = getDiscordOAuthRedirectUriFromRequest(request)
-    const url = getDiscordOAuthAuthorizeUrl(generateDiscordOAuthState(session.wallet), redirectUri)
+    const url = getDiscordOAuthAuthorizeUrl(
+      generateDiscordOAuthState(session.wallet, returnTo),
+      redirectUri
+    )
     if (!url) {
       const base = getRequestOriginForOAuth(request)
       return NextResponse.redirect(`${base}/dashboard?discord_error=not_configured`)

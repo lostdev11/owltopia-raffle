@@ -76,6 +76,16 @@ export async function assertNestingOperationsAllowed(): Promise<void> {
   }
 }
 
+/** Claims stay available during admin “pause holder actions”; only the deploy kill switch blocks payouts. */
+export function assertNestingClaimsAllowed(): void {
+  if (isNestingEnvKillSwitchEnabled()) {
+    throw new StakingUserError(
+      'OWL claims are paused for maintenance (NESTING_DISABLED). Try again after the team clears the deployment flag.',
+      503
+    )
+  }
+}
+
 export function isNestingSelloutRequired(): boolean {
   return readBoolean(process.env.NESTING_SELL_OUT_REQUIRED, DEFAULT_SELL_OUT_REQUIRED)
 }
@@ -115,6 +125,11 @@ export function getNestingRewardTreasuryWallet(): string {
 /** When true, OWL reward claims may succeed with database-only credits (no SPL transfer). Default false. */
 export function isNestingDbOnlyOwlClaimsAllowed(): boolean {
   return readBoolean(process.env.NESTING_ALLOW_DB_ONLY_OWL_CLAIMS, false)
+}
+
+/** When true, `POST /api/me/staking/claim-all` is rejected (single-nest claim still allowed). */
+export function isNestingClaimAllDisabled(): boolean {
+  return readBoolean(process.env.NESTING_CLAIM_ALL_DISABLED, false)
 }
 
 export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<

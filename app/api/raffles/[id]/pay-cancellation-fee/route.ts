@@ -1,25 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
-import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getRaffleById } from '@/lib/db/raffles'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
-import { verifyCancellationFeeTransaction } from '@/lib/verify-cancellation-fee-tx'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
+import { recordCancellationFeePayment } from '@/lib/raffles/record-cancellation-payment'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
-
-async function isFeeTxUsedElsewhere(signature: string, excludeRaffleId: string): Promise<boolean> {
-  const { data, error } = await getSupabaseAdmin()
-    .from('raffles')
-    .select('id')
-    .eq('cancellation_fee_payment_tx', signature.trim())
-    .neq('id', excludeRaffleId)
-    .limit(1)
-    .maybeSingle()
-  if (error) return true
-  return !!data
-}
 
 /**
  * POST /api/raffles/[id]/pay-cancellation-fee
@@ -57,7 +44,7 @@ export async function POST(
 
     const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
     const wallet = session.wallet.trim()
-    if (creator !== wallet) {
+    if (!walletsEqualSolana(creator, wallet)) {
       return NextResponse.json({ error: 'Only the raffle creator can pay this fee' }, { status: 403 })
     }
 
@@ -71,56 +58,34 @@ export async function POST(
     const status = (raffle.status ?? '').toLowerCase()
     const isOpenCancellationStatus = status === 'live' || status === 'ready_to_draw'
 
-    if (raffle.cancellation_fee_paid_at) {
-      if (!raffle.cancellation_requested_at && isOpenCancellationStatus) {
-        await updateRaffle(id, {
-          cancellation_requested_at: raffle.cancellation_fee_paid_at,
-        })
-        return NextResponse.json({ success: true, alreadyPaid: true, cancellationRequested: true })
-      }
-      return NextResponse.json({ success: true, alreadyPaid: true })
+    if (raffle.cancellation_fee_paid_at && raffle.cancellation_requested_at) {
+      return NextResponse.json({ success: true, alreadyPaid: true, cancellationRequested: true })
     }
 
-    const treasury = getRaffleTreasuryWalletAddress()
-    if (!treasury) {
-      return NextResponse.json(
-        { error: 'Treasury wallet is not configured. Set RAFFLE_RECIPIENT_WALLET.' },
-        { status: 500 }
-      )
-    }
+    const recorded = await recordCancellationFeePayment({
+      raffleId: id,
+      raffle,
+      creatorWallet: wallet,
+      feeTransactionSignature: raw,
+      openCancellationRequest: isOpenCancellationStatus,
+    })
 
-    if (await isFeeTxUsedElsewhere(raw, id)) {
-      return NextResponse.json(
-        { error: 'This transaction was already used for a cancellation fee.' },
-        { status: 400 }
-      )
-    }
-
-    const v = await verifyCancellationFeeTransaction(raw, wallet, treasury)
-    if (!v.valid) {
+    if (!recorded.ok) {
       return NextResponse.json(
         {
-          error: v.error ?? 'Could not verify transaction.',
-          feeSol: getCancellationFeeSol(),
-          treasury,
+          error: recorded.error,
+          feeSol: recorded.feeSol ?? getCancellationFeeSol(),
+          treasury: recorded.treasury,
         },
-        { status: 400 }
+        { status: recorded.status }
       )
     }
 
-    const nowIso = new Date().toISOString()
-    const shouldOpenCancellationRequest =
-      !raffle.cancellation_requested_at && isOpenCancellationStatus
-    const patch: Parameters<typeof updateRaffle>[1] = {
-      cancellation_fee_paid_at: nowIso,
-      cancellation_fee_payment_tx: raw,
-    }
-    if (shouldOpenCancellationRequest) {
-      patch.cancellation_requested_at = nowIso
-    }
-    await updateRaffle(id, patch)
-
-    return NextResponse.json({ success: true, cancellationRequested: shouldOpenCancellationRequest })
+    return NextResponse.json({
+      success: true,
+      alreadyPaid: recorded.alreadyRecorded,
+      cancellationRequested: recorded.cancellationRequested,
+    })
   } catch (e) {
     console.error('[pay-cancellation-fee]', e)
     return NextResponse.json({ error: 'Failed to record payment' }, { status: 500 })

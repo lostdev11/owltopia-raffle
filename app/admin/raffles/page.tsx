@@ -61,7 +61,10 @@ export default async function AdminRafflesPage() {
     pendingCancellationRaffles = []
     for (const raffle of allRaffles) {
       const st = (raffle.status ?? '').toLowerCase()
-      if (raffle.cancellation_requested_at && st !== 'cancelled') {
+      if (
+        raffle.cancellation_requested_at &&
+        (st === 'live' || st === 'ready_to_draw')
+      ) {
         pendingCancellationRaffles.push(raffle)
       }
     }

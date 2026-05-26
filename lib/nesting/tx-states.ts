@@ -30,6 +30,37 @@ const PHASE_LABEL: Record<NestingTxPhase, string> = {
   failed: 'That did not work—give it another try',
 }
 
-export function nestingTxPhaseLabel(phase: NestingTxPhase): string {
+const CLAIM_PHASE_LABEL: Record<NestingTxPhase, string> = {
+  idle: '',
+  preparing: 'Processing your claim…',
+  awaiting_wallet_signature: 'Approve in your wallet to finish claiming…',
+  submitting: 'Sending OWL to your wallet…',
+  confirming: 'Confirming payout…',
+  syncing: 'Updating your balance…',
+  failed: 'Claim failed — try again',
+}
+
+export type NestingTxPhaseLabelContext = 'default' | 'claim'
+
+export function nestingTxPhaseLabel(
+  phase: NestingTxPhase,
+  context: NestingTxPhaseLabelContext = 'default'
+): string {
+  if (context === 'claim') {
+    return CLAIM_PHASE_LABEL[phase] ?? phase
+  }
   return PHASE_LABEL[phase] ?? phase
+}
+
+const IN_FLIGHT_PHASES: ReadonlySet<NestingTxPhase> = new Set([
+  'preparing',
+  'awaiting_wallet_signature',
+  'submitting',
+  'confirming',
+  'syncing',
+])
+
+/** True while a wallet/API action is actively running (not idle or failed). */
+export function isNestingTxPhaseInFlight(phase: NestingTxPhase): boolean {
+  return IN_FLIGHT_PHASES.has(phase)
 }

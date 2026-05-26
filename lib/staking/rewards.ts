@@ -58,3 +58,23 @@ export function meetsMinOwlClaimThreshold(claimableUi: number): boolean {
   if (!Number.isFinite(claimableUi)) return false
   return claimableUi >= MIN_OWL_CLAIMABLE_TO_CLAIM - 1e-9
 }
+
+/** OWL nesting: same as {@link meetsMinOwlClaimThreshold}. */
+export function hasClaimableRewardBalance(claimableUi: number): boolean {
+  return meetsMinOwlClaimThreshold(claimableUi)
+}
+
+/** True when an OWL payout amount is allowed (minimum 1 OWL; no upper cap beyond pending balance). */
+export function isValidOwlClaimPayoutAmount(payoutUi: number): boolean {
+  return meetsMinOwlClaimThreshold(payoutUi)
+}
+
+/** Non-zero pending slice included in a combined Claim all batch (per-nest amount may be below 1 OWL). */
+export function isPositiveOwlClaimSlice(payoutUi: number): boolean {
+  return Number.isFinite(payoutUi) && payoutUi > 1e-12
+}
+
+/** User-facing rules for OWL claim minimum and that larger amounts are supported. */
+export function owlClaimAmountRulesMessage(): string {
+  return `Each claim must be at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL. You can claim any amount from ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL up to your full pending balance on that nest.`
+}

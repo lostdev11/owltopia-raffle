@@ -9,6 +9,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import {
   getRaffleProfitInfo,
   normalizeRaffleTicketCurrency,
+  revenueInCurrency,
   shouldShowRevenueFlexPublic,
 } from '@/lib/raffle-profit'
 import { Flame } from 'lucide-react'
@@ -69,10 +70,7 @@ function getThresholdProgress(profitInfo?: RaffleProfitInfo): number | null {
   const { revenue, threshold, thresholdCurrency } = profitInfo
   if (!threshold || threshold <= 0) return null
   const thCur = normalizeRaffleTicketCurrency(thresholdCurrency)
-  let revenueInThreshold = 0
-  if (thCur === 'USDC') revenueInThreshold = revenue.usdc
-  else if (thCur === 'SOL') revenueInThreshold = revenue.sol
-  else if (thCur === 'OWL') revenueInThreshold = revenue.owl
+  const revenueInThreshold = revenueInCurrency(revenue, thCur)
   const progress = revenueInThreshold / threshold
   if (!Number.isFinite(progress) || progress < 0) return null
   return progress

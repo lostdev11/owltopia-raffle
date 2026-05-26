@@ -55,10 +55,10 @@ function parsePositiveInt(name: string, fallback: number): number {
 
 /**
  * Minimum ticket price (raffle field `ticket_price`) in SOL: raffles with price **≤** this are excluded from leaderboards.
- * Eligibility uses **strict** `ticket_price >` this value, so default 0.001 excludes 0.001 SOL raffles.
+ * Eligibility uses **strict** `ticket_price >` this value, so default 0.0001 excludes 0.0001 SOL raffles.
  */
 export function leaderboardMinTicketPriceSol(): number {
-  return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_SOL', 0.001)
+  return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_SOL', 0.0001)
 }
 
 function defaultMinTicketUsdcFromSol(): number {

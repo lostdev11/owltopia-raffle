@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { Zap } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { GEN2_OWL_CENTER_PATH } from '@/lib/gen2-presale/purchase-availability'
 import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
   /** From stats `presale_live`; omit while still loading first stats fetch. */
   live?: boolean
+  soldOut?: boolean
   statsLoading?: boolean
 }
 
@@ -18,8 +20,8 @@ function presaleUsdcFromEnv(): number {
   return Number.isFinite(n) && n > 0 ? n : 20
 }
 
-export function Gen2PresaleBanner({ className, live, statsLoading }: Props) {
-  const paused = live === false
+export function Gen2PresaleBanner({ className, live, soldOut = false, statsLoading }: Props) {
+  const paused = live === false && !soldOut
   const pending = statsLoading || live === undefined
   const spotUsdc = presaleUsdcFromEnv()
 
@@ -27,16 +29,22 @@ export function Gen2PresaleBanner({ className, live, statsLoading }: Props) {
     <div
       className={cn(
         'sticky top-0 z-50 border-b bg-[#0B0F12]/95 backdrop-blur-md',
-        paused
-          ? 'border-[#FFD769]/35 animate-none'
-          : 'border-[#00E58B]/25 animate-gen2-border-pulse',
+        soldOut
+          ? 'border-[#00FF9C]/35 animate-none'
+          : paused
+            ? 'border-[#FFD769]/35 animate-none'
+            : 'border-[#00E58B]/25 animate-gen2-border-pulse',
         className
       )}
     >
       <div
         className={cn(
           'pointer-events-none absolute inset-0 bg-gradient-to-r via-transparent',
-          paused ? 'from-[#FFD769]/10 to-[#FFD769]/10' : 'from-[#00E58B]/10 to-[#00E58B]/10'
+          soldOut
+            ? 'from-[#00E58B]/10 to-[#00E58B]/10'
+            : paused
+              ? 'from-[#FFD769]/10 to-[#FFD769]/10'
+              : 'from-[#00E58B]/10 to-[#00E58B]/10'
         )}
       />
       <div className="relative mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-3 sm:flex-row sm:gap-4">
@@ -46,15 +54,17 @@ export function Gen2PresaleBanner({ className, live, statsLoading }: Props) {
             <span
               className={cn(
                 'inline font-black',
-                paused ? 'text-[#FFD769]' : 'animate-gen2-live-blink text-[#00FF9C]'
+                soldOut ? 'text-[#00FF9C]' : paused ? 'text-[#FFD769]' : 'animate-gen2-live-blink text-[#00FF9C]'
               )}
             >
               OWLTOPIA GEN2
             </span>
             <span className="mx-1.5 text-[#A9CBB9]">·</span>
-            <span className={cn('font-black', paused ? 'text-[#A9CBB9]' : 'text-[#00FF9C]')}>PRESALE</span>
+            <span className={cn('font-black', soldOut || paused ? 'text-[#A9CBB9]' : 'text-[#00FF9C]')}>PRESALE</span>
             {pending ? (
               <span className="mx-1 font-black text-[#A9CBB9]">…</span>
+            ) : soldOut ? (
+              <span className="mx-1 font-black text-[#00FF9C]">SOLD OUT</span>
             ) : paused ? (
               <span className="mx-1 font-black text-[#FFD769]">PAUSED</span>
             ) : (
@@ -66,7 +76,15 @@ export function Gen2PresaleBanner({ className, live, statsLoading }: Props) {
             </span>
           </span>
         </p>
-        {paused ? (
+        {soldOut ? (
+          <Button
+            asChild
+            size="sm"
+            className="min-h-[44px] shrink-0 touch-manipulation border border-[#00FF9C]/40 bg-[#00E58B]/15 px-5 font-bold text-[#EAFBF4] shadow-[0_0_24px_rgba(0,255,156,0.2)] hover:bg-[#00E58B]/25"
+          >
+            <Link href={GEN2_OWL_CENTER_PATH}>Owl Center</Link>
+          </Button>
+        ) : paused ? (
           <Button
             asChild
             size="sm"
