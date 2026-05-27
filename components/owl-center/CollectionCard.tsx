@@ -3,23 +3,25 @@ import Link from 'next/link'
 
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
+import { LaunchMintDetails } from '@/components/owl-center/LaunchMintDetails'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
-import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
-
-const btnPrimary =
-  'inline-flex min-h-[44px] touch-manipulation items-center justify-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-6 font-bold uppercase tracking-wide text-[#E8FDF4] shadow-[0_0_24px_rgba(0,255,156,0.18)] hover:bg-[#00FF9C]/18'
-const btnGhost =
-  'inline-flex min-h-[44px] touch-manipulation items-center justify-center border border-[#1A222B] px-6 font-semibold uppercase tracking-wide text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#E8EEF2]'
+import {
+  owlCenterBtnDisabled,
+  owlCenterBtnGhost,
+  owlCenterBtnPrimary,
+} from '@/components/owl-center/owl-center-cta-styles'
 
 function hrefForLaunch(slug: string): string {
   return `/owl-center/collection/${slug}`
 }
 
-function ctaLabel(launch: OwlCenterLaunchPublic): string {
+function ctaLabel(launch: OwlCenterLaunchPublic, presaleSoldOut: boolean): string {
   if (launch.active_phase === 'TRADING_ACTIVE') return 'Trade Now'
   if (launch.active_phase === 'SOLD_OUT') return 'View Collection'
-  if (launch.active_phase === 'PRESALE') return 'Enter Presale'
+  if (launch.active_phase === 'PRESALE') {
+    return presaleSoldOut && launch.slug === 'gen2' ? 'Presale sold out' : 'Enter Presale'
+  }
   if (launch.active_phase === 'WHITELIST' || launch.active_phase === 'PUBLIC' || launch.active_phase === 'AIRDROP') {
     return 'Mint Now'
   }
@@ -33,27 +35,27 @@ function ctaHref(launch: OwlCenterLaunchPublic): string {
   return hrefForLaunch(launch.slug)
 }
 
-function mintPriceLabel(launch: OwlCenterLaunchPublic): string {
-  switch (launch.active_phase) {
-    case 'PRESALE':
-      return `${launch.presale_price_usdc ?? 20} USDC-notional (SOL)`
-    case 'WHITELIST':
-      return `${launch.wl_price_usdc ?? 30} USDC-notional (SOL)`
-    case 'PUBLIC':
-      return `${launch.public_price_usdc ?? 40} USDC-notional (SOL)`
-    default:
-      return '—'
-  }
+function isPresaleCtaDisabled(launch: OwlCenterLaunchPublic, presaleSoldOut: boolean): boolean {
+  return launch.slug === 'gen2' && launch.active_phase === 'PRESALE' && presaleSoldOut
 }
 
-export function CollectionCard({ launch }: { launch: OwlCenterLaunchPublic }) {
+export function CollectionCard({
+  launch,
+  presaleSoldOut = false,
+}: {
+  launch: OwlCenterLaunchPublic
+  presaleSoldOut?: boolean
+}) {
   const img =
     launch.image_url?.startsWith('http://') || launch.image_url?.startsWith('https://')
       ? launch.image_url
       : launch.image_url?.startsWith('/')
         ? launch.image_url
         : '/images/gen2-logo-mark.png'
-  const internal = ctaHref(launch).startsWith('/')
+  const href = ctaHref(launch)
+  const internal = href.startsWith('/')
+  const presaleDisabled = isPresaleCtaDisabled(launch, presaleSoldOut)
+  const label = ctaLabel(launch, presaleSoldOut)
 
   return (
     <article className="flex flex-col border border-[#1A222B] bg-[#10161C]/85">
@@ -71,7 +73,11 @@ export function CollectionCard({ launch }: { launch: OwlCenterLaunchPublic }) {
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={launch.status} />
-          <PhaseBadge phase={launch.active_phase} pulse={launch.active_phase === 'PRESALE'} />
+          <PhaseBadge
+            phase={launch.active_phase}
+            pulse={launch.active_phase === 'PRESALE' && !presaleSoldOut}
+            presaleSoldOut={launch.slug === 'gen2' ? presaleSoldOut : false}
+          />
         </div>
         <div>
           <h3 className="font-display text-xl text-[#F4FBF8]">{launch.name}</h3>
@@ -79,21 +85,26 @@ export function CollectionCard({ launch }: { launch: OwlCenterLaunchPublic }) {
             {launch.creator_wallet ? `Creator ${launch.creator_wallet.slice(0, 4)}…` : 'Owltopia'}
           </p>
         </div>
-        <SupplyProgress minted={launch.minted_count} total={launch.total_supply} />
-        <p className="font-mono text-xs text-[#9BA8B4]">
-          Mint price: <span className="text-[#00FF9C]">{mintPriceLabel(launch)}</span>
-        </p>
+        <LaunchMintDetails launch={launch} />
         <div className="mt-auto flex flex-wrap gap-2 pt-2">
-          {internal ? (
-            <Link href={ctaHref(launch)} className={`${btnPrimary} w-full sm:w-auto`}>
-              {ctaLabel(launch)}
+          {presaleDisabled ? (
+            <span
+              className={`${owlCenterBtnDisabled} w-full sm:w-auto`}
+              aria-disabled="true"
+              title="All presale spots have been claimed"
+            >
+              {label}
+            </span>
+          ) : internal ? (
+            <Link href={href} className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
+              {label}
             </Link>
           ) : (
-            <a href={ctaHref(launch)} target="_blank" rel="noreferrer" className={`${btnPrimary} w-full sm:w-auto`}>
-              {ctaLabel(launch)}
+            <a href={href} target="_blank" rel="noreferrer" className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
+              {label}
             </a>
           )}
-          <Link href={hrefForLaunch(launch.slug)} className={`${btnGhost} w-full sm:w-auto`}>
+          <Link href={hrefForLaunch(launch.slug)} className={`${owlCenterBtnGhost} w-full sm:w-auto`}>
             Hub
           </Link>
         </div>

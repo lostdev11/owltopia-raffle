@@ -25,6 +25,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     wl_supply: Number(data.wl_supply ?? 0),
     public_supply: Number(data.public_supply ?? 0),
     airdrop_supply: Number(data.airdrop_supply ?? 0),
+    presale_overage_supply: Number(data.presale_overage_supply ?? 13),
     presale_price_usdc: data.presale_price_usdc != null ? Number(data.presale_price_usdc) : null,
     wl_price_usdc: data.wl_price_usdc != null ? Number(data.wl_price_usdc) : null,
     public_price_usdc: data.public_price_usdc != null ? Number(data.public_price_usdc) : null,

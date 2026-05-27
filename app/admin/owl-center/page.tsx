@@ -12,8 +12,11 @@ import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintChecklist'
+import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
+import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { MintTerminalLine, OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { isOwlCenterMintEnvKillSwitchEnabled } from '@/lib/owl-center/mint-policy'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 
 type StatePayload = {
@@ -51,6 +54,15 @@ export default function AdminOwlCenterPage() {
   const [resetPhrase, setResetPhrase] = useState('')
   const [resetMsg, setResetMsg] = useState<string | null>(null)
 
+  const [wlSummary, setWlSummary] = useState<{
+    wl_cap: number
+    wallet_count: number
+    total_allowed: number
+    total_used: number
+    over_allocated_by: number
+    by_community: Record<string, { wallets: number; allowed: number; used: number }>
+  } | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -80,6 +92,21 @@ export default function AdminOwlCenterPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const refreshWlSummary = useCallback(async () => {
+    if (!connected) return
+    try {
+      const res = await fetch('/api/admin/owl-center/gen2/wl-summary', { credentials: 'include' })
+      if (!res.ok) return
+      setWlSummary(await res.json())
+    } catch {
+      setWlSummary(null)
+    }
+  }, [connected])
+
+  useEffect(() => {
+    void refreshWlSummary()
+  }, [refreshWlSummary])
 
   async function savePatch() {
     setSaveMsg(null)
@@ -291,7 +318,7 @@ export default function AdminOwlCenterPage() {
                 <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
                   Active phase
                   <select value={phase} onChange={(e) => setPhase(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm">
-                    {['AIRDROP', 'PRESALE', 'WHITELIST', 'PUBLIC', 'SOLD_OUT', 'TRADING_ACTIVE'].map((p) => (
+                    {['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'SOLD_OUT', 'TRADING_ACTIVE'].map((p) => (
                       <option key={p} value={p}>
                         {p}
                       </option>
@@ -308,9 +335,23 @@ export default function AdminOwlCenterPage() {
                     ))}
                   </select>
                 </label>
-                <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                  <input type="checkbox" checked={paused} onChange={(e) => setPaused(e.target.checked)} className="h-4 w-4" />
-                  Mint paused
+                <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={paused}
+                      onChange={(e) => setPaused(e.target.checked)}
+                      className="h-4 w-4 touch-manipulation"
+                      disabled={isOwlCenterMintEnvKillSwitchEnabled()}
+                    />
+                    Mint kill switch (admin pause)
+                  </span>
+                  <span className="normal-case tracking-normal text-[#9BA8B4]">
+                    When on, the public Mint button stays grayed out and confirm-mint rejects. Save launch to apply.
+                    {isOwlCenterMintEnvKillSwitchEnabled()
+                      ? ' OWL_CENTER_MINT_DISABLED is set in the deployment env — overrides this toggle until cleared.'
+                      : null}
+                  </span>
                 </label>
                 <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
                   Minted count (emergency)
@@ -482,8 +523,48 @@ export default function AdminOwlCenterPage() {
               ) : null}
             </CommandCard>
 
+            <CommandCard label="upload_wl_wallets.sys">
+              <AdminWalletBulkUpload kind="wl" connected={connected} onSuccess={() => void refreshWlSummary()} />
+            </CommandCard>
+
+            <CommandCard label="upload_presale_overage.sys">
+              <p className="mb-3 text-xs text-[#9BA8B4]">
+                Assign wallets for the <strong className="text-[#EAFBF4]">Presale+13</strong> phase (spots 658–670). Wallets
+                must be paid presale participants with credits remaining.
+              </p>
+              <AdminWalletBulkUpload kind="overage" connected={connected} />
+            </CommandCard>
+
+            <CommandCard label="wl_allocation_audit.sys">
+              <p className="mb-3 text-xs text-[#9BA8B4]">
+                FCFS collab channels: {GEN2_WL_COLLAB_COMMUNITIES.map((c) => c.label).join(', ')}. Tag rows with{' '}
+                <code className="text-[10px]">community</code> per upload or CSV column.
+              </p>
+              {wlSummary ? (
+                <div className="space-y-2 font-mono text-xs text-[#C5D0D8]">
+                  <p>
+                    Wallets {wlSummary.wallet_count} · allowed {wlSummary.total_allowed} / cap {wlSummary.wl_cap} · used{' '}
+                    {wlSummary.total_used}
+                  </p>
+                  {wlSummary.over_allocated_by > 0 ? (
+                    <p className="text-[#FFD769]">Over-allocated by {wlSummary.over_allocated_by} spots — trim before WL goes live.</p>
+                  ) : (
+                    <p className="text-[#00FF9C]">Within WL supply cap.</p>
+                  )}
+                  <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto border border-[#1A222B] bg-[#0B0F14] p-2">
+                    {Object.entries(wlSummary.by_community).map(([k, v]) => (
+                      <li key={k} className="text-[#9BA8B4]">
+                        {k}: {v.wallets} wallets · {v.allowed} allowed · {v.used} used
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-xs text-[#5C6773]">Sign in as admin to load WL summary.</p>
+              )}
+            </CommandCard>
+
             <CommandCard label="mint_events.sys">
-              <p className="mb-2 text-xs text-[#5C6773]">WL allocations: manage via Supabase table owl_center_wl_allocations (V1).</p>
               <ActivityLog lines={state.terminal} />
             </CommandCard>
           </>

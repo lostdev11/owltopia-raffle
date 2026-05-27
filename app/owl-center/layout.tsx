@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 
+import { OwlCenterChrome } from '@/components/owl-center/OwlCenterChrome'
 import {
   DEFAULT_OG_IMAGE_DIMS,
   DEFAULT_OG_IMAGE_TYPE,
@@ -36,5 +37,5 @@ export const metadata: Metadata = {
 }
 
 export default function OwlCenterLayout({ children }: { children: ReactNode }) {
-  return children
+  return <OwlCenterChrome>{children}</OwlCenterChrome>
 }

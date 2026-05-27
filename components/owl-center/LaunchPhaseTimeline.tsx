@@ -1,7 +1,8 @@
 import { cn } from '@/lib/utils'
+import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 
-const ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
+const ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
 
 export function LaunchPhaseTimeline({ active }: { active: OwlCenterPhase }) {
   const idx = ORDER.indexOf(active === 'SOLD_OUT' ? 'PUBLIC' : active)
@@ -20,7 +21,7 @@ export function LaunchPhaseTimeline({ active }: { active: OwlCenterPhase }) {
               !done && !current && 'text-[#5C6773]'
             )}
           >
-            {p.replace(/_/g, ' ')}
+            {owlCenterPhaseLabel(p)}
           </li>
         )
       })}

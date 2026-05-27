@@ -222,6 +222,10 @@ Theme accents are stored in the database and applied to:
     └── migrations/            # Database migrations
 ```
 
+## Owl Center (collection mint pipeline)
+
+Operator runbook for **pre-rendered assets → Metaplex Sugar (Arweave upload) → Owl Center admin**: [docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md](docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md).
+
 ## Development
 
 - `npm run dev` - Start development server

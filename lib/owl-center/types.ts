@@ -1,4 +1,15 @@
-export type OwlCenterPhase = 'AIRDROP' | 'PRESALE' | 'WHITELIST' | 'PUBLIC' | 'SOLD_OUT' | 'TRADING_ACTIVE'
+import type { Gen2ClusterPresaleSummary } from '@/lib/gen2-presale/cluster-balance'
+
+export type { Gen2ClusterPresaleSummary }
+
+export type OwlCenterPhase =
+  | 'AIRDROP'
+  | 'PRESALE'
+  | 'PRESALE_OVERAGE'
+  | 'WHITELIST'
+  | 'PUBLIC'
+  | 'SOLD_OUT'
+  | 'TRADING_ACTIVE'
 
 export type OwlCenterStatus =
   | 'DRAFT'
@@ -31,6 +42,7 @@ export type OwlCenterLaunchPublic = {
   wl_supply: number
   public_supply: number
   airdrop_supply: number
+  presale_overage_supply: number
   presale_price_usdc: number | null
   wl_price_usdc: number | null
   public_price_usdc: number | null
@@ -53,6 +65,16 @@ export type OwlCenterLaunchPublic = {
   creator_launch_date: string | null
 }
 
+export type Gen2PresaleBalanceSlice = {
+  purchased_mints: number
+  gifted_mints: number
+  used_mints: number
+  available_mints: number
+  /** Paid presale spots still redeemable (excludes gift-only balance). */
+  purchased_available_mints?: number
+  is_paid_participant?: boolean
+}
+
 export type Gen2EligibilityResponse = {
   active_phase: OwlCenterPhase
   status: OwlCenterStatus
@@ -60,21 +82,90 @@ export type Gen2EligibilityResponse = {
   is_eligible: boolean
   max_mintable: number
   reason: string | null
-  presale_balance?: {
-    purchased_mints: number
-    gifted_mints: number
-    used_mints: number
-    available_mints: number
-  }
+  presale_balance?: Gen2PresaleBalanceSlice
   wl_allocation?: {
     allowed_mints: number
     used_mints: number
     available_mints: number
+    community?: string | null
+  }
+  gen1_snapshot?: {
+    is_holder: boolean
+    gen1_nft_count: number
+    collection_configured?: boolean
+    holder_check_available?: boolean
   }
   /** SOL lamports for paid phases (WL/PUBLIC); null during presale redemption (fees only). */
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
   price_usdc: number | null
+}
+
+export type Gen2MintCheckPhasePreview = {
+  phase: OwlCenterPhase
+  label: string
+  price_usdc: number | null
+  /** Live SOL quote (lamports string) for paid phases. */
+  unit_lamports_estimate: string | null
+  phase_supply: number
+  is_active: boolean
+  is_eligible: boolean
+  max_mintable: number
+  reason: string | null
+  /** Spots reserved for this wallet when the phase opens (may differ from max_mintable during an active phase). */
+  reserved_mints: number
+  /** Informational when the phase is not currently active but the wallet still has allocation. */
+  phase_note: string | null
+  gen1?: {
+    is_holder: boolean
+    gen1_nft_count: number
+    minted_in_phase: number
+    cluster_gen1_nft_count?: number
+    gen1_on_linked_wallet?: boolean
+  }
+  presale?: Gen2PresaleBalanceSlice & {
+    mint_cap?: number
+    credits_issued?: number
+    credits_overshoot?: number
+  }
+  wl?: {
+    allowed_mints: number
+    used_mints: number
+    available_mints: number
+    community: string | null
+    discord_whitelist: boolean
+    /** True when admin assigned spots in owl_center_wl_allocations (FCFS global pool at mint time). */
+    admin_allocated: boolean
+    cluster_available_mints?: number
+    wl_on_linked_wallet?: boolean
+  }
+}
+
+export type Gen2MintCheckResponse = {
+  wallet: string | null
+  active_phase: OwlCenterPhase
+  status: OwlCenterStatus
+  is_paused: boolean
+  /** False until Candy Machine is configured and mint is not paused/kill-switched. */
+  mint_operational?: boolean
+  /** True when the global GEN1 / AIRDROP cap is fully minted. */
+  airdrop_phase_complete?: boolean
+  presale_purchases_closed: boolean
+  /** True when all presale purchase spots are claimed (distinct from admin pause). */
+  presale_sold_out: boolean
+  presale_pool: {
+    mint_cap: number
+    credits_issued: number
+    credits_overshoot: number
+    presale_mints_recorded: number
+    presale_mints_remaining: number
+    overage_supply: number
+    overage_mints_recorded: number
+    overage_mints_remaining: number
+  }
+  wallet_cluster?: Gen2ClusterPresaleSummary
+  phases: Gen2MintCheckPhasePreview[]
+  current: Gen2EligibilityResponse
 }
 
 export type MintTerminalLine = {

@@ -153,6 +153,12 @@ const nextConfig = {
         ],
       },
       {
+        source: '/owl-center/collection/gen2/wl-check/:wallet/opengraph-image',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
+        ],
+      },
+      {
         // Apply security headers to all routes
         source: '/:path*',
         headers: [

@@ -23,7 +23,7 @@ export function OwlCenterShell({
         className
       )}
     >
-      <div className="mx-auto max-w-6xl px-4 py-10 md:py-14">
+      <div className="mx-auto max-w-6xl px-4 py-8 md:py-12">
         {(eyebrow || title || subtitle) && (
           <header className="mb-10 border-b border-[#1A222B] pb-8">
             {eyebrow ? (

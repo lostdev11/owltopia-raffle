@@ -137,6 +137,40 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           launch_id={launch.id} · slug={launch.slug} · assets_ready={String(launch.assets_ready)} · metadata_ready=
           {String(launch.metadata_ready)}
         </p>
+        <details className="mt-4 touch-manipulation border border-[#1A222B] bg-[#10161C]/85 p-4 font-mono text-xs text-[#9BA8B4] [&_summary]:cursor-pointer [&_summary]:select-none [&_summary]:font-mono [&_summary]:text-[10px] [&_summary]:uppercase [&_summary]:tracking-widest [&_summary]:text-[#5C6773]">
+          <summary>Recommended workflow (Sugar + Arweave → Owl Center)</summary>
+          <ol className="mt-3 list-decimal space-y-2 ps-5 text-[13px] leading-relaxed">
+            <li>
+              Pre-render paired files (e.g. <span className="text-[#00FF9C]">0.png + 0.json</span> …) then run{' '}
+              <span className="text-[#E8EEF2]">sugar validate</span> → <span className="text-[#E8EEF2]">sugar upload</span> →{' '}
+              <span className="text-[#E8EEF2]">sugar deploy</span> (
+              <a
+                href="https://developers.metaplex.com/candy-machine/sugar"
+                className="text-[#00C97A] underline underline-offset-2"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Metaplex Sugar docs
+              </a>
+              ).
+            </li>
+            <li>
+              Paste resulting <strong className="font-normal text-[#E8EEF2]">assets</strong> and{' '}
+              <strong className="font-normal text-[#E8EEF2]">metadata</strong> paths/URLs below; complete the checklist →{' '}
+              <strong className="font-normal text-[#E8EEF2]">Mark ready for Candy Machine</strong>.
+            </li>
+            <li>
+              Set <span className="text-[#E8EEF2]">candy_machine_id</span> + <span className="text-[#E8EEF2]">collection_mint</span> in{' '}
+              <a href="/admin/owl-center" className="text-[#00C97A] underline underline-offset-2">
+                Owl Center admin
+              </a>
+              . Full runbook: <span className="break-all text-[#7D8A93]">docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md</span>
+            </li>
+          </ol>
+          <p className="mt-3 text-[11px] text-[#5C6773]">
+            In-app bulk zip → Arweave is planned (Phase B); this screen records provenance and readiness after CLI upload.
+          </p>
+        </details>
       </header>
 
       {gen2Warn ? (
@@ -200,7 +234,8 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <CommandCard label="asset_package.sys">
         <p className="mb-4 text-xs text-[#9BA8B4]">
-          V1: paste Arweave/IPFS bundle paths or URLs. Native folder upload activates when object storage is provisioned.
+          Phase A (current): after <span className="text-[#E8EEF2]">sugar upload</span>, paste Arweave (or IPFS) bundle paths
+          or HTTPS gateway URLs. Phase B: dashboard staging + background push to permanent storage.
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">

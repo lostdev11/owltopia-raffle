@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
+import { getPresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
+import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
+import { listGen2PresaleParticipants } from '@/lib/gen2-presale/db'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
+import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
+import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -73,8 +80,20 @@ export async function GET(request: NextRequest) {
 
   const mp = mpRow as { trading_links_active?: boolean; magic_eden_url?: string | null; tensor_url?: string | null } | null
 
+  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  const [presale_pool, presale_participants, presaleStats, prices_lamports] = await Promise.all([
+    getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, launch.presale_overage_supply ?? 13, network),
+    listGen2PresaleParticipants(500),
+    buildGen2PresalePublicStats().catch(() => null),
+    getLaunchPriceLamportsQuotes(launch),
+  ])
+  const presale_sold_out = isGen2PresaleSoldOut(presaleStats)
+
+  const mint_controls = buildOwlCenterMintControls(launch.is_paused)
+
   return NextResponse.json({
     launch,
+    mint_controls,
     marketplace: {
       trading_links_active: Boolean(mp?.trading_links_active),
       magic_eden_url: mp?.magic_eden_url?.trim() || null,
@@ -97,6 +116,10 @@ export async function GET(request: NextRequest) {
       whitelist: launch.wl_price_usdc,
       public: launch.public_price_usdc,
     },
+    prices_lamports,
+    presale_pool,
+    presale_sold_out,
+    presale_participant_count: presale_participants.length,
     terminal,
   })
 }

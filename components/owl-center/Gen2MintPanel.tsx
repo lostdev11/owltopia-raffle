@@ -1,15 +1,18 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 
-import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
-import { Gen2EligibilityCard } from '@/components/owl-center/Gen2EligibilityCard'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
-import type { Gen2EligibilityResponse } from '@/lib/owl-center/types'
+import {
+  owlCenterMintPhaseStatusLabel,
+  owlCenterMintWrongPhaseHint,
+} from '@/lib/owl-center/phase-display'
+import { owlCenterAllowsHighQuantityMint } from '@/lib/owl-center/phase-allowance'
+import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
+import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
 import {
@@ -56,10 +59,15 @@ function stepLabel(s: MintUiStep): string {
 export function Gen2MintPanel({
   launch,
   remaining,
+  presaleSoldOut = false,
+  mintControls,
   onRefresh,
 }: {
   launch: OwlCenterLaunchPublic
   remaining: number
+  /** True when all presale purchase spots are claimed (distinct from Presale mint redemption phase). */
+  presaleSoldOut?: boolean
+  mintControls: OwlCenterMintControls
   onRefresh: () => void
 }) {
   const { publicKey, connected, wallet } = useWallet()
@@ -67,46 +75,18 @@ export function Gen2MintPanel({
   const adapter = wallet?.adapter
 
   const [qty, setQty] = useState(1)
-  const [elig, setElig] = useState<Gen2EligibilityResponse | null>(null)
-  const [eligLoading, setEligLoading] = useState(false)
+  const { elig, loading: eligLoading, refresh: loadElig } = useGen2MintEligibility(walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
 
-  const loadElig = useCallback(async () => {
-    setEligLoading(true)
-    setErr(null)
-    try {
-      const res = await fetch('/api/owl-center/gen2/eligibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: walletStr }),
-      })
-      const j = (await res.json()) as Gen2EligibilityResponse & { error?: string }
-      if (!res.ok) throw new Error(j.error || 'eligibility_failed')
-      setElig(j)
-    } catch (e) {
-      setElig(null)
-      setErr(e instanceof Error ? e.message : 'eligibility_failed')
-    } finally {
-      setEligLoading(false)
-      setStep('idle')
-    }
-  }, [walletStr])
-
-  useEffect(() => {
-    if (!connected || !walletStr) {
-      setElig(null)
-      return
-    }
-    void loadElig()
-  }, [connected, walletStr, loadElig])
-
   const maxQ = useMemo(() => {
     if (!elig) return 1
-    const phaseCap = elig.active_phase === 'PRESALE' ? elig.max_mintable : Math.min(elig.max_mintable, 10)
+    const phaseCap = owlCenterAllowsHighQuantityMint(elig.active_phase)
+      ? elig.max_mintable
+      : Math.min(elig.max_mintable, 10)
     return Math.max(1, Math.min(phaseCap, remaining))
   }, [elig, remaining])
 
@@ -116,7 +96,7 @@ export function Gen2MintPanel({
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
-  const mintClosed = trading || soldOut || launch.is_paused
+  const mintClosed = trading || soldOut || mintControls.disabled
 
   const runMint = async () => {
     setErr(null)
@@ -138,7 +118,7 @@ export function Gen2MintPanel({
     }
 
     const phase = elig.active_phase
-    const allowedPhases = ['AIRDROP', 'PRESALE', 'WHITELIST', 'PUBLIC'] as const
+    const allowedPhases = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC'] as const
     if (!allowedPhases.includes(phase as (typeof allowedPhases)[number])) {
       setErr('Mint not available in this phase')
       setStep('error')
@@ -224,52 +204,153 @@ export function Gen2MintPanel({
     )
   }
 
+  const phaseLabel = elig
+    ? owlCenterMintPhaseStatusLabel(elig.active_phase, { presaleSoldOut })
+    : '—'
+  const wrongPhaseHint =
+    elig && !elig.is_eligible
+      ? owlCenterMintWrongPhaseHint({
+          activePhase: launch.active_phase,
+          presaleSoldOut,
+          isGen1Holder: elig.gen1_snapshot?.is_holder === true,
+        })
+      : null
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <Gen2EligibilityCard eligibility={elig} loading={eligLoading} />
-
-      <CommandCard label="mint_console.sys">
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <WalletConnectButton />
-            {connected ? (
-              <button
-                type="button"
-                onClick={() => void loadElig()}
-                className="font-mono text-[10px] uppercase tracking-widest text-[#00C97A] underline-offset-4 hover:underline touch-manipulation"
-              >
-                Refresh eligibility
-              </button>
-            ) : null}
+    <CommandCard label="mint_console">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A222B] pb-4">
+          <div className="font-mono text-xs text-[#9BA8B4]">
+            {eligLoading || !elig ? (
+              <span>Checking live eligibility…</span>
+            ) : (
+              <span>
+                Active phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
+                {' · '}
+                {elig.is_eligible ? (
+                  <>
+                    Can mint <span className="text-[#F4FBF8]">{elig.max_mintable}</span> now
+                  </>
+                ) : (
+                  <span className="text-[#FFD769]">Not eligible to mint in this phase</span>
+                )}
+                {' · '}
+                <a href="#allocation" className="text-[#00FF9C] underline-offset-2 hover:underline">
+                  View full allocation
+                </a>
+              </span>
+            )}
           </div>
+          {connected ? (
+            <button
+              type="button"
+              onClick={() => void loadElig()}
+              className="min-h-[44px] touch-manipulation font-mono text-[10px] uppercase tracking-widest text-[#00C97A] underline-offset-4 hover:underline"
+            >
+              Refresh
+            </button>
+          ) : (
+            <p className="text-xs text-[#9BA8B4]">Connect in the site header to mint.</p>
+          )}
+        </div>
 
-          {launch.is_paused ? (
+          {mintControls.env_kill_switch ? (
             <p className="border border-[#FFD769]/40 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
-              Mint temporarily paused by Owl Center.
+              Mint is paused for maintenance (deployment kill switch). Try again after the team clears{' '}
+              <code className="text-[11px]">OWL_CENTER_MINT_DISABLED</code>.
+            </p>
+          ) : mintControls.admin_paused ? (
+            <p className="border border-[#FFD769]/40 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+              Mint temporarily paused by Owl Center admin.
             </p>
           ) : null}
 
-          {launch.active_phase === 'PRESALE' && elig?.presale_balance && elig.presale_balance.available_mints <= 0 ? (
+          {launch.active_phase === 'PRESALE' && elig?.presale_balance && !elig.presale_balance.is_paid_participant ? (
             <div className="space-y-2 border border-[#1A222B] bg-[#0F1419] p-3">
-              <p className="text-sm text-[#9BA8B4]">No presale allocation found for this wallet.</p>
-              <Link
-                href="/gen2-presale"
-                className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10"
-              >
-                Buy Presale Spots
-              </Link>
+              <p className="text-sm text-[#9BA8B4]">
+                This wallet is not in presale purchase records. Connect or link the wallet you used to pay during presale.
+              </p>
             </div>
           ) : null}
 
+          {launch.active_phase === 'PRESALE' &&
+          elig?.presale_balance?.is_paid_participant &&
+          (elig.presale_balance.purchased_available_mints ?? 0) <= 0 ? (
+            <div className="space-y-2 border border-[#1A222B] bg-[#0F1419] p-3">
+              <p className="text-sm text-[#9BA8B4]">
+                No paid presale credits left on this wallet. Link other presale wallets in the Wallets section above, then
+                switch to each wallet in your app to mint.
+              </p>
+            </div>
+          ) : null}
+
+          {launch.active_phase === 'PRESALE_OVERAGE' && elig && !elig.is_eligible ? (
+            <p className="text-sm text-[#FF9C9C]">
+              Presale+13 phase: wallet must be on the 13-spot overage list and still have presale credits. Contact team if
+              you bought spot #658–670.
+            </p>
+          ) : null}
+
+          {launch.active_phase === 'AIRDROP' && elig?.gen1_snapshot?.is_holder ? (
+            <p className="text-sm text-[#9BA8B4]">
+              GEN1 phase: mint up to{' '}
+              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
+              {elig.gen1_snapshot.gen1_nft_count} detected). Sign once per NFT in your wallet.
+            </p>
+          ) : null}
+
+          {wrongPhaseHint ? <p className="text-sm text-[#9BA8B4]">{wrongPhaseHint}</p> : null}
+
+          {launch.active_phase === 'AIRDROP' && elig?.reason === 'gen1_collection_not_configured' ? (
+            <p className="text-sm text-[#FF9C9C]">
+              Gen1 verification is not configured on the server (missing collection address). Contact Owl Center support.
+            </p>
+          ) : null}
+
+          {launch.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'not_gen1_holder' ? (
+            <p className="text-sm text-[#FF9C9C]">
+              No Owltopia Gen1 NFT detected on this connected wallet. Use the same wallet that holds your Gen1 on mainnet,
+              then refresh eligibility.
+            </p>
+          ) : null}
+
+          {launch.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'gen1_mint_limit' ? (
+            <p className="text-sm text-[#FF9C9C]">You have already minted your GEN1 allocation for this wallet.</p>
+          ) : null}
+
+          {launch.active_phase === 'PRESALE' && elig?.reason === 'gen1_phase_pending' ? (
+            <p className="text-sm text-[#9BA8B4]">
+              Presale redemption is not open yet — GEN1 mint runs first. Your paid presale spots stay reserved in Allocation
+              below until admin opens presale redemption.
+            </p>
+          ) : null}
+
+          {launch.active_phase === 'PRESALE' &&
+          elig?.presale_balance?.is_paid_participant &&
+          (elig.presale_balance.purchased_available_mints ?? 0) > 0 &&
+          elig.is_eligible ? (
+            <p className="text-sm text-[#9BA8B4]">
+              Presale redemption: mint up to{' '}
+              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your paid presale credits (
+              {elig.presale_balance.purchased_available_mints} left). Sign once per NFT.
+            </p>
+          ) : null}
+
+          {launch.active_phase === 'WHITELIST' && elig?.wl_allocation && elig.wl_allocation.available_mints > 0 ? (
+            <p className="text-sm text-[#9BA8B4]">
+              WL phase: mint up to{' '}
+              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your{' '}
+              {elig.wl_allocation.available_mints} assigned WL spot
+              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. Sign once per NFT.
+            </p>
+          ) : null}
+
           {launch.active_phase === 'WHITELIST' && elig && !elig.is_eligible ? (
-            <p className="text-sm text-[#FF9C9C]">This wallet is not on the whitelist.</p>
+            <p className="text-sm text-[#FF9C9C]">This wallet is not on the whitelist or has no WL spots left.</p>
           ) : null}
 
           {!cmConfigured ? (
-            <p className="font-mono text-xs text-[#FFD769]">
-              // TODO: Admin must set Candy Machine ID + collection mint (env or Owl Center admin). WL guard proofs still
-              TODO for strict gate.
-            </p>
+            <p className="text-xs text-[#FFD769]">Mint infrastructure is not fully configured yet — check back soon.</p>
           ) : null}
 
           <div className="flex flex-wrap items-end gap-4">
@@ -322,7 +403,6 @@ export function Gen2MintPanel({
             eligibility.
           </p>
         </div>
-      </CommandCard>
-    </div>
+    </CommandCard>
   )
 }

@@ -49,8 +49,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
   }
-  if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 10) {
-    return { ok: false, error: 'Invalid quantity (max 10 per run)' }
+  if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 25) {
+    return { ok: false, error: 'Invalid quantity (max 25 per transaction)' }
   }
 
   if (isDevnetMintEnabled() && getSolanaCluster().toLowerCase() !== 'devnet') {

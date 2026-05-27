@@ -24,13 +24,14 @@ export function AssetStepForm({
   return (
     <div className="grid gap-4">
       <p className="border border-[#C9A227]/35 bg-[#C9A227]/10 px-3 py-2 font-mono text-xs text-[#E8D089]">
-        Upload your final generated art and metadata package. Owl Center does not generate traits in V1.
+        Production path: Metaplex Sugar validate → upload → deploy (Arweave via Sugar), then paste bundle URLs here. Owl Center does
+        not generate traits or run CM deployment in V1.
       </p>
       <p className="font-mono text-xs text-[#9BA8B4]">
         Each NFT should have a matching image and metadata JSON file. Recommended naming:{' '}
         <span className="text-[#00FF9C]">0.png + 0.json</span>,{' '}
-        <span className="text-[#00FF9C]">1.png + 1.json</span>, etc. Paste package URLs or storage paths — folder upload ships when
-        storage is wired.
+        <span className="text-[#00FF9C]">1.png + 1.json</span>, etc. See{' '}
+        <span className="break-all text-[#7D8A93]">docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md</span> for the full workflow.
       </p>
       <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         Logo URL

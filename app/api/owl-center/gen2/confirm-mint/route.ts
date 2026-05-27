@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
 
 
-  if (!wallet || !SIG_REGEX.test(txSig) || !Number.isInteger(qty) || qty <= 0 || qty > 25) {
+  if (!wallet || !SIG_REGEX.test(txSig) || !Number.isInteger(qty) || qty <= 0) {
 
     return NextResponse.json({ error: 'Invalid wallet, signature, or quantity' }, { status: 400 })
 
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
 
 
-  const allowed: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'WHITELIST', 'PUBLIC']
+  const allowed: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC']
 
   if (!phase || !allowed.includes(phase)) {
 
@@ -181,6 +181,42 @@ export async function POST(request: NextRequest) {
     ? body.mintedNftMints.filter((x): x is string => typeof x === 'string' && x.length > 0)
 
     : []
+
+
+
+  const eligibilityPre = await buildGen2Eligibility(wallet)
+
+  if (!eligibilityPre) {
+
+    return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
+
+  }
+
+  if (eligibilityPre.active_phase !== phase) {
+
+    return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
+
+  }
+
+  const absQtyCap = 50
+
+  if (qty > absQtyCap) {
+
+    return NextResponse.json({ error: `Quantity cannot exceed ${absQtyCap} per transaction` }, { status: 400 })
+
+  }
+
+  if (!eligibilityPre.is_eligible || qty > eligibilityPre.max_mintable) {
+
+    return NextResponse.json(
+
+      { error: 'Not eligible for this mint quantity — refresh your allocation checker' },
+
+      { status: 400 }
+
+    )
+
+  }
 
 
 
@@ -258,6 +294,8 @@ export async function POST(request: NextRequest) {
 
       insufficient_wl_allocation: 'Insufficient whitelist allocation',
 
+      wl_pool_exhausted: 'WL phase mint cap reached',
+
       exceeds_supply: 'Would exceed total supply',
 
       launch_not_found: 'Launch not found',
@@ -265,6 +303,16 @@ export async function POST(request: NextRequest) {
       invalid_quantity: 'Invalid quantity',
 
       wallet_mint_limit: 'Wallet mint limit reached',
+
+      presale_pool_exhausted: 'Presale phase mint cap (657) reached',
+
+      not_presale_participant: 'This wallet did not pay during presale',
+
+      no_paid_presale_credits: 'No paid presale credits remaining on this wallet',
+
+      overage_pool_exhausted: 'All Presale+13 spots minted',
+
+      insufficient_overage_allocation: 'Not on Presale+13 list or no slots left',
 
       invalid_network: 'Invalid network',
 
