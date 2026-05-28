@@ -56,6 +56,15 @@ import {
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
 import { cn } from '@/lib/utils'
+import { RafflesBrowseToolbar } from '@/components/RafflesBrowseToolbar'
+import {
+  filterRafflesBrowseList,
+  hasActiveBrowseFilters,
+  prizeFilterFromSearchParam,
+  ticketCurrencyFilterFromSearchParam,
+  type RaffleBrowsePrizeFilter,
+  type RaffleBrowseTicketCurrencyFilter,
+} from '@/lib/raffles/filter-browse-raffles'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -329,6 +338,82 @@ export function RafflesPageClient({
 
   const searchParams = useSearchParams()
   const router = useRouter()
+  const [browseQuery, setBrowseQuery] = useState(() => searchParams.get('q') ?? '')
+  const [browseTicketCurrency, setBrowseTicketCurrency] = useState<RaffleBrowseTicketCurrencyFilter>(
+    () => ticketCurrencyFilterFromSearchParam(searchParams.get('currency'))
+  )
+  const [browsePrize, setBrowsePrize] = useState<RaffleBrowsePrizeFilter>(() =>
+    prizeFilterFromSearchParam(searchParams.get('prize'))
+  )
+
+  const browseFilters = useMemo(
+    () => ({ query: browseQuery, ticketCurrency: browseTicketCurrency, prize: browsePrize }),
+    [browseQuery, browseTicketCurrency, browsePrize]
+  )
+
+  const replaceBrowseFiltersInUrl = useCallback(
+    (next: {
+      query: string
+      ticketCurrency: RaffleBrowseTicketCurrencyFilter
+      prize: RaffleBrowsePrizeFilter
+    }) => {
+      const params = new URLSearchParams(searchParams.toString())
+      const q = next.query.trim()
+      if (q) params.set('q', q)
+      else params.delete('q')
+      if (next.ticketCurrency) params.set('currency', next.ticketCurrency)
+      else params.delete('currency')
+      if (next.prize) params.set('prize', next.prize)
+      else params.delete('prize')
+      const qs = params.toString()
+      router.replace(qs ? `/raffles?${qs}` : '/raffles', { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  useEffect(() => {
+    const urlQ = (searchParams.get('q') ?? '').trim()
+    const urlCur = ticketCurrencyFilterFromSearchParam(searchParams.get('currency'))
+    const urlPrize = prizeFilterFromSearchParam(searchParams.get('prize'))
+    if (browseQuery.trim() === urlQ && browseTicketCurrency === urlCur && browsePrize === urlPrize) return
+    const t = setTimeout(() => {
+      replaceBrowseFiltersInUrl({
+        query: browseQuery,
+        ticketCurrency: browseTicketCurrency,
+        prize: browsePrize,
+      })
+    }, 350)
+    return () => clearTimeout(t)
+  }, [browseQuery, browseTicketCurrency, browsePrize, searchParams, replaceBrowseFiltersInUrl])
+
+  const handleBrowseTicketCurrencyChange = useCallback(
+    (value: RaffleBrowseTicketCurrencyFilter) => {
+      setBrowseTicketCurrency(value)
+      replaceBrowseFiltersInUrl({ query: browseQuery, ticketCurrency: value, prize: browsePrize })
+    },
+    [browseQuery, browsePrize, replaceBrowseFiltersInUrl]
+  )
+
+  const handleBrowsePrizeChange = useCallback(
+    (value: RaffleBrowsePrizeFilter) => {
+      setBrowsePrize(value)
+      replaceBrowseFiltersInUrl({ query: browseQuery, ticketCurrency: browseTicketCurrency, prize: value })
+    },
+    [browseQuery, browseTicketCurrency, replaceBrowseFiltersInUrl]
+  )
+
+  const clearBrowseFilters = useCallback(() => {
+    setBrowseQuery('')
+    setBrowseTicketCurrency(null)
+    setBrowsePrize(null)
+    replaceBrowseFiltersInUrl({ query: '', ticketCurrency: null, prize: null })
+  }, [replaceBrowseFiltersInUrl])
+
+  const applyBrowseFilters = useCallback(
+    (items: RaffleWithEntries[]) => filterRafflesBrowseList(items, browseFilters),
+    [browseFilters]
+  )
+
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false)
@@ -738,6 +823,11 @@ export function RafflesPageClient({
     [active, isPartnerCommunityRaffle]
   )
 
+  const partnerFeaturedBrowse = useMemo(
+    () => applyBrowseFilters(partnerFeaturedActive),
+    [partnerFeaturedActive, applyBrowseFilters]
+  )
+
   const activeView = useMemo(() => filterRafflesForCurrentTab(active), [active, filterRafflesForCurrentTab])
   const pausedPendingView = useMemo(
     () => filterRafflesForCurrentTab(pausedPending),
@@ -745,6 +835,25 @@ export function RafflesPageClient({
   )
   const futureView = useMemo(() => filterRafflesForCurrentTab(future), [future, filterRafflesForCurrentTab])
   const pastView = useMemo(() => filterRafflesForCurrentTab(past), [past, filterRafflesForCurrentTab])
+
+  const activeBrowse = useMemo(() => applyBrowseFilters(activeView), [activeView, applyBrowseFilters])
+  const pausedPendingBrowse = useMemo(
+    () => applyBrowseFilters(pausedPendingView),
+    [pausedPendingView, applyBrowseFilters]
+  )
+  const futureBrowse = useMemo(() => applyBrowseFilters(futureView), [futureView, applyBrowseFilters])
+  const pastBrowse = useMemo(() => applyBrowseFilters(pastView), [pastView, applyBrowseFilters])
+
+  const isBrowseTab = tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains'
+  const browseTabTotalCount =
+    activeView.length + pausedPendingView.length + futureView.length + pastView.length
+  const browseTabResultCount =
+    activeBrowse.length + pausedPendingBrowse.length + futureBrowse.length + pastBrowse.length
+  const isEmptyBrowseFilter =
+    isBrowseTab &&
+    hasActiveBrowseFilters(browseFilters) &&
+    browseTabResultCount === 0 &&
+    browseTabTotalCount > 0
 
   const selectRafflesPageTab = useCallback(
     (next: RafflesPageTab) => {
@@ -1033,6 +1142,18 @@ export function RafflesPageClient({
             })}
           </div>
         </nav>
+        {(tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') && (
+          <RafflesBrowseToolbar
+            query={browseQuery}
+            onQueryChange={setBrowseQuery}
+            ticketCurrency={browseTicketCurrency}
+            onTicketCurrencyChange={handleBrowseTicketCurrencyChange}
+            prize={browsePrize}
+            onPrizeChange={handleBrowsePrizeChange}
+            resultCount={browseTabResultCount}
+            totalCount={browseTabTotalCount}
+          />
+        )}
       </div>
 
       {/* Error state: only blocks the All raffles tab; other tabs (e.g. Giveaways) still load their own data. */}
@@ -1410,7 +1531,7 @@ export function RafflesPageClient({
               )}
             </div>
           ) : (tab === 'all' || tab === 'partner-raffles' || tab === 'sol-domains') ? (
-            solDomainsOnly && isEmptyCurrentTabView ? (
+            solDomainsOnly && isEmptyCurrentTabView && !hasActiveBrowseFilters(browseFilters) ? (
               <div className="mb-8 sm:mb-12 w-full min-w-0">
                 <SolDomainsHubIntro />
                 <div className="text-center py-12 px-2">
@@ -1441,7 +1562,7 @@ export function RafflesPageClient({
                   )}
                 </div>
               </div>
-            ) : partnerOnly && isEmptyCurrentTabView ? (
+            ) : partnerOnly && isEmptyCurrentTabView && !hasActiveBrowseFilters(browseFilters) ? (
               <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
                 {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                   <p className="text-xl text-muted-foreground">Loading raffles…</p>
@@ -1485,11 +1606,26 @@ export function RafflesPageClient({
                   </>
                 )}
               </div>
+            ) : isEmptyBrowseFilter ? (
+              <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
+                <p className="text-xl text-muted-foreground mb-2">No raffles match your search</p>
+                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
+                  Try a different name or clear the ticket or prize filters. Search matches title, slug, collection,
+                  and promo handle.
+                </p>
+                <button
+                  type="button"
+                  onClick={clearBrowseFilters}
+                  className="rounded-md bg-primary px-4 py-3 sm:py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 touch-manipulation min-h-[44px]"
+                >
+                  Clear filters
+                </button>
+              </div>
             ) : (
             <>
               {solDomainsOnly && <SolDomainsHubIntro />}
-              {partnerOnly && partnerFeaturedActive.length > 0 && (
-                <PartnerRafflesCarousel items={partnerFeaturedActive} serverNow={serverTime} />
+              {partnerOnly && partnerFeaturedBrowse.length > 0 && (
+                <PartnerRafflesCarousel items={partnerFeaturedBrowse} serverNow={serverTime} />
               )}
               {partnerOnly && (
                 <p className="text-sm text-muted-foreground mb-4 max-w-2xl leading-relaxed">
@@ -1510,9 +1646,9 @@ export function RafflesPageClient({
                 </p>
               )}
           <div id="browse-active" className="scroll-mt-28 mb-8 sm:mb-12 w-full min-w-0">
-            {activeView.length > 0 ? (
+            {activeBrowse.length > 0 ? (
                 <RafflesList
-                  rafflesWithEntries={activeView}
+                  rafflesWithEntries={activeBrowse}
                   title={
                     solDomainsOnly ? 'Live .sol raffles' : partnerOnly ? 'Active partner raffles' : 'Active Raffles'
                   }
@@ -1540,9 +1676,9 @@ export function RafflesPageClient({
           </div>
 
           <div id="browse-upcoming" className="scroll-mt-28 mb-8 sm:mb-12">
-            {futureView.length > 0 ? (
+            {futureBrowse.length > 0 ? (
                 <RafflesList
-                  rafflesWithEntries={futureView}
+                  rafflesWithEntries={futureBrowse}
                   title={
                     solDomainsOnly ? 'Upcoming .sol raffles' : partnerOnly ? 'Upcoming partner raffles' : 'Future Raffles'
                   }
@@ -1569,9 +1705,9 @@ export function RafflesPageClient({
           </div>
 
           <div id="browse-pending" className="scroll-mt-28 mb-8 sm:mb-12">
-            {pausedPendingView.length > 0 ? (
+            {pausedPendingBrowse.length > 0 ? (
                 <RafflesList
-                  rafflesWithEntries={pausedPendingView}
+                  rafflesWithEntries={pausedPendingBrowse}
                   title={
                     solDomainsOnly
                       ? 'Pending .sol raffles'
@@ -1609,16 +1745,16 @@ export function RafflesPageClient({
             )}
           </div>
 
-          {pastView.length > 0 && (
+          {pastBrowse.length > 0 && (
             <div id="browse-past" className="scroll-mt-28 mb-8 sm:mb-12 w-full min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">
                 {solDomainsOnly ? 'Past .sol raffles' : partnerOnly ? 'Past partner raffles' : 'Past Raffles'}
               </h2>
-              {pastView.length > 3 ? (
-                <PastRafflesCarousel items={pastView} partnerWalletSet={partnerWalletSet} />
+              {pastBrowse.length > 3 ? (
+                <PastRafflesCarousel items={pastBrowse} partnerWalletSet={partnerWalletSet} />
               ) : (
                 <RafflesList
-                  rafflesWithEntries={pastView}
+                  rafflesWithEntries={pastBrowse}
                   title={undefined}
                   section="past"
                   serverNow={serverTime}
@@ -1629,7 +1765,7 @@ export function RafflesPageClient({
           )}
 
           {/* Empty state on Main tab when this tab’s filtered buckets are all empty. */}
-          {isEmptyFilteredMainView && (
+          {isEmptyFilteredMainView && !hasActiveBrowseFilters(browseFilters) && (
             <div className="text-center py-16">
               {clientFetchStarted && !clientBuckets && !clientFetchError ? (
                 <p className="text-xl text-muted-foreground">Loading raffles…</p>
