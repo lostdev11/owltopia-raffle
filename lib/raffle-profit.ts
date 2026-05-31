@@ -1,5 +1,6 @@
 import type { Raffle, Entry } from '@/lib/types'
 import {
+  computeNftMinTicketsFromFloorAndTicket,
   getEffectiveDrawThresholdTickets,
   lenientParseNftFloorAmount,
   parseNftFloorPrice,
@@ -260,6 +261,114 @@ export function previewCreateRaffleThreshold(draft: CreateRaffleThresholdDraft):
     sol_domains_hub: false,
   } as Raffle
   return getRaffleThreshold(synthetic)
+}
+
+function formatThresholdExplainAmount(value: number, currency: RaffleCurrency): string {
+  const decimals = currency === 'USDC' ? 2 : 4
+  return `${value.toFixed(decimals)} ${currency}`
+}
+
+/** Creator-facing preview on the create-raffle form (mirrors saved raffle rules). */
+export type CreateRaffleThresholdCreatorCopy = {
+  ready: boolean
+  /** Shown when required fields are still missing. */
+  intro: string
+  /** e.g. "Minimum tickets to draw: about 50" */
+  minTicketsLine: string | null
+  /** e.g. "Sales goal on your raffle page: 2.5 SOL" */
+  salesGoalLine: string | null
+  footnote: string | null
+}
+
+function formatPrizeAmountForCreator(value: number, currencyCode: string): string {
+  const c = currencyCode.toUpperCase()
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO') {
+    return formatThresholdExplainAmount(value, c as RaffleCurrency)
+  }
+  const decimals = Number.isInteger(value) ? 0 : 4
+  return `${value.toFixed(decimals)} ${c}`
+}
+
+/**
+ * Plain-language copy for creators — mirrors {@link previewCreateRaffleThreshold}.
+ */
+export function explainCreateRaffleThreshold(draft: CreateRaffleThresholdDraft): CreateRaffleThresholdCreatorCopy {
+  const cur = normalizeRaffleTicketCurrency(draft.ticketCurrency)
+  const tp = draft.ticketPrice
+  const footnoteSurplus =
+    'Only confirmed ticket purchases count. Sales above the goal show as extra on your public raffle page.'
+
+  if (draft.prizeMode === 'nft') {
+    const floorParsed = parseNftFloorPrice(draft.floorPriceInput)
+    if (!floorParsed.ok || tp == null || !Number.isFinite(tp) || tp <= 0) {
+      return {
+        ready: false,
+        intro:
+          'Enter your prize value and ticket price below — we will show how many tickets you need to sell and the sales goal buyers will see.',
+        minTicketsLine: null,
+        salesGoalLine: null,
+        footnote: null,
+      }
+    }
+    const drawGoal = computeNftMinTicketsFromFloorAndTicket(floorParsed.value, tp)
+    const preview = previewCreateRaffleThreshold(draft)
+    const salesGoal =
+      preview != null
+        ? formatThresholdExplainAmount(preview.value, preview.currency)
+        : formatThresholdExplainAmount(floorParsed.value, cur)
+    return {
+      ready: true,
+      intro: '',
+      minTicketsLine: `Minimum tickets to draw: about ${drawGoal.toLocaleString()} confirmed sales`,
+      salesGoalLine: `Sales goal on your raffle page: ${salesGoal}`,
+      footnote: footnoteSurplus,
+    }
+  }
+
+  const min = draft.partnerMinTickets
+  const prizeAmt = draft.partnerPrizeAmount
+  const prizeCur = (draft.partnerPrizeCurrency || '').trim().toUpperCase() || cur
+
+  if (prizeAmt != null && Number.isFinite(prizeAmt) && prizeAmt > 0) {
+    const minLine =
+      min != null && min > 0
+        ? `Minimum tickets to draw: ${min.toLocaleString()} confirmed sales`
+        : null
+    return {
+      ready: true,
+      intro: '',
+      minTicketsLine: minLine,
+      salesGoalLine: `Sales goal on your raffle page: ${formatPrizeAmountForCreator(prizeAmt, prizeCur)}`,
+      footnote: minLine
+        ? `${footnoteSurplus} The sales goal follows your prize amount; the ticket minimum is what you set above.`
+        : footnoteSurplus,
+    }
+  }
+
+  if (min != null && min > 0 && tp != null && Number.isFinite(tp) && tp > 0) {
+    const preview = previewCreateRaffleThreshold(draft)
+    const salesGoal =
+      preview != null
+        ? formatThresholdExplainAmount(preview.value, preview.currency)
+        : formatThresholdExplainAmount(min * tp, cur)
+    return {
+      ready: true,
+      intro: '',
+      minTicketsLine: `Minimum tickets to draw: ${min.toLocaleString()} confirmed sales`,
+      salesGoalLine: `Sales goal on your raffle page: ${salesGoal}`,
+      footnote:
+        'The sales goal is your minimum tickets times ticket price. Fill in prize amount above if you want the goal to match the prize instead.',
+    }
+  }
+
+  return {
+    ready: false,
+    intro:
+      'Add your prize amount and minimum tickets (and ticket price below) — we will show your draw minimum and the sales goal on the public page.',
+    minTicketsLine: null,
+    salesGoalLine: null,
+    footnote: null,
+  }
 }
 
 /**

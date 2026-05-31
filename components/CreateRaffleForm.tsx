@@ -41,13 +41,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
-import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import {
   getThemeAccentBorderStyle,
   getThemeAccentClasses,
   THEME_ACCENT_SELECT_OPTIONS,
 } from '@/lib/theme-accent'
+import { DateTimePicker } from '@/components/DateTimePicker'
 import { formatDateTimeWithTimezone, localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import type { DuplicateNftPrizeConflictReason } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
@@ -73,10 +73,11 @@ import {
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { explainCreateRaffleThreshold } from '@/lib/raffle-profit'
 import {
-  normalizeRaffleTicketCurrency,
-  previewCreateRaffleThreshold,
-} from '@/lib/raffle-profit'
+  buildCreateRaffleFeeCopy,
+  type PlatformFeeReason,
+} from '@/lib/raffles/creator-fee-copy'
 import { isOwlEnabled } from '@/lib/tokens'
 import {
   BAMBOO_TICKET_CURRENCY,
@@ -133,7 +134,6 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
   // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
   // causing raffles to start/end earlier or later than intended.
@@ -176,6 +176,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
   /** Active `partner_community_creators` wallet — unlocks extra SPL prize tickers beyond SOL/USDC. */
   const [isPartnerCommunityCreator, setIsPartnerCommunityCreator] = useState(false)
+  const [platformFeeBps, setPlatformFeeBps] = useState<number | null>(null)
+  const [platformFeeReason, setPlatformFeeReason] = useState<PlatformFeeReason | null>(null)
+  const [platformFeeTierLoaded, setPlatformFeeTierLoaded] = useState(false)
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
@@ -270,11 +273,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       setCanSetLinkOnlyVisibility(false)
       setPartnerDiscordLinked(false)
       setIsPartnerCommunityCreator(false)
+      setPlatformFeeBps(null)
+      setPlatformFeeReason(null)
+      setPlatformFeeTierLoaded(false)
       setHideFromPublicBrowse(false)
       return
     }
     let cancelled = false
-    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+    setPlatformFeeTierLoaded(false)
+    const walletParam = publicKey.toBase58()
+    fetch(
+      `/api/raffles/visibility-options?wallet=${encodeURIComponent(walletParam)}`,
+      { credentials: 'include' }
+    )
       .then((r) => (cancelled || !r.ok ? null : r.json()))
       .then(
         (
@@ -282,13 +293,28 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             canSetLinkOnly?: boolean
             partnerDiscordLinked?: boolean
             isPartnerCommunityCreator?: boolean
+            platformFeeBps?: number | null
+            platformFeeReason?: PlatformFeeReason | null
           } | null
         ) => {
-          if (cancelled || !d) return
+          if (cancelled) return
+          if (!d) {
+            setPlatformFeeTierLoaded(true)
+            return
+          }
           const ok = d.canSetLinkOnly === true
           setCanSetLinkOnlyVisibility(ok)
           setPartnerDiscordLinked(d.partnerDiscordLinked === true)
           setIsPartnerCommunityCreator(d.isPartnerCommunityCreator === true)
+          const bps = d.platformFeeBps
+          setPlatformFeeBps(typeof bps === 'number' && Number.isFinite(bps) ? bps : null)
+          const reason = d.platformFeeReason
+          setPlatformFeeReason(
+            reason === 'holder' || reason === 'standard' || reason === 'partner_community'
+              ? reason
+              : null
+          )
+          setPlatformFeeTierLoaded(true)
           if (!ok) setHideFromPublicBrowse(false)
           if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
             setHideFromPublicBrowse(true)
@@ -301,6 +327,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           setCanSetLinkOnlyVisibility(false)
           setPartnerDiscordLinked(false)
           setIsPartnerCommunityCreator(false)
+          setPlatformFeeBps(null)
+          setPlatformFeeReason(null)
+          setPlatformFeeTierLoaded(true)
           setHideFromPublicBrowse(false)
         }
       })
@@ -308,6 +337,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       cancelled = true
     }
   }, [connected, publicKey, partnerCreateMode, snsDomainHubFlow])
+
+  const createRaffleFeeCopy = useMemo(
+    () =>
+      buildCreateRaffleFeeCopy({
+        connected: connected && !!publicKey,
+        feeTierLoaded: platformFeeTierLoaded,
+        feeBps: platformFeeBps ?? undefined,
+        feeReason: platformFeeReason ?? undefined,
+      }),
+    [connected, publicKey, platformFeeTierLoaded, platformFeeBps, platformFeeReason]
+  )
 
   /**
    * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
@@ -376,27 +416,27 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     return p.ok ? p.value : null
   }, [ticketPrice])
 
-  const thresholdPreview = useMemo(() => {
-    return previewCreateRaffleThreshold({
+  const thresholdExplain = useMemo(
+    () =>
+      explainCreateRaffleThreshold({
+        prizeMode,
+        ticketCurrency: raffleCurrency,
+        ticketPrice: ticketPriceParsedForPreview,
+        floorPriceInput: floorPrice,
+        partnerMinTickets: prizeMode === 'token' ? partnerMinTicketsParsed : null,
+        partnerPrizeAmount: prizeMode === 'token' ? partnerPrizeAmountParsed : null,
+        partnerPrizeCurrency: tokenPrizeCurrency,
+      }),
+    [
       prizeMode,
-      ticketCurrency: raffleCurrency,
-      ticketPrice: ticketPriceParsedForPreview,
-      floorPriceInput: floorPrice,
-      partnerMinTickets: prizeMode === 'token' ? partnerMinTicketsParsed : null,
-      partnerPrizeAmount: prizeMode === 'token' ? partnerPrizeAmountParsed : null,
-      partnerPrizeCurrency: tokenPrizeCurrency,
-    })
-  }, [
-    prizeMode,
-    raffleCurrency,
-    ticketPriceParsedForPreview,
-    floorPrice,
-    partnerMinTicketsParsed,
-    partnerPrizeAmountParsed,
-    tokenPrizeCurrency,
-  ])
-
-  const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
+      raffleCurrency,
+      ticketPriceParsedForPreview,
+      floorPrice,
+      partnerMinTicketsParsed,
+      partnerPrizeAmountParsed,
+      tokenPrizeCurrency,
+    ]
+  )
 
   /** TRQ, CANE, etc. — only admins + partner-community wallets; SOL/USDC stay open to all creators. */
   const canSelectPartnerPrizeTokens = viewerIsAdmin === true || isPartnerCommunityCreator
@@ -466,22 +506,6 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
   }
 
-  const handlePresetSelect = (presetName: string) => {
-    const preset = NIGHT_MODE_PRESETS.find(p => p.name === presetName)
-    if (preset) {
-      setSelectedPreset(presetName)
-      setThemeAccent(preset.themeAccent)
-      const presetEndTime = preset.getEndTime()
-      // Convert the Date object (which is in local time) to datetime-local format
-      const year = presetEndTime.getFullYear()
-      const month = String(presetEndTime.getMonth() + 1).padStart(2, '0')
-      const day = String(presetEndTime.getDate()).padStart(2, '0')
-      const hours = String(presetEndTime.getHours()).padStart(2, '0')
-      const minutes = String(presetEndTime.getMinutes()).padStart(2, '0')
-      setEndTime(`${year}-${month}-${day}T${hours}:${minutes}`)
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
@@ -536,7 +560,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       return
     }
     if (!endTime?.trim()) {
-      alert('Please set an end time, or tap a Night Mode preset (Midnight / Dawn / Prime Time) to fill dates.')
+      alert('Please set an end time for your raffle.')
       focusFormField('end_time')
       return
     }
@@ -1621,6 +1645,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   value={partnerMinTickets}
                   onChange={(e) => setPartnerMinTickets(e.target.value)}
                 />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  How many confirmed tickets must sell before a winner can be drawn after the raffle ends.
+                </p>
               </div>
             </div>
           )}
@@ -1833,6 +1860,24 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                <Input
+                  id="floor_price"
+                  name="floor_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={floorPrice ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setFloorPrice(v)
+                    applyFloorToTicketAutofill(v)
+                  }}
+                  placeholder="e.g., 0.25 or 5.5 (same as currency above)"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="ticket_price">Ticket price *</Label>
                 <Input
                   id="ticket_price"
@@ -1851,45 +1896,40 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   }}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="floor_price">Floor price (prize value) *</Label>
-                <Input
-                  id="floor_price"
-                  name="floor_price"
-                  type="text"
-                  inputMode="decimal"
-                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
-                  value={floorPrice ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setFloorPrice(v)
-                    applyFloorToTicketAutofill(v)
-                  }}
-                  placeholder="e.g., 0.25 or 5.5 (same as currency above)"
-                  required
-                />
-              </div>
             </div>
-            {thresholdPreview != null && (
-              <div
-                className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="text-xs text-muted-foreground">{thresholdPreviewLabel}</p>
-                <p className="text-sm font-semibold tabular-nums">
-                  {thresholdPreview.value.toFixed(
-                    normalizeRaffleTicketCurrency(thresholdPreview.currency) === 'USDC' ? 2 : 4
-                  )}{' '}
-                  {normalizeRaffleTicketCurrency(thresholdPreview.currency)}
+            <div
+              className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4 space-y-2"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm font-medium text-foreground">Your raffle goals</p>
+              {!thresholdExplain.ready ? (
+                <p className="text-xs text-muted-foreground leading-relaxed">{thresholdExplain.intro}</p>
+              ) : (
+                <ul className="text-sm text-foreground space-y-1.5 list-none pl-0">
+                  {thresholdExplain.minTicketsLine ? (
+                    <li className="leading-snug">{thresholdExplain.minTicketsLine}</li>
+                  ) : null}
+                  {thresholdExplain.salesGoalLine ? (
+                    <li className="leading-snug font-medium tabular-nums">{thresholdExplain.salesGoalLine}</li>
+                  ) : null}
+                </ul>
+              )}
+              {thresholdExplain.footnote ? (
+                <p className="text-xs text-muted-foreground leading-relaxed">{thresholdExplain.footnote}</p>
+              ) : null}
+            </div>
+            <div className="rounded-lg border border-border/80 bg-background/50 px-3 py-2.5 sm:px-4 space-y-1.5">
+              <p className="text-sm font-medium text-foreground">{createRaffleFeeCopy.heading}</p>
+              {createRaffleFeeCopy.lines.map((line) => (
+                <p key={line} className="text-xs text-muted-foreground leading-relaxed">
+                  {line}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {prizeMode === 'nft'
-                    ? 'Ticket revenue past this bar counts as surplus on the raffle page (same rule after you publish).'
-                    : 'Matches the threshold shown on the live raffle once ticket sales start.'}
-                </p>
-              </div>
-            )}
+              ))}
+              {createRaffleFeeCopy.yourRate ? (
+                <p className="text-xs font-medium text-foreground pt-0.5">{createRaffleFeeCopy.yourRate}</p>
+              ) : null}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1995,36 +2035,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             </div>
           )}
 
-          <div className="space-y-4">
-            <Label>Night Mode Presets (optional)</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {NIGHT_MODE_PRESETS.map(preset => (
-                <Button
-                  key={preset.name}
-                  type="button"
-                  variant={selectedPreset === preset.name ? 'default' : 'outline'}
-                  onClick={() => handlePresetSelect(preset.name)}
-                  className="flex flex-col h-auto py-3 min-h-[60px] touch-manipulation"
-                >
-                  <span className="font-semibold text-sm sm:text-base">{preset.label}</span>
-                  <span className="text-xs opacity-80">{preset.description}</span>
-                </Button>
-              ))}
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="start_time">Start Time *</Label>
-              <div className="flex gap-2">
-                <Input
+              <div className="flex gap-2 items-start">
+                <DateTimePicker
                   id="start_time"
                   name="start_time"
-                  type="datetime-local"
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={setStartTime}
                   required
-                  className="text-base sm:text-sm flex-1"
+                  datePlaceholder="Choose start date"
                 />
                 <Button
                   type="button"
@@ -2039,7 +2060,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     setStartTime(`${year}-${month}-${day}T${hours}:${minutes}`)
                   }}
                   title="Set to current time"
-                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
+                  className="touch-manipulation min-h-[44px] shrink-0 px-3 sm:px-4"
                 >
                   Now
                 </Button>
@@ -2047,22 +2068,25 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             </div>
             <div className="space-y-2">
               <Label htmlFor="end_time">End Time * (Max 7 days from start)</Label>
-              <div className="flex gap-2">
-                <Input
+              <div className="flex gap-2 items-start">
+                <DateTimePicker
                   id="end_time"
                   name="end_time"
-                  type="datetime-local"
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={setEndTime}
                   required
-                  className="text-base sm:text-sm flex-1"
-                  max={startTime ? (() => {
-                    // Build max in local time, but base calculations on the UTC conversion to avoid browser parsing quirks.
-                    const startUtc = localDateTimeToUtc(startTime)
-                    const maxUtc = new Date(startUtc)
-                    maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
-                    return utcToLocalDateTime(maxUtc.toISOString())
-                  })() : undefined}
+                  datePlaceholder="Choose end date"
+                  min={startTime || undefined}
+                  max={
+                    startTime
+                      ? (() => {
+                          const startUtc = localDateTimeToUtc(startTime)
+                          const maxUtc = new Date(startUtc)
+                          maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
+                          return utcToLocalDateTime(maxUtc.toISOString())
+                        })()
+                      : undefined
+                  }
                 />
                 <Button
                   type="button"
@@ -2074,7 +2098,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     setEndTime(utcToLocalDateTime(maxUtc.toISOString()))
                   }}
                   title="Set to 7 days from start"
-                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
+                  className="touch-manipulation min-h-[44px] shrink-0 px-3 sm:px-4"
                 >
                   Max
                 </Button>
