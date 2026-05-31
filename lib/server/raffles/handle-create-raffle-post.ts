@@ -6,6 +6,7 @@ import {
   findNonTerminalNftRaffleByPrizeAssetId,
   findNonTerminalPartnerCryptoRaffleByCreator,
   generateUniqueSlug,
+  getRaffleById,
   getRaffleCreationCountForCreatorToday,
 } from '@/lib/db/raffles'
 import { requireSession } from '@/lib/auth-server'
@@ -29,6 +30,10 @@ import {
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
+import {
+  buildDuplicatePartnerCryptoPrizeConflictBody,
+  shouldBlockPartnerCryptoDuplicateCreate,
+} from '@/lib/raffles/duplicate-partner-crypto-prize-conflict'
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
@@ -502,14 +507,20 @@ export async function handleCreateRafflePost(
           'supabase error'
         )
         if (existingPartner) {
-          return NextResponse.json(
-            {
-              error:
-                'You already have an active SPL token prize raffle. Finish or cancel it before starting another with the same prize token.',
-              existing_slug: existingPartner.slug,
-            },
-            { status: 409 }
+          const existingRaffle = await withTimeout(
+            getRaffleById(existingPartner.id),
+            SUPABASE_TIMEOUT_MS,
+            'supabase error'
           )
+          if (
+            existingRaffle &&
+            (await shouldBlockPartnerCryptoDuplicateCreate(existingRaffle))
+          ) {
+            return NextResponse.json(
+              buildDuplicatePartnerCryptoPrizeConflictBody(existingRaffle),
+              { status: 409 }
+            )
+          }
         }
       }
 

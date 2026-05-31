@@ -130,6 +130,8 @@ export default function AdminDashboardPage() {
   const [orphanRefundTx, setOrphanRefundTx] = useState('')
   const [orphanRefundWallet, setOrphanRefundWallet] = useState('')
   const [orphanRefundSlug, setOrphanRefundSlug] = useState('')
+  const [orphanRefundEntryId, setOrphanRefundEntryId] = useState('')
+  const [orphanRefundCandidateIds, setOrphanRefundCandidateIds] = useState<string[]>([])
   const [orphanRefunding, setOrphanRefunding] = useState(false)
   const [orphanRefundResult, setOrphanRefundResult] = useState<{
     ok?: boolean
@@ -138,6 +140,15 @@ export default function AdminDashboardPage() {
     currency?: string
     error?: string
     note?: string
+    entryIds?: string[]
+  } | null>(null)
+  const [orphanRecordEntryId, setOrphanRecordEntryId] = useState('')
+  const [orphanRecordRefundTx, setOrphanRecordRefundTx] = useState('')
+  const [orphanRecordSaving, setOrphanRecordSaving] = useState(false)
+  const [orphanRecordResult, setOrphanRecordResult] = useState<{
+    ok?: boolean
+    error?: string
+    refundTransactionSignature?: string
   } | null>(null)
 
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
@@ -1212,6 +1223,7 @@ export default function AdminDashboardPage() {
 
     setOrphanRefunding(true)
     setOrphanRefundResult(null)
+    setOrphanRefundCandidateIds([])
     try {
       const response = await fetch('/api/admin/orphan-payment-refund', {
         method: 'POST',
@@ -1221,19 +1233,55 @@ export default function AdminDashboardPage() {
           transactionSignature: orphanRefundTx.trim(),
           walletAddress: orphanRefundWallet.trim(),
           raffleSlug: orphanRefundSlug.trim(),
+          ...(orphanRefundEntryId.trim() ? { entryId: orphanRefundEntryId.trim() } : {}),
         }),
       })
       const data = await response.json()
       if (!response.ok) {
-        setOrphanRefundResult({ ok: false, error: data.error || data.message || 'Refund failed' })
+        const ids = Array.isArray(data.entryIds) ? (data.entryIds as string[]) : []
+        if (ids.length > 0) {
+          setOrphanRefundCandidateIds(ids)
+          if (ids.length === 1) setOrphanRefundEntryId(ids[0]!)
+        }
+        setOrphanRefundResult({ ok: false, error: data.error || data.message || 'Refund failed', entryIds: ids })
       } else {
         setOrphanRefundResult(data)
         setOrphanRefundTx('')
+        setOrphanRefundCandidateIds([])
       }
     } catch {
       setOrphanRefundResult({ ok: false, error: 'Network error' })
     } finally {
       setOrphanRefunding(false)
+    }
+  }
+
+  const handleRecordOrphanRefund = async () => {
+    if (!orphanRecordEntryId.trim() || !orphanRecordRefundTx.trim()) return
+
+    setOrphanRecordSaving(true)
+    setOrphanRecordResult(null)
+    try {
+      const response = await fetch('/api/admin/record-orphan-refund', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entryId: orphanRecordEntryId.trim(),
+          refundTransactionSignature: orphanRecordRefundTx.trim(),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        setOrphanRecordResult({ ok: false, error: data.error || 'Failed to record refund' })
+      } else {
+        setOrphanRecordResult({ ok: true, refundTransactionSignature: data.refundTransactionSignature })
+        setOrphanRecordRefundTx('')
+      }
+    } catch {
+      setOrphanRecordResult({ ok: false, error: 'Network error' })
+    } finally {
+      setOrphanRecordSaving(false)
     }
   }
 
@@ -3088,6 +3136,26 @@ export default function AdminDashboardPage() {
                     disabled={orphanRefunding}
                   />
                 </div>
+                <div>
+                  <Label htmlFor="orphan-refund-entry-id">Entry ID (if multiple matches)</Label>
+                  <Input
+                    id="orphan-refund-entry-id"
+                    className="font-mono text-xs mt-1"
+                    placeholder="9a016e4e-9207-4ff1-b81c-5c030aae4e0c"
+                    value={orphanRefundEntryId}
+                    onChange={e => {
+                      setOrphanRefundEntryId(e.target.value)
+                      setOrphanRefundResult(null)
+                    }}
+                    disabled={orphanRefunding}
+                  />
+                  {orphanRefundCandidateIds.length > 1 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Matching entries: {orphanRefundCandidateIds.map(id => id.slice(0, 8) + '…').join(', ')}. Use the
+                      3-ticket / 0.024 SOL row from the purchase time.
+                    </p>
+                  )}
+                </div>
                 <Button
                   type="button"
                   variant="secondary"
@@ -3128,6 +3196,74 @@ export default function AdminDashboardPage() {
                 {orphanRefundResult?.note && (
                   <p className="text-xs text-muted-foreground">{orphanRefundResult.note}</p>
                 )}
+
+                <div className="pt-3 border-t border-border/60 space-y-3">
+                  <p className="text-sm font-semibold">Record refund from your wallet</p>
+                  <p className="text-xs text-muted-foreground">
+                    After you send 0.024 SOL (or the ticket total) to the buyer from Phantom/your wallet, paste your
+                    refund TX and the entry ID here so the database shows refunded.
+                  </p>
+                  <div>
+                    <Label htmlFor="orphan-record-entry-id">Entry ID</Label>
+                    <Input
+                      id="orphan-record-entry-id"
+                      className="font-mono text-xs mt-1"
+                      placeholder="9a016e4e-9207-4ff1-b81c-5c030aae4e0c"
+                      value={orphanRecordEntryId}
+                      onChange={e => {
+                        setOrphanRecordEntryId(e.target.value)
+                        setOrphanRecordResult(null)
+                      }}
+                      disabled={orphanRecordSaving}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="orphan-record-refund-tx">Your refund TX signature</Label>
+                    <Input
+                      id="orphan-record-refund-tx"
+                      className="font-mono text-sm mt-1"
+                      placeholder="Solscan link or signature after you sent SOL to buyer"
+                      value={orphanRecordRefundTx}
+                      onChange={e => {
+                        setOrphanRecordRefundTx(e.target.value)
+                        setOrphanRecordResult(null)
+                      }}
+                      disabled={orphanRecordSaving}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={orphanRecordSaving || !orphanRecordEntryId.trim() || !orphanRecordRefundTx.trim()}
+                    onClick={handleRecordOrphanRefund}
+                    className="touch-manipulation min-h-[44px]"
+                  >
+                    {orphanRecordSaving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving…
+                      </>
+                    ) : (
+                      'Record manual refund'
+                    )}
+                  </Button>
+                  {orphanRecordResult?.ok && orphanRecordResult.refundTransactionSignature && (
+                    <p className="text-sm text-green-600 dark:text-green-400">
+                      Refund recorded.{' '}
+                      <a
+                        href={`https://solscan.io/tx/${orphanRecordResult.refundTransactionSignature}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        View on Solscan
+                      </a>
+                    </p>
+                  )}
+                  {orphanRecordResult?.error && (
+                    <p className="text-sm text-destructive">{orphanRecordResult.error}</p>
+                  )}
+                </div>
               </div>
 
               {verifyResult && (

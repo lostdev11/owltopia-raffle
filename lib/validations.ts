@@ -41,6 +41,12 @@ export const adminOrphanPaymentRefundBody = z.object({
   entryId: z.string().uuid().optional(),
 })
 
+/** Full admin: after sending refund from your own wallet for an orphan/rejected ticket row. */
+export const adminRecordOrphanRefundBody = z.object({
+  entryId: z.string().uuid(),
+  refundTransactionSignature: z.string().min(80).max(120),
+})
+
 /** Paid cart checkout: one or more pending rows and merged payment splits (one Solana tx). */
 export const entriesCreateBatchBody = z.object({
   walletAddress: solanaAddress,

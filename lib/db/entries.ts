@@ -1085,6 +1085,39 @@ export async function markEntriesRefundedManual(
   return { updatedIds }
 }
 
+/**
+ * Full admin: record manual refund for pending/rejected/confirmed rows (orphan payments never confirmed).
+ */
+export async function markOrphanEntryRefundedManual(
+  entryId: string,
+  refundTransactionSignature: string
+): Promise<{ updated: boolean }> {
+  const id = entryId.trim()
+  const sig = refundTransactionSignature.trim()
+  if (!id || sig.length < 80) return { updated: false }
+
+  const now = new Date().toISOString()
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .update({
+      refunded_at: now,
+      refund_transaction_signature: sig,
+      refund_lock_started_at: null,
+    })
+    .eq('id', id)
+    .in('status', ['pending', 'rejected', 'confirmed'])
+    .is('refunded_at', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error('markOrphanEntryRefundedManual:', error)
+    throw new Error(`Failed to mark entry refunded: ${error.message}`)
+  }
+
+  return { updated: !!data?.id }
+}
+
 /** Cap how many matching entry rows we scan when aggregating by raffle (dashboard list). */
 const PENDING_MANUAL_REFUND_ENTRY_SCAN_LIMIT = 25_000
 
