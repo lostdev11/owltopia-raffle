@@ -269,7 +269,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [connected, publicKey])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !connected) {
+    if (typeof window === 'undefined' || !connected || !publicKey) {
       setCanSetLinkOnlyVisibility(false)
       setPartnerDiscordLinked(false)
       setIsPartnerCommunityCreator(false)
