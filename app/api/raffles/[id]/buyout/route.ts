@@ -88,7 +88,6 @@ export async function GET(
       eligible,
       reason,
       depositWallet,
-      treasuryWallet: depositWallet,
       buyoutFeeBps: 100,
       winnerWallet: raffle.winner_wallet?.trim() ?? null,
       buyoutClosedAt: raffle.buyout_closed_at ?? null,

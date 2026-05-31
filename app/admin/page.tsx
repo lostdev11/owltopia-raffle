@@ -151,6 +151,61 @@ export default function AdminDashboardPage() {
     refundTransactionSignature?: string
   } | null>(null)
 
+  const [buyoutRecordResult, setBuyoutRecordResult] = useState<{
+    ok?: boolean
+    error?: string
+    refundTransactionSignature?: string
+    amount?: number
+    currency?: string
+    bidderWallet?: string
+  } | null>(null)
+
+  type WalletRefundLookupData = {
+    wallet: string
+    ticketEscrow: Array<{
+      entryId: string
+      raffleTitle: string
+      raffleSlug: string
+      amount: number
+      currency: string
+      raffleStatus: string
+    }>
+    buyoutEscrow: Array<{
+      offerId: string
+      raffleTitle: string
+      raffleSlug: string
+      amount: number
+      currency: string
+      offerStatus: string
+    }>
+    buyoutTreasury: Array<{
+      offerId: string
+      raffleTitle: string
+      raffleSlug: string
+      amount: number
+      currency: string
+      offerStatus: string
+    }>
+    summary?: {
+      escrowRefundableCount: number
+      treasuryBuyoutCount: number
+      hasAnything: boolean
+    }
+  }
+  const [walletRefundLookupInput, setWalletRefundLookupInput] = useState('')
+  const [walletRefundLookupLoading, setWalletRefundLookupLoading] = useState(false)
+  const [walletRefundLookupData, setWalletRefundLookupData] = useState<WalletRefundLookupData | null>(null)
+  const [walletRefundLookupError, setWalletRefundLookupError] = useState<string | null>(null)
+  const [walletRefundSending, setWalletRefundSending] = useState(false)
+  const [walletRefundSendResult, setWalletRefundSendResult] = useState<{
+    ok?: boolean
+    error?: string
+    okCount?: number
+    requestedCount?: number
+  } | null>(null)
+  const [treasuryBuyoutRecordTx, setTreasuryBuyoutRecordTx] = useState<Record<string, string>>({})
+  const [treasuryBuyoutRecordSavingId, setTreasuryBuyoutRecordSavingId] = useState<string | null>(null)
+
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
     message?: string
@@ -1282,6 +1337,121 @@ export default function AdminDashboardPage() {
       setOrphanRecordResult({ ok: false, error: 'Network error' })
     } finally {
       setOrphanRecordSaving(false)
+    }
+  }
+
+  const handleRecordBuyoutRefund = async (offerId: string, refundTx: string) => {
+    const trimmedOfferId = offerId.trim()
+    const trimmedTx = refundTx.trim()
+    if (!trimmedOfferId || !trimmedTx) return
+
+    setTreasuryBuyoutRecordSavingId(trimmedOfferId)
+    setBuyoutRecordResult(null)
+    try {
+      const response = await fetch(
+        `/api/admin/buyout-offers/${encodeURIComponent(trimmedOfferId)}/record-refund`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            refundTransactionSignature: trimmedTx,
+          }),
+        }
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        setBuyoutRecordResult({ ok: false, error: data.error || 'Failed to record buyout refund' })
+      } else {
+        setBuyoutRecordResult({
+          ok: true,
+          refundTransactionSignature: data.refundTransactionSignature,
+          amount: data.amount,
+          currency: data.currency,
+          bidderWallet: data.bidderWallet,
+        })
+        setTreasuryBuyoutRecordTx((prev) => {
+          const next = { ...prev }
+          delete next[trimmedOfferId]
+          return next
+        })
+        if (walletRefundLookupInput.trim()) {
+          await handleWalletRefundLookup(walletRefundLookupInput.trim())
+        }
+      }
+    } catch {
+      setBuyoutRecordResult({ ok: false, error: 'Network error' })
+    } finally {
+      setTreasuryBuyoutRecordSavingId(null)
+    }
+  }
+
+  const handleWalletRefundLookup = async (walletOverride?: string) => {
+    const wallet = (walletOverride ?? walletRefundLookupInput).trim()
+    if (!wallet) return
+
+    setWalletRefundLookupLoading(true)
+    setWalletRefundLookupError(null)
+    setWalletRefundSendResult(null)
+    setBuyoutRecordResult(null)
+    try {
+      const response = await fetch(
+        `/api/admin/wallet-refund-candidates?wallet=${encodeURIComponent(wallet)}`,
+        { credentials: 'include' }
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        setWalletRefundLookupData(null)
+        setWalletRefundLookupError(typeof data.error === 'string' ? data.error : 'Lookup failed')
+        return
+      }
+      setWalletRefundLookupInput(wallet)
+      setWalletRefundLookupData(data as WalletRefundLookupData)
+    } catch {
+      setWalletRefundLookupData(null)
+      setWalletRefundLookupError('Network error')
+    } finally {
+      setWalletRefundLookupLoading(false)
+    }
+  }
+
+  const handleSendWalletEscrowRefunds = async () => {
+    if (!walletRefundLookupData) return
+    const entryIds = walletRefundLookupData.ticketEscrow.map((t) => t.entryId)
+    const buyoutOfferIds = walletRefundLookupData.buyoutEscrow.map((b) => b.offerId)
+    if (entryIds.length === 0 && buyoutOfferIds.length === 0) return
+
+    setWalletRefundSending(true)
+    setWalletRefundSendResult(null)
+    try {
+      const response = await fetch('/api/admin/wallet-refunds/send-escrow', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet: walletRefundLookupData.wallet,
+          entryIds,
+          buyoutOfferIds,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        setWalletRefundSendResult({
+          ok: false,
+          error: typeof data.error === 'string' ? data.error : 'Send failed',
+        })
+      } else {
+        setWalletRefundSendResult({
+          ok: data.ok,
+          okCount: data.okCount,
+          requestedCount: data.requestedCount,
+        })
+        await handleWalletRefundLookup(walletRefundLookupData.wallet)
+      }
+    } catch {
+      setWalletRefundSendResult({ ok: false, error: 'Network error' })
+    } finally {
+      setWalletRefundSending(false)
     }
   }
 
@@ -3088,6 +3258,179 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
               )}
+
+              <div className="pt-4 border-t border-border space-y-3">
+                <p className="text-sm font-semibold">Wallet refund lookup</p>
+                <p className="text-xs text-muted-foreground">
+                  Enter a buyer wallet to find ticket and buyout refunds. Items in funds escrow can be sent automatically;
+                  legacy buyout bids in the fee treasury need a manual send, then record the tx below.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id="wallet-refund-lookup"
+                    className="font-mono text-sm flex-1"
+                    placeholder="Bidder wallet address"
+                    value={walletRefundLookupInput}
+                    onChange={(e) => {
+                      setWalletRefundLookupInput(e.target.value)
+                      setWalletRefundLookupError(null)
+                    }}
+                    disabled={walletRefundLookupLoading || walletRefundSending}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={walletRefundLookupLoading || !walletRefundLookupInput.trim()}
+                    onClick={() => void handleWalletRefundLookup()}
+                    className="touch-manipulation min-h-[44px] shrink-0"
+                  >
+                    {walletRefundLookupLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Looking up…
+                      </>
+                    ) : (
+                      'Look up refunds'
+                    )}
+                  </Button>
+                </div>
+                {walletRefundLookupError && (
+                  <p className="text-sm text-destructive">{walletRefundLookupError}</p>
+                )}
+                {walletRefundLookupData && (
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                    {!walletRefundLookupData.summary?.hasAnything ? (
+                      <p className="text-sm text-muted-foreground">
+                        No pending refunds for this wallet.
+                      </p>
+                    ) : (
+                      <>
+                        {(walletRefundLookupData.ticketEscrow.length > 0 ||
+                          walletRefundLookupData.buyoutEscrow.length > 0) && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium text-foreground">
+                              Refundable from funds escrow (
+                              {walletRefundLookupData.ticketEscrow.length +
+                                walletRefundLookupData.buyoutEscrow.length}
+                              )
+                            </p>
+                            <ul className="space-y-1 text-xs">
+                              {walletRefundLookupData.ticketEscrow.map((t) => (
+                                <li key={t.entryId} className="rounded bg-background/60 px-2 py-1.5">
+                                  Ticket · {t.raffleTitle} · {t.amount} {t.currency}
+                                </li>
+                              ))}
+                              {walletRefundLookupData.buyoutEscrow.map((b) => (
+                                <li key={b.offerId} className="rounded bg-background/60 px-2 py-1.5">
+                                  Buyout · {b.raffleTitle} · {b.amount} {b.currency}
+                                </li>
+                              ))}
+                            </ul>
+                            <Button
+                              type="button"
+                              disabled={walletRefundSending}
+                              onClick={() => void handleSendWalletEscrowRefunds()}
+                              className="touch-manipulation min-h-[44px]"
+                            >
+                              {walletRefundSending ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Sending from escrow…
+                                </>
+                              ) : (
+                                'Send all from funds escrow'
+                              )}
+                            </Button>
+                            {walletRefundSendResult && (
+                              <p
+                                className={
+                                  walletRefundSendResult.ok
+                                    ? 'text-sm text-green-600 dark:text-green-400'
+                                    : 'text-sm text-destructive'
+                                }
+                              >
+                                {walletRefundSendResult.ok
+                                  ? `Sent ${walletRefundSendResult.okCount ?? 0} of ${walletRefundSendResult.requestedCount ?? 0} refund(s) from escrow.`
+                                  : walletRefundSendResult.error ?? 'Some refunds failed — refresh lookup and retry.'}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {walletRefundLookupData.buyoutTreasury.length > 0 && (
+                          <div className="space-y-2 border-t border-border/60 pt-3">
+                            <p className="text-xs font-medium text-foreground">
+                              Legacy buyout bids (fee treasury — send manually, then record)
+                            </p>
+                            {walletRefundLookupData.buyoutTreasury.map((b) => (
+                              <div
+                                key={b.offerId}
+                                className="space-y-2 rounded bg-background/60 px-2 py-2 text-xs"
+                              >
+                                <p>
+                                  {b.raffleTitle} · {b.amount} {b.currency} · {b.offerStatus}
+                                </p>
+                                <Input
+                                  className="font-mono text-xs"
+                                  placeholder="Refund TX after sending from fee treasury"
+                                  value={treasuryBuyoutRecordTx[b.offerId] ?? ''}
+                                  onChange={(e) =>
+                                    setTreasuryBuyoutRecordTx((prev) => ({
+                                      ...prev,
+                                      [b.offerId]: e.target.value,
+                                    }))
+                                  }
+                                  disabled={treasuryBuyoutRecordSavingId === b.offerId}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="touch-manipulation min-h-[44px]"
+                                  disabled={
+                                    treasuryBuyoutRecordSavingId === b.offerId ||
+                                    !(treasuryBuyoutRecordTx[b.offerId] ?? '').trim()
+                                  }
+                                  onClick={() =>
+                                    void handleRecordBuyoutRefund(
+                                      b.offerId,
+                                      treasuryBuyoutRecordTx[b.offerId] ?? '',
+                                    )
+                                  }
+                                >
+                                  {treasuryBuyoutRecordSavingId === b.offerId ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      Recording…
+                                    </>
+                                  ) : (
+                                    'Record treasury refund'
+                                  )}
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {buyoutRecordResult?.ok && buyoutRecordResult.refundTransactionSignature && (
+                      <p className="text-sm text-green-600 dark:text-green-400">
+                        Treasury buyout refund recorded.{' '}
+                        <a
+                          href={`https://solscan.io/tx/${buyoutRecordResult.refundTransactionSignature}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          View on Solscan
+                        </a>
+                      </p>
+                    )}
+                    {buyoutRecordResult?.error && (
+                      <p className="text-sm text-destructive">{buyoutRecordResult.error}</p>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="pt-4 border-t border-border space-y-3">
                 <p className="text-sm font-semibold">Orphan payment refund (funds escrow)</p>

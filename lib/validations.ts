@@ -47,6 +47,23 @@ export const adminRecordOrphanRefundBody = z.object({
   refundTransactionSignature: z.string().min(80).max(120),
 })
 
+/** Full admin: after manually refunding a legacy treasury buyout bid, record the payout tx. */
+export const adminRecordBuyoutRefundBody = z.object({
+  refundTransactionSignature: z.string().trim().min(80).max(128),
+})
+
+/** Full admin: lookup pending refunds for a wallet. */
+export const adminWalletRefundLookupQuery = z.object({
+  wallet: solanaAddress,
+})
+
+/** Full admin: send ticket + buyout refunds from FUNDS_ESCROW for a wallet. */
+export const adminSendWalletEscrowRefundsBody = z.object({
+  wallet: solanaAddress,
+  entryIds: z.array(z.string().uuid()).max(100).default([]),
+  buyoutOfferIds: z.array(z.string().uuid()).max(50).default([]),
+})
+
 /** Paid cart checkout: one or more pending rows and merged payment splits (one Solana tx). */
 export const entriesCreateBatchBody = z.object({
   walletAddress: solanaAddress,

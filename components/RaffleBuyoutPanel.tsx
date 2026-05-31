@@ -14,7 +14,6 @@ type BuyoutApiState = {
   eligible: boolean
   reason: string | null
   depositWallet: string | null
-  treasuryWallet?: string | null
   buyoutFeeBps: number
   winnerWallet: string | null
   buyoutClosedAt: string | null
@@ -146,7 +145,7 @@ export function RaffleBuyoutPanel({
         return
       }
 
-      const depositWallet = (created.depositWallet ?? created.treasuryWallet) as string
+      const depositWallet = created.depositWallet as string
       const offerId = created.offerId as string
       if (!depositWallet || !offerId) {
         setError('Invalid server response')

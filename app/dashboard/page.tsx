@@ -3292,7 +3292,8 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>
               Your buyout deposit can be returned when the offer expired or the winner accepted someone else&apos;s bid.
-              Refunds are sent from funds escrow (or legacy treasury for older bids).
+              Refunds are sent from funds escrow. Older bids that went to the fee treasury need a manual refund from
+              platform admin.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -3328,6 +3329,9 @@ export default function DashboardPage() {
                   </Link>
                   <p className="mt-1 text-sm tabular-nums text-muted-foreground">
                     {o.amount} {o.currency} · {o.status}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/80 break-all" title="Offer ID">
+                    {o.id}
                   </p>
                 </div>
                 <Button

@@ -257,6 +257,35 @@ export async function finalizeBuyoutRefund(params: {
   return !!data
 }
 
+/** Full admin: mark refunded after a manual treasury payout (legacy bids only). */
+export async function recordBuyoutRefundManual(params: {
+  offerId: string
+  refundTxSignature: string
+}): Promise<{ ok: true; offerId: string } | { ok: false; error: string }> {
+  const offer = await getBuyoutOfferById(params.offerId)
+  if (!offer) {
+    return { ok: false, error: 'Offer not found' }
+  }
+  if (offer.refunded_at) {
+    return { ok: false, error: 'Offer bid was already refunded' }
+  }
+  if (offer.status !== 'expired' && offer.status !== 'superseded') {
+    return { ok: false, error: 'Offer is not eligible for refund (must be expired or superseded)' }
+  }
+  if (!offer.deposit_tx_signature?.trim()) {
+    return { ok: false, error: 'No deposit was recorded for this offer' }
+  }
+
+  const saved = await finalizeBuyoutRefund({
+    offerId: offer.id,
+    refundTxSignature: params.refundTxSignature,
+  })
+  if (!saved) {
+    return { ok: false, error: 'Could not update offer (wrong state or already refunded)' }
+  }
+  return { ok: true, offerId: offer.id }
+}
+
 /** Allow refund retry when DB marked refunded but client lost sig — idempotent no-op if already refunded with same sig */
 export async function getRefundEligibleOffer(offerId: string): Promise<RaffleBuyoutOffer | null> {
   const o = await getBuyoutOfferById(offerId)
