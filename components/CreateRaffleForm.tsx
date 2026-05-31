@@ -1897,6 +1897,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 />
               </div>
             </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {prizeMode === 'nft'
+                ? 'Draw goal updates automatically when you change ticket price or prize value.'
+                : 'Changing ticket price updates the sales goal below; minimum tickets stays what you set for the draw.'}
+            </p>
             <div
               className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4 space-y-2"
               role="status"
