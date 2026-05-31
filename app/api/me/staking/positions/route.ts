@@ -6,6 +6,7 @@ import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orpha
 import { healPendingNftNestsForWallet } from '@/lib/nesting/heal-pending-nft-freeze'
 import { healOrphanedOnChainFrozenNestsForWallet } from '@/lib/nesting/heal-orphaned-onchain-frozen'
 import { reconcileActiveNftFreezeLocksForWallet } from '@/lib/nesting/reconcile-active-nft-freeze'
+import { clearCrossWalletStaleNestsForWallet } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -44,6 +45,13 @@ export async function GET(request: NextRequest) {
 
     const { cleared_count, results: clear_results } =
       await clearOrphanedPendingNftNestsForWallet(session.wallet)
+    const { cleared_count: cleared_cross_wallet_count, results: clear_cross_wallet_results } =
+      healBudgetExceeded()
+        ? {
+            cleared_count: 0,
+            results: [] as Awaited<ReturnType<typeof clearCrossWalletStaleNestsForWallet>>['results'],
+          }
+        : await clearCrossWalletStaleNestsForWallet(session.wallet)
     const { healed_count: healed_orphan_frozen_count, results: heal_orphan_frozen_results } =
       healBudgetExceeded()
         ? { healed_count: 0, results: [] as Awaited<ReturnType<typeof healOrphanedOnChainFrozenNestsForWallet>>['results'] }
@@ -89,6 +97,12 @@ export async function GET(request: NextRequest) {
         ? {
             cleared_orphaned_active_count: cleared_active_count,
             clear_orphaned_active_results: clear_active_results.filter((r) => r.cleared),
+          }
+        : {}),
+      ...(cleared_cross_wallet_count > 0
+        ? {
+            cleared_cross_wallet_count,
+            clear_cross_wallet_results: clear_cross_wallet_results.filter((r) => r.cleared),
           }
         : {}),
       ...(healBudgetExceeded() ? { heal_partial: true } : {}),

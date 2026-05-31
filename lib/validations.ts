@@ -22,6 +22,25 @@ export const entriesVerifyBody = z.object({
   transactionSignature: z.string().min(80).max(120),
 })
 
+/** Link payment TX to pending/rejected entry before on-chain verify completes. */
+export const entriesAttachTxBody = z
+  .object({
+    transactionSignature: z.string().min(80).max(120),
+    walletAddress: solanaAddress,
+    entryId: z.string().uuid().optional(),
+    entryIds: z.array(z.string().uuid()).min(1).max(CART_BATCH_MAX_RAFFLES_PER_TX).optional(),
+  })
+  .refine(d => Boolean(d.entryId) || (d.entryIds?.length ?? 0) > 0, {
+    message: 'entryId or entryIds required',
+  })
+
+export const adminOrphanPaymentRefundBody = z.object({
+  transactionSignature: z.string().min(80).max(120),
+  walletAddress: solanaAddress,
+  raffleSlug: z.string().min(1).max(100),
+  entryId: z.string().uuid().optional(),
+})
+
 /** Paid cart checkout: one or more pending rows and merged payment splits (one Solana tx). */
 export const entriesCreateBatchBody = z.object({
   walletAddress: solanaAddress,

@@ -49,6 +49,7 @@ import {
   assertActiveNftNestOnChainLock,
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
+import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 
 export async function executeStake(params: {
   wallet: string
@@ -90,6 +91,11 @@ export async function executeStake(params: {
     throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
   }
   if (pool.asset_type === 'nft' && asset_identifier) {
+    await tryClearCrossWalletBlockerForMint({
+      holderWallet: params.wallet,
+      poolId: pool.id,
+      assetMint: asset_identifier,
+    })
     const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
     if (existing) {
       const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))

@@ -1,0 +1,28 @@
+{
+  "tokenStandard": "nft",
+  "number": 3,
+  "symbol": "TOWL",
+  "sellerFeeBasisPoints": 500,
+  "isMutable": true,
+  "isSequential": false,
+  "ruleSet": null,
+  "uploadMethod": "bundlr",
+  "awsConfig": null,
+  "pinataConfig": null,
+  "sdriveApiKey": null,
+  "creators": [
+    {
+      "address": "29TmvGq9BJ9knDnKAiCDGwX2yarSueNNYxGwLJGkWTs9",
+      "share": 100
+    }
+  ],
+  "hiddenSettings": null,
+  "guards": {
+    "default": {
+      "solPayment": {
+        "value": 0.01,
+        "destination": "29TmvGq9BJ9knDnKAiCDGwX2yarSueNNYxGwLJGkWTs9"
+      }
+    }
+  }
+}

@@ -35,7 +35,10 @@ import {
 } from '@/lib/theme-accent'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { isOwlEnabled } from '@/lib/tokens'
-import { executeRafflePurchase } from '@/lib/client/execute-raffle-purchase'
+import {
+  executeRafflePurchase,
+  TICKETS_CONFIRMING_MESSAGE,
+} from '@/lib/client/execute-raffle-purchase'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
@@ -127,6 +130,7 @@ export function RaffleCard({
   const purchaseAmount = raffle.ticket_price * ticketQuantity
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [ticketsConfirming, setTicketsConfirming] = useState(false)
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
   const displayImageSrc = useMemo(() => {
@@ -412,6 +416,7 @@ export function RaffleCard({
     setIsProcessing(true)
     setError(null)
     setSuccess(false)
+    setTicketsConfirming(false)
 
     try {
       const res = await executeRafflePurchase({
@@ -422,21 +427,33 @@ export function RaffleCard({
         sendTransaction,
         routerRefresh: () => router.refresh(),
         celebrateOnComplimentary: true,
-        celebrateOnPaymentConfirmed: true,
+        celebrateOnPaymentConfirmed: false,
         onComplimentarySuccess: () => setSuccess(true),
-        afterPaymentTxConfirmed: () => setSuccess(true),
         onVerifyPending: async () => {
+          setTicketsConfirming(true)
+          setError(null)
+          setSuccess(false)
           router.refresh()
-          setSuccess(true)
         },
       })
 
       if (!res.ok) {
+        setTicketsConfirming(false)
         setError(res.error)
         if (res.isUnconfirmedPayment) router.refresh()
         return
       }
 
+      if (res.verifying) {
+        setTicketsConfirming(true)
+        setError(null)
+        setSuccess(false)
+        router.refresh()
+        return
+      }
+
+      setTicketsConfirming(false)
+      setSuccess(true)
       dismissQuickBuyAfterSuccess()
       router.refresh()
     } finally {
@@ -1278,6 +1295,11 @@ export function RaffleCard({
               {error && (
                 <div className="p-2 rounded-lg bg-destructive/10 border border-destructive text-destructive text-xs">
                   {error}
+                </div>
+              )}
+              {ticketsConfirming && (
+                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs">
+                  {TICKETS_CONFIRMING_MESSAGE}
                 </div>
               )}
               {success && (

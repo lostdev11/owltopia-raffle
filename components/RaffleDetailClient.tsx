@@ -59,7 +59,10 @@ import {
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { isOwlEnabled } from '@/lib/tokens'
-import { executeRafflePurchase } from '@/lib/client/execute-raffle-purchase'
+import {
+  executeRafflePurchase,
+  TICKETS_CONFIRMING_MESSAGE,
+} from '@/lib/client/execute-raffle-purchase'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { useCart } from '@/components/cart/CartProvider'
 import { formatDistance } from 'date-fns'
@@ -276,6 +279,7 @@ export function RaffleDetailClient({
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [ticketsConfirming, setTicketsConfirming] = useState(false)
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
@@ -919,6 +923,7 @@ export function RaffleDetailClient({
     setIsProcessing(true)
     setError(null)
     setSuccess(false)
+    setTicketsConfirming(false)
 
     try {
       const res = await executeRafflePurchase({
@@ -932,13 +937,9 @@ export function RaffleDetailClient({
         celebrateOnComplimentary: true,
         celebrateOnPaymentConfirmed: false,
         onComplimentarySuccess: () => setSuccess(true),
-        afterPaymentTxConfirmed: () => {
-          setShowEnterRaffleDialog(false)
-          setSuccess(true)
-          requestAnimationFrame(() => fireGreenConfetti())
-        },
         onVerifyPending: async ({ entryId, transactionSignature }) => {
-          setSuccess(true)
+          setTicketsConfirming(true)
+          setSuccess(false)
           setError(null)
           router.refresh()
           await new Promise(resolve => setTimeout(resolve, 1000))
@@ -947,7 +948,7 @@ export function RaffleDetailClient({
           const refetchDelays = [2000, 5000, 10000, 20000]
           refetchDelays.forEach(ms => setTimeout(() => fetchEntries(), ms))
 
-          const verifyRetryDelays = [5000, 15000]
+          const verifyRetryDelays = [5000, 15000, 30000]
           verifyRetryDelays.forEach(ms => {
             setTimeout(async () => {
               try {
@@ -957,6 +958,10 @@ export function RaffleDetailClient({
                   body: JSON.stringify({ entryId, transactionSignature }),
                 })
                 if (retryRes.ok) {
+                  setTicketsConfirming(false)
+                  setSuccess(true)
+                  setShowEnterRaffleDialog(false)
+                  requestAnimationFrame(() => fireGreenConfetti())
                   router.refresh()
                   fetchEntries()
                 }
@@ -967,6 +972,10 @@ export function RaffleDetailClient({
           })
         },
         afterVerifyOk: async () => {
+          setTicketsConfirming(false)
+          setShowEnterRaffleDialog(false)
+          setSuccess(true)
+          requestAnimationFrame(() => fireGreenConfetti())
           await new Promise(resolve => setTimeout(resolve, 1000))
           fetchEntries()
           if (!isUsingRealtime) {
@@ -978,6 +987,7 @@ export function RaffleDetailClient({
 
       if (!res.ok) {
         setSuccess(false)
+        setTicketsConfirming(false)
         setError(res.error)
         if (res.isUnconfirmedPayment) {
           router.refresh()
@@ -986,6 +996,13 @@ export function RaffleDetailClient({
           delay(4000).then(() => fetchEntries())
           delay(8000).then(() => fetchEntries())
         }
+        return
+      }
+
+      if (res.verifying) {
+        setTicketsConfirming(true)
+        setSuccess(false)
+        router.refresh()
         return
       }
 
@@ -4631,6 +4648,11 @@ export function RaffleDetailClient({
               </div>
             )}
             
+            {ticketsConfirming && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm">
+                {TICKETS_CONFIRMING_MESSAGE}
+              </div>
+            )}
             {success && (
               <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
                 <p>Tickets purchased successfully! Transaction confirmed.</p>

@@ -9,7 +9,7 @@ import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-i
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { clearOrphanedActiveNftNestsForWallet } from '@/lib/nesting/clear-orphaned-active-nests'
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
-import { clearCrossWalletStaleNestsForHolder } from '@/lib/nesting/clear-cross-wallet-stale-nests'
+import { clearCrossWalletStaleNestsForWallet } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import {
   readOwlClaimNftNestLockEligibility,
 } from '@/lib/nesting/nft-freeze'
@@ -368,21 +368,8 @@ export async function healHolderWalletNests(
     clearedActive = r.cleared_count
   }
   if (clearCross) {
-    const pool = await getStakingPoolBySlug('owl-nest-365')
-    const heliusRpcUrl = getHeliusMainnetRpcUrl()
-    if (pool && heliusRpcUrl) {
-      const candidates = resolveWalletOwlNestCollectionCandidates(pool)
-      const mints: string[] = []
-      for (const candidate of candidates) {
-        const batch = await fetchWalletNftsInCollectionDas(heliusRpcUrl, holder, candidate)
-        for (const item of batch) {
-          const id = item.id?.trim()
-          if (id && item.burnt !== true) mints.push(id)
-        }
-      }
-      const r = await clearCrossWalletStaleNestsForHolder(holder, mints)
-      clearedCross = r.cleared_count
-    }
+    const r = await clearCrossWalletStaleNestsForWallet(holder)
+    clearedCross = r.cleared_count
   }
 
   return {

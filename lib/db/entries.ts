@@ -4,6 +4,8 @@ import type { Entry } from '@/lib/types'
 import { getDisplayNamesByWallets } from '@/lib/db/wallet-profiles'
 import { withRetry } from '@/lib/db-retry'
 import { RAFFLE_CURRENCIES } from '@/lib/tokens'
+import { PENDING_PAYMENT_GRACE_MS } from '@/lib/entries/pending-payment-grace'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 /** Thrown when the DB rejects a duplicate transaction_signature (unique index). */
 export class TransactionSignatureAlreadyUsedError extends Error {
@@ -413,17 +415,21 @@ export async function invalidateAllPendingEntriesForWallet(
   const admin = getSupabaseAdmin()
   const { data, error } = await admin
     .from('entries')
-    .select('id, transaction_signature')
+    .select('id, transaction_signature, created_at')
     .eq('raffle_id', rid)
     .eq('wallet_address', w)
     .eq('status', 'pending')
 
   if (error || !data?.length) return
 
+  const now = Date.now()
   const toReject = data
     .filter(row => {
       const sig = row.transaction_signature
-      return typeof sig !== 'string' || sig.trim().length < 80
+      if (typeof sig === 'string' && sig.trim().length >= 80) return false
+      const created = row.created_at ? new Date(String(row.created_at)).getTime() : 0
+      if (created > 0 && now - created < PENDING_PAYMENT_GRACE_MS) return false
+      return true
     })
     .map(row => row.id as string)
 
@@ -493,6 +499,52 @@ export async function saveTransactionSignature(
   }
 
   return data as Entry
+}
+
+/**
+ * Link a payment signature to a pending/rejected entry and re-open rejected rows for verify.
+ * Returns null when wallet mismatch, wrong status, or signature already used elsewhere.
+ */
+export async function attachEntryPaymentSignature(
+  entryId: string,
+  walletAddress: string,
+  transactionSignature: string
+): Promise<Entry | null> {
+  const id = entryId.trim()
+  const w = walletAddress.trim()
+  const sig = transactionSignature.trim()
+  if (!id || !w || sig.length < 80) return null
+
+  const entry = await getEntryById(id)
+  if (!entry || !walletsEqualSolana(entry.wallet_address, w)) return null
+
+  const existing = await getEntryByTransactionSignature(sig)
+  if (existing && existing.id !== id) {
+    throw new TransactionSignatureAlreadyUsedError()
+  }
+
+  if (entry.status === 'confirmed') {
+    const existingSig = (entry.transaction_signature || '').trim()
+    if (existingSig === sig) return entry
+    return null
+  }
+
+  if (entry.status === 'rejected') {
+    const { error: reactivateErr } = await getSupabaseAdmin()
+      .from('entries')
+      .update({ status: 'pending' })
+      .eq('id', id)
+      .eq('status', 'rejected')
+
+    if (reactivateErr) {
+      console.error('attachEntryPaymentSignature reactivate:', reactivateErr)
+      return null
+    }
+  } else if (entry.status !== 'pending') {
+    return null
+  }
+
+  return saveTransactionSignature(id, sig)
 }
 
 export async function updateEntryStatus(

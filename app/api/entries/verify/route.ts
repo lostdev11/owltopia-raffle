@@ -9,6 +9,7 @@ import {
   TransactionSignatureAlreadyUsedError,
   ComplimentaryQuotaExceededError,
   saveTransactionSignature,
+  attachEntryPaymentSignature,
 } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
@@ -97,11 +98,32 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      if (entry.status !== 'pending') {
+      let activeEntry = entry
+      if (entry.status === 'rejected') {
+        const reattached = await attachEntryPaymentSignature(
+          entryId,
+          entry.wallet_address,
+          transactionSignature
+        )
+        if (!reattached) {
+          return NextResponse.json(ERROR_BODY, { status: 400 })
+        }
+        activeEntry = reattached
+      } else if (entry.status !== 'pending') {
         return NextResponse.json(ERROR_BODY, { status: 400 })
+      } else {
+        try {
+          const withSig = await saveTransactionSignature(entryId, transactionSignature)
+          if (withSig) activeEntry = withSig
+        } catch (err) {
+          if (err instanceof TransactionSignatureAlreadyUsedError) {
+            return NextResponse.json(ERROR_BODY, { status: 400 })
+          }
+          console.error(`Error saving transaction signature for entry ${entryId}:`, err)
+        }
       }
 
-      const raffle = await getRaffleById(entry.raffle_id)
+      const raffle = await getRaffleById(activeEntry.raffle_id)
       if (!raffle) {
         return NextResponse.json(ERROR_BODY, { status: 404 })
       }
@@ -109,7 +131,7 @@ export async function POST(request: NextRequest) {
       // --- 1) Validate blockchain transaction FIRST (no DB write until verified) ---
       const verificationResult = await verifyTransaction(
         transactionSignature,
-        entry,
+        activeEntry,
         raffle
       )
 
@@ -161,11 +183,11 @@ export async function POST(request: NextRequest) {
       // Entry is only "released" (lock removed) after this completes — reset-after-verify ordering
       const result = await confirmEntryWithTx(
         entryId,
-        entry.raffle_id,
-        entry.wallet_address,
+        activeEntry.raffle_id,
+        activeEntry.wallet_address,
         transactionSignature,
-        Number(entry.amount_paid),
-        entry.ticket_quantity
+        Number(activeEntry.amount_paid),
+        activeEntry.ticket_quantity
       )
 
       return NextResponse.json({

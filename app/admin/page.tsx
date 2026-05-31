@@ -127,6 +127,19 @@ export default function AdminDashboardPage() {
   const [verifyErrorMessage, setVerifyErrorMessage] = useState<string | null>(null)
   const [verifyErrorSuggestion, setVerifyErrorSuggestion] = useState<string | null>(null)
 
+  const [orphanRefundTx, setOrphanRefundTx] = useState('')
+  const [orphanRefundWallet, setOrphanRefundWallet] = useState('')
+  const [orphanRefundSlug, setOrphanRefundSlug] = useState('')
+  const [orphanRefunding, setOrphanRefunding] = useState(false)
+  const [orphanRefundResult, setOrphanRefundResult] = useState<{
+    ok?: boolean
+    refundTransactionSignature?: string
+    amount?: number
+    currency?: string
+    error?: string
+    note?: string
+  } | null>(null)
+
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
     message?: string
@@ -1191,6 +1204,36 @@ export default function AdminDashboardPage() {
       setBulkReverifyResult({ message: 'Network error', errors: [] })
     } finally {
       setBulkReverifyRunning(false)
+    }
+  }
+
+  const handleOrphanPaymentRefund = async () => {
+    if (!orphanRefundTx.trim() || !orphanRefundWallet.trim() || !orphanRefundSlug.trim()) return
+
+    setOrphanRefunding(true)
+    setOrphanRefundResult(null)
+    try {
+      const response = await fetch('/api/admin/orphan-payment-refund', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionSignature: orphanRefundTx.trim(),
+          walletAddress: orphanRefundWallet.trim(),
+          raffleSlug: orphanRefundSlug.trim(),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        setOrphanRefundResult({ ok: false, error: data.error || data.message || 'Refund failed' })
+      } else {
+        setOrphanRefundResult(data)
+        setOrphanRefundTx('')
+      }
+    } catch {
+      setOrphanRefundResult({ ok: false, error: 'Network error' })
+    } finally {
+      setOrphanRefunding(false)
     }
   }
 
@@ -2997,6 +3040,95 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
               )}
+
+              <div className="pt-4 border-t border-border space-y-3">
+                <p className="text-sm font-semibold">Orphan payment refund (funds escrow)</p>
+                <p className="text-xs text-muted-foreground">
+                  Paid on-chain but never confirmed (e.g. raffle ended). Sends gross back from FUNDS_ESCROW to the buyer.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="orphan-refund-tx">Purchase TX signature</Label>
+                    <Input
+                      id="orphan-refund-tx"
+                      className="font-mono text-sm mt-1"
+                      value={orphanRefundTx}
+                      onChange={e => {
+                        setOrphanRefundTx(e.target.value)
+                        setOrphanRefundResult(null)
+                      }}
+                      disabled={orphanRefunding}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="orphan-refund-wallet">Buyer wallet</Label>
+                    <Input
+                      id="orphan-refund-wallet"
+                      className="font-mono text-sm mt-1"
+                      value={orphanRefundWallet}
+                      onChange={e => {
+                        setOrphanRefundWallet(e.target.value)
+                        setOrphanRefundResult(null)
+                      }}
+                      disabled={orphanRefunding}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="orphan-refund-slug">Raffle slug</Label>
+                  <Input
+                    id="orphan-refund-slug"
+                    className="mt-1"
+                    placeholder="0-4-sol-15-min"
+                    value={orphanRefundSlug}
+                    onChange={e => {
+                      setOrphanRefundSlug(e.target.value)
+                      setOrphanRefundResult(null)
+                    }}
+                    disabled={orphanRefunding}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    orphanRefunding ||
+                    !orphanRefundTx.trim() ||
+                    !orphanRefundWallet.trim() ||
+                    !orphanRefundSlug.trim()
+                  }
+                  onClick={handleOrphanPaymentRefund}
+                  className="touch-manipulation min-h-[44px]"
+                >
+                  {orphanRefunding ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending refund…
+                    </>
+                  ) : (
+                    'Refund from escrow'
+                  )}
+                </Button>
+                {orphanRefundResult?.ok && orphanRefundResult.refundTransactionSignature && (
+                  <p className="text-sm text-green-600 dark:text-green-400">
+                    Refund sent ({orphanRefundResult.amount} {orphanRefundResult.currency}).{' '}
+                    <a
+                      href={`https://solscan.io/tx/${orphanRefundResult.refundTransactionSignature}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                    >
+                      View on Solscan
+                    </a>
+                  </p>
+                )}
+                {orphanRefundResult?.error && (
+                  <p className="text-sm text-destructive">{orphanRefundResult.error}</p>
+                )}
+                {orphanRefundResult?.note && (
+                  <p className="text-xs text-muted-foreground">{orphanRefundResult.note}</p>
+                )}
+              </div>
 
               {verifyResult && (
                 <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
