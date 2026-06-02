@@ -96,11 +96,15 @@ export async function POST(request: NextRequest) {
     }
 
     // NFT raffles: block purchases until prize is verified in escrow (defense in depth)
-    if (
-      raffle.prize_type === 'nft' &&
+    if (raffle.prize_type === 'nft' &&
       !raffle.prize_deposited_at &&
       !nftRaffleExemptFromEscrowRequirement(raffle)
     ) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    const { raffleHasPendingMilestoneDeposits } = await import('@/lib/raffles/publish-after-deposits')
+    if (await raffleHasPendingMilestoneDeposits(raffleIdStr)) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 

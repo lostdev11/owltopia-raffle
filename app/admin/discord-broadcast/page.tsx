@@ -54,9 +54,10 @@ const textareaClass =
   'flex min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
 
 type ChannelConfigHint = {
-  public: { configured: boolean; idSuffix: string | null }
-  holder: { configured: boolean; idSuffix: string | null }
+  public: { configured: boolean; idSuffix: string | null; name?: string | null }
+  holder: { configured: boolean; idSuffix: string | null; name?: string | null }
   sameChannel: boolean
+  idsLikelySwapped?: boolean
 }
 
 function ChannelTargetPicker({
@@ -555,6 +556,18 @@ export default function AdminDiscordBroadcastPage() {
           </Card>
         )}
 
+        {channelConfig?.idsLikelySwapped && (
+          <Card className="mb-6 border-destructive/40 bg-destructive/5">
+            <CardContent className="pt-6 text-sm">
+              <strong className="text-destructive">Channel IDs look swapped.</strong> Public env points at #
+              {channelConfig.public.name ?? '?'} but holder env points at #
+              {channelConfig.holder.name ?? '?'}. Swap{' '}
+              <code className="text-xs">DISCORD_CHANNEL_PUBLIC</code> and{' '}
+              <code className="text-xs">DISCORD_CHANNEL_HOLDER</code> on Vercel, then redeploy.
+            </CardContent>
+          </Card>
+        )}
+
         {channelConfig?.sameChannel && (
           <Card className="mb-6 border-destructive/40 bg-destructive/5">
             <CardContent className="pt-6 text-sm">
@@ -568,11 +581,15 @@ export default function AdminDiscordBroadcastPage() {
         {channelConfig && !channelConfig.sameChannel && (
           <Card className="mb-6 border-border/60">
             <CardContent className="pt-6 text-sm text-muted-foreground">
-              Configured channel IDs (last 4 digits): public …{channelConfig.public.idSuffix ?? '????'}{' '}
-              {channelConfig.public.configured ? '' : '(not set)'}
+              Configured channels (from Discord): public →{' '}
+              {channelConfig.public.name ? `#${channelConfig.public.name}` : '—'} (…
+              {channelConfig.public.idSuffix ?? '????'})
+              {channelConfig.public.configured ? '' : ' · not set'}
               {' · '}
-              holder …{channelConfig.holder.idSuffix ?? '????'}{' '}
-              {channelConfig.holder.configured ? '' : '(not set)'}
+              holder →{' '}
+              {channelConfig.holder.name ? `#${channelConfig.holder.name}` : '—'} (…
+              {channelConfig.holder.idSuffix ?? '????'})
+              {channelConfig.holder.configured ? '' : ' · not set'}
             </CardContent>
           </Card>
         )}

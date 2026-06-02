@@ -205,6 +205,8 @@ export default function AdminDashboardPage() {
   } | null>(null)
   const [treasuryBuyoutRecordTx, setTreasuryBuyoutRecordTx] = useState<Record<string, string>>({})
   const [treasuryBuyoutRecordSavingId, setTreasuryBuyoutRecordSavingId] = useState<string | null>(null)
+  const [treasuryBuyoutSendSavingId, setTreasuryBuyoutSendSavingId] = useState<string | null>(null)
+  const [treasurySigningBuyoutRefunds, setTreasurySigningBuyoutRefunds] = useState<boolean | null>(null)
 
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
@@ -321,6 +323,27 @@ export default function AdminDashboardPage() {
       clearTimeout(midnightTimeoutId)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setTreasurySigningBuyoutRefunds(null)
+      return
+    }
+    let cancelled = false
+    void fetch('/api/config/treasury-signing', { cache: 'no-store' })
+      .then((res) => res.json().catch(() => ({})))
+      .then((data: { buyoutRefundsEnabled?: boolean }) => {
+        if (!cancelled) {
+          setTreasurySigningBuyoutRefunds(data.buyoutRefundsEnabled === true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTreasurySigningBuyoutRefunds(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin])
 
   const runAdminCheck = useCallback(async () => {
     if (!publicKey) return
@@ -1383,6 +1406,39 @@ export default function AdminDashboardPage() {
       setBuyoutRecordResult({ ok: false, error: 'Network error' })
     } finally {
       setTreasuryBuyoutRecordSavingId(null)
+    }
+  }
+
+  const handleSendTreasuryBuyoutRefund = async (offerId: string) => {
+    const trimmedOfferId = offerId.trim()
+    if (!trimmedOfferId) return
+
+    setTreasuryBuyoutSendSavingId(trimmedOfferId)
+    setBuyoutRecordResult(null)
+    try {
+      const response = await fetch(
+        `/api/admin/buyout-offers/${encodeURIComponent(trimmedOfferId)}/send-treasury-refund`,
+        { method: 'POST', credentials: 'include' },
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        setBuyoutRecordResult({ ok: false, error: data.error || 'Failed to send legacy buyout refund' })
+      } else {
+        setBuyoutRecordResult({
+          ok: true,
+          refundTransactionSignature: data.refundTransactionSignature,
+          amount: data.amount,
+          currency: data.currency,
+          bidderWallet: data.bidderWallet,
+        })
+        if (walletRefundLookupInput.trim()) {
+          await handleWalletRefundLookup(walletRefundLookupInput.trim())
+        }
+      }
+    } catch {
+      setBuyoutRecordResult({ ok: false, error: 'Network error' })
+    } finally {
+      setTreasuryBuyoutSendSavingId(null)
     }
   }
 
@@ -3373,7 +3429,11 @@ export default function AdminDashboardPage() {
                         {walletRefundLookupData.buyoutTreasury.length > 0 && (
                           <div className="space-y-2 border-t border-border/60 pt-3">
                             <p className="text-xs font-medium text-foreground">
-                              Legacy buyout bids (fee treasury — send manually, then record)
+                              Legacy buyout refund (fee treasury)
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Send from RAFFLE_RECIPIENT_WALLET, then record the refund tx. Or use Send refund when
+                              treasury signing is configured on the server.
                             </p>
                             {walletRefundLookupData.buyoutTreasury.map((b) => (
                               <div
@@ -3383,6 +3443,31 @@ export default function AdminDashboardPage() {
                                 <p>
                                   {b.raffleTitle} · {b.amount} {b.currency} · {b.offerStatus}
                                 </p>
+                                <p className="font-mono text-[10px] text-muted-foreground break-all">
+                                  Offer {b.offerId}
+                                </p>
+                                {treasurySigningBuyoutRefunds === true && (
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="sm"
+                                    className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                                    disabled={
+                                      treasuryBuyoutSendSavingId === b.offerId ||
+                                      treasuryBuyoutRecordSavingId === b.offerId
+                                    }
+                                    onClick={() => void handleSendTreasuryBuyoutRefund(b.offerId)}
+                                  >
+                                    {treasuryBuyoutSendSavingId === b.offerId ? (
+                                      <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Sending refund…
+                                      </>
+                                    ) : (
+                                      'Send refund from fee treasury'
+                                    )}
+                                  </Button>
+                                )}
                                 <Input
                                   className="font-mono text-xs"
                                   placeholder="Refund TX after sending from fee treasury"
@@ -3417,7 +3502,7 @@ export default function AdminDashboardPage() {
                                       Recording…
                                     </>
                                   ) : (
-                                    'Record treasury refund'
+                                    'Record legacy buyout refund'
                                   )}
                                 </Button>
                               </div>

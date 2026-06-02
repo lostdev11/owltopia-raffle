@@ -343,6 +343,102 @@ export async function refundEntryFromFundsEscrow(
   }
 }
 
+/** Send SOL or USDC from funds escrow to any wallet (milestone winner / creator return). */
+export async function payoutCryptoFromFundsEscrow(params: {
+  recipientWallet: string
+  amount: number
+  currency: 'SOL' | 'USDC'
+}): Promise<FundsEscrowPayoutResult> {
+  const kp = getFundsEscrowKeypair()
+  if (!kp) {
+    return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
+  }
+
+  const amount = Number(params.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'Invalid payout amount.' }
+  }
+
+  const connection = getSolanaConnection()
+  const escrowPubkey = kp.publicKey
+  const recipientPk = new PublicKey(params.recipientWallet.trim())
+
+  try {
+    if (params.currency === 'SOL') {
+      const lamports = Math.round(amount * LAMPORTS_PER_SOL)
+      if (lamports <= 0) return { ok: false, error: 'Nothing to pay.' }
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: escrowPubkey,
+          toPubkey: recipientPk,
+          lamports,
+        })
+      )
+      const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      })
+      return { ok: true, signature: sig }
+    }
+
+    const readConn = getSolanaReadConnection()
+    const tokenInfo = getTokenInfo('USDC')
+    if (!tokenInfo.mintAddress) {
+      return { ok: false, error: 'USDC mint not configured.' }
+    }
+    const mint = new PublicKey(tokenInfo.mintAddress)
+    const decimals = tokenInfo.decimals
+    const programId = await getFundsEscrowTokenProgramForMint(mint, escrowPubkey)
+    if (!programId) {
+      return { ok: false, error: 'Funds escrow has no USDC token account for this mint.' }
+    }
+
+    const raw = BigInt(Math.round(amount * Math.pow(10, decimals)))
+    if (raw <= 0n) return { ok: false, error: 'Nothing to pay.' }
+
+    const fromAta = await getAssociatedTokenAddress(
+      mint,
+      escrowPubkey,
+      false,
+      programId,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+    const toAta = await getAssociatedTokenAddress(
+      mint,
+      recipientPk,
+      false,
+      programId,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+
+    const tx = new Transaction()
+    try {
+      await getAccount(readConn, toAta, 'confirmed', programId)
+    } catch {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          escrowPubkey,
+          toAta,
+          recipientPk,
+          mint,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      )
+    }
+    tx.add(createTransferInstruction(fromAta, toAta, escrowPubkey, raw, [], programId))
+
+    const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    })
+    return { ok: true, signature: sig }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg }
+  }
+}
+
 /** Refund an expired/superseded NFT buyout bid held in funds escrow. */
 export async function refundBuyoutOfferFromFundsEscrow(offer: {
   bidder_wallet: string

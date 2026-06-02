@@ -29,7 +29,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
+import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import {
@@ -183,6 +184,7 @@ function formatOfferAmount(amount: number, currency: string): string {
 interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
+  milestones?: RaffleMilestone[]
   owlVisionScore: OwlVisionScore
   sessionWallet: string | null
 }
@@ -190,6 +192,7 @@ interface RaffleDetailClientProps {
 export function RaffleDetailClient({
   raffle,
   entries: initialEntries,
+  milestones: initialMilestones = [],
   owlVisionScore,
   sessionWallet,
 }: RaffleDetailClientProps) {
@@ -2696,6 +2699,15 @@ export function RaffleDetailClient({
               </Button>
             )}
         </div>
+        {initialMilestones.length > 0 && (
+          <RaffleMilestonesPanel
+            raffle={raffle}
+            milestones={initialMilestones}
+            entries={entries}
+            sessionWallet={sessionWallet}
+            onRefresh={() => router.refresh()}
+          />
+        )}
         <Dialog open={requestCancelDialogOpen} onOpenChange={setRequestCancelDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>

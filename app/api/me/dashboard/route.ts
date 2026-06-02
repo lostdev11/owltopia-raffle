@@ -17,6 +17,7 @@ import {
 import { getReferralSummaryForWallet, syncReferralStateForWallet } from '@/lib/db/referrals'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
+import { enrichBuyoutOffersRefundDepositSource } from '@/lib/buyout/dashboard-offers'
 import {
   expireStaleBuyoutOffersForBidderWallet,
   listBuyoutOffersForBidder,
@@ -245,6 +246,8 @@ export async function GET(request: NextRequest) {
       /** Hide creator refund UI once every confirmed ticket row is refunded (e.g. after platform escrow payouts). */
       .filter((rr) => rr.totalPending > 0)
 
+    const buyoutOffersWithDepositSource = await enrichBuyoutOffersRefundDepositSource(buyoutOffers)
+
     return NextResponse.json({
       wallet,
       displayName: walletProfile.displayName,
@@ -272,7 +275,7 @@ export async function GET(request: NextRequest) {
         referralSummary != null
           ? { ...referralSummary, canSetVanity: canSetVanityReferral }
           : null,
-      buyoutOffers,
+      buyoutOffers: buyoutOffersWithDepositSource,
       engagement,
       /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */
       viewerIsSiteAdmin,

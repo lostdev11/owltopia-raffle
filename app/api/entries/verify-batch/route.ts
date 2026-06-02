@@ -10,7 +10,7 @@ import {
   attachEntryPaymentSignature,
 } from '@/lib/db/entries'
 import type { Entry, Raffle } from '@/lib/types'
-import { getRaffleById } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { entriesVerifyBatchBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { tryAcquireVerificationLock, releaseVerificationLocks } from '@/lib/verify-in-flight'
@@ -184,6 +184,19 @@ export async function POST(request: NextRequest) {
           return verifyBatchErr('server_error', 503)
         }
         return verifyBatchErr('confirm_failed', 400)
+      }
+
+      try {
+        const raffleIds = [...new Set(pairsSorted.map((p) => p.entry.raffle_id))]
+        const { syncMilestoneUnlocksForRaffle } = await import('@/lib/raffles/milestones/unlock')
+        for (const raffleId of raffleIds) {
+          const raffle = await getRaffleById(raffleId)
+          if (!raffle) continue
+          const allEntries = await getEntriesByRaffleId(raffleId)
+          await syncMilestoneUnlocksForRaffle(raffle, allEntries)
+        }
+      } catch (unlockErr) {
+        console.error('[entries/verify-batch] milestone unlock sync:', unlockErr)
       }
 
       return NextResponse.json({

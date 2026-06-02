@@ -119,6 +119,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(ERROR_BODY, { status: 400 })
       }
 
+      const { raffleHasPendingMilestoneDeposits } = await import('@/lib/raffles/publish-after-deposits')
+      if (await raffleHasPendingMilestoneDeposits(raffleIdStr)) {
+        return NextResponse.json(ERROR_BODY, { status: 400 })
+      }
+
       const purchasesBlockedAt = (raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
       if (purchasesBlockedAt) return NextResponse.json(ERROR_BODY, { status: 400 })
 

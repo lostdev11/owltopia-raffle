@@ -8,6 +8,7 @@
     "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
     "check:funds-escrow": "node scripts/check-funds-escrow-api.mjs",
     "check:treasury-signing": "node --env-file=.env.local scripts/check-treasury-signing.mjs",
+    "send:legacy-buyout-refund": "npx --yes tsx --env-file=.env.local scripts/send-legacy-buyout-refund.mjs",
     "check:treasury-signing-api": "node scripts/check-treasury-signing-api.mjs",
     "generate:escrow-key": "node scripts/generate-escrow-keypair.mjs",
     "generate:nesting-freeze-authority-key": "node scripts/generate-nesting-freeze-authority-keypair.mjs",

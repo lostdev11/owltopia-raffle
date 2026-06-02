@@ -11,6 +11,7 @@ import {
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
+import { getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
 import { notFound } from 'next/navigation'
@@ -173,6 +174,7 @@ export default async function RaffleDetailPage({
   }
 
   const entries = await getEntriesByRaffleId(raffle.id)
+  const milestones = await getMilestonesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle])
   return (
@@ -180,6 +182,7 @@ export default async function RaffleDetailPage({
       key={enrichedRaffle.id}
       raffle={enrichedRaffle}
       entries={entries}
+      milestones={milestones}
       owlVisionScore={owlVisionScore}
       sessionWallet={viewerWallet}
     />

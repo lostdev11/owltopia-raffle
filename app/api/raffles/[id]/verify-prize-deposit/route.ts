@@ -76,6 +76,12 @@ export async function POST(
     }
 
     const result = await verifyPrizeDepositInternal(id, depositTxFromBody)
+    if (result.ok && !result.alreadyVerified) {
+      const { finalizeRafflePublicationAfterPrizeVerify } = await import(
+        '@/lib/raffles/publish-after-deposits'
+      )
+      await finalizeRafflePublicationAfterPrizeVerify(id)
+    }
     return jsonFromVerifyResult(result)
   } catch (error) {
     console.error('Verify prize deposit route error:', error)

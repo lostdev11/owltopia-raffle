@@ -48,6 +48,8 @@ import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/
 import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
+import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
+import { insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
@@ -817,8 +819,20 @@ export async function handleCreateRafflePost(
       )
     }
 
+    const milestoneValidation = validateMilestonesForRaffle(
+      { max_tickets: raffleData.max_tickets, min_tickets: raffleData.min_tickets },
+      body.milestones
+    )
+    if (!milestoneValidation.ok) {
+      return NextResponse.json({ error: milestoneValidation.error }, { status: 400 })
+    }
+
     try {
       const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
+
+      if (milestoneValidation.milestones.length > 0) {
+        await insertRaffleMilestones(raffle.id, milestoneValidation.milestones)
+      }
 
       await notifyRaffleCreated(raffle)
 

@@ -11,7 +11,7 @@ import {
   saveTransactionSignature,
   attachEntryPaymentSignature,
 } from '@/lib/db/entries'
-import { getRaffleById } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import { entriesVerifyBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -189,6 +189,17 @@ export async function POST(request: NextRequest) {
         Number(activeEntry.amount_paid),
         activeEntry.ticket_quantity
       )
+
+      try {
+        const raffleForUnlock = await getRaffleById(activeEntry.raffle_id)
+        if (raffleForUnlock) {
+          const allEntries = await getEntriesByRaffleId(activeEntry.raffle_id)
+          const { syncMilestoneUnlocksForRaffle } = await import('@/lib/raffles/milestones/unlock')
+          await syncMilestoneUnlocksForRaffle(raffleForUnlock, allEntries)
+        }
+      } catch (unlockErr) {
+        console.error('[entries/verify] milestone unlock sync:', unlockErr)
+      }
 
       return NextResponse.json({
         success: true,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import {
-  getDiscordBroadcastChannelConfig,
+  getDiscordBroadcastChannelConfigDetailed,
   isDiscordBroadcastConfigured,
 } from '@/lib/discord-channel-messages'
 import {
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       configured: isDiscordBroadcastConfigured(),
-      channels: getDiscordBroadcastChannelConfig(),
+      channels: await getDiscordBroadcastChannelConfigDetailed(),
       templates,
       schedules,
       logs,

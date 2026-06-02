@@ -49,6 +49,83 @@ export function getDiscordBroadcastChannelConfig(): {
   }
 }
 
+export type DiscordChannelMeta = {
+  idSuffix: string
+  name: string | null
+}
+
+/** Resolve Discord #channel names for admin verification (requires bot token). */
+export async function fetchDiscordChannelMeta(
+  channelId: string
+): Promise<DiscordChannelMeta | null> {
+  const token = getDiscordBotToken()
+  const cid = channelId.trim()
+  if (!token || !cid) return null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${DISCORD_API}/channels/${cid}`, {
+      headers: { Authorization: `Bot ${token}` },
+      signal: controller.signal,
+    })
+    if (!res.ok) return { idSuffix: cid.slice(-4), name: null }
+    const json = (await res.json()) as { name?: string }
+    const name = typeof json.name === 'string' ? json.name : null
+    return { idSuffix: cid.slice(-4), name }
+  } catch {
+    return { idSuffix: cid.slice(-4), name: null }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function channelNamesLookSwapped(
+  publicName: string | null,
+  holderName: string | null
+): boolean {
+  if (!publicName || !holderName) return false
+  const pub = publicName.toLowerCase()
+  const holder = holderName.toLowerCase()
+  const publicEnvPointsAtOwl = pub.includes('owl') && !pub.includes('public')
+  const holderEnvPointsAtPublic = holder.includes('public')
+  return publicEnvPointsAtOwl && holderEnvPointsAtPublic
+}
+
+export async function getDiscordBroadcastChannelConfigDetailed(): Promise<{
+  public: { configured: boolean; idSuffix: string | null; name: string | null }
+  holder: { configured: boolean; idSuffix: string | null; name: string | null }
+  sameChannel: boolean
+  idsLikelySwapped: boolean
+}> {
+  const base = getDiscordBroadcastChannelConfig()
+  const publicId = getDiscordPublicChannelId()
+  const holderId = getDiscordHolderChannelId()
+
+  const [publicMeta, holderMeta] = await Promise.all([
+    publicId ? fetchDiscordChannelMeta(publicId) : Promise.resolve(null),
+    holderId ? fetchDiscordChannelMeta(holderId) : Promise.resolve(null),
+  ])
+
+  const publicName = publicMeta?.name ?? null
+  const holderName = holderMeta?.name ?? null
+
+  return {
+    public: {
+      configured: base.public.configured,
+      idSuffix: base.public.idSuffix,
+      name: publicName,
+    },
+    holder: {
+      configured: base.holder.configured,
+      idSuffix: base.holder.idSuffix,
+      name: holderName,
+    },
+    sameChannel: base.sameChannel,
+    idsLikelySwapped: channelNamesLookSwapped(publicName, holderName),
+  }
+}
+
 function truncateContent(content: string): string {
   const trimmed = content.trim()
   if (trimmed.length <= MAX_CONTENT_LENGTH) return trimmed

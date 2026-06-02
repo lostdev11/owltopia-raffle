@@ -83,6 +83,9 @@ import {
   BAMBOO_TICKET_CURRENCY,
   canWalletUseBambooTicketCurrency,
 } from '@/lib/raffles/bamboo-ticket-currency'
+import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
+import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
+import type { RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -126,6 +129,25 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
   persistUntilDismiss: false,
 }
 
+type MilestoneDraftRow = {
+  trigger_type: RaffleMilestoneTriggerType
+  trigger_value: string
+  prize_amount: string
+  prize_currency: 'SOL' | 'USDC'
+  winner_mode: RaffleMilestoneWinnerMode
+  /** When true, ticket-count target follows the live draw goal from floor ÷ ticket or partner min. */
+  followDrawGoal?: boolean
+}
+
+const DEFAULT_MILESTONE_ROW: MilestoneDraftRow = {
+  trigger_type: 'draw_threshold',
+  trigger_value: '1',
+  prize_amount: '0.1',
+  prize_currency: 'SOL',
+  winner_mode: 'random',
+  followDrawGoal: true,
+}
+
 export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlow?: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -135,6 +157,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
+  const [milestonesEnabled, setMilestonesEnabled] = useState(false)
+  const [milestoneRows, setMilestoneRows] = useState<MilestoneDraftRow[]>([{ ...DEFAULT_MILESTONE_ROW }])
+  const milestoneRulesCopy = useMemo(() => buildMilestoneBonusRulesCopy(), [])
   // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
   // causing raffles to start/end earlier or later than intended.
   const [startTime, setStartTime] = useState(() => {
@@ -415,6 +440,25 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     const p = parseNftTicketPrice(ticketPrice)
     return p.ok ? p.value : null
   }, [ticketPrice])
+
+  const effectiveDrawGoalTickets = useMemo(() => {
+    if (prizeMode === 'token') return partnerMinTicketsParsed
+    return derivedDrawGoal
+  }, [prizeMode, partnerMinTicketsParsed, derivedDrawGoal])
+
+  useEffect(() => {
+    if (!milestonesEnabled || effectiveDrawGoalTickets == null || effectiveDrawGoalTickets < 1) return
+    const goalStr = String(effectiveDrawGoalTickets)
+    setMilestoneRows((prev) =>
+      prev.map((row) => {
+        if (row.trigger_type === 'draw_threshold') return row
+        if (row.followDrawGoal) {
+          return { ...row, trigger_value: goalStr }
+        }
+        return row
+      })
+    )
+  }, [milestonesEnabled, effectiveDrawGoalTickets])
 
   const thresholdExplain = useMemo(
     () =>
@@ -714,6 +758,26 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     if (viewerIsAdmin === true) {
       const promo = (formData.get('promo_x_handle') as string)?.trim()
       if (promo) data.promo_x_handle = promo
+    }
+    if (milestonesEnabled && milestoneRows.length > 0) {
+      const built = milestoneRows
+        .map((row) => ({
+          trigger_type: row.trigger_type,
+          trigger_value:
+            row.trigger_type === 'draw_threshold' ? 1 : parseFloat(row.trigger_value),
+          prize_type: 'crypto' as const,
+          prize_amount: parseFloat(row.prize_amount),
+          prize_currency: row.prize_currency,
+          winner_mode: row.winner_mode,
+        }))
+        .filter(
+          (row) =>
+            Number.isFinite(row.trigger_value) &&
+            row.trigger_value > 0 &&
+            Number.isFinite(row.prize_amount) &&
+            row.prize_amount > 0
+        )
+      if (built.length > 0) data.milestones = built
     }
     if (canUseBambooTicketCurrency) {
       if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
@@ -1947,6 +2011,222 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
+          </div>
+
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer touch-manipulation min-h-[44px]">
+              <input
+                type="checkbox"
+                checked={milestonesEnabled}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setMilestonesEnabled(on)
+                  if (!on) {
+                    setMilestoneRows([{ ...DEFAULT_MILESTONE_ROW }])
+                  }
+                }}
+                className="mt-1 h-5 w-5"
+              />
+              <span>
+                <span className="text-sm font-medium text-foreground">Add bonus milestone(s)</span>
+                <span className="block text-xs text-amber-200/90 mt-0.5">{MILESTONE_BETA_NOTICE}</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Prefund SOL or USDC to the platform funds escrow (max {MILESTONE_MAX_PRIZE_SOL} SOL or{' '}
+                  {milestoneMaxPrizeUsdc()} USDC per milestone). Default winner mode is random (ticket-weighted).
+                </span>
+              </span>
+            </label>
+            {milestonesEnabled && (
+              <>
+                <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
+                  {milestoneRulesCopy.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                {milestoneRows.map((row, idx) => (
+                  <div key={idx} className="border border-border/50 rounded-md p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-foreground">
+                        Milestone {idx + 1}
+                        {milestoneRows.length > 1 ? ` of ${milestoneRows.length}` : ''}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-[44px] min-w-[44px] touch-manipulation text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                        aria-label={`Remove milestone ${idx + 1}`}
+                        onClick={() => {
+                          setMilestoneRows((prev) => {
+                            const next = prev.filter((_, i) => i !== idx)
+                            if (next.length === 0) {
+                              setMilestonesEnabled(false)
+                              return [{ ...DEFAULT_MILESTONE_ROW }]
+                            }
+                            return next
+                          })
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Trigger</Label>
+                      <select
+                        value={row.trigger_type}
+                        onChange={(e) => {
+                          const v = e.target.value as RaffleMilestoneTriggerType
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => {
+                              if (i !== idx) return r
+                              if (v === 'draw_threshold') {
+                                return {
+                                  ...r,
+                                  trigger_type: v,
+                                  trigger_value: '1',
+                                  followDrawGoal: true,
+                                }
+                              }
+                              if (v === 'absolute_tickets') {
+                                return {
+                                  ...r,
+                                  trigger_type: v,
+                                  trigger_value:
+                                    effectiveDrawGoalTickets != null
+                                      ? String(effectiveDrawGoalTickets)
+                                      : r.trigger_value,
+                                  followDrawGoal: true,
+                                }
+                              }
+                              return { ...r, trigger_type: v, followDrawGoal: false }
+                            })
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="draw_threshold">When draw goal is met (recommended)</option>
+                        <option value="absolute_tickets">Custom ticket count</option>
+                        <option value="percent_max">% of max tickets</option>
+                      </select>
+                    </div>
+                    {row.trigger_type === 'draw_threshold' ? (
+                      <div className="space-y-1 sm:col-span-1">
+                        <Label className="text-xs">Unlock target</Label>
+                        <p className="text-sm text-muted-foreground min-h-[44px] flex items-center tabular-nums">
+                          {effectiveDrawGoalTickets != null && effectiveDrawGoalTickets > 0
+                            ? `${effectiveDrawGoalTickets} tickets (matches draw goal)`
+                            : 'Set floor, ticket price, or draw goal first'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Target value</Label>
+                        <Input
+                          type="number"
+                          min={effectiveDrawGoalTickets ?? 1}
+                          value={row.trigger_value}
+                          onChange={(e) =>
+                            setMilestoneRows((prev) =>
+                              prev.map((r, i) =>
+                                i === idx
+                                  ? { ...r, trigger_value: e.target.value, followDrawGoal: false }
+                                  : r
+                              )
+                            )
+                          }
+                          className="min-h-[44px] touch-manipulation"
+                        />
+                        {row.trigger_type === 'absolute_tickets' &&
+                          effectiveDrawGoalTickets != null &&
+                          effectiveDrawGoalTickets > 0 && (
+                            <button
+                              type="button"
+                              className="text-xs text-primary underline-offset-2 hover:underline touch-manipulation"
+                              onClick={() =>
+                                setMilestoneRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx
+                                      ? {
+                                          ...r,
+                                          trigger_value: String(effectiveDrawGoalTickets),
+                                          followDrawGoal: true,
+                                        }
+                                      : r
+                                  )
+                                )
+                              }
+                            >
+                              Use draw goal ({effectiveDrawGoalTickets} tickets)
+                            </button>
+                          )}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Bonus amount</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.prize_amount}
+                        onChange={(e) =>
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, prize_amount: e.target.value } : r))
+                          )
+                        }
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Currency</Label>
+                      <select
+                        value={row.prize_currency}
+                        onChange={(e) => {
+                          const v = e.target.value as 'SOL' | 'USDC'
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, prize_currency: v } : r))
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="SOL">SOL</option>
+                        <option value="USDC">USDC</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs">Winner selection</Label>
+                      <select
+                        value={row.winner_mode}
+                        onChange={(e) => {
+                          const v = e.target.value as RaffleMilestoneWinnerMode
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, winner_mode: v } : r))
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="random">Random (ticket-weighted) — recommended</option>
+                        <option value="top_buyer">Top buyer (ties broken randomly)</option>
+                        <option value="creator_initiated_pull">Creator starts random draw when unlocked</option>
+                      </select>
+                    </div>
+                    </div>
+                  </div>
+                ))}
+                {milestoneRows.length < MILESTONE_MAX_PER_RAFFLE && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-[44px] touch-manipulation"
+                    onClick={() =>
+                      setMilestoneRows((prev) => [...prev, { ...DEFAULT_MILESTONE_ROW }])
+                    }
+                  >
+                    Add another milestone
+                  </Button>
+                )}
+              </>
+            )}
           </div>
 
           <div className="space-y-2">

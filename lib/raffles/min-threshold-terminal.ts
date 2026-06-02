@@ -25,6 +25,13 @@ export async function finalizeMinThresholdTerminalFailure(raffleId: string): Pro
 }> {
   await updateRaffle(raffleId, { status: 'failed_refund_available', is_active: false })
 
+  try {
+    const { voidMilestonesOnFailedRaffle } = await import('@/lib/raffles/milestones/settlement')
+    await voidMilestonesOnFailedRaffle(raffleId)
+  } catch (e) {
+    console.error('[finalizeMinThresholdTerminalFailure] milestone void:', e)
+  }
+
   const raffle = await getRaffleById(raffleId)
   if (!raffle) return {}
 

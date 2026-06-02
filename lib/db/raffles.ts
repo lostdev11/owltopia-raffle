@@ -1907,6 +1907,20 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
   await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
+
+  try {
+    const { settleUnawardedMilestones } = await import('@/lib/raffles/milestones/settlement')
+    const freshEntries = await getEntriesByRaffleId(raffleId)
+    const freshRaffle = (await getRaffleById(raffleId)) ?? raffle
+    await settleUnawardedMilestones({
+      raffle: freshRaffle,
+      entries: freshEntries,
+      mainWinnerWallet: winnerWallet,
+    })
+  } catch (milestoneErr) {
+    console.error(`[selectWinner] milestone settlement failed for ${raffleId}:`, milestoneErr)
+  }
+
   return winnerWallet
 }
 

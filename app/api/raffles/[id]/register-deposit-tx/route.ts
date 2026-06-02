@@ -70,6 +70,11 @@ export async function POST(
       })
     }
 
+    const { finalizeRafflePublicationAfterPrizeVerify } = await import(
+      '@/lib/raffles/publish-after-deposits'
+    )
+    await finalizeRafflePublicationAfterPrizeVerify(id)
+
     return NextResponse.json({
       ok: true,
       registered: true,
