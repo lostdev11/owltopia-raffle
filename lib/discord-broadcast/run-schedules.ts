@@ -153,8 +153,10 @@ export async function sendDiscordBroadcastBody(opts: {
   const status: 'sent' | 'partial' | 'failed' =
     okCount === results.length ? 'sent' : okCount > 0 ? 'partial' : 'failed'
   const error = results
-    .filter((r) => !r.result.ok)
-    .map((r) => `${r.target}: ${r.result.message}`)
+    .flatMap((r) => {
+      if (r.result.ok) return []
+      return [`${r.target}: ${r.result.message}`]
+    })
     .join('; ')
 
   await insertDiscordBroadcastSendLog({
