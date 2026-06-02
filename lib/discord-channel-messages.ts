@@ -28,6 +28,27 @@ export function isDiscordBroadcastConfigured(): boolean {
   return Boolean(token && (publicCh || holderCh))
 }
 
+/** Admin UI hint: last 4 digits of configured channel ids (not secret; helps verify env). */
+export function getDiscordBroadcastChannelConfig(): {
+  public: { configured: boolean; idSuffix: string | null }
+  holder: { configured: boolean; idSuffix: string | null }
+  sameChannel: boolean
+} {
+  const publicId = getDiscordPublicChannelId()
+  const holderId = getDiscordHolderChannelId()
+  return {
+    public: {
+      configured: Boolean(publicId),
+      idSuffix: publicId ? publicId.slice(-4) : null,
+    },
+    holder: {
+      configured: Boolean(holderId),
+      idSuffix: holderId ? holderId.slice(-4) : null,
+    },
+    sameChannel: Boolean(publicId && holderId && publicId === holderId),
+  }
+}
+
 function truncateContent(content: string): string {
   const trimmed = content.trim()
   if (trimmed.length <= MAX_CONTENT_LENGTH) return trimmed

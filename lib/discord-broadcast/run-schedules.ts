@@ -116,13 +116,18 @@ export async function sendDiscordBroadcastBody(opts: {
   templateId?: string | null
   triggeredBy: 'cron' | 'manual'
   createdByWallet?: string | null
-}): Promise<{ status: 'sent' | 'partial' | 'failed'; error?: string }> {
+}): Promise<{
+  status: 'sent' | 'partial' | 'failed'
+  error?: string
+  sentTo: BroadcastChannelTarget[]
+  failedTo: BroadcastChannelTarget[]
+}> {
   const targets: BroadcastChannelTarget[] = []
   if (opts.postToPublic) targets.push('public')
   if (opts.postToHolder) targets.push('holder')
 
   if (targets.length === 0) {
-    return { status: 'failed', error: 'No channels selected.' }
+    return { status: 'failed', error: 'No channels selected.', sentTo: [], failedTo: [] }
   }
 
   if (!isDiscordBroadcastConfigured()) {
@@ -138,16 +143,18 @@ export async function sendDiscordBroadcastBody(opts: {
       triggered_by: opts.triggeredBy,
       created_by_wallet: opts.createdByWallet,
     })
-    return { status: 'failed', error: err }
+    return { status: 'failed', error: err, sentTo: [], failedTo: targets }
   }
 
   const { results } = await postDiscordBroadcastMessage(opts.body, targets)
-  const okCount = results.filter((r) => r.result.ok).length
+  const sentTo = results.filter((r) => r.result.ok).map((r) => r.target)
+  const failedTo = results.filter((r) => !r.result.ok).map((r) => r.target)
+  const okCount = sentTo.length
   const status: 'sent' | 'partial' | 'failed' =
     okCount === results.length ? 'sent' : okCount > 0 ? 'partial' : 'failed'
   const error = results
     .filter((r) => !r.result.ok)
-    .map((r) => `${r.target}: ${r.result.ok ? '' : r.result.message}`)
+    .map((r) => `${r.target}: ${r.result.message}`)
     .join('; ')
 
   await insertDiscordBroadcastSendLog({
@@ -162,7 +169,7 @@ export async function sendDiscordBroadcastBody(opts: {
     created_by_wallet: opts.createdByWallet,
   })
 
-  return { status, error: error || undefined }
+  return { status, error: error || undefined, sentTo, failedTo }
 }
 
 export async function processDueDiscordBroadcastSchedules(): Promise<DiscordBroadcastRunResult[]> {

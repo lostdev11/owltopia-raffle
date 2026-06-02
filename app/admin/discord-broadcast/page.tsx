@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import {
   ArrowLeft,
   Bot,
+  ChevronDown,
   Clock,
   Loader2,
   MessageSquare,
@@ -31,6 +32,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { cn } from '@/lib/utils'
+import {
+  channelTargetLabel,
+  channelTargetToFlags,
+  type DiscordBroadcastChannelTarget,
+} from '@/lib/discord-broadcast/channel-target'
 import {
   computeNextRecurringRunUtc,
   formatDateTimeInTimezone,
@@ -45,6 +52,86 @@ import type {
 
 const textareaClass =
   'flex min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+
+type ChannelConfigHint = {
+  public: { configured: boolean; idSuffix: string | null }
+  holder: { configured: boolean; idSuffix: string | null }
+  sameChannel: boolean
+}
+
+function ChannelTargetPicker({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: DiscordBroadcastChannelTarget
+  onChange: (v: DiscordBroadcastChannelTarget) => void
+  idPrefix: string
+}) {
+  const options: DiscordBroadcastChannelTarget[] = ['public', 'holder', 'both']
+  return (
+    <div className="space-y-2">
+      <Label>Post to</Label>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        {options.map((opt) => (
+          <Button
+            key={opt}
+            type="button"
+            id={`${idPrefix}-${opt}`}
+            variant={value === opt ? 'default' : 'outline'}
+            className="min-h-[44px] flex-1 sm:flex-none"
+            onClick={() => onChange(opt)}
+          >
+            {channelTargetLabel(opt)}
+          </Button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Channel names in Discord do not matter — routing uses channel IDs in server env (
+        <code className="text-[11px]">DISCORD_CHANNEL_PUBLIC</code>,{' '}
+        <code className="text-[11px]">DISCORD_CHANNEL_HOLDER</code>).
+      </p>
+    </div>
+  )
+}
+
+function CollapsibleSection({
+  title,
+  count,
+  icon,
+  open,
+  onOpenChange,
+  children,
+}: {
+  title: string
+  count?: number
+  icon?: ReactNode
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  children: ReactNode
+}) {
+  return (
+    <section className="mb-6 rounded-lg border bg-card">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 p-4 text-left min-h-[44px] touch-manipulation hover:bg-accent/40 rounded-t-lg transition-colors"
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+      >
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          {icon}
+          {title}
+          {count != null ? ` (${count})` : ''}
+        </h2>
+        <ChevronDown
+          className={cn('h-5 w-5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
+          aria-hidden
+        />
+      </button>
+      {open ? <div className="border-t px-4 pb-4 pt-3">{children}</div> : null}
+    </section>
+  )
+}
 
 function formatScheduleSummary(
   schedule: DiscordBroadcastScheduleWithTemplate,
@@ -93,6 +180,7 @@ export default function AdminDiscordBroadcastPage() {
   const [viewerTz, setViewerTz] = useState('UTC')
 
   const [configured, setConfigured] = useState(false)
+  const [channelConfig, setChannelConfig] = useState<ChannelConfigHint | null>(null)
   const [templates, setTemplates] = useState<DiscordBroadcastTemplate[]>([])
   const [schedules, setSchedules] = useState<DiscordBroadcastScheduleWithTemplate[]>([])
   const [logs, setLogs] = useState<DiscordBroadcastSendLog[]>([])
@@ -107,8 +195,7 @@ export default function AdminDiscordBroadcastPage() {
   const [scheduleForm, setScheduleForm] = useState({
     template_id: '',
     label: '',
-    post_to_public: true,
-    post_to_holder: false,
+    channel_target: 'public' as DiscordBroadcastChannelTarget,
     schedule_type: 'recurring' as 'once' | 'recurring',
     timezone: '',
     once_date: '',
@@ -124,9 +211,12 @@ export default function AdminDiscordBroadcastPage() {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewBody, setPreviewBody] = useState('')
   const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null)
-  const [previewPublic, setPreviewPublic] = useState(true)
-  const [previewHolder, setPreviewHolder] = useState(false)
+  const [previewTarget, setPreviewTarget] = useState<DiscordBroadcastChannelTarget>('public')
   const [sending, setSending] = useState(false)
+  const [sendSuccess, setSendSuccess] = useState<string | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(true)
+  const [schedulesOpen, setSchedulesOpen] = useState(true)
+  const [logsOpen, setLogsOpen] = useState(false)
 
   useEffect(() => {
     setViewerTz(getDefaultBrowserTimezone())
@@ -176,6 +266,7 @@ export default function AdminDiscordBroadcastPage() {
       if (res.ok) {
         const data = await res.json()
         setConfigured(Boolean(data.configured))
+        setChannelConfig(data.channels ?? null)
         setTemplates(Array.isArray(data.templates) ? data.templates : [])
         setSchedules(Array.isArray(data.schedules) ? data.schedules : [])
         setLogs(Array.isArray(data.logs) ? data.logs : [])
@@ -275,11 +366,11 @@ export default function AdminDiscordBroadcastPage() {
     setError(null)
     setSaving(true)
     try {
+      const channelFlags = channelTargetToFlags(scheduleForm.channel_target)
       const payload: Record<string, unknown> = {
         template_id: scheduleForm.template_id,
         label: scheduleForm.label.trim(),
-        post_to_public: scheduleForm.post_to_public,
-        post_to_holder: scheduleForm.post_to_holder,
+        ...channelFlags,
         schedule_type: scheduleForm.schedule_type,
         timezone: scheduleForm.timezone || viewerTz,
         posts_per_day: scheduleForm.posts_per_day,
@@ -348,11 +439,13 @@ export default function AdminDiscordBroadcastPage() {
     await fetchData()
   }
 
-  const openPostPreview = (template: DiscordBroadcastTemplate, holder: boolean) => {
+  const openPostPreview = (
+    template: DiscordBroadcastTemplate,
+    target: DiscordBroadcastChannelTarget = 'public'
+  ) => {
     setPreviewTemplateId(template.id)
     setPreviewBody(template.body)
-    setPreviewPublic(true)
-    setPreviewHolder(holder)
+    setPreviewTarget(target)
     setPreviewOpen(true)
   }
 
@@ -360,6 +453,8 @@ export default function AdminDiscordBroadcastPage() {
     if (!wallet) return
     setSending(true)
     setError(null)
+    setSendSuccess(null)
+    const channelFlags = channelTargetToFlags(previewTarget)
     try {
       const res = await fetch('/api/admin/discord-broadcast/send', {
         method: 'POST',
@@ -367,8 +462,7 @@ export default function AdminDiscordBroadcastPage() {
         body: JSON.stringify({
           template_id: previewTemplateId,
           body: previewBody,
-          post_to_public: previewPublic,
-          post_to_holder: previewHolder,
+          ...channelFlags,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -376,6 +470,9 @@ export default function AdminDiscordBroadcastPage() {
         setError(typeof data.error === 'string' ? data.error : 'Send failed')
         return
       }
+      const sentTo = Array.isArray(data.sentTo) ? (data.sentTo as string[]).join(', ') : previewTarget
+      setSendSuccess(`Posted to: ${sentTo}`)
+      setLogsOpen(true)
       setPreviewOpen(false)
       await fetchData()
     } finally {
@@ -456,6 +553,34 @@ export default function AdminDiscordBroadcastPage() {
               <code className="text-xs">DISCORD_CHANNEL_HOLDER</code> on the server before posting.
             </CardContent>
           </Card>
+        )}
+
+        {channelConfig?.sameChannel && (
+          <Card className="mb-6 border-destructive/40 bg-destructive/5">
+            <CardContent className="pt-6 text-sm">
+              Public and holder env channel IDs are the same — both targets post to one channel. Update{' '}
+              <code className="text-xs">DISCORD_CHANNEL_HOLDER</code> with the holder channel ID (right-click
+              channel → Copy Channel ID).
+            </CardContent>
+          </Card>
+        )}
+
+        {channelConfig && !channelConfig.sameChannel && (
+          <Card className="mb-6 border-border/60">
+            <CardContent className="pt-6 text-sm text-muted-foreground">
+              Configured channel IDs (last 4 digits): public …{channelConfig.public.idSuffix ?? '????'}{' '}
+              {channelConfig.public.configured ? '' : '(not set)'}
+              {' · '}
+              holder …{channelConfig.holder.idSuffix ?? '????'}{' '}
+              {channelConfig.holder.configured ? '' : '(not set)'}
+            </CardContent>
+          </Card>
+        )}
+
+        {sendSuccess && (
+          <p className="mb-4 text-sm text-green-600" role="status">
+            {sendSuccess}
+          </p>
         )}
 
         {error && (
@@ -541,24 +666,11 @@ export default function AdminDiscordBroadcastPage() {
                 placeholder="e.g. Weekday morning public"
               />
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border p-3">
-              <Label htmlFor="sched-public">Public chat</Label>
-              <Switch
-                id="sched-public"
-                ariaLabel="Post to public chat"
-                checked={scheduleForm.post_to_public}
-                onCheckedChange={(v) => setScheduleForm((f) => ({ ...f, post_to_public: v }))}
-              />
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border p-3">
-              <Label htmlFor="sched-holder">Holder chat</Label>
-              <Switch
-                id="sched-holder"
-                ariaLabel="Post to holder chat"
-                checked={scheduleForm.post_to_holder}
-                onCheckedChange={(v) => setScheduleForm((f) => ({ ...f, post_to_holder: v }))}
-              />
-            </div>
+            <ChannelTargetPicker
+              idPrefix="sched"
+              value={scheduleForm.channel_target}
+              onChange={(channel_target) => setScheduleForm((f) => ({ ...f, channel_target }))}
+            />
             <div>
               <Label>Schedule type</Label>
               <div className="flex gap-2 mt-2">
@@ -704,11 +816,13 @@ export default function AdminDiscordBroadcastPage() {
           <p className="text-muted-foreground text-center py-8">Loading…</p>
         ) : (
           <>
-            <section className="mb-8">
-              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Templates ({templates.length})
-              </h2>
+            <CollapsibleSection
+              title="Templates"
+              count={templates.length}
+              icon={<MessageSquare className="h-5 w-5" />}
+              open={templatesOpen}
+              onOpenChange={setTemplatesOpen}
+            >
               {templates.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No templates yet.</p>
               ) : (
@@ -722,7 +836,7 @@ export default function AdminDiscordBroadcastPage() {
                             size="sm"
                             variant="outline"
                             className="min-h-[44px]"
-                            onClick={() => openPostPreview(t, false)}
+                            onClick={() => openPostPreview(t, 'public')}
                           >
                             <Send className="h-3.5 w-3.5 mr-1" />
                             Post now
@@ -753,10 +867,15 @@ export default function AdminDiscordBroadcastPage() {
                   ))}
                 </ul>
               )}
-            </section>
+            </CollapsibleSection>
 
-            <section className="mb-8">
-              <h2 className="text-lg font-semibold mb-3">Schedules ({schedules.length})</h2>
+            <CollapsibleSection
+              title="Schedules"
+              count={schedules.length}
+              icon={<Clock className="h-5 w-5" />}
+              open={schedulesOpen}
+              onOpenChange={setSchedulesOpen}
+            >
               {schedules.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No schedules yet.</p>
               ) : (
@@ -808,10 +927,14 @@ export default function AdminDiscordBroadcastPage() {
                   ))}
                 </ul>
               )}
-            </section>
+            </CollapsibleSection>
 
-            <section>
-              <h2 className="text-lg font-semibold mb-3">Recent sends</h2>
+            <CollapsibleSection
+              title="Recent sends"
+              count={logs.length}
+              open={logsOpen}
+              onOpenChange={setLogsOpen}
+            >
               {logs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No sends logged yet.</p>
               ) : (
@@ -831,12 +954,20 @@ export default function AdminDiscordBroadcastPage() {
                       </span>
                       {' · '}
                       {log.triggered_by} · {formatDateTimeInTimezone(log.created_at, viewerTz)}
+                      {log.post_to_public || log.post_to_holder ? (
+                        <>
+                          {' · '}
+                          {log.post_to_public ? 'public' : ''}
+                          {log.post_to_public && log.post_to_holder ? '+' : ''}
+                          {log.post_to_holder ? 'holder' : ''}
+                        </>
+                      ) : null}
                       {log.error_message ? ` — ${log.error_message}` : ''}
                     </li>
                   ))}
                 </ul>
               )}
-            </section>
+            </CollapsibleSection>
           </>
         )}
       </div>
@@ -855,33 +986,18 @@ export default function AdminDiscordBroadcastPage() {
             onChange={(e) => setPreviewBody(e.target.value)}
             maxLength={2000}
           />
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="preview-public">Public chat</Label>
-              <Switch
-                id="preview-public"
-                ariaLabel="Send to public chat"
-                checked={previewPublic}
-                onCheckedChange={setPreviewPublic}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="preview-holder">Holder chat</Label>
-              <Switch
-                id="preview-holder"
-                ariaLabel="Send to holder chat"
-                checked={previewHolder}
-                onCheckedChange={setPreviewHolder}
-              />
-            </div>
-          </div>
+          <ChannelTargetPicker
+            idPrefix="preview"
+            value={previewTarget}
+            onChange={setPreviewTarget}
+          />
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setPreviewOpen(false)} className="min-h-[44px]">
               Cancel
             </Button>
             <Button
               onClick={() => void handleConfirmSend()}
-              disabled={sending || !previewBody.trim() || (!previewPublic && !previewHolder)}
+              disabled={sending || !previewBody.trim()}
               className="min-h-[44px]"
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
