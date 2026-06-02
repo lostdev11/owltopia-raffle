@@ -820,7 +820,13 @@ export async function handleCreateRafflePost(
     }
 
     const milestoneValidation = validateMilestonesForRaffle(
-      { max_tickets: raffleData.max_tickets, min_tickets: raffleData.min_tickets },
+      {
+        max_tickets: raffleData.max_tickets,
+        min_tickets: raffleData.min_tickets,
+        prize_type: raffleData.prize_type,
+        floor_price: raffleData.floor_price,
+        ticket_price: raffleData.ticket_price,
+      },
       body.milestones
     )
     if (!milestoneValidation.ok) {

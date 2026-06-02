@@ -82,7 +82,7 @@ function parseMilestonesInput(raw: unknown): RaffleMilestoneCreateInput[] {
 }
 
 export function validateMilestonesForRaffle(
-  raffle: Pick<Raffle, 'max_tickets' | 'min_tickets'>,
+  raffle: RaffleForMilestoneTarget,
   raw: unknown
 ): { ok: true; milestones: RaffleMilestoneCreateInput[] } | { ok: false; error: string } {
   const milestones = parseMilestonesInput(raw)
