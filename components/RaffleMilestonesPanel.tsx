@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronDown, Copy } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
@@ -31,6 +32,7 @@ import {
 } from '@/lib/raffles/milestones/draw'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { fetchFundsEscrowAddress } from '@/lib/client/create-raffle-milestone-deposit'
 import { getTokenInfo } from '@/lib/tokens'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
@@ -62,6 +64,11 @@ export function RaffleMilestonesPanel({
   const [actionError, setActionError] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [depositTxByMilestone, setDepositTxByMilestone] = useState<Record<string, string>>({})
+  const [fundsEscrowAddress, setFundsEscrowAddress] = useState<string | null>(() =>
+    (raffle.funds_escrow_address_snapshot ?? '').trim() || null
+  )
+  const [escrowCopied, setEscrowCopied] = useState(false)
+  const [panelCollapsed, setPanelCollapsed] = useState(true)
 
   const sold = useMemo(() => ticketsSoldFromEntries(entries), [entries])
   const drawThresholdTickets = useMemo(
@@ -78,6 +85,39 @@ export function RaffleMilestonesPanel({
   }, [entries])
 
   const rules = buildMilestoneBonusRulesCopy()
+
+  const needsMilestoneDeposit = useMemo(
+    () =>
+      isCreator &&
+      milestones.some((m) => m.prize_type === 'crypto' && !m.deposit_verified_at),
+    [isCreator, milestones]
+  )
+
+  useEffect(() => {
+    if (fundsEscrowAddress) return
+    let cancelled = false
+    void fetchFundsEscrowAddress().then((addr) => {
+      if (!cancelled && addr) setFundsEscrowAddress(addr)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [fundsEscrowAddress])
+
+  useEffect(() => {
+    if (needsMilestoneDeposit) setPanelCollapsed(false)
+  }, [needsMilestoneDeposit])
+
+  const copyFundsEscrowAddress = useCallback(async () => {
+    if (!fundsEscrowAddress) return
+    try {
+      await navigator.clipboard.writeText(fundsEscrowAddress)
+      setEscrowCopied(true)
+      window.setTimeout(() => setEscrowCopied(false), 2000)
+    } catch {
+      // ignore
+    }
+  }, [fundsEscrowAddress])
 
   const depositMilestone = useCallback(
     async (m: RaffleMilestone) => {
@@ -273,26 +313,102 @@ export function RaffleMilestonesPanel({
 
   const showLeaderboard = milestones.some((m) => m.winner_mode === 'top_buyer')
 
+  const milestoneProgressBlocks = milestones.map((m) => {
+    const target = milestoneTargetTickets(raffle, m)
+    const progress = Math.min(100, target > 0 ? Math.round((sold / target) * 100) : 0)
+    const unlocked = m.status !== 'pending'
+    return { m, target, progress, unlocked }
+  })
+
   return (
-    <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Bonus milestones</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Extra prizes prefunded in escrow — separate from the main prize.
-        </p>
-        <p className="text-xs text-amber-200/90">{MILESTONE_BETA_NOTICE}</p>
+    <section
+      id="bonus-milestones"
+      className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4 space-y-3 scroll-mt-24"
+    >
+      <button
+        type="button"
+        className="flex w-full min-h-[44px] items-center justify-between gap-3 text-left touch-manipulation rounded-md -mx-1 px-1"
+        style={{ touchAction: 'manipulation' }}
+        aria-expanded={!panelCollapsed}
+        aria-controls="bonus-milestones-panel-body"
+        onClick={() => setPanelCollapsed((c) => !c)}
+      >
+        <span className="text-lg font-semibold text-foreground">Bonus milestones</span>
+        <ChevronDown
+          className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${
+            panelCollapsed ? '' : 'rotate-180'
+          }`}
+          aria-hidden
+        />
+      </button>
+
+      <div className="space-y-3">
+        {milestoneProgressBlocks.map(({ m, target, progress, unlocked }) => (
+          <div key={m.id} className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+              <span>
+                {sold} / {target} tickets
+              </span>
+              <span>{unlocked ? 'Unlocked' : `${progress}%`}</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-amber-500 transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
 
-      <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
-        {rules.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
+      {!panelCollapsed ? (
+        <div id="bonus-milestones-panel-body" className="space-y-4 pt-1">
+      <p className="text-sm text-muted-foreground">
+        Extra prizes prefunded in funds escrow — separate from the main prize.
+      </p>
 
-      {milestones.map((m) => {
-        const target = milestoneTargetTickets(raffle, m)
-        const progress = Math.min(100, target > 0 ? Math.round((sold / target) * 100) : 0)
-        const unlocked = m.status !== 'pending'
+      <details className="group rounded-md border border-border/60 bg-background/30">
+        <summary
+          className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-foreground touch-manipulation [&::-webkit-details-marker]:hidden"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span>How bonus milestones work</span>
+          <ChevronDown
+            className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+            aria-hidden
+          />
+        </summary>
+        <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2">
+          <p className="text-xs text-amber-200/90">{MILESTONE_BETA_NOTICE}</p>
+          <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
+            {rules.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      </details>
+
+      {needsMilestoneDeposit && fundsEscrowAddress ? (
+        <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 space-y-2">
+          <p className="text-xs text-muted-foreground">Funds escrow wallet (for manual bonus transfers)</p>
+          <p className="font-mono text-xs sm:text-sm text-foreground break-all leading-relaxed">
+            {fundsEscrowAddress}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+            style={{ touchAction: 'manipulation' }}
+            onClick={() => void copyFundsEscrowAddress()}
+          >
+            <Copy className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            {escrowCopied ? 'Copied' : 'Copy escrow wallet'}
+          </Button>
+        </div>
+      ) : null}
+
+      {milestoneProgressBlocks.map(({ m, unlocked }) => {
         const ruleLine = buildSingleMilestoneRuleLine(m, raffle.max_tickets, drawThresholdTickets)
 
         return (
@@ -302,25 +418,11 @@ export function RaffleMilestonesPanel({
               {formatMilestonePrize(m)} · {milestoneWinnerModeLabel(m.winner_mode)}
             </p>
 
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>
-                  {sold} / {target} tickets
-                </span>
-                <span>{unlocked ? 'Unlocked' : `${progress}%`}</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-amber-500 transition-all"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              {!unlocked && (
-                <p className="text-xs text-muted-foreground">
-                  Pays only if the raffle hits its draw threshold.
-                </p>
-              )}
-            </div>
+            {!unlocked && (
+              <p className="text-xs text-muted-foreground">
+                Pays only if the raffle hits its draw threshold.
+              </p>
+            )}
 
             {isCreator && !m.deposit_verified_at && m.prize_type === 'crypto' && (
               <div className="space-y-2 pt-1">
@@ -442,6 +544,8 @@ export function RaffleMilestonesPanel({
           {actionError}
         </p>
       )}
+        </div>
+      ) : null}
     </section>
   )
 }

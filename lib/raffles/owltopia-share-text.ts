@@ -1,4 +1,5 @@
 import type { Raffle } from '@/lib/types'
+import { buildRaffleHostWalletShareLine } from '@/lib/raffles/host-wallet-copy'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import { formatPromoXHandleForShare } from '@/lib/raffles/promo-x-handle'
 import { getSiteBaseUrl } from '@/lib/site-config'
@@ -65,6 +66,7 @@ function buildOwltopiaRaffleShareBody(
   const promoLine = formatPromoLine(raffle)
   const ticket = formatRaffleTicketPriceSummary(raffle)
   const duration = formatRaffleRemainingDuration(raffle.end_time, nowMs)
+  const hostWalletLine = buildRaffleHostWalletShareLine(raffle)
 
   return [
     'RAFFLE LIVE ON OWLTOPIA',
@@ -72,6 +74,7 @@ function buildOwltopiaRaffleShareBody(
     promoLine,
     `Ticket: ${ticket}`,
     `Duration: ${duration}`,
+    ...(hostWalletLine ? ['', hostWalletLine] : []),
     '',
     `Enter here: ${url}`,
   ].join('\n')

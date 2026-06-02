@@ -78,14 +78,23 @@ import {
   buildCreateRaffleFeeCopy,
   type PlatformFeeReason,
 } from '@/lib/raffles/creator-fee-copy'
-import { isOwlEnabled } from '@/lib/tokens'
+import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import {
   BAMBOO_TICKET_CURRENCY,
   canWalletUseBambooTicketCurrency,
 } from '@/lib/raffles/bamboo-ticket-currency'
 import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
 import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
-import type { RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
+import type { Raffle, RaffleMilestone, RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
+import {
+  fetchFundsEscrowAddress,
+  milestoneDepositTotalForPrizeCurrency,
+  sendMilestoneDepositTransaction,
+  sumMilestoneDepositsByCurrency,
+  verifyCreateMilestoneDepositsFromClient,
+  pendingCryptoMilestonesForCreate,
+  appendSolMilestoneTransfersToTransaction,
+} from '@/lib/client/create-raffle-milestone-deposit'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -146,6 +155,28 @@ const DEFAULT_MILESTONE_ROW: MilestoneDraftRow = {
   prize_currency: 'SOL',
   winner_mode: 'random',
   followDrawGoal: true,
+}
+
+function parseCreateRaffleResponse(body: unknown): { raffle: Raffle; milestones: RaffleMilestone[] } {
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const milestones = Array.isArray(raw.milestones)
+    ? (raw.milestones as RaffleMilestone[])
+    : []
+  const { milestones: _m, ...rest } = raw
+  return { raffle: rest as unknown as Raffle, milestones }
+}
+
+/** Milestone currencies that must be deposited in a follow-up tx (not the main prize currency). */
+function milestoneCurrenciesNeedingFollowUpTx(
+  milestones: RaffleMilestone[],
+  prizeCurrency: string | null
+): Array<'SOL' | 'USDC'> {
+  const prize = (prizeCurrency ?? '').trim().toUpperCase()
+  const totals = sumMilestoneDepositsByCurrency(pendingCryptoMilestonesForCreate(milestones))
+  const out: Array<'SOL' | 'USDC'> = []
+  if ((totals.SOL ?? 0) > 0 && prize !== 'SOL') out.push('SOL')
+  if ((totals.USDC ?? 0) > 0 && prize !== 'USDC') out.push('USDC')
+  return out
 }
 
 export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlow?: boolean }) {
@@ -550,6 +581,81 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
   }
 
+  const depositFollowUpMilestonesAfterPrize = useCallback(
+    async (params: {
+      raffle: Raffle
+      createdMilestones: RaffleMilestone[]
+      prizeCurrency: string | null
+      mainDepositSig: string | null
+      /** Currencies already deposited in the main prize transaction (e.g. SOL bundled with SPL NFT). */
+      skipCurrencies?: Array<'SOL' | 'USDC'>
+    }) => {
+      if (!publicKey || !connected) return
+
+      const prizeCur = (params.prizeCurrency ?? '').trim().toUpperCase()
+      if (params.mainDepositSig && (prizeCur === 'SOL' || prizeCur === 'USDC')) {
+        const bundled = milestoneDepositTotalForPrizeCurrency(params.createdMilestones, prizeCur)
+        if (bundled > 0) {
+          const v = await verifyCreateMilestoneDepositsFromClient({
+            raffleId: params.raffle.id,
+            depositTx: params.mainDepositSig,
+            currency: prizeCur,
+          })
+          if (!v.ok) {
+            throw new Error(v.error ?? 'Bonus deposit verification failed.')
+          }
+        }
+      }
+
+      const skip = new Set(params.skipCurrencies ?? [])
+      const followUp = milestoneCurrenciesNeedingFollowUpTx(
+        params.createdMilestones,
+        params.prizeCurrency
+      ).filter((c) => !skip.has(c))
+      if (followUp.length === 0) return
+
+      const fundsAddress = await fetchFundsEscrowAddress()
+      if (!fundsAddress) {
+        throw new Error(
+          'Funds escrow is not configured. Open your raffle page to deposit bonus milestones manually.'
+        )
+      }
+
+      const pending = pendingCryptoMilestonesForCreate(params.createdMilestones)
+      const totals = sumMilestoneDepositsByCurrency(pending)
+
+      for (const currency of followUp) {
+        const amount = totals[currency] ?? 0
+        if (amount <= 0) continue
+        setEscrowProgress((p) => ({
+          ...p,
+          open: true,
+          phase: 'loading',
+          persistUntilDismiss: false,
+          title: 'Bonus milestone deposit',
+          description: `When your wallet opens, approve sending ${amount} ${currency} bonus to escrow.`,
+        }))
+        const sig = await sendMilestoneDepositTransaction({
+          connection,
+          sendTransaction,
+          publicKey,
+          currency,
+          amount,
+          fundsEscrowAddress: fundsAddress,
+        })
+        const v = await verifyCreateMilestoneDepositsFromClient({
+          raffleId: params.raffle.id,
+          depositTx: sig,
+          currency,
+        })
+        if (!v.ok) {
+          throw new Error(v.error ?? 'Bonus deposit verification failed.')
+        }
+      }
+    },
+    [publicKey, connected, connection, sendTransaction]
+  )
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
@@ -816,7 +922,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       })
 
       if (response.ok) {
-        const raffle = await response.json()
+        const { raffle, milestones: createdMilestones } = parseCreateRaffleResponse(await response.json())
         // NFT raffles: one flow — sign transfer to escrow, retry verify until RPC catches up, then redirect
         if (
           raffle.prize_type === 'nft' &&
@@ -935,13 +1041,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
             let depositSig: string | null = null
             let lastMplCoreEscrowError: string | null = null
+            let bundledSolWithNft = 0
+
+            const nftMilestoneSol = milestoneDepositTotalForPrizeCurrency(createdMilestones, 'SOL')
+            const nftWalletHint =
+              nftMilestoneSol > 0
+                ? `approve sending the prize NFT and ${nftMilestoneSol} SOL bonus to escrow in one transaction.`
+                : 'approve the transaction to send the prize NFT to escrow.'
 
             setEscrowProgress((p) => ({
               ...p,
               phase: 'loading',
               persistUntilDismiss: false,
-              description:
-                'When your wallet opens, approve the transaction to send the prize NFT to escrow.',
+              description: `When your wallet opens, ${nftWalletHint}`,
             }))
 
             if (resolvedHolder) {
@@ -1004,10 +1116,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     tokenProgram
                   )
                 )
+                const bundle = await appendSolMilestoneTransfersToTransaction(
+                  tx,
+                  publicKey,
+                  createdMilestones
+                )
+                if (bundle) bundledSolWithNft = bundle.amount
                 logEscrowDepositPath(depositLogCtx, 'spl_transfer', {
                   tokenProgram: tokenProgram.toBase58(),
                   sourceTokenAccount: sourceTokenAccount.toBase58(),
                   escrowAta: escrowAta.toBase58(),
+                  bundledSolMilestone: bundledSolWithNft > 0 ? bundledSolWithNft : undefined,
                 })
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
@@ -1196,6 +1315,45 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 return
               }
             }
+            try {
+              if (bundledSolWithNft > 0 && depositSig) {
+                const v = await verifyCreateMilestoneDepositsFromClient({
+                  raffleId: raffle.id,
+                  depositTx: depositSig,
+                  currency: 'SOL',
+                })
+                if (!v.ok) {
+                  throw new Error(v.error ?? 'Bonus deposit verification failed.')
+                }
+              }
+              await depositFollowUpMilestonesAfterPrize({
+                raffle,
+                createdMilestones,
+                prizeCurrency: raffle.prize_currency,
+                mainDepositSig: depositSig,
+                skipCurrencies: bundledSolWithNft > 0 ? ['SOL'] : [],
+              })
+            } catch (milestoneErr) {
+              const msg =
+                milestoneErr instanceof Error
+                  ? milestoneErr.message
+                  : 'Bonus milestone deposit failed.'
+              setEscrowProgress({
+                open: true,
+                title: 'Bonus deposit needed',
+                description: `${msg} Open your raffle to finish bonus deposits.`,
+                phase: 'result',
+                persistUntilDismiss: true,
+                primaryAction: {
+                  label: 'Open raffle',
+                  onClick: () => {
+                    setEscrowProgress(CREATE_ESCROW_IDLE)
+                    router.push(`/raffles/${raffle.slug}#bonus-milestones`)
+                  },
+                },
+              })
+              return
+            }
             router.push(`/raffles/${raffle.slug}`)
           } catch (transferErr) {
             logEscrowDepositError(
@@ -1249,6 +1407,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 return
               }
               const escrowPubkey = new PublicKey(escrowAddress)
+              const milestoneBonus = milestoneDepositTotalForPrizeCurrency(createdMilestones, prizeCur)
+              const prizeHuman = Number(raffle.prize_amount ?? 0)
               let depositSig: string
               if (prizeCur === 'SOL') {
                 if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -1256,11 +1416,26 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   router.push(`/raffles/${raffle.slug}?deposit=1`)
                   return
                 }
+                let fundsEscrowAddress: string | null = null
+                if (milestoneBonus > 0) {
+                  fundsEscrowAddress = await fetchFundsEscrowAddress()
+                  if (!fundsEscrowAddress) {
+                    alert(
+                      'Funds escrow is not configured. Your raffle is saved — deposit bonuses on the raffle page.'
+                    )
+                    router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    return
+                  }
+                }
+                const walletCopy =
+                  milestoneBonus > 0
+                    ? `approve sending ${(prizeHuman + milestoneBonus).toFixed(4)} SOL (${prizeHuman} prize + ${milestoneBonus} bonus) to escrow.`
+                    : 'approve the transaction to send SOL to escrow.'
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
                   persistUntilDismiss: false,
-                  description: 'When your wallet opens, approve the transaction to send SOL to escrow.',
+                  description: `When your wallet opens, ${walletCopy}`,
                 }))
                 const tx = new Transaction().add(
                   SystemProgram.transfer({
@@ -1269,6 +1444,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     lamports: Number(rawNeed),
                   })
                 )
+                if (milestoneBonus > 0 && fundsEscrowAddress) {
+                  tx.add(
+                    SystemProgram.transfer({
+                      fromPubkey: publicKey,
+                      toPubkey: new PublicKey(fundsEscrowAddress),
+                      lamports: Math.round(milestoneBonus * 1e9),
+                    })
+                  )
+                }
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
               } else {
@@ -1340,11 +1524,59 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     tokenProgram
                   )
                 )
+                if (prizeCur === 'USDC' && milestoneBonus > 0) {
+                  const fundsEscrowAddress = await fetchFundsEscrowAddress()
+                  if (!fundsEscrowAddress) {
+                    alert(
+                      'Funds escrow is not configured. Your raffle is saved — deposit bonuses on the raffle page.'
+                    )
+                    router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    return
+                  }
+                  const fundsPk = new PublicKey(fundsEscrowAddress)
+                  const fundsAta = await getAssociatedTokenAddress(
+                    mintPk,
+                    fundsPk,
+                    false,
+                    tokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
+                  )
+                  try {
+                    await getAccount(connection, fundsAta, 'confirmed', tokenProgram)
+                  } catch {
+                    tx.add(
+                      createAssociatedTokenAccountInstruction(
+                        publicKey,
+                        fundsAta,
+                        fundsPk,
+                        mintPk,
+                        tokenProgram,
+                        ASSOCIATED_TOKEN_PROGRAM_ID
+                      )
+                    )
+                  }
+                  const usdcDecimals = getTokenInfo('USDC').decimals
+                  const bonusRaw = BigInt(Math.round(milestoneBonus * Math.pow(10, usdcDecimals)))
+                  tx.add(
+                    createTransferInstruction(
+                      sourceTokenAccount,
+                      fundsAta,
+                      publicKey,
+                      bonusRaw,
+                      [],
+                      tokenProgram
+                    )
+                  )
+                }
+                const walletCopy =
+                  milestoneBonus > 0
+                    ? `approve sending ${prizeHuman + milestoneBonus} ${prizeCur} (${prizeHuman} prize + ${milestoneBonus} bonus) to escrow.`
+                    : `approve the transaction to send ${prizeCur} to escrow.`
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
                   persistUntilDismiss: false,
-                  description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
+                  description: `When your wallet opens, ${walletCopy}`,
                 }))
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
@@ -1452,6 +1684,34 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   })
                   return
                 }
+              }
+              try {
+                await depositFollowUpMilestonesAfterPrize({
+                  raffle,
+                  createdMilestones,
+                  prizeCurrency: prizeCur,
+                  mainDepositSig: depositSig,
+                })
+              } catch (milestoneErr) {
+                const msg =
+                  milestoneErr instanceof Error
+                    ? milestoneErr.message
+                    : 'Bonus milestone deposit failed.'
+                setEscrowProgress({
+                  open: true,
+                  title: 'Bonus deposit needed',
+                  description: `${msg} Open your raffle to finish bonus deposits.`,
+                  phase: 'result',
+                  persistUntilDismiss: true,
+                  primaryAction: {
+                    label: 'Open raffle',
+                    onClick: () => {
+                      setEscrowProgress(CREATE_ESCROW_IDLE)
+                      router.push(`/raffles/${raffle.slug}#bonus-milestones`)
+                    },
+                  },
+                })
+                return
               }
               router.push(`/raffles/${raffle.slug}`)
             } catch (transferErr) {
@@ -2031,8 +2291,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 <span className="text-sm font-medium text-foreground">Add bonus milestone(s)</span>
                 <span className="block text-xs text-amber-200/90 mt-0.5">{MILESTONE_BETA_NOTICE}</span>
                 <span className="block text-xs text-muted-foreground mt-0.5">
-                  Prefund SOL or USDC to the platform funds escrow (max {MILESTONE_MAX_PRIZE_SOL} SOL or{' '}
-                  {milestoneMaxPrizeUsdc()} USDC per milestone). Default winner mode is random (ticket-weighted).
+                  Bonuses in the same currency as your prize are charged in the same wallet step as the main prize.
+                  Prefund to platform funds escrow (max {MILESTONE_MAX_PRIZE_SOL} SOL or {milestoneMaxPrizeUsdc()}{' '}
+                  USDC per milestone). Default winner mode is random (ticket-weighted).
                 </span>
               </span>
             </label>

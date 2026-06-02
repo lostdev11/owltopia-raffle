@@ -49,7 +49,7 @@ import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
-import { insertRaffleMilestones } from '@/lib/db/raffle-milestones'
+import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
@@ -842,7 +842,8 @@ export async function handleCreateRafflePost(
 
       await notifyRaffleCreated(raffle)
 
-      return NextResponse.json(raffle, { status: 201 })
+      const milestones = await getMilestonesByRaffleId(raffle.id)
+      return NextResponse.json({ ...raffle, milestones }, { status: 201 })
     } catch (createErr) {
       if (createErr instanceof DuplicateActiveNftPrizeError) {
         const mintRaw =

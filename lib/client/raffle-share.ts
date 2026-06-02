@@ -1,4 +1,5 @@
 import type { Raffle } from '@/lib/types'
+import { buildRaffleHostWalletShareLine } from '@/lib/raffles/host-wallet-copy'
 import {
   buildOwltopiaRaffleShareText,
   buildOwltopiaRaffleXIntentUrl,
@@ -109,9 +110,18 @@ export async function shareRaffleFromBrowser(params: {
     return
   }
 
+  const hostWalletLine = buildRaffleHostWalletShareLine(raffle)
+  const shareText = [
+    `Check out this raffle: ${raffle.title}`,
+    hostWalletLine,
+    pageUrl,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
   const shareData = {
     title: raffle.title,
-    text: `Check out this raffle: ${raffle.title}`,
+    text: shareText,
     url: pageUrl,
   }
 
@@ -126,7 +136,7 @@ export async function shareRaffleFromBrowser(params: {
 
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     try {
-      await navigator.clipboard.writeText(pageUrl)
+      await navigator.clipboard.writeText(shareText)
       onCopied?.()
       return
     } catch {
@@ -134,5 +144,5 @@ export async function shareRaffleFromBrowser(params: {
     }
   }
 
-  window.prompt('Copy raffle link:', pageUrl)
+  window.prompt('Copy raffle link:', shareText)
 }

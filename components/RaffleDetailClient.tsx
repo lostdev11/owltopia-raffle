@@ -3848,8 +3848,16 @@ export function RaffleDetailClient({
               </div>
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
-                <p className={classes.contentText + ' font-semibold break-all'}>
-                  {creatorDisplayName || creatorWallet || 'Unknown'}
+                {creatorDisplayName ? (
+                  <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
+                ) : null}
+                <p
+                  className={
+                    (creatorDisplayName ? 'text-sm ' : classes.contentText + ' font-semibold ') +
+                    'font-mono break-all text-foreground/90'
+                  }
+                >
+                  {creatorWallet || 'Unknown'}
                 </p>
               </div>
             </div>

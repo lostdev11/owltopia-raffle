@@ -367,17 +367,17 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
     creatorWallet && creatorSnowflake
       ? {
           name: 'Creator',
-          value: `<@${creatorSnowflake}> (\`${shortenWallet(creatorWallet)}\`)`,
-          inline: true,
+          value: `<@${creatorSnowflake}>\nHost wallet:\n\`${creatorWallet}\``,
+          inline: false,
         }
       : {
           name: 'Creator',
           value: creatorWallet
-            ? `\`${shortenWallet(creatorWallet)}\``
+            ? `Host wallet:\n\`${creatorWallet}\``
             : raffle.created_by
-              ? `\`${shortenWallet(String(raffle.created_by))}\``
+              ? `Host wallet:\n\`${String(raffle.created_by).trim()}\``
               : '—',
-          inline: true,
+          inline: false,
         }
 
   const extras: WebhookExtras | undefined = creatorSnowflake
