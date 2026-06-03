@@ -58,7 +58,6 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import {
   buildRaffleImageAttemptChain,
   getRaffleDisplayImageUrl,
-  getRaffleImageFallbackRawUrl,
   isDirectRaffleImageHost,
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
@@ -134,7 +133,7 @@ export function RaffleCard({
   const [ticketsConfirming, setTicketsConfirming] = useState(false)
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
-  const displayImageSrc = useMemo(() => {
+  const imageAttemptChain = useMemo(() => {
     const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
     const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
     const isLegacyOwltopiaPlaceholder =
@@ -147,38 +146,16 @@ export function RaffleCard({
           ? '/solana-mark.svg'
           : '/usdc.png'
         : null
-    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
-    return fromDb
-  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
-  const displayAdminDisp = useMemo(
-    () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
-    [raffle.image_fallback_url]
-  )
-  const adminRaw = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayAdminDisp, raffle.image_fallback_url),
-    [displayAdminDisp, raffle.image_fallback_url]
-  )
-  const modalImageChain = useMemo(
-    () =>
-      buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean),
-    [raffle.image_url, raffle.image_fallback_url]
-  )
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
+      return [cryptoCurrencyArt]
+    }
+    return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
+  }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
+  const imageAttemptChainKey = imageAttemptChain.join('\0')
+  const [thumbIdx, setThumbIdx] = useState(0)
   const [modalImgIdx, setModalImgIdx] = useState(0)
-  const listThumbFallbackRaw = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayImageSrc, raffle.image_url),
-    [displayImageSrc, raffle.image_url]
-  )
-  /** Thumbnail / card hero: primary → raw → on-chain metadata image → admin fallback URL. */
-  type ListThumbPhase =
-    | 'primary'
-    | 'fallback'
-    | 'mint_loading'
-    | 'mint'
-    | 'admin'
-    | 'admin_raw'
-    | 'dead'
-  const [listThumbPhase, setListThumbPhase] = useState<ListThumbPhase>('primary')
   const [listMintThumbSrc, setListMintThumbSrc] = useState<string | null>(null)
+  const [listMintThumbLoading, setListMintThumbLoading] = useState(false)
   // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
@@ -212,30 +189,21 @@ export function RaffleCard({
     raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())
 
   useEffect(() => {
+    setThumbIdx(0)
     setListMintThumbSrc(null)
-    const hasPrimary = !!displayImageSrc?.trim()
-    if (hasPrimary) {
-      setListThumbPhase('primary')
-    } else if (displayAdminDisp) {
-      setListThumbPhase('admin')
-    } else if (canListMintThumb) {
-      setListThumbPhase('mint_loading')
-    } else {
-      setListThumbPhase('dead')
-    }
-  }, [raffle.id, displayImageSrc, raffle.image_fallback_url, displayAdminDisp, canListMintThumb])
+    setListMintThumbLoading(false)
+  }, [raffle.id, imageAttemptChainKey])
 
   useEffect(() => {
     if (imageModalOpen) setModalImgIdx(0)
   }, [imageModalOpen])
 
   useEffect(() => {
-    if (listThumbPhase !== 'mint_loading') return
+    if (thumbIdx < imageAttemptChain.length) return
+    if (!canListMintThumb || listMintThumbSrc || listMintThumbLoading) return
     const mint = raffle.nft_mint_address?.trim()
-    if (!mint) {
-      setListThumbPhase(displayAdminDisp ? 'admin' : 'dead')
-      return
-    }
+    if (!mint) return
+    setListMintThumbLoading(true)
     let cancelled = false
     fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -243,35 +211,57 @@ export function RaffleCard({
         if (cancelled) return
         const raw = typeof data?.image === 'string' ? data.image.trim() : ''
         if (!raw) {
-          setListThumbPhase(displayAdminDisp ? 'admin' : 'dead')
+          setListMintThumbLoading(false)
           return
         }
-        const proxied = getRaffleDisplayImageUrl(raw) ?? raw
-        setListMintThumbSrc(proxied)
-        setListThumbPhase('mint')
+        setListMintThumbSrc(getRaffleDisplayImageUrl(raw) ?? raw)
+        setListMintThumbLoading(false)
       })
       .catch(() => {
-        if (!cancelled) setListThumbPhase(displayAdminDisp ? 'admin' : 'dead')
+        if (!cancelled) setListMintThumbLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [listThumbPhase, raffle.nft_mint_address, displayAdminDisp])
+  }, [
+    thumbIdx,
+    imageAttemptChain.length,
+    imageAttemptChainKey,
+    canListMintThumb,
+    raffle.nft_mint_address,
+    listMintThumbSrc,
+    listMintThumbLoading,
+  ])
+
+  const tryNextThumb = useCallback(() => {
+    setThumbIdx((i) => i + 1)
+  }, [])
+
+  const handleThumbLoadOrError = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      if (thumbIdx < imageAttemptChain.length) {
+        if (e.type === 'error') {
+          tryNextThumb()
+          return
+        }
+        const el = e.currentTarget
+        if (el.naturalWidth < 2 || el.naturalHeight < 2) tryNextThumb()
+        return
+      }
+      if (listMintThumbSrc) setListMintThumbSrc(null)
+    },
+    [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc]
+  )
 
   const listThumbSrc =
-    listThumbPhase === 'fallback' && listThumbFallbackRaw
-      ? listThumbFallbackRaw
-      : listThumbPhase === 'mint' && listMintThumbSrc
-        ? listMintThumbSrc
-        : listThumbPhase === 'admin_raw'
-          ? (adminRaw ?? displayAdminDisp ?? '')
-          : listThumbPhase === 'admin'
-            ? (displayAdminDisp ?? '')
-            : displayImageSrc ?? ''
+    thumbIdx < imageAttemptChain.length
+      ? imageAttemptChain[thumbIdx]
+      : (listMintThumbSrc ?? '')
   const listThumbUseContain =
     listThumbSrc === '/solana-mark.svg' || listThumbSrc === '/usdc.png'
-  const listThumbDead = listThumbPhase === 'dead'
-  const listThumbMintLoading = listThumbPhase === 'mint_loading'
+  const listThumbMintLoading =
+    thumbIdx >= imageAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
+  const listThumbDead = !listThumbSrc && !listThumbMintLoading
 
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const startTime = new Date(raffle.start_time)
@@ -581,7 +571,7 @@ export function RaffleCard({
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element -- list row: next/image often fails on proxy/GIF in tight layout */
                   <img
-                    key={`${listThumbPhase}-${listThumbSrc}`}
+                    key={`thumb-${thumbIdx}-${listThumbSrc}`}
                     src={listThumbSrc}
                     alt=""
                     width={160}
@@ -589,31 +579,8 @@ export function RaffleCard({
                     loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
                     className={`pointer-events-none absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-3' : 'object-cover object-center'}`}
-                    onError={() => {
-                      setListThumbPhase((phase) => {
-                        if (phase === 'primary') {
-                          if (listThumbFallbackRaw) return 'fallback'
-                          if (canListMintThumb) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'fallback') {
-                          if (canListMintThumb) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'mint') {
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'admin') {
-                          if (adminRaw && adminRaw !== displayAdminDisp) return 'admin_raw'
-                          return 'dead'
-                        }
-                        if (phase === 'admin_raw') return 'dead'
-                        return phase
-                      })
-                    }}
+                    onError={handleThumbLoadOrError}
+                    onLoad={handleThumbLoadOrError}
                   />
                 )}
               </div>
@@ -793,18 +760,18 @@ export function RaffleCard({
         <>
           <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
             <DialogContent className="max-w-5xl w-full p-0">
-              {modalImageChain.length > 0 && modalImgIdx < modalImageChain.length ? (
+              {imageAttemptChain.length > 0 && modalImgIdx < imageAttemptChain.length ? (
                 <div className="!relative w-full h-[80vh] min-h-[500px]">
                   <Image
-                    key={`modal-${modalImgIdx}-${modalImageChain[modalImgIdx]}`}
-                    src={modalImageChain[modalImgIdx]}
+                    key={`modal-${modalImgIdx}-${imageAttemptChain[modalImgIdx]}`}
+                    src={imageAttemptChain[modalImgIdx]}
                     alt={raffle.title}
                     fill
                     sizes="100vw"
                     className="object-contain"
                     priority={priority}
                     onError={() => setModalImgIdx((i) => i + 1)}
-                    unoptimized={raffleImageUnoptimized(modalImageChain[modalImgIdx])}
+                    unoptimized={raffleImageUnoptimized(imageAttemptChain[modalImgIdx])}
                   />
                 </div>
               ) : (
@@ -887,40 +854,16 @@ export function RaffleCard({
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <Image
-                  key={`card-${listThumbPhase}-${listThumbSrc}`}
+                /* eslint-disable-next-line @next/next/no-img-element -- card hero: reliable onError through fallback chain */
+                <img
+                  key={`card-${thumbIdx}-${listThumbSrc}`}
                   src={listThumbSrc}
                   alt={raffle.title}
-                  fill
-                  sizes="(max-width: 768px) 92vw, (max-width: 1200px) 50vw, 400px"
-                  className={listThumbUseContain ? 'object-contain p-2' : 'object-cover object-center'}
-                  priority={priority}
-                  onError={() => {
-                    setListThumbPhase((phase) => {
-                      if (phase === 'primary') {
-                        if (listThumbFallbackRaw) return 'fallback'
-                        if (canListMintThumb) return 'mint_loading'
-                        if (displayAdminDisp) return 'admin'
-                        return 'dead'
-                      }
-                      if (phase === 'fallback') {
-                        if (canListMintThumb) return 'mint_loading'
-                        if (displayAdminDisp) return 'admin'
-                        return 'dead'
-                      }
-                      if (phase === 'mint') {
-                        if (displayAdminDisp) return 'admin'
-                        return 'dead'
-                      }
-                      if (phase === 'admin') {
-                        if (adminRaw && adminRaw !== displayAdminDisp) return 'admin_raw'
-                        return 'dead'
-                      }
-                      if (phase === 'admin_raw') return 'dead'
-                      return phase
-                    })
-                  }}
-                  unoptimized={raffleImageUnoptimized(listThumbSrc)}
+                  loading={priority ? 'eager' : 'lazy'}
+                  decoding="async"
+                  className={`absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-2' : 'object-cover object-center'}`}
+                  onError={handleThumbLoadOrError}
+                  onLoad={handleThumbLoadOrError}
                 />
               )}
               {/* Metadata overlay on image */}
@@ -1376,18 +1319,18 @@ export function RaffleCard({
       <>
         <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
           <DialogContent className="max-w-5xl w-full p-0">
-            {modalImageChain.length > 0 && modalImgIdx < modalImageChain.length ? (
+            {imageAttemptChain.length > 0 && modalImgIdx < imageAttemptChain.length ? (
               <div className="relative w-full h-[80vh] min-h-[500px]">
                 <Image
-                  key={`modal-lg-${modalImgIdx}-${modalImageChain[modalImgIdx]}`}
-                  src={modalImageChain[modalImgIdx]}
+                  key={`modal-lg-${modalImgIdx}-${imageAttemptChain[modalImgIdx]}`}
+                  src={imageAttemptChain[modalImgIdx]}
                   alt={raffle.title}
                   fill
                   sizes="100vw"
                   className="object-contain"
                   priority={priority}
                   onError={() => setModalImgIdx((i) => i + 1)}
-                  unoptimized={raffleImageUnoptimized(modalImageChain[modalImgIdx])}
+                  unoptimized={raffleImageUnoptimized(imageAttemptChain[modalImgIdx])}
                 />
               </div>
             ) : (

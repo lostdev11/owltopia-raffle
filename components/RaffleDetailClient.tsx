@@ -69,7 +69,10 @@ import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity
 import { useCart } from '@/components/cart/CartProvider'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
+import {
+  buildRaffleImageAttemptChain,
+  getRaffleDisplayImageUrl,
+} from '@/lib/raffle-display-image-url'
 import Image from 'next/image'
 import {
   Users,
@@ -308,18 +311,11 @@ export function RaffleDetailClient({
   const [browseListError, setBrowseListError] = useState<string | null>(null)
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
-  type HeroImgPhase =
-    | 'primary'
-    | 'fallback'
-    | 'mint_loading'
-    | 'mint'
-    | 'admin'
-    | 'admin_raw'
-    | 'dead'
-  const [heroImgPhase, setHeroImgPhase] = useState<HeroImgPhase>('primary')
+  const [heroIdx, setHeroIdx] = useState(0)
   const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
+  const [mintHeroLoading, setMintHeroLoading] = useState(false)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const displayImageUrl = useMemo(() => {
+  const heroImageChain = useMemo(() => {
     const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
     const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
     const isLegacyOwltopiaPlaceholder =
@@ -332,38 +328,22 @@ export function RaffleDetailClient({
           ? '/solana-mark.svg'
           : '/usdc.png'
         : null
-    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
-    return fromDb
-  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
-  const displayAdminDisp = useMemo(
-    () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
-    [raffle.image_fallback_url]
-  )
-  const adminHeroRaw = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayAdminDisp, raffle.image_fallback_url),
-    [displayAdminDisp, raffle.image_fallback_url]
-  )
-  const fallbackRawUrl = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayImageUrl, raffle.image_url),
-    [displayImageUrl, raffle.image_url]
-  )
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
+      return [cryptoCurrencyArt]
+    }
+    return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
+  }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
+  const heroImageChainKey = heroImageChain.join('\0')
   const canMintImageFallback =
     raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())
   const hasHeroImageSection =
-    !!(displayImageUrl ?? raffle.image_url) || !!displayAdminDisp || canMintImageFallback
+    heroImageChain.length > 0 || canMintImageFallback
 
   useEffect(() => {
+    setHeroIdx(0)
     setMintHeroSrc(null)
-    if (displayImageUrl?.trim()) {
-      setHeroImgPhase('primary')
-    } else if (displayAdminDisp) {
-      setHeroImgPhase('admin')
-    } else if (canMintImageFallback) {
-      setHeroImgPhase('mint_loading')
-    } else {
-      setHeroImgPhase('dead')
-    }
-  }, [raffle.id, displayImageUrl, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+    setMintHeroLoading(false)
+  }, [raffle.id, heroImageChainKey])
 
   useEffect(() => {
     if (!depositEscrowError || !isEscrowSplPrizeFrozenVerifyError(depositEscrowError)) {
@@ -372,12 +352,11 @@ export function RaffleDetailClient({
   }, [depositEscrowError])
 
   useEffect(() => {
-    if (heroImgPhase !== 'mint_loading') return
+    if (heroIdx < heroImageChain.length) return
+    if (!canMintImageFallback || mintHeroSrc || mintHeroLoading) return
     const mint = raffle.nft_mint_address?.trim()
-    if (!mint) {
-      setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
-      return
-    }
+    if (!mint) return
+    setMintHeroLoading(true)
     let cancelled = false
     fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -385,33 +364,53 @@ export function RaffleDetailClient({
         if (cancelled) return
         const raw = typeof data?.image === 'string' ? data.image.trim() : ''
         if (!raw) {
-          setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+          setMintHeroLoading(false)
           return
         }
-        const proxied = getRaffleDisplayImageUrl(raw) ?? raw
-        setMintHeroSrc(proxied)
-        setHeroImgPhase('mint')
+        setMintHeroSrc(getRaffleDisplayImageUrl(raw) ?? raw)
+        setMintHeroLoading(false)
       })
       .catch(() => {
-        if (!cancelled) setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+        if (!cancelled) setMintHeroLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [heroImgPhase, raffle.nft_mint_address, displayAdminDisp])
+  }, [
+    heroIdx,
+    heroImageChain.length,
+    heroImageChainKey,
+    canMintImageFallback,
+    raffle.nft_mint_address,
+    mintHeroSrc,
+    mintHeroLoading,
+  ])
+
+  const tryNextHeroImage = useCallback(() => {
+    setHeroIdx((i) => i + 1)
+  }, [])
+
+  const handleHeroLoadOrError = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      if (heroIdx < heroImageChain.length) {
+        if (e.type === 'error') {
+          tryNextHeroImage()
+          return
+        }
+        const el = e.currentTarget
+        if (el.naturalWidth < 2 || el.naturalHeight < 2) tryNextHeroImage()
+        return
+      }
+      if (mintHeroSrc) setMintHeroSrc(null)
+    },
+    [heroIdx, heroImageChain.length, tryNextHeroImage, mintHeroSrc]
+  )
 
   const heroImageSrc =
-    heroImgPhase === 'fallback' && fallbackRawUrl
-      ? fallbackRawUrl
-      : heroImgPhase === 'mint' && mintHeroSrc
-        ? mintHeroSrc
-        : heroImgPhase === 'admin_raw'
-          ? (adminHeroRaw ?? displayAdminDisp ?? '')
-          : heroImgPhase === 'admin'
-            ? (displayAdminDisp ?? '')
-            : displayImageUrl ?? raffle.image_url ?? ''
-  const heroImageDead = heroImgPhase === 'dead'
-  const heroImageMintLoading = heroImgPhase === 'mint_loading'
+    heroIdx < heroImageChain.length ? heroImageChain[heroIdx] : (mintHeroSrc ?? '')
+  const heroImageMintLoading =
+    heroIdx >= heroImageChain.length && mintHeroLoading && !mintHeroSrc
+  const heroImageDead = !heroImageSrc && !heroImageMintLoading
   const { serverNow: serverTime } = useServerTime()
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
@@ -3614,7 +3613,7 @@ export function RaffleDetailClient({
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element -- proxy + IPFS: native img matches RaffleCard */}
                   <img
-                    key={`${heroImgPhase}-${heroImageSrc}`}
+                    key={`hero-${heroIdx}-${heroImageSrc}`}
                     src={heroImageSrc}
                     alt={raffle.title}
                     width={1200}
@@ -3623,31 +3622,8 @@ export function RaffleDetailClient({
                     decoding="async"
                     fetchPriority="high"
                     className="h-full w-full object-contain"
-                    onError={() => {
-                      setHeroImgPhase((phase) => {
-                        if (phase === 'primary') {
-                          if (fallbackRawUrl) return 'fallback'
-                          if (canMintImageFallback) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'fallback') {
-                          if (canMintImageFallback) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'mint') {
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'admin') {
-                          if (adminHeroRaw && adminHeroRaw !== displayAdminDisp) return 'admin_raw'
-                          return 'dead'
-                        }
-                        if (phase === 'admin_raw') return 'dead'
-                        return phase
-                      })
-                    }}
+                    onError={handleHeroLoadOrError}
+                    onLoad={handleHeroLoadOrError}
                   />
                 </div>
               ) : (
