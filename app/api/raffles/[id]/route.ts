@@ -26,8 +26,8 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
 import {
-  nftPrizeRaffleTitleMatchesSubmitted,
-  resolveNftPrizeRaffleTitleFromMint,
+  nftPrizeRaffleTitleMatchesAnyCandidate,
+  resolveNftPrizeRaffleTitleCandidatesFromMint,
 } from '@/lib/raffles/nft-prize-raffle-title'
 
 // Force dynamic rendering since we use request body and params
@@ -614,11 +614,12 @@ export async function PATCH(
     if (isNft && body.title !== undefined && body.title !== null) {
       const prizeMint = (existingRaffle.nft_mint_address || existingRaffle.nft_token_id || '').trim()
       if (prizeMint) {
-        nftRaffleTitle = await resolveNftPrizeRaffleTitleFromMint(
+        const titleCandidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
           getSolanaReadConnection(),
           prizeMint
         )
-        if (!nftPrizeRaffleTitleMatchesSubmitted(String(body.title), nftRaffleTitle)) {
+        nftRaffleTitle = titleCandidates[0]!
+        if (!nftPrizeRaffleTitleMatchesAnyCandidate(String(body.title), titleCandidates)) {
           return NextResponse.json(
             {
               error:

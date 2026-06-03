@@ -49,8 +49,8 @@ import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import {
-  nftPrizeRaffleTitleMatchesSubmitted,
-  resolveNftPrizeRaffleTitleFromMint,
+  nftPrizeRaffleTitleMatchesAnyCandidate,
+  resolveNftPrizeRaffleTitleCandidatesFromMint,
 } from '@/lib/raffles/nft-prize-raffle-title'
 import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
 import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
@@ -725,14 +725,15 @@ export async function handleCreateRafflePost(
       const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
       const floorPrice = fpParsed.string
 
-      const canonicalNftTitle = await resolveNftPrizeRaffleTitleFromMint(
+      const titleCandidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
         getSolanaReadConnection(),
         prizeAssetId
       )
+      const canonicalNftTitle = titleCandidates[0]!
       const submittedTitle = typeof body.title === 'string' ? body.title : ''
       if (
         submittedTitle.trim() &&
-        !nftPrizeRaffleTitleMatchesSubmitted(submittedTitle, canonicalNftTitle)
+        !nftPrizeRaffleTitleMatchesAnyCandidate(submittedTitle, titleCandidates)
       ) {
         return NextResponse.json(
           {
