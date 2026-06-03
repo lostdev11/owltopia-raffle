@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
+import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
@@ -290,6 +291,7 @@ export function RaffleCard({
     ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
       isPartnerSplPrizeRaffle(raffle))
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
+  const creatorModerationFlag = raffle.creator_restricted_listing === true
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
   const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
   
@@ -756,6 +758,9 @@ export function RaffleCard({
                       {statusLabel}
                     </Badge>
                   )}
+                  {creatorModerationFlag && (
+                    <CreatorModerationBuyerWarning raffle={raffle} variant="badge" />
+                  )}
                 </Link>
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
                   <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
@@ -990,11 +995,17 @@ export function RaffleCard({
                       >
                         {statusLabel}
                       </Badge>
+                      {creatorModerationFlag && (
+                        <CreatorModerationBuyerWarning raffle={raffle} variant="badge" />
+                      )}
                       <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact onImageOverlay />
                     </div>
                   )}
                   {section === 'active' && (
                     <div className="flex flex-col items-end gap-1 transition-opacity duration-200 group-hover/owlvision:opacity-30" style={{ zIndex: 1 }}>
+                      {creatorModerationFlag && (
+                        <CreatorModerationBuyerWarning raffle={raffle} variant="badge" />
+                      )}
                       <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} compact onImageOverlay />
                     </div>
                   )}

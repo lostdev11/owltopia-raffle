@@ -12,6 +12,7 @@ import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { ReferralComplimentaryHint } from '@/components/ReferralComplimentaryHint'
+import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
@@ -3458,6 +3459,11 @@ export function RaffleDetailClient({
                 <CardDescription className={`${classes.description} break-words`}>
                   <RaffleDescriptionText raffle={raffle} />
                 </CardDescription>
+                {raffle.creator_restricted_listing && (
+                  <div className="mt-3">
+                    <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
+                  </div>
+                )}
               </div>
               <div
                 className={`relative w-full sm:w-auto shrink-0 rounded-2xl bg-gradient-to-r from-emerald-400/70 via-emerald-500/80 to-emerald-300/70 p-[1px] shadow-[0_0_30px_rgba(16,185,129,0.85)] ${
@@ -4217,6 +4223,9 @@ export function RaffleDetailClient({
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Ticket purchases are temporarily blocked. Please check back later.
                   </p>
+                )}
+                {raffle.creator_restricted_listing && (
+                  <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
                 )}
                 <ReferralComplimentaryHint
                   variant="compact"

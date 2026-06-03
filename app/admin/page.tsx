@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,6 +19,7 @@ import type { CreatorHealthRow } from '@/lib/db/creator-health'
 import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
+import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
 
 interface DeletedEntry {
   id: string
@@ -2450,6 +2451,21 @@ export default function AdminDashboardPage() {
             </Button>
           </div>
         </OwlVisionDisclosure>
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="amber-soft"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                Creator moderation list
+              </span>
+            }
+          >
+            <AdminCreatorBlacklist />
+          </OwlVisionDisclosure>
+        )}
 
         {adminRole === 'full' && (
           <OwlVisionDisclosure

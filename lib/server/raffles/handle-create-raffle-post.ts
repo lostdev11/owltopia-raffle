@@ -49,6 +49,8 @@ import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
+import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
+import { listingFeeSolForStrikeCount } from '@/lib/raffles/creator-moderation-policy'
 import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
@@ -819,6 +821,36 @@ export async function handleCreateRafflePost(
       )
     }
 
+    const moderationCtx =
+      adminRole === null
+        ? await getCreatorModerationCreateContext(walletAddress)
+        : {
+            blacklisted: false,
+            banned: false,
+            strikeCount: 0,
+            listingFeeLamports: null,
+            reason: null,
+          }
+
+    if (moderationCtx.banned) {
+      return NextResponse.json(
+        {
+          error:
+            'This wallet cannot create new raffles due to moderation restrictions. Contact support if you believe this is a mistake.',
+          moderationBanned: true,
+          strikeCount: moderationCtx.strikeCount,
+        },
+        { status: 403 }
+      )
+    }
+
+    const moderationRaffleFields = {
+      creator_restricted_listing: moderationCtx.blacklisted,
+      moderation_listing_fee_lamports: moderationCtx.listingFeeLamports,
+      moderation_listing_fee_paid_at: null as string | null,
+      moderation_listing_fee_payment_tx: null as string | null,
+    }
+
     const milestoneValidation = validateMilestonesForRaffle(
       {
         max_tickets: raffleData.max_tickets,
@@ -833,6 +865,8 @@ export async function handleCreateRafflePost(
       return NextResponse.json({ error: milestoneValidation.error }, { status: 400 })
     }
 
+    raffleData = { ...raffleData, ...moderationRaffleFields }
+
     try {
       const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
@@ -843,7 +877,21 @@ export async function handleCreateRafflePost(
       await notifyRaffleCreated(raffle)
 
       const milestones = await getMilestonesByRaffleId(raffle.id)
-      return NextResponse.json({ ...raffle, milestones }, { status: 201 })
+      return NextResponse.json(
+        {
+          ...raffle,
+          milestones,
+          creatorModeration: moderationCtx.blacklisted
+            ? {
+                listingFeeLamports: moderationCtx.listingFeeLamports,
+                listingFeeSol: listingFeeSolForStrikeCount(moderationCtx.strikeCount),
+                strikeCount: moderationCtx.strikeCount,
+                buyerCaution: true,
+              }
+            : null,
+        },
+        { status: 201 }
+      )
     } catch (createErr) {
       if (createErr instanceof DuplicateActiveNftPrizeError) {
         const mintRaw =

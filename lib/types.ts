@@ -305,6 +305,12 @@ export interface Raffle {
   prize_standard?: PrizeStandard | null
   /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */
   purchases_blocked_at?: string | null
+  /** Host was on admin moderation list at create — show buyer caution on listing. */
+  creator_restricted_listing?: boolean
+  /** Lamports required before go-live for restricted creators (snapshot at create). */
+  moderation_listing_fee_lamports?: number | null
+  moderation_listing_fee_paid_at?: string | null
+  moderation_listing_fee_payment_tx?: string | null
   /** When true, ticket gross is paid to funds escrow; creator claims net after draw. */
   ticket_payments_to_funds_escrow?: boolean | null
   /** Prize escrow pubkey at creation (verification / support). */
