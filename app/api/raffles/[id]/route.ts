@@ -24,6 +24,11 @@ import {
 } from '@/lib/raffles/nft-raffle-economics'
 import { isOwlEnabled } from '@/lib/tokens'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
+import { getSolanaReadConnection } from '@/lib/solana/connection'
+import {
+  nftPrizeRaffleTitleMatchesSubmitted,
+  resolveNftPrizeRaffleTitleFromMint,
+} from '@/lib/raffles/nft-prize-raffle-title'
 
 // Force dynamic rendering since we use request body and params
 export const dynamic = 'force-dynamic'
@@ -605,8 +610,28 @@ export async function PATCH(
       (body.min_tickets !== undefined && body.min_tickets !== '') ||
       (body.minParticipants !== undefined && body.minParticipants !== '')
 
+    let nftRaffleTitle: string | undefined
+    if (isNft && body.title !== undefined && body.title !== null) {
+      const prizeMint = (existingRaffle.nft_mint_address || existingRaffle.nft_token_id || '').trim()
+      if (prizeMint) {
+        nftRaffleTitle = await resolveNftPrizeRaffleTitleFromMint(
+          getSolanaReadConnection(),
+          prizeMint
+        )
+        if (!nftPrizeRaffleTitleMatchesSubmitted(String(body.title), nftRaffleTitle)) {
+          return NextResponse.json(
+            {
+              error:
+                'Raffle title must match the prize NFT name and cannot be edited to a custom title.',
+            },
+            { status: 400 }
+          )
+        }
+      }
+    }
+
     const updates: Record<string, unknown> = {
-      title: body.title,
+      title: nftRaffleTitle ?? body.title,
       description:
         body.description !== undefined ? (body.description || null) : undefined,
       ticket_price: body.ticket_price,

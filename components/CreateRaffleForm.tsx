@@ -35,6 +35,7 @@ import {
 } from '@/lib/solana/escrow-deposit-log'
 import { isEscrowSplPrizeFrozenVerifyError } from '@/lib/raffles/verify-prize-deposit-client'
 import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
+import { nftPrizeRaffleTitleFromWalletSelection } from '@/lib/raffles/nft-prize-raffle-title'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -697,10 +698,20 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       }
     }
 
-    const titleTrimmed = ((formData.get('title') as string) ?? '').trim()
+    const isNftPrizeMode = prizeMode === 'nft'
+    const titleTrimmed = isNftPrizeMode
+      ? selectedNft
+        ? nftPrizeRaffleTitleFromWalletSelection(selectedNft.name, selectedNft.mint)
+        : ''
+      : ((formData.get('title') as string) ?? '').trim()
     if (!titleTrimmed) {
-      alert('Please enter a raffle title (scroll up if you don’t see the title field).')
-      focusFormField('title')
+      alert(
+        isNftPrizeMode
+          ? 'Select an NFT from your wallet — the raffle title is set from that NFT’s name.'
+          : 'Please enter a raffle title.'
+      )
+      if (!isNftPrizeMode) focusFormField('title')
+      else document.getElementById('nft-prize-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
 
@@ -1826,10 +1837,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           noValidate
           className="space-y-6"
         >
-          <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
-            <Input id="title" name="title" required />
-          </div>
+          {prizeMode === 'token' ? (
+            <div className="space-y-2">
+              <Label htmlFor="title">Title *</Label>
+              <Input id="title" name="title" required />
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
@@ -2093,6 +2106,34 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   Selected: {selectedNft.name ?? selectedNft.mint}
                 </p>
               )}
+              {prizeMode === 'nft' ? (
+                <div className="space-y-2 pt-2">
+                  <Label htmlFor="title">Title *</Label>
+                  {selectedNft ? (
+                    <>
+                      <Input
+                        id="title"
+                        name="title"
+                        readOnly
+                        required
+                        value={nftPrizeRaffleTitleFromWalletSelection(
+                          selectedNft.name,
+                          selectedNft.mint
+                        )}
+                        className="bg-muted/50"
+                        aria-readonly="true"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Raffle title is the selected NFT&apos;s name (from your wallet metadata).
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Pick an NFT above to set the raffle title.
+                    </p>
+                  )}
+                </div>
+              ) : null}
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">

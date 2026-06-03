@@ -1424,7 +1424,24 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
               </div>
               <div className="space-y-2">
                 <Label htmlFor="title">Title *</Label>
-                <Input id="title" name="title" defaultValue={raffle.title} required />
+                {raffle.prize_type === 'nft' ? (
+                  <>
+                    <Input
+                      id="title"
+                      name="title"
+                      defaultValue={raffle.title}
+                      readOnly
+                      required
+                      className="bg-muted/50"
+                      aria-readonly="true"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      NFT raffle titles match the prize NFT name and cannot be changed here.
+                    </p>
+                  </>
+                ) : (
+                  <Input id="title" name="title" defaultValue={raffle.title} required />
+                )}
               </div>
 
               <div className="space-y-2">

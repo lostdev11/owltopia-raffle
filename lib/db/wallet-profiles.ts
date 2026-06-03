@@ -168,6 +168,28 @@ export async function getDiscordUserIdsByWallets(wallets: string[]): Promise<Rec
   return map
 }
 
+/** Discord slash commands: resolve linked Owltopia wallet from a Discord user snowflake. */
+export async function getWalletAddressByDiscordUserId(
+  discordUserId: string
+): Promise<string | null> {
+  const did = typeof discordUserId === 'string' ? discordUserId.trim() : ''
+  if (!did) return null
+
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from('wallet_profiles')
+    .select('wallet_address')
+    .eq('discord_user_id', did)
+    .maybeSingle()
+
+  if (error) {
+    console.error('getWalletAddressByDiscordUserId:', error.message)
+    return null
+  }
+  const w = data?.wallet_address != null ? String(data.wallet_address).trim() : ''
+  return w || null
+}
+
 export async function linkDiscordToWallet(
   walletAddress: string,
   discordUserId: string,
