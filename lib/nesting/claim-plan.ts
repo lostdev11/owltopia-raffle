@@ -20,6 +20,14 @@ export function isOwlRewardPosition(
   return (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
 }
 
+/** Active OWL nest rows must reference an on-chain mint to claim or verify locks. */
+export function activeOwlNestHasMint(
+  row: Pick<StakingPositionRow, 'status' | 'reward_token_snapshot' | 'asset_identifier'>
+): boolean {
+  if (row.status !== 'active' || !isOwlRewardPosition(row)) return true
+  return Boolean(row.asset_identifier?.trim())
+}
+
 export type BuildOwlClaimPlansOptions = {
   /**
    * Claim all: include every nest with pending OWL when the combined total meets the 1 OWL minimum.
@@ -37,6 +45,7 @@ export function buildOwlClaimPlansForPositions(
   const plans: PositionClaimPlan[] = []
   for (const row of rows) {
     if (row.status !== 'active' || !isOwlRewardPosition(row)) continue
+    if (!activeOwlNestHasMint(row)) continue
     const plan = buildFullPositionClaimPlan(row, asOfMs, options)
     if (plan) plans.push(plan)
   }
@@ -69,6 +78,7 @@ export function sumOwlPendingAccrualForPositions(
   let total = 0
   for (const row of rows) {
     if (row.status !== 'active' || !isOwlRewardPosition(row)) continue
+    if (!activeOwlNestHasMint(row)) continue
     total += estimateClaimableRewards({
       amount: Number(row.amount),
       rewardRateSnapshot: Number(row.reward_rate_snapshot),
@@ -88,6 +98,7 @@ export function buildFullPositionClaimPlan(
   options?: BuildOwlClaimPlansOptions
 ): PositionClaimPlan | null {
   if (row.status !== 'active') return null
+  if (!activeOwlNestHasMint(row)) return null
 
   const stakedAtMs = new Date(row.staked_at).getTime()
   const stakeAmount = Number(row.amount)

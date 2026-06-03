@@ -115,10 +115,22 @@ export async function diagnoseNestingWallet(
 
   const positions = await listStakingPositionsByWallet(holder)
   const byStatus = { active: 0, pending: 0, unstaked: 0 }
+  let ghostActive = 0
   for (const p of positions) {
-    if (p.status === 'active') byStatus.active += 1
-    else if (p.status === 'pending') byStatus.pending += 1
+    if (p.status === 'active') {
+      byStatus.active += 1
+      if (!p.asset_identifier?.trim()) ghostActive += 1
+    } else if (p.status === 'pending') byStatus.pending += 1
     else byStatus.unstaked += 1
+  }
+
+  if (ghostActive > 0) {
+    issues.push({
+      kind: 'ghost_active_nest',
+      severity: 'medium',
+      message: `${ghostActive} active nest row(s) have no mint in the ledger — they are skipped for Claim all until cleared.`,
+      suggested_action: 'Run wallet heal (orphaned active only) or clear ghost rows in admin; do not use catch-up for unpaid OWL.',
+    })
   }
 
   const heliusRpcUrl = getHeliusMainnetRpcUrl()

@@ -227,6 +227,36 @@ export async function readOwlClaimNftNestLockEligibility(params: {
   }
 }
 
+export const NEST_LOCK_READ_MAX_ATTEMPTS = 4
+export const NEST_LOCK_READ_RETRY_BASE_MS = 400
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Retries transient RPC failures (429 / timeouts) so Claim all is not rejected with a false
+ * "not locked on-chain" error for Owner-thawed nests.
+ */
+export async function readOwlClaimNftNestLockEligibilityWithRetry(
+  params: {
+    assetId: string
+    ownerWallet: string
+    collectionMint?: string | null
+  },
+  options?: { maxAttempts?: number }
+): Promise<OwlClaimNftNestLockRead | null> {
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? NEST_LOCK_READ_MAX_ATTEMPTS)
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const state = await readOwlClaimNftNestLockEligibility(params)
+    if (state !== null) return state
+    if (attempt < maxAttempts - 1) {
+      await sleepMs(NEST_LOCK_READ_RETRY_BASE_MS * (attempt + 1))
+    }
+  }
+  return null
+}
+
 /** Owner-delegate Owl Nest that is thawed but still in the holder wallet — OK to pay OWL claims without a wallet re-lock. */
 export async function isOwnerThawedOwlNestEligibleForClaim(params: {
   assetId: string
