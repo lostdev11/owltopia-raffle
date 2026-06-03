@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
           clear_active: report.issues.some((i) => i.kind === 'orphaned_active'),
           clear_cross_wallet: report.cross_wallet_rows.length > 0,
         },
+        ghost_active_count: report.positions_under_wallet.ghost_active,
       },
     })
   } catch (e) {

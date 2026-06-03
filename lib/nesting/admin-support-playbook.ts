@@ -175,6 +175,14 @@ export function buildAdminSupportPlaybook(params: {
     })
   }
 
+  const ghostActiveCount = diag.positions_under_wallet.ghost_active ?? 0
+  if (ghostActiveCount > 0) {
+    recommendations.push({
+      action: 'Admin: Clear ghost actives only',
+      detail: `${ghostActiveCount} active ledger row(s) have no mint — use the one-click button in wallet diagnostics. Does not close real nests or remove claimable OWL.`,
+    })
+  }
+
   if (activeUnderWallet === 0 && diag.wallet_nest_mint_count > 0) {
     warnings.push({
       severity: 'info',

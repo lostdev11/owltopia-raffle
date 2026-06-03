@@ -56,6 +56,7 @@ export type NestingWalletIssueKind =
   | 'orphaned_pending'
   | 'owner_thawed_active'
   | 'ledger_active_onchain_locked'
+  | 'ghost_active_nest'
 
 export type NestingWalletIssue = {
   kind: NestingWalletIssueKind
@@ -76,6 +77,7 @@ export type NestingWalletDiagnostics = {
     active: number
     pending: number
     unstaked: number
+    ghost_active: number
   }
   issues: NestingWalletIssue[]
   cross_wallet_rows: Array<{
@@ -114,12 +116,15 @@ export async function diagnoseNestingWallet(
   const issues: NestingWalletIssue[] = []
 
   const positions = await listStakingPositionsByWallet(holder)
-  const byStatus = { active: 0, pending: 0, unstaked: 0 }
+  const byStatus = { active: 0, pending: 0, unstaked: 0, ghost_active: 0 }
   let ghostActive = 0
   for (const p of positions) {
     if (p.status === 'active') {
       byStatus.active += 1
-      if (!p.asset_identifier?.trim()) ghostActive += 1
+      if (!p.asset_identifier?.trim()) {
+        ghostActive += 1
+        byStatus.ghost_active += 1
+      }
     } else if (p.status === 'pending') byStatus.pending += 1
     else byStatus.unstaked += 1
   }
@@ -129,7 +134,7 @@ export async function diagnoseNestingWallet(
       kind: 'ghost_active_nest',
       severity: 'medium',
       message: `${ghostActive} active nest row(s) have no mint in the ledger — they are skipped for Claim all until cleared.`,
-      suggested_action: 'Run wallet heal (orphaned active only) or clear ghost rows in admin; do not use catch-up for unpaid OWL.',
+      suggested_action: 'Admin: Clear ghost actives only (one click). Does not close real nests or remove claimable OWL.',
     })
   }
 

@@ -101,10 +101,11 @@ export function AdminNestingClient() {
   const [supportWallet, setSupportWallet] = useState('')
   const [walletDiagRunning, setWalletDiagRunning] = useState(false)
   const [walletHealRunning, setWalletHealRunning] = useState(false)
+  const [ghostClearRunning, setGhostClearRunning] = useState(false)
   const [walletDiagReport, setWalletDiagReport] = useState<{
     wallet: string
     wallet_nest_mint_count: number
-    positions_under_wallet: { active: number; pending: number; unstaked: number }
+    positions_under_wallet: { active: number; pending: number; unstaked: number; ghost_active?: number }
     cross_wallet_rows: Array<{
       position_id: string
       prior_wallet: string
@@ -121,6 +122,7 @@ export function AdminNestingClient() {
     summary?: {
       issue_count: number
       high_severity_count: number
+      ghost_active_count?: number
       recommended_heal?: {
         clear_pending: boolean
         clear_active: boolean
@@ -143,7 +145,7 @@ export function AdminNestingClient() {
     } | null
     nest_diagnostics: {
       wallet_nest_mint_count: number
-      positions_under_wallet: { active: number; pending: number; unstaked: number }
+      positions_under_wallet: { active: number; pending: number; unstaked: number; ghost_active?: number }
       cross_wallet_rows: unknown[]
     }
     warnings: Array<{ severity: string; code: string; title: string; detail: string }>
@@ -705,6 +707,43 @@ export function AdminNestingClient() {
     }
   }
 
+  const runClearGhostActives = async () => {
+    const wallet = supportWallet.trim()
+    setWalletSupportMsg(null)
+    setSaveError(null)
+    if (!wallet) {
+      setSaveError('Enter the holder wallet address.')
+      return
+    }
+    setGhostClearRunning(true)
+    try {
+      const res = await fetch('/api/admin/staking/clear-ghost-active', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Clear ghost actives failed')
+        return
+      }
+      const cleared = typeof json?.cleared_count === 'number' ? json.cleared_count : 0
+      setWalletSupportMsg(
+        cleared > 0
+          ? `Cleared ${cleared} ghost active row(s) for ${wallet}. Real nests and claimable OWL are unchanged — user should refresh nesting.`
+          : `No ghost active rows found for ${wallet}.`
+      )
+      if (json.diagnostics_after) {
+        setWalletDiagReport(json.diagnostics_after as typeof walletDiagReport)
+      } else {
+        await runWalletNestDiagnostics()
+      }
+    } finally {
+      setGhostClearRunning(false)
+    }
+  }
+
   const runWalletNestHeal = async () => {
     const wallet = supportWallet.trim()
     setWalletSupportMsg(null)
@@ -756,6 +795,11 @@ export function AdminNestingClient() {
       setWalletHealRunning(false)
     }
   }
+
+  const ghostActiveCount =
+    walletDiagReport?.positions_under_wallet.ghost_active ??
+    supportPlaybook?.nest_diagnostics.positions_under_wallet.ghost_active ??
+    0
 
   const runForceUnstake = async () => {
     const id = forceUnstakePositionId.trim()
@@ -1257,6 +1301,7 @@ export function AdminNestingClient() {
                 supportPlaybookRunning ||
                 walletDiagRunning ||
                 walletHealRunning ||
+                ghostClearRunning ||
                 claimCatchupRunning ||
                 !supportWallet.trim()
               }
@@ -1351,6 +1396,24 @@ export function AdminNestingClient() {
                     <Label htmlFor="support-override-wallet-heal" className="text-xs leading-relaxed text-muted-foreground">
                       Override: allow full wallet heal anyway (will close active nests in DB)
                     </Label>
+                  </div>
+                ) : null}
+                {ghostActiveCount > 0 ? (
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-[44px] touch-manipulation border-primary/40"
+                      disabled={ghostClearRunning || !supportWallet.trim()}
+                      onClick={() => void runClearGhostActives()}
+                    >
+                      {ghostClearRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Clear ghost actives only ({ghostActiveCount})
+                    </Button>
+                    <p className="text-xs text-muted-foreground max-w-md">
+                      Removes active ledger rows with no mint. Safe while the holder still has real nests and
+                      claimable OWL — not the same as full heal.
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -1496,11 +1559,29 @@ export function AdminNestingClient() {
                 type="button"
                 variant="outline"
                 className="min-h-[44px] touch-manipulation"
-                disabled={walletDiagRunning || walletHealRunning || !supportWallet.trim()}
+                disabled={
+                  walletDiagRunning || walletHealRunning || ghostClearRunning || !supportWallet.trim()
+                }
                 onClick={() => void runWalletNestDiagnostics()}
               >
                 {walletDiagRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Run diagnostics
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation border-primary/40"
+                disabled={
+                  ghostClearRunning ||
+                  walletDiagRunning ||
+                  walletHealRunning ||
+                  !supportWallet.trim()
+                }
+                onClick={() => void runClearGhostActives()}
+              >
+                {ghostClearRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Clear ghost actives only
+                {ghostActiveCount > 0 ? ` (${ghostActiveCount})` : ''}
               </Button>
               <Button
                 type="button"
@@ -1509,6 +1590,7 @@ export function AdminNestingClient() {
                 disabled={
                   walletHealRunning ||
                   walletDiagRunning ||
+                  ghostClearRunning ||
                   !supportWallet.trim() ||
                   (supportPlaybook?.guards.block_wallet_heal === true &&
                     !overrideWalletHealBlock &&
@@ -1532,6 +1614,14 @@ export function AdminNestingClient() {
                   <span className="text-muted-foreground">DB rows:</span>{' '}
                   {walletDiagReport.positions_under_wallet.active} active,{' '}
                   {walletDiagReport.positions_under_wallet.pending} pending
+                  {(walletDiagReport.positions_under_wallet.ghost_active ?? 0) > 0 ? (
+                    <>
+                      {' · '}
+                      <span className="text-amber-200/95 font-medium tabular-nums">
+                        {walletDiagReport.positions_under_wallet.ghost_active} ghost active
+                      </span>
+                    </>
+                  ) : null}
                 </p>
                 {walletDiagReport.cross_wallet_rows.length > 0 ? (
                   <div>
@@ -1554,7 +1644,12 @@ export function AdminNestingClient() {
                 {walletDiagReport.issues.length > 0 ? (
                   <ul className="space-y-2">
                     {walletDiagReport.issues
-                      .filter((i) => i.severity !== 'low' || i.kind === 'cross_wallet_blocker')
+                      .filter(
+                        (i) =>
+                          i.severity !== 'low' ||
+                          i.kind === 'cross_wallet_blocker' ||
+                          i.kind === 'ghost_active_nest'
+                      )
                       .slice(0, 12)
                       .map((issue, idx) => (
                         <li
