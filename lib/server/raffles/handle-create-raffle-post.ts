@@ -48,6 +48,10 @@ import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/
 import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
+import {
+  nftPrizeRaffleTitleMatchesSubmitted,
+  resolveNftPrizeRaffleTitleFromMint,
+} from '@/lib/raffles/nft-prize-raffle-title'
 import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
 import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
 import { listingFeeSolForStrikeCount } from '@/lib/raffles/creator-moderation-policy'
@@ -721,9 +725,40 @@ export async function handleCreateRafflePost(
       const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
       const floorPrice = fpParsed.string
 
+      const canonicalNftTitle = await resolveNftPrizeRaffleTitleFromMint(
+        getSolanaReadConnection(),
+        prizeAssetId
+      )
+      const submittedTitle = typeof body.title === 'string' ? body.title : ''
+      if (
+        submittedTitle.trim() &&
+        !nftPrizeRaffleTitleMatchesSubmitted(submittedTitle, canonicalNftTitle)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Raffle title must match the selected NFT name. Pick the NFT again or use the name shown in your wallet.',
+          },
+          { status: 400 }
+        )
+      }
+
+      if (!body.slug) {
+        slug = await withTimeout(
+          generateUniqueSlug(
+            canonicalNftTitle
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)/g, '')
+          ),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+      }
+
       raffleData = {
         slug,
-        title: body.title,
+        title: canonicalNftTitle,
         description: body.description || null,
         image_url: body.image_url || null,
         image_fallback_url:
