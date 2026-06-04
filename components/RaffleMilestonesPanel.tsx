@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Copy } from 'lucide-react'
+import { Check, ChevronDown, Copy, ExternalLink } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
@@ -36,6 +36,12 @@ import { fetchFundsEscrowAddress } from '@/lib/client/create-raffle-milestone-de
 import { getTokenInfo } from '@/lib/tokens'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
+
+function solscanTxUrl(signature: string): string {
+  const dev = /devnet/i.test(resolvePublicSolanaRpcUrl())
+  return `https://solscan.io/tx/${encodeURIComponent(signature)}${dev ? '?cluster=devnet' : ''}`
+}
 
 function shortWallet(w: string): string {
   const t = w.trim()
@@ -69,6 +75,11 @@ export function RaffleMilestonesPanel({
   )
   const [escrowCopied, setEscrowCopied] = useState(false)
   const [panelCollapsed, setPanelCollapsed] = useState(true)
+  const [claimBonusSuccess, setClaimBonusSuccess] = useState<{
+    milestoneId: string
+    tx: string
+    label: string
+  } | null>(null)
 
   const sold = useMemo(() => ticketsSoldFromEntries(entries), [entries])
   const drawThresholdTickets = useMemo(
@@ -266,6 +277,7 @@ export function RaffleMilestonesPanel({
   const claimPrize = useCallback(
     async (m: RaffleMilestone) => {
       setActionError(null)
+      setClaimBonusSuccess(null)
       setLoadingId(`claim-${m.id}`)
       try {
         const res = await fetch(`/api/raffles/${raffle.id}/milestones/${m.id}/claim`, {
@@ -276,6 +288,15 @@ export function RaffleMilestonesPanel({
         if (!res.ok) {
           setActionError(typeof json.error === 'string' ? json.error : 'Claim failed')
           return
+        }
+        const tx =
+          typeof json.transactionSignature === 'string' ? json.transactionSignature.trim() : ''
+        if (tx) {
+          setClaimBonusSuccess({
+            milestoneId: m.id,
+            tx,
+            label: formatMilestonePrize(m),
+          })
         }
         onRefresh?.()
       } finally {
@@ -536,6 +557,40 @@ export function RaffleMilestonesPanel({
               </li>
             ))}
           </ol>
+        </div>
+      )}
+
+      {claimBonusSuccess && (
+        <div
+          className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 space-y-2"
+          role="status"
+        >
+          <div className="flex items-start gap-2">
+            <Check className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" aria-hidden />
+            <div className="min-w-0 space-y-1">
+              <p className="text-sm font-medium text-foreground">Bonus prize claimed!</p>
+              <p className="text-sm text-muted-foreground">
+                {claimBonusSuccess.label} was sent to your wallet.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button type="button" size="sm" variant="secondary" className="min-h-[44px] touch-manipulation" asChild>
+              <a href={solscanTxUrl(claimBonusSuccess.tx)} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1" />
+                View on Solscan
+              </a>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-[44px] touch-manipulation"
+              onClick={() => setClaimBonusSuccess(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
         </div>
       )}
 

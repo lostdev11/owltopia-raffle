@@ -26,7 +26,6 @@ import {
   MessageCircle,
   Share2,
   Wallet,
-  Award,
   Landmark,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -51,6 +50,20 @@ import {
   getEmptyEngagementPayload,
   type DashboardEngagementPayload,
 } from '@/lib/xp/engagement-payload'
+import { CreatorAnalyticsSection } from '@/components/dashboard/CreatorAnalyticsSection'
+import { DashboardOverviewSection } from '@/components/dashboard/DashboardOverviewSection'
+import { DashboardCollapsible } from '@/components/dashboard/DashboardCollapsible'
+import { HostingClaimTracker } from '@/components/dashboard/hosting/HostingClaimTracker'
+import { HostingQuickStats } from '@/components/dashboard/hosting/HostingQuickStats'
+import { HostingStatusBadge } from '@/components/dashboard/hosting/HostingStatusBadge'
+import { myRaffleStatusLabel } from '@/components/dashboard/hosting/helpers'
+import { ReferralRewardsRedeem } from '@/components/dashboard/ReferralRewardsRedeem'
+import { ReferralCodeCopyRow } from '@/components/referrals/ReferralCodeCopyRow'
+import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
+import {
+  getEscrowPrizeClaimSuccessCopy,
+  GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
+} from '@/lib/raffles/claim-prize-success-copy'
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -167,13 +180,6 @@ function formatMintForDisplay(mint: string | null | undefined): string {
   return m
 }
 
-/** Readable status for creator list (DB uses snake_case; some states need clearer wording). */
-function myRaffleStatusLabel(status: string | null): string {
-  const s = status ?? 'draft'
-  if (s === 'successful_pending_claims') return 'Settled — claim proceeds'
-  return s.replace(/_/g, ' ')
-}
-
 type DashboardData = {
   wallet: string
   displayName: string | null
@@ -226,6 +232,21 @@ type DashboardData = {
     activeCode: string
     codeKind: 'random' | 'vanity'
     canSetVanity: boolean
+  } | null
+  referralGrowth?: {
+    monthlyCap: number
+    monthlyUsed: number
+    monthlyRemaining: number
+    isHolder: boolean
+    monthKey: string
+    resetsAt: string
+    pendingRewards: Array<{
+      id: string
+      reward_recipient_role: 'buyer' | 'referrer'
+      referral_code: string
+      issued_at: string
+    }>
+    eligibleRaffles: Array<{ id: string; slug: string; title: string }>
   } | null
   engagement?: DashboardEngagementPayload
   /** Buyout bids placed by this wallet (claim refunds here when expired/superseded). */
@@ -320,13 +341,14 @@ type RaffleEntrySummary = {
   referredByLabels: string[]
 }
 
-type DashboardTabId = 'overview' | 'hosting' | 'winnings' | 'account'
+type DashboardTabId = 'overview' | 'hosting' | 'analytics' | 'winnings' | 'account'
 
 function parseDashboardTabParam(value: string | null): DashboardTabId | null {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
     raw === 'overview' ||
     raw === 'hosting' ||
+    raw === 'analytics' ||
     raw === 'winnings' ||
     raw === 'account'
   ) {
@@ -369,7 +391,14 @@ export default function DashboardPage() {
   const [buyoutRefundLoadingId, setBuyoutRefundLoadingId] = useState<string | null>(null)
   const [isClaimingAllBuyoutRefunds, setIsClaimingAllBuyoutRefunds] = useState(false)
   const [claimActionError, setClaimActionError] = useState<string | null>(null)
-  const [claimPrizeSuccessTx, setClaimPrizeSuccessTx] = useState<string | null>(null)
+  const [claimSuccess, setClaimSuccess] = useState<{
+    tx: string
+    title: string
+    slug: string
+    winnerWallet: string
+    heading: string
+    message: string
+  } | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
   const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<number | null>(null)
@@ -385,6 +414,7 @@ export default function DashboardPage() {
   const hasRetried401OnMobile = useRef(false)
   const dashboardHydratedRef = useRef(false)
   const hasDashboardDataRef = useRef(false)
+  const myEntriesDetailsRef = useRef<HTMLDetailsElement>(null)
   const visibilityTick = useVisibilityTick()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -417,11 +447,6 @@ export default function DashboardPage() {
     if (next) setDashboardTab(next)
   }, [searchParams])
 
-  useEffect(() => {
-    if (!claimPrizeSuccessTx) return
-    const t = window.setTimeout(() => setClaimPrizeSuccessTx(null), 9000)
-    return () => window.clearTimeout(t)
-  }, [claimPrizeSuccessTx])
 
   // Use wallet address string in deps so callback identity is stable (publicKey object ref can change every render and cause infinite loop).
   const walletAddr = publicKey?.toBase58() ?? ''
@@ -711,12 +736,19 @@ export default function DashboardPage() {
   )
 
   const handleClaimPrize = useCallback(
-    async (raffleId: string) => {
+    async (raffle: {
+      id: string
+      slug: string
+      title: string
+      winner_wallet?: string | null
+      prize_type?: string | null
+      prize_currency?: string | null
+    }) => {
       setClaimActionError(null)
-      setClaimPrizeSuccessTx(null)
-      setClaimPrizeLoadingId(raffleId)
+      setClaimSuccess(null)
+      setClaimPrizeLoadingId(raffle.id)
       try {
-        const res = await fetch(`/api/raffles/${raffleId}/claim-prize`, {
+        const res = await fetch(`/api/raffles/${raffle.id}/claim-prize`, {
           method: 'POST',
           credentials: 'include',
         })
@@ -733,8 +765,19 @@ export default function DashboardPage() {
           typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
             ? (json as { transactionSignature: string }).transactionSignature.trim()
             : ''
-        if (txSig) {
-          setClaimPrizeSuccessTx(txSig)
+        const winnerWallet = raffle.winner_wallet?.trim() ?? ''
+        if (txSig && winnerWallet) {
+          setClaimSuccess({
+            tx: txSig,
+            title: raffle.title,
+            slug: raffle.slug,
+            winnerWallet,
+            heading: 'Prize claimed!',
+            message: getEscrowPrizeClaimSuccessCopy({
+              prize_type: (raffle.prize_type ?? 'nft') as 'crypto' | 'nft',
+              prize_currency: raffle.prize_currency ?? null,
+            }).sentDetail,
+          })
         }
         await loadDashboard({ silent: true })
       } finally {
@@ -853,13 +896,14 @@ export default function DashboardPage() {
   )
 
   const handleClaimGiveaway = useCallback(
-    async (giveawayId: string) => {
+    async (g: NftGiveaway) => {
       if (!publicKey) return
       setClaimActionError(null)
-      setClaimGiveawayLoadingId(giveawayId)
+      setClaimSuccess(null)
+      setClaimGiveawayLoadingId(g.id)
       try {
         const addr = publicKey.toBase58()
-        const res = await fetch(`/api/me/nft-giveaways/${giveawayId}/claim`, {
+        const res = await fetch(`/api/me/nft-giveaways/${g.id}/claim`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'X-Connected-Wallet': addr },
@@ -873,6 +917,21 @@ export default function DashboardPage() {
           )
           return
         }
+        const txSig =
+          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
+            ? (json as { transactionSignature: string }).transactionSignature.trim()
+            : ''
+        const winnerWallet = (g.eligible_wallet ?? addr).trim()
+        if (txSig && winnerWallet) {
+          setClaimSuccess({
+            tx: txSig,
+            title: g.title?.trim() || 'Giveaway NFT',
+            slug: `giveaway-${g.id}`,
+            winnerWallet,
+            heading: 'NFT claimed!',
+            message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
+          })
+        }
         await loadDashboard({ silent: true })
       } finally {
         setClaimGiveawayLoadingId(null)
@@ -882,13 +941,14 @@ export default function DashboardPage() {
   )
 
   const handleClaimCommunityGiveaway = useCallback(
-    async (giveawayId: string) => {
+    async (g: CommunityGiveaway) => {
       if (!publicKey) return
       setClaimActionError(null)
-      setClaimCommunityGiveawayLoadingId(giveawayId)
+      setClaimSuccess(null)
+      setClaimCommunityGiveawayLoadingId(g.id)
       try {
         const addr = publicKey.toBase58()
-        const res = await fetch(`/api/me/community-giveaways/${giveawayId}/claim`, {
+        const res = await fetch(`/api/me/community-giveaways/${g.id}/claim`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'X-Connected-Wallet': addr },
@@ -901,6 +961,21 @@ export default function DashboardPage() {
               : 'Could not claim community giveaway'
           )
           return
+        }
+        const txSig =
+          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
+            ? (json as { transactionSignature: string }).transactionSignature.trim()
+            : ''
+        const winnerWallet = (g.winner_wallet ?? addr).trim()
+        if (txSig && winnerWallet) {
+          setClaimSuccess({
+            tx: txSig,
+            title: g.title?.trim() || 'Community giveaway',
+            slug: `community-giveaway-${g.id}`,
+            winnerWallet,
+            heading: 'NFT claimed!',
+            message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
+          })
         }
         await loadDashboard({ silent: true })
       } finally {
@@ -1281,6 +1356,92 @@ export default function DashboardPage() {
     )
   }, [myEntriesForMemo, entriesFilter, walletForMemo])
 
+  const winsSectionDefaults = useMemo(() => {
+    const giveaways = Array.isArray(data?.nftGiveaways) ? data.nftGiveaways : []
+    const community = Array.isArray(data?.communityGiveaways) ? data.communityGiveaways : []
+    const giveawayReady = giveaways.filter((g) => Boolean(g.prize_deposited_at) && !g.claimed_at).length
+    const communityReady = community.filter(
+      (g) =>
+        g.status === 'drawn' &&
+        Boolean(g.prize_deposited_at) &&
+        Boolean(g.winner_wallet) &&
+        !g.claimed_at
+    ).length
+    const nftClaimable = nftPrizeDashboardRows.filter((r) => r.prizeState === 'claimable').length
+    const cryptoClaimable = cryptoPrizeWinRows.filter((r) =>
+      canClaimEscrowPrize(r as EntryWithRaffle['raffle'], walletForMemo)
+    ).length
+
+    return {
+      creatorProceeds: pendingCreatorFundClaims.length > 0,
+      giveaways: giveawayReady > 0,
+      community: communityReady > 0,
+      nftWins: nftClaimable > 0,
+      cryptoWins: cryptoClaimable > 0,
+      myEntries: entriesFilter === 'won' || raffleSummaries.length <= 6,
+      counts: {
+        giveaways: giveaways.length,
+        giveawayReady,
+        community: community.length,
+        communityReady,
+        nftWins: nftPrizeDashboardRows.length,
+        nftClaimable,
+        cryptoWins: cryptoPrizeWinRows.length,
+        cryptoClaimable,
+      },
+    }
+  }, [
+    data,
+    nftPrizeDashboardRows,
+    cryptoPrizeWinRows,
+    pendingCreatorFundClaims.length,
+    walletForMemo,
+    entriesFilter,
+    raffleSummaries.length,
+  ])
+
+  const overviewStats = useMemo(() => {
+    let ticketsEntered = 0
+    const enteredRaffles = new Set<string>()
+    const winRaffles = new Set<string>()
+    for (const { entry, raffle } of myEntriesForMemo) {
+      if (entry.status === 'rejected') continue
+      enteredRaffles.add(raffle.id)
+      ticketsEntered += Number(entry.ticket_quantity) || 0
+      if (raffle.winner_wallet?.trim() === walletForMemo.trim()) winRaffles.add(raffle.id)
+    }
+    const giveaways = Array.isArray(data?.nftGiveaways) ? data.nftGiveaways : []
+    const community = Array.isArray(data?.communityGiveaways) ? data.communityGiveaways : []
+    const giveawayReady = giveaways.filter((g) => Boolean(g.prize_deposited_at) && !g.claimed_at).length
+    const communityReady = community.filter(
+      (g) =>
+        g.status === 'drawn' &&
+        Boolean(g.prize_deposited_at) &&
+        Boolean(g.winner_wallet) &&
+        !g.claimed_at
+    ).length
+    const nftClaimable = nftPrizeDashboardRows.filter((r) => r.prizeState === 'claimable').length
+    const cryptoClaimable = cryptoPrizeWinRows.filter((r) =>
+      canClaimEscrowPrize(r as EntryWithRaffle['raffle'], walletForMemo)
+    ).length
+    return {
+      rafflesEntered: enteredRaffles.size,
+      ticketsEntered,
+      wins: winRaffles.size,
+      hostedRaffles: myRafflesForMemo.length,
+      pendingClaims: pendingCreatorFundClaims.length,
+      prizesToClaim: giveawayReady + communityReady + nftClaimable + cryptoClaimable,
+    }
+  }, [
+    myEntriesForMemo,
+    walletForMemo,
+    myRafflesForMemo.length,
+    pendingCreatorFundClaims.length,
+    data,
+    nftPrizeDashboardRows,
+    cryptoPrizeWinRows,
+  ])
+
   const entriesListMaxPage =
     raffleSummaries.length === 0
       ? 0
@@ -1293,6 +1454,12 @@ export default function DashboardPage() {
   useEffect(() => {
     setEntriesPage((p) => Math.min(p, entriesListMaxPage))
   }, [entriesListMaxPage])
+
+  useLayoutEffect(() => {
+    if (winsSectionDefaults.myEntries && myEntriesDetailsRef.current) {
+      myEntriesDetailsRef.current.open = true
+    }
+  }, [winsSectionDefaults.myEntries])
 
   if (!connected) {
     return (
@@ -1394,7 +1561,6 @@ export default function DashboardPage() {
   // Defensive: avoid crashes if API returns unexpected shape (e.g. partial/cached response)
   const myRaffles = myRafflesForMemo
   const myEntries = myEntriesForMemo
-  const creatorRevenue = typeof data.creatorRevenue === 'number' ? data.creatorRevenue : 0
   const creatorRevenueByCurrency =
     data.creatorRevenueByCurrency && typeof data.creatorRevenueByCurrency === 'object'
       ? data.creatorRevenueByCurrency
@@ -1690,7 +1856,9 @@ export default function DashboardPage() {
       : null
 
   return (
-    <main className="relative mx-auto max-w-4xl px-4 py-6 sm:py-10 safe-area-bottom">
+    <main
+      className={`relative mx-auto px-4 py-6 sm:py-10 safe-area-bottom ${dashboardTab === 'analytics' || dashboardTab === 'overview' ? 'max-w-6xl' : 'max-w-4xl'}`}
+    >
       <div
         className="pointer-events-none absolute inset-x-0 -top-24 h-72 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,hsl(var(--primary)/0.18),transparent)]"
         aria-hidden
@@ -2047,6 +2215,12 @@ export default function DashboardPage() {
             )}
           </TabsTrigger>
           <TabsTrigger
+            value="analytics"
+            className="min-h-[44px] flex-1 gap-1.5 rounded-lg px-2 text-xs font-medium sm:flex-initial sm:px-4 sm:text-sm"
+          >
+            Analytics
+          </TabsTrigger>
+          <TabsTrigger
             value="winnings"
             className="min-h-[44px] flex-1 gap-1.5 rounded-lg px-2 text-xs font-medium sm:flex-initial sm:px-4 sm:text-sm"
           >
@@ -2060,183 +2234,17 @@ export default function DashboardPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-0 space-y-4 focus-visible:outline-none">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <Award className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Level & XP
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-2xl font-bold tracking-tight">
-                    Level {engagement.level}
-                    <span className="text-base font-semibold text-muted-foreground"> / 99</span>
-                  </p>
-                  <p className="text-sm tabular-nums text-muted-foreground">{engagement.totalXp} XP</p>
-                </div>
-                {engagement.xpToNext != null && engagement.xpToNext > 0 ? (
-                  <div className="space-y-1.5">
-                    <div
-                      className="h-2 w-full overflow-hidden rounded-full bg-muted"
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={engagement.xpToNext}
-                      aria-valuenow={engagement.xpIntoLevel}
-                      aria-label="Experience toward next level"
-                    >
-                      <div
-                        className="h-full rounded-full bg-primary transition-[width] duration-300"
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            Math.round((100 * engagement.xpIntoLevel) / engagement.xpToNext)
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                      {engagement.xpIntoLevel} / {engagement.xpToNext} XP to next level
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Max level reached.</p>
-                )}
-                <details className="group text-sm">
-                  <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground touch-manipulation min-h-[44px] sm:min-h-0 [&::-webkit-details-marker]:hidden">
-                    <ChevronDown
-                      className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180"
-                      aria-hidden
-                    />
-                    Milestones ({engagement.milestones.filter((m) => m.done).length}/
-                    {engagement.milestones.length})
-                  </summary>
-                  <ul className="scrollbar-themed mt-1 max-h-52 space-y-2 overflow-y-auto pr-1 text-xs text-muted-foreground">
-                    {engagement.milestones.map((m) => (
-                      <li
-                        key={m.key}
-                        className={`flex gap-2 rounded-md border border-border/50 p-2 ${m.done ? 'bg-muted/40' : 'bg-transparent'}`}
-                      >
-                        <span className="shrink-0 pt-0.5" aria-hidden>
-                          {m.done ? (
-                            <Check className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-                          ) : (
-                            <span className="inline-block h-3.5 w-3.5 rounded-full border border-muted-foreground/40" />
-                          )}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="font-medium text-foreground">{m.title}</span>
-                          <span className="text-muted-foreground"> · +{m.xp} XP</span>
-                          <span className="mt-0.5 block leading-snug">{m.description}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Fee tier
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-2xl font-bold tracking-tight">
-                  {feeTier.feeBps === 300 ? '3%' : feeTier.feeBps === 600 ? '6%' : `${(feeTier.feeBps / 100).toFixed(1)}%`}{' '}
-                  <span className="text-base font-semibold text-muted-foreground">fee</span>
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {feeTier.reason === 'holder'
-                    ? 'Owltopia holder rate'
-                    : feeTier.reason === 'partner_community'
-                      ? displayNameInput.trim()
-                        ? `Partner · ${displayNameInput.trim()}`
-                        : 'Partner — set display name in Wallet tab'
-                      : 'Standard rate'}
-                </p>
-                <details className="group text-xs text-muted-foreground">
-                  <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground touch-manipulation [&::-webkit-details-marker]:hidden">
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" aria-hidden />
-                    How fees work
-                  </summary>
-                  <p className="mt-2 leading-relaxed pl-1">
-                    New raffles use funds escrow; platform fee and your net share are sent when you claim after the draw.
-                    Older raffles may use split-at-purchase.
-                  </p>
-                </details>
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Creator revenue
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-2xl font-bold tabular-nums tracking-tight">
-                  {creatorRevenue > 0
-                    ? Object.entries(creatorRevenueByCurrency)
-                        .map(([cur, amt]) => `${amt.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
-                        .join(' + ') || '—'
-                    : '—'}
-                </p>
-                {creatorRevenue > 0 ? (
-                  <>
-                    <p className="text-sm text-muted-foreground">After platform fee (claimed + live estimate).</p>
-                    {Object.keys(creatorLiveEarningsByCurrency).length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        Live:{' '}
-                        {Object.entries(creatorLiveEarningsByCurrency)
-                          .map(([cur, amt]) => `${amt.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
-                          .join(' + ')}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No earnings from hosted raffles yet.</p>
-                )}
-              </CardContent>
-            </Card>
-            <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Gross sales
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-2xl font-bold tabular-nums tracking-tight">
-                  {Object.keys(creatorAllTimeGrossByCurrency).length > 0
-                    ? Object.entries(creatorAllTimeGrossByCurrency)
-                        .map(([cur, amt]) => `${amt.toFixed(cur === 'USDC' ? 2 : 4)} ${cur}`)
-                        .join(' + ')
-                    : '—'}
-                </p>
-                <p className="text-sm text-muted-foreground">Confirmed ticket volume (before platform fee).</p>
-              </CardContent>
-            </Card>
-          </div>
-          <p className="text-center text-xs text-muted-foreground">
-            Live escrow totals and claims are under{' '}
-            <button
-              type="button"
-              className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-              onClick={() => setDashboardTabFromUi('hosting')}
-            >
-              Hosting
-            </button>
-            . Prizes and tickets you bought are under{' '}
-            <button
-              type="button"
-              className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-              onClick={() => setDashboardTabFromUi('winnings')}
-            >
-              Wins
-            </button>
-            .
-          </p>
+        <TabsContent value="overview" className="mt-0 focus-visible:outline-none">
+          <DashboardOverviewSection
+            engagement={engagement}
+            feeTier={feeTier}
+            partnerDisplayName={displayNameInput.trim() || displayName}
+            creatorRevenueByCurrency={creatorRevenueByCurrency}
+            creatorLiveEarningsByCurrency={creatorLiveEarningsByCurrency}
+            creatorAllTimeGrossByCurrency={creatorAllTimeGrossByCurrency}
+            stats={overviewStats}
+            onNavigateTab={setDashboardTabFromUi}
+          />
         </TabsContent>
 
         <TabsContent value="account" className="mt-0 space-y-4 focus-visible:outline-none">
@@ -2376,41 +2384,50 @@ export default function DashboardPage() {
           </Card>
 
           {referralRow ? (
-            <Card className="rounded-xl border-border/60 shadow-sm">
+            <Card className="rounded-xl border-emerald-500/25 bg-emerald-500/[0.04] shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Share2 className="h-4 w-4" />
-                  Referral link
+                  <Share2 className="h-4 w-4 text-emerald-500" />
+                  Your referral code
                 </CardTitle>
-                <CardDescription>Share to credit referrals on ticket purchases (cookie-based).</CardDescription>
+                <CardDescription>
+                  Copy your code and add it to any eligible raffle link as{' '}
+                  <span className="font-mono">?ref={referralRow.activeCode}</span> (SOL/USDC tickets only).
+                </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch sm:flex-wrap">
-                  <code className="flex min-h-[44px] items-center rounded-lg border border-border/60 bg-muted/80 px-3 py-2.5 text-xs break-all sm:text-sm">
-                    {typeof window !== 'undefined'
-                      ? `${window.location.origin}/?ref=${encodeURIComponent(referralRow.activeCode)}`
-                      : `/?ref=${referralRow.activeCode}`}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
-                    onClick={() => {
-                      const href =
-                        typeof window !== 'undefined'
-                          ? `${window.location.origin}/?ref=${encodeURIComponent(referralRow.activeCode)}`
-                          : ''
-                      if (href && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                        void navigator.clipboard.writeText(href)
-                      }
-                    }}
-                  >
-                    Copy link
-                  </Button>
-                </div>
+                <ReferralCodeCopyRow code={referralRow.activeCode} copyLabel="Copy code" />
+
+                {data?.referralGrowth ? (
+                  <div className="rounded-lg border border-border/50 bg-muted/30 px-3 py-3">
+                    <p className="text-sm font-medium text-foreground">
+                      Referrals this month: {data.referralGrowth.monthlyUsed} / {data.referralGrowth.monthlyCap}{' '}
+                      used
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {data.referralGrowth.monthlyRemaining > 0
+                        ? `${data.referralGrowth.monthlyRemaining} referral reward${data.referralGrowth.monthlyRemaining === 1 ? '' : 's'} left`
+                        : 'No referral rewards left this month'}{' '}
+                      · Resets {new Date(data.referralGrowth.resetsAt).toLocaleDateString()}
+                      {data.referralGrowth.isHolder ? ' · Owltopia holder' : ''}
+                    </p>
+                  </div>
+                ) : null}
+
+                {data?.referralGrowth?.pendingRewards?.length && publicKey ? (
+                  <ReferralRewardsRedeem
+                    pendingRewards={data.referralGrowth.pendingRewards}
+                    eligibleRaffles={data.referralGrowth.eligibleRaffles}
+                    walletAddress={publicKey.toBase58()}
+                    onRedeemed={() => void loadDashboard()}
+                  />
+                ) : null}
+
                 <p className="text-xs text-muted-foreground">
-                  Code: <span className="font-medium text-foreground">{referralRow.activeCode}</span>
-                  {referralRow.codeKind === 'vanity' ? ' · custom' : ' · auto'}
+                  {referralRow.codeKind === 'vanity' ? 'Custom code' : 'Auto-generated code'}
+                  {' · '}
+                  Use on raffle pages from the share card, or append{' '}
+                  <span className="font-mono">?ref={referralRow.activeCode}</span> to the URL.
                 </p>
                 <details className="rounded-lg border border-border/50 bg-muted/20 text-xs">
                   <summary className="cursor-pointer p-3 font-medium text-foreground touch-manipulation">
@@ -2474,217 +2491,44 @@ export default function DashboardPage() {
           ) : null}
         </TabsContent>
 
+        <TabsContent value="analytics" className="mt-0 space-y-6 focus-visible:outline-none">
+          <CreatorAnalyticsSection />
+        </TabsContent>
+
         <TabsContent value="hosting" className="mt-0 space-y-6 focus-visible:outline-none">
-      <Card className="mb-0 rounded-xl border-emerald-500/30 bg-emerald-500/[0.06] shadow-sm">
-        <CardHeader className="space-y-3 pb-2">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2.5 text-base sm:text-lg">
-                <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-35" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                </span>
-                Live claim tracker
-              </CardTitle>
-              <CardDescription>
-                Updates about every {Math.round(CLAIM_TRACKER_POLL_MS / 1000)}s while this tab is open, or when you use
-                refresh in the page header.
-              </CardDescription>
-            </div>
-            <details className="rounded-lg border border-border/50 bg-background/60 text-sm sm:max-w-xs">
-              <summary className="cursor-pointer px-3 py-2.5 font-medium touch-manipulation">
-                Escrow tips
-              </summary>
-              <p className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-                Creator revenue and gross sales on the Overview tab use the same refresh. On mobile, use stable Wi‑Fi or
-                data if totals lag.
-              </p>
-            </details>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-1">Ready to claim (net to you)</p>
-              <p className="text-lg font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerReadyNetByCurrency)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {pendingCreatorFundClaims.length} raffle
-                {pendingCreatorFundClaims.length === 1 ? '' : 's'} settled — use{' '}
-                <span className="font-medium text-foreground">Claim now</span> below when listed.
-              </p>
-              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (net in escrow)</p>
-              <p className="text-base font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerLiveSales.net)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Estimated from confirmed ticket sales on funds-escrow raffles still live or waiting to draw.
-              </p>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-1">Platform fee (same claim tx)</p>
-              <p className="text-lg font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerReadyFeeByCurrency)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Goes to treasury when you claim</p>
-              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (fee in escrow)</p>
-              <p className="text-base font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerLiveSales.fee)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Same fee tier as your dashboard; included when you claim after the draw.</p>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-background/60 p-3 sm:col-span-1">
-              <p className="text-xs font-medium text-muted-foreground mb-1">Gross in escrow (pre-claim)</p>
-              <p className="text-lg font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerReadyGrossByCurrency)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Net + fee for raffles ready to claim</p>
-              <p className="text-xs font-medium text-muted-foreground mt-2.5 mb-0.5">Live raffles (gross in escrow)</p>
-              <p className="text-base font-semibold tabular-nums break-words">
-                {formatMultiCurrencyTotals(claimTrackerLiveSales.gross)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Total confirmed ticket volume still in funds escrow before the draw.</p>
-            </div>
-          </div>
+          <HostingQuickStats
+            hostedCount={myRaffles.length}
+            readyToClaimCount={pendingCreatorFundClaims.length}
+            awaitingDrawCount={creatorRafflesEndedAwaitingDraw.length}
+          />
+          <HostingClaimTracker
+            pollIntervalMs={CLAIM_TRACKER_POLL_MS}
+            readyNet={claimTrackerReadyNetByCurrency}
+            readyFee={claimTrackerReadyFeeByCurrency}
+            readyGross={claimTrackerReadyGrossByCurrency}
+            liveSales={claimTrackerLiveSales}
+            pendingClaims={pendingCreatorFundClaims}
+            awaitingSettlement={awaitingSettlementEscrowClaims}
+            liveEscrowCount={liveEscrowRaffles.length}
+            endedAwaitingDraw={creatorRafflesEndedAwaitingDraw}
+            hasLiveEscrowSales={claimTrackerHasLiveEscrowSales}
+            claimProceedsLoadingId={claimProceedsLoadingId}
+            onClaimProceeds={handleClaimProceeds}
+            onGoOverview={() => setDashboardTabFromUi('overview')}
+          />
 
-          {pendingCreatorFundClaims.length > 0 && (
-            <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/[0.09] p-3 sm:p-4">
-              <p className="text-sm font-semibold text-foreground mb-1">Claim now — ticket proceeds (funds escrow)</p>
-              <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                One transaction sends your net share to this wallet and the platform fee to treasury. You can also claim
-                from each raffle row under My raffles in this tab.
-              </p>
-              <ul className="space-y-3">
-                {pendingCreatorFundClaims.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/30 pb-3 last:border-0 last:pb-0"
-                  >
-                    <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate min-w-0">
-                      {r.title}
-                    </Link>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="touch-manipulation min-h-[44px] shrink-0 w-full sm:w-auto"
-                      disabled={claimProceedsLoadingId === r.id}
-                      onClick={() => handleClaimProceeds(r.id)}
-                    >
-                      {claimProceedsLoadingId === r.id ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Claiming…
-                        </>
-                      ) : (
-                        <>
-                          <Coins className="h-4 w-4 mr-2" />
-                          Claim funds
-                        </>
-                      )}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {awaitingSettlementEscrowClaims.length > 0 && (
-            <div>
-              <p className="text-sm font-medium text-foreground mb-2">
-                Waiting for settlement ({awaitingSettlementEscrowClaims.length})
-              </p>
-              <p className="text-xs text-muted-foreground mb-2">
-                Winner recorded; payout lines are being finalized. Amounts appear here when ready.
-              </p>
-              <ul className="space-y-1.5 text-sm">
-                {awaitingSettlementEscrowClaims.slice(0, 8).map((r) => (
-                  <li key={r.id}>
-                    <Link href={`/raffles/${r.slug}`} className="text-primary hover:underline font-medium">
-                      {r.title}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              {awaitingSettlementEscrowClaims.length > 8 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  +{awaitingSettlementEscrowClaims.length - 8} more in My raffles
-                </p>
-              )}
-            </div>
-          )}
-
-          {liveEscrowRaffles.length > 0 && (
-            <div className="rounded-lg border border-dashed border-border/70 p-3">
-              <p className="text-sm font-medium text-foreground">
-                Ticket sales still in funds escrow ({liveEscrowRaffles.length} raffle
-                {liveEscrowRaffles.length === 1 ? '' : 's'})
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Live and ready-to-draw raffles keep gross proceeds in escrow until the draw. The top row stays “—” until
-                a winner is drawn; then your net and fee move to “ready to claim.” See{' '}
-                <button
-                  type="button"
-                  className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
-                  onClick={() => setDashboardTabFromUi('overview')}
-                >
-                  Overview
-                </button>{' '}
-                for headline revenue and gross sales as purchases confirm.
-              </p>
-            </div>
-          )}
-
-          {creatorRafflesEndedAwaitingDraw.length > 0 && (
-            <div
-              className="rounded-lg border border-amber-500/40 bg-amber-500/[0.07] p-3"
-              role="status"
-            >
-              <p className="text-sm font-medium text-foreground">End time passed — winner draw still pending</p>
-              <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-                Your claim button only appears <span className="font-medium text-foreground">after</span> a winner is
-                chosen and settlement is recorded. Open each raffle page once to run the draw immediately, or wait for
-                the automatic job (about every 15 minutes).
-              </p>
-              <ul className="mt-2.5 space-y-1.5 text-sm">
-                {creatorRafflesEndedAwaitingDraw.slice(0, 10).map((r) => (
-                  <li key={r.id}>
-                    <Link href={`/raffles/${r.slug}`} className="text-primary font-medium hover:underline">
-                      {r.title}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              {creatorRafflesEndedAwaitingDraw.length > 10 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  +{creatorRafflesEndedAwaitingDraw.length - 10} more in My raffles below
-                </p>
-              )}
-            </div>
-          )}
-
-          {pendingCreatorFundClaims.length === 0 &&
-            awaitingSettlementEscrowClaims.length === 0 &&
-            liveEscrowRaffles.length === 0 &&
-            !claimTrackerHasLiveEscrowSales && (
-              <p className="text-sm text-muted-foreground">
-                No active escrow claim pipeline right now. When you host funds-escrow raffles, live sales show in the
-                tracker above; after a draw, ready-to-claim totals appear in the top row of each column until you claim.
-              </p>
-            )}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-xl border-border/60 shadow-sm">
-        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
+      <Card className="rounded-xl border-border/60 shadow-sm overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/40 bg-muted/20">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <TrendingUp className="h-5 w-5 shrink-0 text-primary" aria-hidden />
               My raffles
             </CardTitle>
-            <CardDescription>Raffles you created ({myRaffles.length})</CardDescription>
+            <CardDescription className="mt-1">
+              Manage listings, claims, and refunds ({myRaffles.length})
+            </CardDescription>
           </div>
-          <Button asChild className="shrink-0">
+          <Button asChild className="shrink-0 min-h-[44px] w-full touch-manipulation sm:w-auto">
             <Link href="/admin/raffles/new">Create raffle</Link>
           </Button>
         </CardHeader>
@@ -2696,10 +2540,10 @@ export default function DashboardPage() {
           )}
           {creatorFailedMinPrizeReturnClaimable.length > 0 && (
             <div
-              className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/[0.07] p-3 space-y-2"
+              className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/[0.07] p-3 sm:p-4 space-y-2"
               role="status"
             >
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-sm font-semibold text-foreground">
                 Claim your prize back (cancelled or minimum not met after extension)
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -2761,16 +2605,29 @@ export default function DashboardPage() {
             </div>
           )}
           {myRaffles.length === 0 ? (
-            <p className="text-muted-foreground">You haven’t created any raffles yet.</p>
+            <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+              You haven&apos;t created any raffles yet.{' '}
+              <Link href="/admin/raffles/new" className="font-medium text-primary hover:underline">
+                Create your first raffle
+              </Link>
+            </div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {myRaffles.slice(0, 20).map((r) => {
                 const isOpen = openRaffleId === r.id
                 const endTime = new Date(r.end_time)
+                const payoutPreview =
+                  r.creator_payout_amount != null &&
+                  (r.status === 'completed' ||
+                    (r.status === 'successful_pending_claims' && r.creator_claimed_at))
+                    ? `${Number(r.creator_payout_amount).toFixed(r.currency === 'USDC' ? 2 : 4)} ${r.currency}`
+                    : null
                 return (
                   <li
                     key={r.id}
-                    className="border-b border-border/50 last:border-0"
+                    className={`rounded-xl border bg-card/80 transition-colors ${
+                      isOpen ? 'border-primary/30 shadow-sm' : 'border-border/60'
+                    }`}
                   >
                     <div
                       role="button"
@@ -2782,22 +2639,36 @@ export default function DashboardPage() {
                           toggleRaffle(r.id)
                         }
                       }}
-                      className="flex w-full cursor-pointer items-center justify-between gap-4 py-2 text-left"
+                      className="flex w-full cursor-pointer flex-col gap-3 p-3 text-left touch-manipulation sm:flex-row sm:items-center sm:justify-between sm:p-4"
                     >
-                      <span className="flex min-w-0 flex-col">
-                        <Link
-                          href={`/raffles/${r.slug}`}
-                          className="font-medium hover:underline truncate"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {r.title}
-                        </Link>
-                        <span className="text-xs text-muted-foreground">
-                          Ends {endTime.toLocaleString()}
+                      <span className="flex min-w-0 flex-1 items-start gap-2">
+                        <ChevronDown
+                          className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                            isOpen ? 'rotate-180' : ''
+                          }`}
+                          aria-hidden
+                        />
+                        <span className="flex min-w-0 flex-col gap-1">
+                          <Link
+                            href={`/raffles/${r.slug}`}
+                            className="font-medium text-foreground hover:underline truncate"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {r.title}
+                          </Link>
+                          <span className="text-xs text-muted-foreground">
+                            Ends {endTime.toLocaleString()}
+                            {payoutPreview ? (
+                              <span className="text-foreground/80">
+                                {' '}
+                                · <span className="tabular-nums font-medium">{payoutPreview}</span>
+                              </span>
+                            ) : null}
+                          </span>
                         </span>
                       </span>
-                      <span className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground flex-wrap justify-end">
-                        <span className="capitalize">{myRaffleStatusLabel(r.status)}</span>
+                      <span className="flex items-center gap-2 shrink-0 flex-wrap justify-end pl-6 sm:pl-0">
+                        <HostingStatusBadge status={r.status} />
                         {r.status === 'successful_pending_claims' &&
                           raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
@@ -2875,13 +2746,6 @@ export default function DashboardPage() {
                               )}
                             </Button>
                           )}
-                        {r.creator_payout_amount != null &&
-                          (r.status === 'completed' ||
-                            (r.status === 'successful_pending_claims' && r.creator_claimed_at)) && (
-                          <span>
-                            {Number(r.creator_payout_amount).toFixed(r.currency === 'USDC' ? 2 : 4)} {r.currency}
-                          </span>
-                        )}
                         {r.prize_type === 'nft' && (
                           <button
                             type="button"
@@ -2913,10 +2777,10 @@ export default function DashboardPage() {
                     </div>
                     <div
                       className={`overflow-hidden transition-all duration-300 ${
-                        isOpen ? 'max-h-[28rem] opacity-100' : 'max-h-0 opacity-0'
+                        isOpen ? 'max-h-[32rem] opacity-100' : 'max-h-0 opacity-0'
                       }`}
                     >
-                      <div className="pb-3 pl-1 pr-1 text-sm text-muted-foreground space-y-1">
+                      <div className="border-t border-border/40 px-3 pb-4 pt-3 text-sm text-muted-foreground space-y-1 sm:px-4">
                         {r.status === 'successful_pending_claims' &&
                           raffleUsesFundsEscrow(r) &&
                           !r.creator_claimed_at &&
@@ -3494,14 +3358,17 @@ export default function DashboardPage() {
             </p>
           </details>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-3">
           {claimActionError && (
             <p className="text-sm text-destructive" role="alert">
               {claimActionError}
             </p>
           )}
-          <div>
-            <p className="text-sm font-medium text-foreground mb-2">Creator proceeds (your raffles)</p>
+          <DashboardCollapsible
+            title="Creator proceeds (your raffles)"
+            defaultOpen={winsSectionDefaults.creatorProceeds}
+            description="Ticket sales you host are claimed from the Hosting tab. This section is a quick pointer only."
+          >
             {pendingCreatorFundClaims.length > 0 ? (
               <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
                 <p>
@@ -3546,14 +3413,18 @@ export default function DashboardPage() {
                 button.
               </p>
             )}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground mb-2">Giveaway NFTs</p>
-            <p className="text-xs text-muted-foreground mb-3">
-              One-off drops from the team: when the prize is verified in escrow, claim here with this wallet (same as
-              sign-in). The eligible wallet on the giveaway must match this signed-in wallet. On mobile, use Wi‑Fi or
-              solid data and a reliable RPC if claim fails once.
-            </p>
+          </DashboardCollapsible>
+          <DashboardCollapsible
+            title="Giveaway NFTs"
+            count={winsSectionDefaults.counts.giveaways}
+            readyLabel={
+              winsSectionDefaults.counts.giveawayReady > 0
+                ? `${winsSectionDefaults.counts.giveawayReady} ready`
+                : null
+            }
+            defaultOpen={winsSectionDefaults.giveaways}
+            description="One-off drops from the team. On mobile, use Wi‑Fi or solid data and a reliable RPC if claim fails once."
+          >
             {(Array.isArray(data.nftGiveaways) ? data.nftGiveaways : []).length === 0 ? (
               <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border/70 p-3">
                 No giveaways for this wallet yet. If you were sent a link, open{' '}
@@ -3622,7 +3493,7 @@ export default function DashboardPage() {
                             size="sm"
                             className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                             disabled={claimGiveawayLoadingId === g.id}
-                            onClick={() => handleClaimGiveaway(g.id)}
+                            onClick={() => handleClaimGiveaway(g)}
                           >
                             {claimGiveawayLoadingId === g.id ? (
                               <>
@@ -3647,12 +3518,18 @@ export default function DashboardPage() {
                 })}
               </ul>
             )}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground mb-2">Community giveaway wins</p>
-            <p className="text-xs text-muted-foreground mb-3">
-              Pool giveaways you won after a draw: claim sends the NFT from escrow to this wallet (same as sign-in).
-            </p>
+          </DashboardCollapsible>
+          <DashboardCollapsible
+            title="Community giveaway wins"
+            count={winsSectionDefaults.counts.community}
+            readyLabel={
+              winsSectionDefaults.counts.communityReady > 0
+                ? `${winsSectionDefaults.counts.communityReady} ready`
+                : null
+            }
+            defaultOpen={winsSectionDefaults.community}
+            description="Pool giveaways you won after a draw — claim sends the NFT from escrow to this wallet."
+          >
             {(Array.isArray(data.communityGiveaways) ? data.communityGiveaways : []).length === 0 ? (
               <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border/70 p-3">
                 No community giveaway wins for this wallet yet.
@@ -3723,7 +3600,7 @@ export default function DashboardPage() {
                             size="sm"
                             className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                             disabled={claimCommunityGiveawayLoadingId === g.id}
-                            onClick={() => handleClaimCommunityGiveaway(g.id)}
+                            onClick={() => handleClaimCommunityGiveaway(g)}
                           >
                             {claimCommunityGiveawayLoadingId === g.id ? (
                               <>
@@ -3748,9 +3625,17 @@ export default function DashboardPage() {
                 })}
               </ul>
             )}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground mb-2">Raffle winners (NFT prizes)</p>
+          </DashboardCollapsible>
+          <DashboardCollapsible
+            title="Raffle winners (NFT prizes)"
+            count={winsSectionDefaults.counts.nftWins}
+            readyLabel={
+              winsSectionDefaults.counts.nftClaimable > 0
+                ? `${winsSectionDefaults.counts.nftClaimable} to claim`
+                : null
+            }
+            defaultOpen={winsSectionDefaults.nftWins}
+          >
             {nftPrizeDashboardRows.length > 0 ? (
               <ul className="space-y-3">
                 {nftPrizeDashboardRows.map(({ raffle, prizeState, claimedTx }) => (
@@ -3781,7 +3666,7 @@ export default function DashboardPage() {
                           size="sm"
                           className="touch-manipulation min-h-[44px] w-full sm:w-auto"
                           disabled={claimPrizeLoadingId === raffle.id}
-                          onClick={() => handleClaimPrize(raffle.id)}
+                          onClick={() => handleClaimPrize(raffle)}
                         >
                           {claimPrizeLoadingId === raffle.id ? (
                             <>
@@ -3813,10 +3698,18 @@ export default function DashboardPage() {
                 appear here.
               </p>
             )}
-          </div>
+          </DashboardCollapsible>
           {cryptoPrizeWinRows.length > 0 && (
-            <div>
-              <p className="text-sm font-medium text-foreground mb-2">Raffle winners (crypto / SPL prizes)</p>
+            <DashboardCollapsible
+              title="Raffle winners (crypto / SPL prizes)"
+              count={winsSectionDefaults.counts.cryptoWins}
+              readyLabel={
+                winsSectionDefaults.counts.cryptoClaimable > 0
+                  ? `${winsSectionDefaults.counts.cryptoClaimable} to claim`
+                  : null
+              }
+              defaultOpen={winsSectionDefaults.cryptoWins}
+            >
               <ul className="space-y-3">
                 {cryptoPrizeWinRows.map((raffle) => (
                   <li key={raffle.id} className="rounded-lg border border-border/50 p-3">
@@ -3838,7 +3731,7 @@ export default function DashboardPage() {
                             variant="secondary"
                             className="min-h-[44px] touch-manipulation"
                             disabled={claimPrizeLoadingId === raffle.id}
-                            onClick={() => handleClaimPrize(raffle.id)}
+                            onClick={() => handleClaimPrize(raffle)}
                           >
                             {claimPrizeLoadingId === raffle.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -3866,7 +3759,7 @@ export default function DashboardPage() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </DashboardCollapsible>
           )}
         </CardContent>
       </Card>
@@ -3896,7 +3789,21 @@ export default function DashboardPage() {
             </select>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
+          <details ref={myEntriesDetailsRef} className="group border-t border-border/40">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-6 py-3 touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <ChevronDown
+                  className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                  aria-hidden
+                />
+                Entry list
+              </span>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {raffleSummaries.length} raffle{raffleSummaries.length === 1 ? '' : 's'}
+              </span>
+            </summary>
+            <div className="space-y-0 px-6 pb-6 pt-2">
           {raffleSummaries.length === 0 ? (
             <p className="text-muted-foreground">
               {myEntries.length === 0
@@ -3956,7 +3863,7 @@ export default function DashboardPage() {
                                 disabled={claimPrizeLoadingId === raffle.id}
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  handleClaimPrize(raffle.id)
+                                  handleClaimPrize(raffle)
                                 }}
                               >
                                 {claimPrizeLoadingId === raffle.id ? (
@@ -4038,43 +3945,30 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+            </div>
+          </details>
         </CardContent>
       </Card>
       </TabsContent>
       </Tabs>
       </div>
-      {claimPrizeSuccessTx && (
-        <div className="fixed inset-x-0 bottom-3 z-50 px-3 safe-area-bottom pointer-events-none">
-          <div className="mx-auto max-w-xl rounded-xl border border-emerald-500/50 bg-emerald-500/10 p-3 shadow-lg pointer-events-auto">
-            <div className="flex items-start gap-3">
-              <Check className="mt-0.5 h-5 w-5 text-emerald-500 shrink-0" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-foreground">Prize claimed successfully</p>
-                <p className="text-xs text-muted-foreground break-all">
-                  Tx: {claimPrizeSuccessTx}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Button type="button" size="sm" variant="secondary" className="min-h-[44px]" asChild>
-                    <a href={solscanTxUrl(claimPrizeSuccessTx)} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink className="h-4 w-4 mr-1" />
-                      View on Solscan
-                    </a>
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="min-h-[44px]"
-                    onClick={() => setClaimPrizeSuccessTx(null)}
-                  >
-                    Dismiss
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ClaimSuccessOverlay
+        open={claimSuccess !== null}
+        heading={claimSuccess?.heading}
+        message={claimSuccess?.message ?? ''}
+        transactionSignature={claimSuccess?.tx ?? ''}
+        solscanUrl={solscanTxUrl}
+        winnerPng={
+          claimSuccess
+            ? {
+                title: claimSuccess.title,
+                slug: claimSuccess.slug,
+                winnerWallet: claimSuccess.winnerWallet,
+              }
+            : undefined
+        }
+        onClose={() => setClaimSuccess(null)}
+      />
     </main>
   )
 }
