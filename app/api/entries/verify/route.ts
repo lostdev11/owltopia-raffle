@@ -15,6 +15,8 @@ import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import { entriesVerifyBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { tryIssueReferralRewardsOnPaidEntryConfirm } from '@/lib/referrals/reward-engine'
+import { isReferralGrowthProgramActive } from '@/lib/referrals/config'
 import {
   tryAcquireVerificationLock,
   releaseVerificationLock,
@@ -201,10 +203,21 @@ export async function POST(request: NextRequest) {
         console.error('[entries/verify] milestone unlock sync:', unlockErr)
       }
 
+      let freeEntryUnlocked = false
+      if (await isReferralGrowthProgramActive()) {
+        try {
+          const unlock = await tryIssueReferralRewardsOnPaidEntryConfirm(result.entry)
+          freeEntryUnlocked = Boolean(unlock.buyerReward)
+        } catch (rewardErr) {
+          console.error('[entries/verify] referral rewards:', rewardErr)
+        }
+      }
+
       return NextResponse.json({
         success: true,
         entryId: result.entry.id,
         transactionSignature: result.entry.transaction_signature ?? transactionSignature,
+        ...(freeEntryUnlocked ? { freeEntryUnlocked: true as const } : {}),
       })
     } finally {
       releaseVerificationLock(entryId)

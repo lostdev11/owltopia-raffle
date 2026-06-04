@@ -398,6 +398,12 @@ export interface Entry {
   referral_complimentary?: boolean
   complimentary_confirm_token?: string | null
   complimentary_token_expires_at?: string | null
+  /** Referral growth reward audit (complimentary redemption). */
+  reward_mode_at_issue?: string | null
+  reward_issued_at?: string | null
+  reward_confirmed_at?: string | null
+  reward_status?: string | null
+  referral_reward_id?: string | null
 }
 
 export interface OwlVisionScore {

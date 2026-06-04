@@ -14,7 +14,14 @@ import {
   getEmptyEngagementPayload,
   syncEngagementMilestonesAndGetPayload,
 } from '@/lib/db/wallet-milestones'
-import { getReferralSummaryForWallet, syncReferralStateForWallet } from '@/lib/db/referrals'
+import { getReferralSummaryForWallet, syncReferralStateForWallet, ensureWalletReferralRow } from '@/lib/db/referrals'
+import {
+  getReferrerMonthlyUsage,
+  listPendingReferralRewardsForWallet,
+} from '@/lib/db/referral-rewards'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { raffleEligibleForReferralFreeEntry } from '@/lib/referrals/program'
+import { isReferralGrowthProgramActive, isReferralProgramEnabled } from '@/lib/referrals/config'
 import { listCommunityGiveawaysWonByWallet } from '@/lib/db/community-giveaways'
 import { listNftGiveawaysForWallet } from '@/lib/db/nft-giveaways'
 import { enrichBuyoutOffersRefundDepositSource } from '@/lib/buyout/dashboard-offers'
@@ -98,6 +105,7 @@ export async function GET(request: NextRequest) {
 
     try {
       await syncReferralStateForWallet(wallet)
+      await ensureWalletReferralRow(wallet)
     } catch (e) {
       console.error('[me/dashboard] referral sync:', e instanceof Error ? e.message : e)
     }
@@ -248,6 +256,49 @@ export async function GET(request: NextRequest) {
 
     const buyoutOffersWithDepositSource = await enrichBuyoutOffersRefundDepositSource(buyoutOffers)
 
+    const referralProgramActive = await isReferralProgramEnabled()
+
+    let referralGrowth: {
+      monthlyCap: number
+      monthlyUsed: number
+      monthlyRemaining: number
+      isHolder: boolean
+      monthKey: string
+      resetsAt: string
+      pendingRewards: Awaited<ReturnType<typeof listPendingReferralRewardsForWallet>>
+      eligibleRaffles: Array<{ id: string; slug: string; title: string }>
+    } | null = null
+
+    if (referralProgramActive && (await isReferralGrowthProgramActive())) {
+      try {
+        const [monthly, pendingRewards] = await Promise.all([
+          getReferrerMonthlyUsage(wallet),
+          listPendingReferralRewardsForWallet(wallet),
+        ])
+        const { data: liveRaffles } = await getSupabaseAdmin()
+          .from('raffles')
+          .select('id, slug, title, currency, is_active, end_time, purchases_blocked_at')
+          .eq('is_active', true)
+          .in('currency', ['SOL', 'USDC'])
+          .limit(80)
+        const eligibleRaffles = (liveRaffles ?? [])
+          .filter((r) => raffleEligibleForReferralFreeEntry(r))
+          .map((r) => ({ id: r.id, slug: r.slug, title: r.title }))
+        referralGrowth = {
+          monthlyCap: monthly.cap,
+          monthlyUsed: monthly.used,
+          monthlyRemaining: monthly.remaining,
+          isHolder: monthly.isHolder,
+          monthKey: monthly.monthKey,
+          resetsAt: monthly.resetsAt,
+          pendingRewards,
+          eligibleRaffles,
+        }
+      } catch (e) {
+        console.error('[me/dashboard] referral growth:', e instanceof Error ? e.message : e)
+      }
+    }
+
     return NextResponse.json({
       wallet,
       displayName: walletProfile.displayName,
@@ -272,9 +323,10 @@ export async function GET(request: NextRequest) {
       nftGiveaways,
       communityGiveaways,
       referral:
-        referralSummary != null
+        referralProgramActive && referralSummary != null
           ? { ...referralSummary, canSetVanity: canSetVanityReferral }
           : null,
+      referralGrowth: referralProgramActive ? referralGrowth : null,
       buyoutOffers: buyoutOffersWithDepositSource,
       engagement,
       /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */

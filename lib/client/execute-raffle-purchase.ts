@@ -27,7 +27,7 @@ import { attachPaymentSignature } from '@/lib/client/attach-payment-signature'
 import { isMobileDevice, isAndroidDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export type ExecuteRafflePurchaseResult =
-  | { ok: true; verifying?: boolean }
+  | { ok: true; verifying?: boolean; freeEntryUnlocked?: boolean }
   | { ok: false; error: string; isUnconfirmedPayment?: boolean }
 
 /** Shown while payment is on-chain but tickets are not confirmed yet. */
@@ -718,9 +718,18 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     if (celebrateOnPaymentConfirmed) {
       requestAnimationFrame(() => fireGreenConfetti())
     }
+
+    let freeEntryUnlocked = false
+    try {
+      const verifyJson = (await verifyResponse.json()) as { freeEntryUnlocked?: boolean }
+      freeEntryUnlocked = verifyJson.freeEntryUnlocked === true
+    } catch {
+      /* ignore */
+    }
+
     routerRefresh()
     afterVerifyOk?.()
-    return { ok: true }
+    return { ok: true, freeEntryUnlocked: freeEntryUnlocked || undefined }
   } catch (err: unknown) {
     const { message, isUnconfirmedPayment } = classifyPurchaseError(err)
     return { ok: false, error: message, isUnconfirmedPayment }

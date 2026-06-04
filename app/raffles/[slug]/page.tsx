@@ -14,6 +14,12 @@ import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-wit
 import { getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { RaffleDetailClient } from '@/components/RaffleDetailClient'
+import { RaffleReferralCapture, RaffleViewTracker } from '@/components/referrals/RaffleReferralTracking'
+import { getRaffleReferralStats } from '@/lib/db/referral-stats'
+import { getReferralSummaryForWallet } from '@/lib/db/referrals'
+import { isReferralProgramEnabled } from '@/lib/referrals/config'
+import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
+import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
@@ -177,14 +183,47 @@ export default async function RaffleDetailPage({
   const milestones = await getMilestonesByRaffleId(raffle.id)
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const [enrichedRaffle] = await enrichRafflesWithCreatorHolder([raffle])
+
+  const referralProgramActive = await isReferralProgramEnabled()
+  const referralEnabled = referralProgramActive && raffleSupportsReferralProgram(enrichedRaffle)
+  const referralStats = referralEnabled ? await getRaffleReferralStats(raffle.id) : { promoters: [] }
+
+  const creatorWallet = (
+    enrichedRaffle.creator_wallet ||
+    enrichedRaffle.created_by ||
+    ''
+  ).trim()
+  const isCreator =
+    Boolean(viewerWallet) &&
+    Boolean(creatorWallet) &&
+    viewerWallet!.trim() === creatorWallet
+
+  let viewerReferralCode: string | null = null
+  if (viewerWallet) {
+    const summary = await getReferralSummaryForWallet(viewerWallet)
+    viewerReferralCode = summary?.activeCode ?? null
+  }
+
   return (
-    <RaffleDetailClient
-      key={enrichedRaffle.id}
-      raffle={enrichedRaffle}
-      entries={entries}
-      milestones={milestones}
-      owlVisionScore={owlVisionScore}
-      sessionWallet={viewerWallet}
-    />
+    <>
+      {referralEnabled ? (
+        <Suspense fallback={null}>
+          <RaffleReferralCapture slug={enrichedRaffle.slug} />
+        </Suspense>
+      ) : null}
+      <RaffleViewTracker slug={enrichedRaffle.slug} viewerWallet={viewerWallet} />
+      <RaffleDetailClient
+        key={enrichedRaffle.id}
+        raffle={enrichedRaffle}
+        entries={entries}
+        milestones={milestones}
+        owlVisionScore={owlVisionScore}
+        sessionWallet={viewerWallet}
+        referralEnabled={referralEnabled}
+        referralPromoters={referralStats.promoters}
+        isCreatorViewer={isCreator}
+        viewerReferralCode={viewerReferralCode}
+      />
+    </>
   )
 }

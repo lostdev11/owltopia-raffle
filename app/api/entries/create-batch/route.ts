@@ -12,7 +12,8 @@ import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
 import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
-import { isReferralAttributionEnabled } from '@/lib/referrals/config'
+import { isReferralAttributionActive } from '@/lib/referrals/config'
+import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
 import { mergeBatchPayoutLines } from '@/lib/entries/batch-payout-lines'
 import {
   assertCartBatchGrossMatchesMergedSplit,
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     let referralRaw: string | undefined
-    if (isReferralAttributionEnabled()) {
+    if (await isReferralAttributionActive()) {
       const cookieRaw = request.cookies.get(REFERRAL_COOKIE_NAME)?.value?.trim()
       if (cookieRaw) {
         try {
@@ -175,7 +176,9 @@ export async function POST(request: NextRequest) {
       }
 
       /** Batch checkout never activates referral complimentary flows (would require separate tx-less confirm). */
-      const referralResolution = await resolveReferralForPurchase(referralRaw, walletAddressStr, {
+      const itemReferralRaw =
+        referralRaw && raffleSupportsReferralProgram(raffle) ? referralRaw : undefined
+      const referralResolution = await resolveReferralForPurchase(itemReferralRaw, walletAddressStr, {
         amountPaid: fullPrice,
         currency: String(raffle.currency || 'SOL'),
         complimentary: false,

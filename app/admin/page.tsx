@@ -20,6 +20,7 @@ import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
+import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
 
 interface DeletedEntry {
   id: string
@@ -2464,6 +2465,21 @@ export default function AdminDashboardPage() {
             }
           >
             <AdminCreatorBlacklist />
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="green"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Share2 className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                Referral Performance
+              </span>
+            }
+          >
+            <AdminReferralPerformanceSection />
           </OwlVisionDisclosure>
         )}
 

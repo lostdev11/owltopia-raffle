@@ -12,6 +12,10 @@ import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { ReferralComplimentaryHint } from '@/components/ReferralComplimentaryHint'
+import { RaffleReferralPanel } from '@/components/referrals/RaffleReferralPanel'
+import { RaffleReferralShareCard } from '@/components/referrals/RaffleReferralShareCard'
+import { FreeEntryUnlockedDialog } from '@/components/referrals/FreeEntryUnlockedDialog'
+import type { RaffleReferralPromoterRow } from '@/lib/referrals/types'
 import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
@@ -151,6 +155,7 @@ import {
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
@@ -191,6 +196,10 @@ interface RaffleDetailClientProps {
   milestones?: RaffleMilestone[]
   owlVisionScore: OwlVisionScore
   sessionWallet: string | null
+  referralEnabled?: boolean
+  referralPromoters?: RaffleReferralPromoterRow[]
+  isCreatorViewer?: boolean
+  viewerReferralCode?: string | null
 }
 
 export function RaffleDetailClient({
@@ -199,6 +208,10 @@ export function RaffleDetailClient({
   milestones: initialMilestones = [],
   owlVisionScore,
   sessionWallet,
+  referralEnabled = false,
+  referralPromoters = [],
+  isCreatorViewer = false,
+  viewerReferralCode = null,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -210,6 +223,7 @@ export function RaffleDetailClient({
   const { addItem: addCartItem } = useCart()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [shareCopied, setShareCopied] = useState(false)
+  const [freeEntryUnlockedOpen, setFreeEntryUnlockedOpen] = useState(false)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   /** Populated when verify fails with frozen escrow SPL account; cleared when error is not that case. */
@@ -961,6 +975,12 @@ export function RaffleDetailClient({
                   body: JSON.stringify({ entryId, transactionSignature }),
                 })
                 if (retryRes.ok) {
+                  try {
+                    const retryJson = (await retryRes.json()) as { freeEntryUnlocked?: boolean }
+                    if (retryJson.freeEntryUnlocked) setFreeEntryUnlockedOpen(true)
+                  } catch {
+                    /* ignore */
+                  }
                   setTicketsConfirming(false)
                   setSuccess(true)
                   setShowEnterRaffleDialog(false)
@@ -1007,6 +1027,10 @@ export function RaffleDetailClient({
         setSuccess(false)
         router.refresh()
         return
+      }
+
+      if (res.freeEntryUnlocked) {
+        setFreeEntryUnlockedOpen(true)
       }
 
       router.refresh()
@@ -2699,6 +2723,14 @@ export function RaffleDetailClient({
               </Button>
             )}
         </div>
+        {referralEnabled ? (
+          <RaffleReferralShareCard
+            slug={raffle.slug}
+            referralCode={viewerReferralCode}
+            hasSession={Boolean(sessionWallet?.trim())}
+            variant="compact"
+          />
+        ) : null}
         {initialMilestones.length > 0 && (
           <RaffleMilestonesPanel
             raffle={raffle}
@@ -2708,6 +2740,9 @@ export function RaffleDetailClient({
             onRefresh={() => router.refresh()}
           />
         )}
+        {referralEnabled && referralPromoters.length > 0 ? (
+          <RaffleReferralPanel promoters={referralPromoters} />
+        ) : null}
         <Dialog open={requestCancelDialogOpen} onOpenChange={setRequestCancelDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -4736,8 +4771,7 @@ export function RaffleDetailClient({
                   Claiming your prize…
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Stay on this screen. Your wallet may ask you to sign in first; after that we broadcast
-                  the NFT transfer from escrow. Solana usually confirms within a few seconds.
+                  {getEscrowPrizeClaimSuccessCopy(raffle).loadingDetail}
                 </p>
               </>
             ) : (
@@ -4749,12 +4783,12 @@ export function RaffleDetailClient({
                   <Trophy className="h-8 w-8" />
                 </div>
                 <h2 id="claim-prize-overlay-title" className="text-lg font-semibold text-foreground">
-                  {claimPrizeAlreadyClaimed ? 'Prize already sent' : 'Prize sent!'}
+                  {claimPrizeAlreadyClaimed ? 'Prize already sent' : 'Prize claimed!'}
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   {claimPrizeAlreadyClaimed
-                    ? 'This prize was already transferred to your wallet. Open Solscan below to verify the transaction.'
-                    : 'Your NFT prize has been sent to your connected wallet. You can confirm the transfer on Solscan.'}
+                    ? getEscrowPrizeClaimSuccessCopy(raffle).alreadySentDetail
+                    : getEscrowPrizeClaimSuccessCopy(raffle).sentDetail}
                 </p>
                 {claimPrizeTxSignature ? (
                   <a
@@ -4766,6 +4800,16 @@ export function RaffleDetailClient({
                     View transaction on Solscan
                     <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                   </a>
+                ) : null}
+                {raffle.winner_wallet?.trim() ? (
+                  <RaffleWinnerPngButton
+                    title={raffle.title}
+                    slug={raffle.slug}
+                    imageUrl={heroImageDead ? null : heroImageSrc}
+                    winnerWallet={raffle.winner_wallet.trim()}
+                    buttonLabel="Download winner PNG"
+                    fullWidth
+                  />
                 ) : null}
                 <Button
                   type="button"
@@ -4779,6 +4823,7 @@ export function RaffleDetailClient({
           </div>
         </div>
       )}
+      <FreeEntryUnlockedDialog open={freeEntryUnlockedOpen} onOpenChange={setFreeEntryUnlockedOpen} />
       </div>
     </>
   )

@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { supabase } from '@/lib/supabase'
 import { ownsOwltopia } from '@/lib/platform-fees'
-import { isReferralAttributionEnabled } from '@/lib/referrals/config'
+import { isReferralAttributionActive } from '@/lib/referrals/config'
 import { purchaseMeetsReferralMinimum } from '@/lib/referrals/hardening'
 import { referralAbuseAllowsNewRow } from '@/lib/db/referral-abuse'
 import {
@@ -161,6 +161,39 @@ export type ReferralResolveContext = {
 }
 
 /**
+ * Validate an active referral code without a buyer context (landing capture).
+ */
+export async function lookupActiveReferralCode(
+  rawCode: string | null | undefined
+): Promise<PurchaseReferralResolution> {
+  if (!(await isReferralAttributionActive())) return null
+
+  const normalized = normalizeReferralCodeInput(rawCode ?? '')
+  if (!normalized) return null
+
+  const admin = getSupabaseAdmin()
+
+  const { data: retired } = await admin
+    .from('referral_retired_codes')
+    .select('code')
+    .eq('code', normalized)
+    .maybeSingle()
+  if (retired?.code) return null
+
+  const { data: row, error } = await admin
+    .from('wallet_referrals')
+    .select('wallet_address')
+    .eq('active_code', normalized)
+    .maybeSingle()
+
+  if (error || !row?.wallet_address) return null
+  const referrer = String(row.wallet_address).trim()
+  if (!referrer) return null
+
+  return { referrerWallet: referrer, referralCodeUsed: normalized }
+}
+
+/**
  * Resolve referral for a purchase: only active codes count; retired codes do not.
  * No self-referral. Optional ctx enforces minimum checkout size + 24h velocity caps.
  */
@@ -169,7 +202,7 @@ export async function resolveReferralForPurchase(
   buyerWallet: string,
   ctx?: ReferralResolveContext
 ): Promise<PurchaseReferralResolution> {
-  if (!isReferralAttributionEnabled()) return null
+  if (!(await isReferralAttributionActive())) return null
 
   const buyer = buyerWallet.trim()
   const normalized = normalizeReferralCodeInput(rawCode ?? '')

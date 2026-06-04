@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { lookupActiveReferralCode } from '@/lib/db/referrals'
 import { normalizeReferralCodeInput } from '@/lib/referrals/code-format'
 import { REFERRAL_COOKIE_NAME, REFERRAL_COOKIE_MAX_AGE_SEC } from '@/lib/referrals/constants'
 import { isReferralAttributionActive, isReferralGrowthProgramActive } from '@/lib/referrals/config'
+import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
+import { getRaffleByIdOrSlug } from '@/lib/raffles/resolve-raffle-route-param'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -11,12 +14,21 @@ const CAPTURE_CODE_LIMIT = 25
 const WINDOW_MS = 60_000
 
 /**
- * GET /api/referrals/capture?ref=code
- * Validates `ref`, then sets an httpOnly cookie so checkout can attribute without exposing the code to page JS.
+ * GET /api/raffles/[id]/referral-capture?ref=code
+ * Segment may be raffle uuid or slug. Sets httpOnly referral cookie on eligible raffles.
  */
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
-    if (!(await isReferralAttributionActive()) || (await isReferralGrowthProgramActive())) {
+    if (!(await isReferralAttributionActive()) || !(await isReferralGrowthProgramActive())) {
+      return new NextResponse(null, { status: 204 })
+    }
+
+    const { id } = await context.params
+    const raffle = await getRaffleByIdOrSlug(id)
+    if (!raffle || !raffleSupportsReferralProgram(raffle)) {
       return new NextResponse(null, { status: 204 })
     }
 
@@ -37,8 +49,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } })
     }
 
-    const res = NextResponse.json({ ok: true })
-    res.cookies.set(REFERRAL_COOKIE_NAME, code, {
+    const resolved = await lookupActiveReferralCode(code)
+    if (!resolved) {
+      return new NextResponse(null, { status: 204 })
+    }
+
+    const res = NextResponse.json({ ok: true, code: resolved.referralCodeUsed })
+    res.cookies.set(REFERRAL_COOKIE_NAME, resolved.referralCodeUsed, {
       path: '/',
       maxAge: REFERRAL_COOKIE_MAX_AGE_SEC,
       sameSite: 'lax',
@@ -47,7 +64,7 @@ export async function GET(request: NextRequest) {
     })
     return res
   } catch (e) {
-    console.error('[referrals/capture]', e instanceof Error ? e.message : e)
+    console.error('[raffles/referral-capture]', e instanceof Error ? e.message : e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

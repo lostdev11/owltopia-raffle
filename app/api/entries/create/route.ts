@@ -18,7 +18,12 @@ import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
-import { isReferralAttributionEnabled, isReferralComplimentaryTicketEnabled } from '@/lib/referrals/config'
+import {
+  isReferralAttributionActive,
+  isReferralComplimentaryTicketEnabled,
+  isReferralGrowthProgramActive,
+} from '@/lib/referrals/config'
+import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -59,9 +64,12 @@ export async function POST(request: NextRequest) {
     const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum, paymentCurrency } =
       parsed.data
 
+    const referralAttributionActive = await isReferralAttributionActive()
+    const referralGrowthActive = await isReferralGrowthProgramActive()
+
     // Attribution uses httpOnly cookie only (set by GET /api/referrals/capture); never trust JSON body.
     let referralRaw: string | undefined
-    if (isReferralAttributionEnabled()) {
+    if (referralAttributionActive) {
       const cookieRaw = request.cookies.get(REFERRAL_COOKIE_NAME)?.value?.trim()
       if (cookieRaw) {
         try {
@@ -83,6 +91,10 @@ export async function POST(request: NextRequest) {
     let raffle = await getRaffleById(raffleIdStr)
     if (!raffle) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
+    }
+
+    if (referralRaw && !raffleSupportsReferralProgram(raffle)) {
+      referralRaw = undefined
     }
 
     await upgradeRaffleToFundsEscrowIfEligible(raffleIdStr)
@@ -174,8 +186,9 @@ export async function POST(request: NextRequest) {
     const alreadyUsedGlobalFreeTicket =
       await hasConfirmedReferralComplimentaryGlobally(walletAddressStr)
     const eligibleComplimentary =
+      !referralGrowthActive &&
       isReferralComplimentaryTicketEnabled() &&
-      isReferralAttributionEnabled() &&
+      referralAttributionActive &&
       ticketQuantityNum === 1 &&
       Boolean(referralRaw) &&
       !hadConfirmed &&
