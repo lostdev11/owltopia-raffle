@@ -75,6 +75,26 @@ function traitFromDataUrl(
   }
 }
 
+export function projectMissingDefaultLayers(project: GeneratorProject): boolean {
+  const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
+  return DEFAULT_CATEGORIES.some((c) => !existing.has(c.name.toLowerCase()))
+}
+
+/** Add any default layers (e.g. Eyes) missing from saved projects. */
+export function ensureDefaultCategories(project: GeneratorProject): GeneratorProject {
+  const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
+  const missing = DEFAULT_CATEGORIES.filter((c) => !existing.has(c.name.toLowerCase()))
+  if (!missing.length) return project
+  const added = missing.map((c) => ({
+    ...c,
+    id: `cat-${crypto.randomUUID().slice(0, 8)}`,
+  }))
+  return {
+    ...project,
+    categories: [...project.categories, ...added].sort((a, b) => a.zIndex - b.zIndex),
+  }
+}
+
 export function createEmptyProject(): GeneratorProject {
   const now = new Date().toISOString()
   const categories = DEFAULT_CATEGORIES.map((c, i) => ({

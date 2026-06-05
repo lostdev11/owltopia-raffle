@@ -1,5 +1,5 @@
 import type { CompatibilityRule, GeneratorProject } from '@/lib/owl-center/generator/types'
-import { comboTraitIds } from '@/lib/owl-center/generator/rules'
+import { chainTraitIds, comboTraitIds } from '@/lib/owl-center/generator/rules'
 
 export type RuleLintSeverity = 'error' | 'warning' | 'info'
 
@@ -89,6 +89,47 @@ function lintIfPoolRule(
   }
 }
 
+function lintIfChainRule(
+  rule: CompatibilityRule,
+  traitById: Map<string, GeneratorProject['traits'][number]>,
+  issues: RuleLintIssue[]
+): void {
+  const ids = chainTraitIds(rule)
+  if (ids.length < 2) {
+    issues.push({
+      severity: 'error',
+      code: 'if_chain_too_short',
+      message: 'IF chain needs at least 2 traits across different layers',
+      ruleId: rule.id,
+    })
+    return
+  }
+
+  const seenCategories = new Set<string>()
+  for (const id of ids) {
+    const t = traitById.get(id)
+    if (!t) {
+      issues.push({
+        severity: 'error',
+        code: 'missing_trait',
+        message: 'IF chain references a trait that was removed',
+        ruleId: rule.id,
+      })
+      continue
+    }
+    if (seenCategories.has(t.categoryId)) {
+      issues.push({
+        severity: 'error',
+        code: 'if_chain_same_category',
+        message: 'IF chain traits must each be from a different layer',
+        ruleId: rule.id,
+      })
+      break
+    }
+    seenCategories.add(t.categoryId)
+  }
+}
+
 /** Static analysis for trait rules before batch generation. */
 export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[] {
   const issues: RuleLintIssue[] = []
@@ -97,6 +138,11 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
   for (const rule of project.rules) {
     if (rule.type === 'if_pool') {
       lintIfPoolRule(rule, traitById, issues)
+      continue
+    }
+
+    if (rule.type === 'if_chain') {
+      lintIfChainRule(rule, traitById, issues)
       continue
     }
 
@@ -146,7 +192,9 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     const key =
       rule.type === 'if_pool'
         ? `if_pool:${rule.whenTraitId}:${rule.targetCategoryId}:${ruleTraitKey(rule.allowedTraitIds ?? [])}`
-        : `${rule.type}:${ruleTraitKey(comboTraitIds(rule))}`
+        : rule.type === 'if_chain'
+          ? `if_chain:${ruleTraitKey(chainTraitIds(rule))}`
+          : `${rule.type}:${ruleTraitKey(comboTraitIds(rule))}`
     if (seenRules.has(key)) {
       issues.push({
         severity: 'warning',
@@ -159,7 +207,7 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     }
   }
 
-  const comboRules = project.rules.filter((r) => r.type !== 'if_pool')
+  const comboRules = project.rules.filter((r) => r.type !== 'if_pool' && r.type !== 'if_chain')
   for (let i = 0; i < comboRules.length; i++) {
     for (let j = i + 1; j < comboRules.length; j++) {
       const a = comboRules[i]

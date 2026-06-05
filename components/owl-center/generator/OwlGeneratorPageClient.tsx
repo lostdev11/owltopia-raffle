@@ -17,9 +17,15 @@ import {
 } from '@/components/ui/dialog'
 import { GeneratorCloudSavePanel } from '@/components/owl-center/generator/GeneratorCloudSavePanel'
 import { GeneratorRuleLinter } from '@/components/owl-center/generator/GeneratorRuleLinter'
+import { GeneratorSupplySimulator } from '@/components/owl-center/generator/GeneratorSupplySimulator'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { canvasToDataUrl, compositeTraitsToCanvas } from '@/lib/owl-center/generator/composite'
-import { createDemoProject, createEmptyProject } from '@/lib/owl-center/generator/demo-project'
+import {
+  createDemoProject,
+  createEmptyProject,
+  ensureDefaultCategories,
+  projectMissingDefaultLayers,
+} from '@/lib/owl-center/generator/demo-project'
 import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
@@ -30,8 +36,7 @@ import {
   traitRarityPercent,
 } from '@/lib/owl-center/generator/rarity'
 import {
-  getCategoryPool,
-  pickWeightedRandom,
+  randomSelection,
   traitsForSelection,
   validateSelection,
 } from '@/lib/owl-center/generator/rules'
@@ -102,10 +107,16 @@ export function OwlGeneratorPageClient() {
         const localTime = local ? new Date(local.updatedAt).getTime() : 0
         if (!local || cloudTime >= localTime) chosen = cloud
       }
-      setProject(chosen)
+      setProject(ensureDefaultCategories(chosen))
       setLoading(false)
     })()
   }, [fetchCloudProject])
+
+  useEffect(() => {
+    if (!project || loading) return
+    if (!projectMissingDefaultLayers(project)) return
+    setProject(ensureDefaultCategories(project))
+  }, [project, loading])
 
   useEffect(() => {
     if (!project || loading) return
@@ -128,6 +139,7 @@ export function OwlGeneratorPageClient() {
   const lintIssues = useMemo(() => (project ? lintGeneratorProject(project) : []), [project])
   const lintBlocked = hasBlockingLintIssues(lintIssues)
   const maxUnique = project ? estimateMaxUniqueSupply(project) : 0
+  const targetSupply = project?.targetSupply ?? 2000
 
   const categoriesSorted = useMemo(
     () => (project ? [...project.categories].sort((a, b) => a.zIndex - b.zIndex) : []),
@@ -280,6 +292,11 @@ export function OwlGeneratorPageClient() {
             acc.push({ ...r, allowedTraitIds: allowed })
             return acc
           }
+          if (r.type === 'if_chain') {
+            const chain = (r.chainTraitIds ?? []).filter((id) => id !== traitId)
+            if (chain.length >= 2) acc.push({ ...r, chainTraitIds: chain })
+            return acc
+          }
           const traitIds = (r.traitIds ?? []).filter((id) => id !== traitId)
           if (traitIds.length >= 2) acc.push({ ...r, traitIds })
           return acc
@@ -298,19 +315,12 @@ export function OwlGeneratorPageClient() {
 
   const randomizePreview = useCallback(() => {
     if (!project) return
-    const sorted = [...project.categories].sort((a, b) => a.zIndex - b.zIndex)
-    const next: TraitSelection = {}
-    for (const cat of sorted) {
-      const pool = getCategoryPool(cat.id, next, project.traits, project.rules)
-      next[cat.id] = pool.length ? (pickWeightedRandom(pool)?.id ?? null) : null
+    const next = randomSelection(project.categories, project.traits, project.rules)
+    if (!next) {
+      setMessage('No valid combo found — check IF rules are set both ways for exclusive pairs')
+      return
     }
-    for (let i = 0; i < 80; i++) {
-      if (!validateSelection(next, project.rules)) break
-      for (const cat of sorted) {
-        const pool = getCategoryPool(cat.id, next, project.traits, project.rules)
-        if (pool.length) next[cat.id] = pickWeightedRandom(pool)?.id ?? null
-      }
-    }
+    setMessage(null)
     setSelection(next)
   }, [project])
 
@@ -334,7 +344,12 @@ export function OwlGeneratorPageClient() {
   )
 
   const addIfPoolRule = useCallback(
-    (whenTraitId: string, targetCategoryId: string, allowedTraitIds: string[]) => {
+    (
+      whenTraitId: string,
+      targetCategoryId: string,
+      allowedTraitIds: string[],
+      options?: { alsoReverse?: boolean }
+    ) => {
       if (!project || !whenTraitId || !targetCategoryId || allowedTraitIds.length < 1) return
       const whenTrait = project.traits.find((t) => t.id === whenTraitId)
       const targetCat = project.categories.find((c) => c.id === targetCategoryId)
@@ -342,13 +357,50 @@ export function OwlGeneratorPageClient() {
         .map((id) => project.traits.find((t) => t.id === id)?.name)
         .filter(Boolean)
         .join(', ')
+      const newRules: CompatibilityRule[] = [
+        {
+          id: uid(),
+          type: 'if_pool',
+          whenTraitId,
+          targetCategoryId,
+          allowedTraitIds,
+          label: `IF ${whenTrait?.name ?? 'trait'} → ${targetCat?.name ?? 'layer'}: ${allowedNames}`,
+        },
+      ]
+
+      if (options?.alsoReverse && whenTrait) {
+        const reverseTargetCat = project.categories.find((c) => c.id === whenTrait.categoryId)
+        for (const allowedId of allowedTraitIds) {
+          const allowedTrait = project.traits.find((t) => t.id === allowedId)
+          if (!allowedTrait) continue
+          newRules.push({
+            id: uid(),
+            type: 'if_pool',
+            whenTraitId: allowedId,
+            targetCategoryId: whenTrait.categoryId,
+            allowedTraitIds: [whenTraitId],
+            label: `IF ${allowedTrait.name} → ${reverseTargetCat?.name ?? 'layer'}: ${whenTrait.name}`,
+          })
+        }
+      }
+
+      updateProject({ rules: [...project.rules, ...newRules] })
+    },
+    [project, updateProject]
+  )
+
+  const addIfChainRule = useCallback(
+    (chainTraitIds: string[]) => {
+      if (!project || chainTraitIds.length < 2) return
+      const names = chainTraitIds
+        .map((id) => project.traits.find((t) => t.id === id)?.name)
+        .filter(Boolean)
+        .join(' → ')
       const rule: CompatibilityRule = {
         id: uid(),
-        type: 'if_pool',
-        whenTraitId,
-        targetCategoryId,
-        allowedTraitIds,
-        label: `IF ${whenTrait?.name ?? 'trait'} → ${targetCat?.name ?? 'layer'}: ${allowedNames}`,
+        type: 'if_chain',
+        chainTraitIds,
+        label: `Chain: ${names}`,
       }
       updateProject({ rules: [...project.rules, rule] })
     },
@@ -588,6 +640,7 @@ export function OwlGeneratorPageClient() {
             project={project}
             onAddRule={addRule}
             onAddIfPoolRule={addIfPoolRule}
+            onAddIfChainRule={addIfChainRule}
             onRemoveRule={(id) => updateProject({ rules: project.rules.filter((r) => r.id !== id) })}
           />
         </div>
@@ -604,7 +657,7 @@ export function OwlGeneratorPageClient() {
               void (async () => {
                 const cloud = await fetchCloudProject()
                 if (cloud) {
-                  setProject(cloud)
+                  setProject(ensureDefaultCategories(cloud))
                   setSelection({})
                   setMessage('Loaded from cloud')
                 } else setCloudError('No cloud project found')
@@ -645,6 +698,12 @@ export function OwlGeneratorPageClient() {
               </ul>
             ) : null}
           </CommandCard>
+
+          <GeneratorSupplySimulator
+            project={project}
+            targetSupply={targetSupply}
+            disabled={!project.traits.length}
+          />
 
           <CommandCard label="EXPORT // Sugar batch">
             <p className="text-sm text-[#9BA8B4]">
@@ -710,11 +769,18 @@ function RulesSection({
   project,
   onAddRule,
   onAddIfPoolRule,
+  onAddIfChainRule,
   onRemoveRule,
 }: {
   project: GeneratorProject
   onAddRule: (type: CompatibilityRuleType, traitIds: string[]) => void
-  onAddIfPoolRule: (whenTraitId: string, targetCategoryId: string, allowedTraitIds: string[]) => void
+  onAddIfPoolRule: (
+    whenTraitId: string,
+    targetCategoryId: string,
+    allowedTraitIds: string[],
+    options?: { alsoReverse?: boolean }
+  ) => void
+  onAddIfChainRule: (chainTraitIds: string[]) => void
   onRemoveRule: (id: string) => void
 }) {
   const [ruleType, setRuleType] = useState<CompatibilityRuleType>('require')
@@ -722,6 +788,8 @@ function RulesSection({
   const [ifTrigger, setIfTrigger] = useState<string | null>(null)
   const [ifTargetCategory, setIfTargetCategory] = useState<string | null>(null)
   const [ifAllowed, setIfAllowed] = useState<string[]>([])
+  const [ifAlsoReverse, setIfAlsoReverse] = useState(true)
+  const [chainSteps, setChainSteps] = useState<string[]>([])
 
   const traitLabel = (id: string) => project.traits.find((t) => t.id === id)?.name ?? id.slice(0, 8)
   const categoryLabel = (id: string) => project.categories.find((c) => c.id === id)?.name ?? 'Layer'
@@ -730,8 +798,13 @@ function RulesSection({
     ? project.traits.filter((t) => t.categoryId === ifTargetCategory)
     : []
 
-  const comboRules = project.rules.filter((r) => r.type !== 'if_pool')
+  const comboRules = project.rules.filter((r) => r.type !== 'if_pool' && r.type !== 'if_chain')
   const ifPoolRules = project.rules.filter((r) => r.type === 'if_pool')
+  const ifChainRules = project.rules.filter((r) => r.type === 'if_chain')
+
+  const chainUsedCategories = new Set(
+    chainSteps.map((id) => project.traits.find((t) => t.id === id)?.categoryId).filter(Boolean)
+  )
 
   return (
     <>
@@ -833,7 +906,9 @@ function RulesSection({
         <p className="mb-4 text-sm text-[#9BA8B4]">
           <strong className="font-normal text-[#E8EEF2]">IF</strong> a trigger trait is selected,{' '}
           <strong className="font-normal text-[#E8EEF2]">THEN</strong> another layer only rolls from the allowed
-          subset — e.g. Cyber Base → only cyber hats, or no-mouth variants.
+          subset — e.g. Stampede Hat → only Brown Base. For exclusive pairs, enable{' '}
+          <strong className="font-normal text-[#E8EEF2]">both directions</strong> and include{' '}
+          <strong className="font-normal text-[#E8EEF2]">None</strong> traits where a layer can be empty.
         </p>
 
         {project.traits.length >= 2 ? (
@@ -935,20 +1010,30 @@ function RulesSection({
               <p className="font-mono text-xs text-[#5C6773]">Upload traits to this layer first.</p>
             ) : null}
 
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-[#9BA8B4] touch-manipulation">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#00FF9C]"
+                checked={ifAlsoReverse}
+                onChange={(e) => setIfAlsoReverse(e.target.checked)}
+              />
+              Also add reverse IF rules (recommended for exclusive pairs)
+            </label>
+
             <DeployButton
               variant="ghost"
               className="gap-2"
               disabled={!ifTrigger || !ifTargetCategory || ifAllowed.length < 1}
               onClick={() => {
                 if (!ifTrigger || !ifTargetCategory) return
-                onAddIfPoolRule(ifTrigger, ifTargetCategory, ifAllowed)
+                onAddIfPoolRule(ifTrigger, ifTargetCategory, ifAllowed, { alsoReverse: ifAlsoReverse })
                 setIfTrigger(null)
                 setIfTargetCategory(null)
                 setIfAllowed([])
               }}
             >
               <Link2 className="h-4 w-4" aria-hidden />
-              Add IF rule
+              Add IF rule{ifAlsoReverse ? ' (+ reverse)' : ''}
             </DeployButton>
           </div>
         ) : (
@@ -967,6 +1052,119 @@ function RulesSection({
                   {' · '}
                   IF {traitLabel(r.whenTraitId!)} → {categoryLabel(r.targetCategoryId!)}:{' '}
                   {(r.allowedTraitIds ?? []).map(traitLabel).join(', ')}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Remove rule"
+                  className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                  onClick={() => onRemoveRule(r.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </CommandCard>
+
+      <CommandCard label="RULES // IF chain (multi-layer)">
+        <p className="mb-4 text-sm text-[#9BA8B4]">
+          Link <strong className="font-normal text-[#E8EEF2]">2+ traits across layers</strong> in order — e.g.{' '}
+          Stampede Hat → Brown Body → Medshade Glasses → Owl Chain. All chain traits must appear together;
+          randomize and export respect the full chain.
+        </p>
+
+        {project.traits.length >= 2 ? (
+          <div className="space-y-4">
+            {chainSteps.length ? (
+              <ol className="space-y-2 border border-[#1A222B] bg-[#0F1419]/80 px-3 py-3 text-sm text-[#C5D0D8]">
+                {chainSteps.map((id, i) => {
+                  const t = project.traits.find((tr) => tr.id === id)
+                  const cat = project.categories.find((c) => c.id === t?.categoryId)?.name
+                  return (
+                    <li key={id} className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        <span className="font-mono text-[10px] text-[#5C6773]">{i + 1}.</span>{' '}
+                        {cat}: <span className="text-[#E8EEF2]">{t?.name}</span>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Remove chain step"
+                        className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                        onClick={() => setChainSteps((p) => p.filter((x) => x !== id))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ol>
+            ) : (
+              <p className="font-mono text-xs text-[#5C6773]">Pick traits in order — one per layer.</p>
+            )}
+
+            <div>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                {chainSteps.length ? `Next step (${chainSteps.length + 1})` : 'Step 1'}
+              </span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {project.traits.map((t) => {
+                  const cat = project.categories.find((c) => c.id === t.categoryId)?.name
+                  const used = chainSteps.includes(t.id) || chainUsedCategories.has(t.categoryId)
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      disabled={used}
+                      className={cn(
+                        'min-h-[44px] touch-manipulation border px-3 text-xs',
+                        'border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/30',
+                        used && 'cursor-not-allowed opacity-40'
+                      )}
+                      onClick={() => setChainSteps((p) => [...p, t.id])}
+                    >
+                      {cat}: {t.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <DeployButton
+                variant="ghost"
+                className="gap-2"
+                disabled={chainSteps.length < 2}
+                onClick={() => {
+                  onAddIfChainRule(chainSteps)
+                  setChainSteps([])
+                }}
+              >
+                <Link2 className="h-4 w-4" aria-hidden />
+                Add IF chain ({chainSteps.length} traits)
+              </DeployButton>
+              {chainSteps.length ? (
+                <DeployButton variant="ghost" onClick={() => setChainSteps([])}>
+                  Clear steps
+                </DeployButton>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p className="font-mono text-xs text-[#5C6773]">Add at least 2 traits to create IF chains.</p>
+        )}
+
+        {ifChainRules.length ? (
+          <ul className="mt-6 space-y-2">
+            {ifChainRules.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 border border-[#1A222B] bg-[#0F1419]/80 px-3 py-2 text-sm"
+              >
+                <span className="text-[#C5D0D8]">
+                  <span className="font-mono text-[10px] uppercase text-[#00C97A]">if chain</span>
+                  {' · '}
+                  {(r.chainTraitIds ?? []).map(traitLabel).join(' → ')}
                 </span>
                 <button
                   type="button"

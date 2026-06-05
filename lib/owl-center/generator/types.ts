@@ -15,7 +15,7 @@ export type TraitLayer = {
   imageSrc: string
 }
 
-export type CompatibilityRuleType = 'require' | 'exclude' | 'lock_set' | 'if_pool'
+export type CompatibilityRuleType = 'require' | 'exclude' | 'lock_set' | 'if_pool' | 'if_chain'
 
 export type CompatibilityRule = {
   id: string
@@ -27,6 +27,8 @@ export type CompatibilityRule = {
   /** if_pool — …only roll from these traits in this category. */
   targetCategoryId?: string
   allowedTraitIds?: string[]
+  /** if_chain — ordered traits that must appear together across layers. */
+  chainTraitIds?: string[]
   label?: string
 }
 
@@ -57,6 +59,7 @@ export const DEFAULT_CATEGORIES: Omit<TraitCategory, 'id'>[] = [
   { name: 'Background', zIndex: 0 },
   { name: 'Body', zIndex: 10 },
   { name: 'Hat', zIndex: 20 },
+  { name: 'Eyes', zIndex: 25 },
   { name: 'Glasses', zIndex: 30 },
   { name: 'Accessory', zIndex: 40 },
 ]

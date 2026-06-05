@@ -36,6 +36,18 @@ export function comboTraitIds(rule: CompatibilityRule): string[] {
   return rule.traitIds ?? []
 }
 
+export function chainTraitIds(rule: CompatibilityRule): string[] {
+  return rule.chainTraitIds ?? []
+}
+
+function chainTraitInCategory(
+  ids: string[],
+  categoryId: string,
+  traitById: Map<string, TraitLayer>
+): string | undefined {
+  return ids.find((id) => traitById.get(id)?.categoryId === categoryId)
+}
+
 export function isIfPoolRule(rule: CompatibilityRule): boolean {
   return rule.type === 'if_pool'
 }
@@ -55,9 +67,14 @@ export function activeIfPoolRules(
   )
 }
 
+function intersectPool(pool: TraitLayer[], allowedIds: Set<string>): TraitLayer[] {
+  const next = pool.filter((t) => allowedIds.has(t.id))
+  return next
+}
+
 /**
- * Trait pool for random generation — narrows to allowedTraitIds when an if_pool trigger is active.
- * Multiple active rules on the same category intersect their allowed sets.
+ * Trait pool for random generation — respects if_pool (forward + reverse), exclude, require, and lock_set.
+ * Multiple active if_pool rules on the same category intersect their allowed sets.
  */
 export function getCategoryPool(
   categoryId: string,
@@ -65,24 +82,103 @@ export function getCategoryPool(
   allTraits: TraitLayer[],
   rules: CompatibilityRule[]
 ): TraitLayer[] {
-  const base = allTraits.filter((t) => t.categoryId === categoryId)
-  const active = activeIfPoolRules(categoryId, selection, rules)
-  if (!active.length) return base
+  const traitById = new Map(allTraits.map((t) => [t.id, t]))
+  let pool = allTraits.filter((t) => t.categoryId === categoryId)
 
-  let allowedIds: string[] | null = null
-  for (const rule of active) {
-    const ids = rule.allowedTraitIds ?? []
-    if (allowedIds === null) {
-      allowedIds = ids
-    } else {
-      const idSet = new Set(ids)
-      allowedIds = allowedIds.filter((id) => idSet.has(id))
+  const active = activeIfPoolRules(categoryId, selection, rules)
+  if (active.length) {
+    let allowedIds: string[] | null = null
+    for (const rule of active) {
+      const ids = rule.allowedTraitIds ?? []
+      if (allowedIds === null) {
+        allowedIds = ids
+      } else {
+        const idSet = new Set(ids)
+        allowedIds = allowedIds.filter((id) => idSet.has(id))
+      }
+    }
+    if (!allowedIds?.length) return []
+    pool = intersectPool(pool, new Set(allowedIds))
+  }
+
+  for (const rule of rules) {
+    if (rule.type !== 'if_pool' || !rule.whenTraitId || !rule.targetCategoryId) continue
+    const whenTrait = traitById.get(rule.whenTraitId)
+    if (!whenTrait || whenTrait.categoryId !== categoryId) continue
+
+    const targetPicked = selection[rule.targetCategoryId]
+    if (!targetPicked) continue
+
+    const allowed = rule.allowedTraitIds ?? []
+    if (!allowed.includes(targetPicked)) {
+      pool = pool.filter((t) => t.id !== rule.whenTraitId)
     }
   }
 
-  if (!allowedIds?.length) return []
-  const allowed = new Set(allowedIds)
-  return base.filter((t) => allowed.has(t.id))
+  for (const rule of rules) {
+    if (rule.type === 'if_chain') {
+      const ids = chainTraitIds(rule)
+      if (ids.length < 2) continue
+
+      const present = ids.filter((id) => selectionHasTrait(selection, id))
+      const chainTraitId = chainTraitInCategory(ids, categoryId, traitById)
+
+      if (chainTraitId) {
+        let blockChainTrait = false
+        for (const otherId of ids) {
+          if (otherId === chainTraitId) continue
+          const other = traitById.get(otherId)
+          if (!other) continue
+          const otherPicked = selection[other.categoryId]
+          if (otherPicked != null && otherPicked !== otherId) {
+            blockChainTrait = true
+            break
+          }
+        }
+        if (blockChainTrait) {
+          pool = pool.filter((t) => t.id !== chainTraitId)
+        }
+      }
+
+      if (present.length > 0 && chainTraitId && !selectionHasTrait(selection, chainTraitId)) {
+        pool = pool.filter((t) => t.id === chainTraitId)
+        if (!pool.length) return []
+      }
+      continue
+    }
+
+    if (rule.type === 'if_pool') continue
+
+    const ids = comboTraitIds(rule).filter(Boolean)
+    if (ids.length < 2) continue
+
+    const present = ids.filter((id) => selectionHasTrait(selection, id))
+
+    if (rule.type === 'exclude' && present.length > 0) {
+      for (const id of ids) {
+        if (selectionHasTrait(selection, id)) continue
+        const trait = traitById.get(id)
+        if (trait?.categoryId === categoryId) {
+          pool = pool.filter((t) => t.id !== id)
+        }
+      }
+    }
+
+    if ((rule.type === 'require' || rule.type === 'lock_set') && present.length > 0 && present.length < ids.length) {
+      const mandatory = new Set<string>()
+      for (const id of ids) {
+        if (selectionHasTrait(selection, id)) continue
+        const trait = traitById.get(id)
+        if (trait?.categoryId === categoryId) mandatory.add(id)
+      }
+      if (mandatory.size) {
+        pool = pool.filter((t) => mandatory.has(t.id))
+        if (!pool.length) return []
+      }
+    }
+  }
+
+  return pool
 }
 
 export function validateSelection(
@@ -103,6 +199,16 @@ export function validateSelection(
           rule.label ??
           `When "${whenName}" is selected, this category can only use allowed traits from the IF rule`
         )
+      }
+      continue
+    }
+
+    if (rule.type === 'if_chain') {
+      const ids = chainTraitIds(rule)
+      if (ids.length < 2) continue
+      const present = ids.filter((id) => selectionHasTrait(selection, id))
+      if (present.length > 0 && present.length < ids.length) {
+        return rule.label ?? 'Trait chain incomplete — all chain traits must appear together'
       }
       continue
     }
