@@ -133,3 +133,41 @@ export async function getPriorMilestoneWinnerWallets(
   }
   return set
 }
+
+export type MilestoneBonusWinRow = {
+  milestone: RaffleMilestone
+  raffleId: string
+  raffleSlug: string
+  raffleTitle: string
+}
+
+/** Milestone side-prizes won by this wallet (top buyer, random bonus, etc.). */
+export async function listMilestoneBonusWinsForWallet(wallet: string): Promise<MilestoneBonusWinRow[]> {
+  const w = wallet.trim()
+  if (!w) return []
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffle_milestones')
+    .select('*, raffles!inner(id, slug, title)')
+    .eq('winner_wallet', w)
+    .not('winner_wallet', 'is', null)
+    .order('winner_selected_at', { ascending: false })
+
+  if (error) {
+    console.error('[raffle_milestones] list wins for wallet:', error.message)
+    return []
+  }
+
+  return (data ?? []).map((row) => {
+    const raffle = row.raffles as { id: string; slug: string; title: string } | null
+    const { raffles: _raffles, ...milestoneRow } = row as Record<string, unknown> & {
+      raffles: { id: string; slug: string; title: string } | null
+    }
+    return {
+      milestone: mapRow(milestoneRow as Record<string, unknown>),
+      raffleId: raffle?.id ?? String(milestoneRow.raffle_id),
+      raffleSlug: raffle?.slug ?? '',
+      raffleTitle: raffle?.title ?? 'Raffle',
+    }
+  })
+}

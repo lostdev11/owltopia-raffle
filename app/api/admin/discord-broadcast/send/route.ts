@@ -6,6 +6,7 @@ import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 /**
  * POST /api/admin/discord-broadcast/send

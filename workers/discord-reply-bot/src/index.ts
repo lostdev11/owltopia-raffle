@@ -27,12 +27,17 @@ async function main(): Promise<void> {
     }
   })
 
-  startHealthServer(config.port, () => ({
-    ok: true,
-    ready: client.isReady(),
-    user: client.user?.username ?? null,
-    enabled: config.enabled,
-  }))
+  startHealthServer(
+    config.port,
+    () => ({
+      ok: true,
+      ready: client.isReady(),
+      user: client.user?.username ?? null,
+      enabled: config.enabled,
+      broadcast: Boolean(process.env.DISCORD_BROADCAST_WORKER_SECRET?.trim()),
+    }),
+    client
+  )
 
   await client.login(config.token)
 }

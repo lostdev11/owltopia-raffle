@@ -33,6 +33,7 @@ import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
+import { listMilestoneBonusWinsForWallet } from '@/lib/db/raffle-milestones'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
 
@@ -145,6 +146,7 @@ export async function GET(request: NextRequest) {
       partnerDiscordTenantId,
       buyoutOffers,
       viewerIsSiteAdmin,
+      milestoneBonusWins,
     ] = await Promise.all([
       Promise.resolve(rafflesForResponse),
       getCreatorRevenueByWallet(wallet),
@@ -180,6 +182,10 @@ export async function GET(request: NextRequest) {
       isWalletRegisteredAdmin(wallet).catch((err) => {
         console.error('[me/dashboard] admin check:', err instanceof Error ? err.message : err)
         return false
+      }),
+      listMilestoneBonusWinsForWallet(wallet).catch((err) => {
+        console.error('[me/dashboard] milestone bonus wins:', err instanceof Error ? err.message : err)
+        return []
       }),
     ])
 
@@ -331,6 +337,7 @@ export async function GET(request: NextRequest) {
       engagement,
       /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */
       viewerIsSiteAdmin,
+      milestoneBonusWins,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'

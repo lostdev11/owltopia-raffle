@@ -45,7 +45,12 @@ import {
   canCreatorClaimPrizeBackFromEscrow,
   needsPayCancellationFeeBeforePrizeReturn,
 } from '@/lib/raffles/creator-prize-return-eligibility'
-import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle } from '@/lib/types'
+import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle, RaffleMilestone } from '@/lib/types'
+import {
+  formatMilestonePrize,
+  milestoneWinnerModeLabel,
+} from '@/lib/raffles/milestones/copy'
+import type { MilestoneBonusWinRow } from '@/lib/db/raffle-milestones'
 import {
   getEmptyEngagementPayload,
   type DashboardEngagementPayload,
@@ -60,6 +65,7 @@ import { myRaffleStatusLabel } from '@/components/dashboard/hosting/helpers'
 import { ReferralRewardsRedeem } from '@/components/dashboard/ReferralRewardsRedeem'
 import { ReferralCodeCopyRow } from '@/components/referrals/ReferralCodeCopyRow'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
+import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import {
   getEscrowPrizeClaimSuccessCopy,
   GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
@@ -146,6 +152,10 @@ function needsPayCancellationStraggler(raffle: Raffle): boolean {
   if (!raffle.start_time) return false
   if (!raffleRequiresCancellationFee(raffle as unknown as FullRaffle, new Date())) return false
   return !raffle.cancellation_fee_paid_at
+}
+
+function canClaimMilestoneBonus(milestone: RaffleMilestone): boolean {
+  return milestone.status === 'awarded' && milestone.prize_type === 'crypto' && !milestone.claimed_at
 }
 
 function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string): boolean {
@@ -261,6 +271,7 @@ type DashboardData = {
     deposit_tx_signature: string | null
     refunded_at: string | null
   }>
+  milestoneBonusWins?: MilestoneBonusWinRow[]
 }
 
 type NftWinnerDashboardRow = {
@@ -378,6 +389,7 @@ export default function DashboardPage() {
   const [escrowLinkLoadingId, setEscrowLinkLoadingId] = useState<string | null>(null)
   const [claimProceedsLoadingId, setClaimProceedsLoadingId] = useState<string | null>(null)
   const [claimPrizeLoadingId, setClaimPrizeLoadingId] = useState<string | null>(null)
+  const [claimMilestoneLoadingId, setClaimMilestoneLoadingId] = useState<string | null>(null)
   const [claimFailedMinPrizeReturnLoadingId, setClaimFailedMinPrizeReturnLoadingId] = useState<string | null>(null)
   const [payCancelFeeLoadingId, setPayCancelFeeLoadingId] = useState<string | null>(null)
   const [claimGiveawayLoadingId, setClaimGiveawayLoadingId] = useState<string | null>(null)
@@ -398,6 +410,7 @@ export default function DashboardPage() {
     winnerWallet: string
     heading: string
     message: string
+    showWinnerPng?: boolean
   } | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
@@ -702,9 +715,35 @@ export default function DashboardPage() {
     }
   }, [])
 
+  const presentClaimSuccess = useCallback(
+    (params: {
+      tx?: string | null
+      title: string
+      slug?: string
+      heading: string
+      message: string
+      winnerWallet?: string
+      showWinnerPng?: boolean
+    }) => {
+      setClaimSuccess({
+        tx: params.tx?.trim() ?? '',
+        title: params.title,
+        slug: params.slug?.trim() || 'dashboard',
+        winnerWallet: params.winnerWallet?.trim() || walletAddr.trim(),
+        heading: params.heading,
+        message: params.message,
+        showWinnerPng: params.showWinnerPng ?? false,
+      })
+    },
+    [walletAddr]
+  )
+
   const handleClaimProceeds = useCallback(
     async (raffleId: string) => {
+      const raffle =
+        (Array.isArray(data?.myRaffles) ? data.myRaffles : []).find((x) => x.id === raffleId) ?? null
       setClaimActionError(null)
+      setClaimSuccess(null)
       setClaimProceedsLoadingId(raffleId)
       try {
         const res = await fetch(`/api/raffles/${raffleId}/claim-proceeds`, {
@@ -720,19 +759,22 @@ export default function DashboardPage() {
           )
           return
         }
-        const txSig =
-          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
-            ? (json as { transactionSignature: string }).transactionSignature.trim()
-            : ''
-        if (txSig) {
-          window.open(solscanTxUrl(txSig), '_blank', 'noopener,noreferrer')
-        }
+        const alreadyClaimed = (json as { alreadyClaimed?: boolean }).alreadyClaimed === true
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: raffle?.title ?? 'Raffle proceeds',
+          slug: raffle?.slug ?? raffleId,
+          heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
+          message: alreadyClaimed
+            ? 'Creator proceeds were already sent to your wallet.'
+            : 'Net ticket proceeds were sent to your wallet.',
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimProceedsLoadingId(null)
       }
     },
-    [loadDashboard]
+    [data?.myRaffles, loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimPrize = useCallback(
@@ -761,35 +803,72 @@ export default function DashboardPage() {
           )
           return
         }
-        const txSig =
-          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
-            ? (json as { transactionSignature: string }).transactionSignature.trim()
-            : ''
-        const winnerWallet = raffle.winner_wallet?.trim() ?? ''
-        if (txSig && winnerWallet) {
-          setClaimSuccess({
-            tx: txSig,
-            title: raffle.title,
-            slug: raffle.slug,
-            winnerWallet,
-            heading: 'Prize claimed!',
-            message: getEscrowPrizeClaimSuccessCopy({
-              prize_type: (raffle.prize_type ?? 'nft') as 'crypto' | 'nft',
-              prize_currency: raffle.prize_currency ?? null,
-            }).sentDetail,
-          })
-        }
+        const alreadyClaimed = (json as { alreadyClaimed?: boolean }).alreadyClaimed === true
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: raffle.title,
+          slug: raffle.slug,
+          winnerWallet: raffle.winner_wallet?.trim() ?? walletAddr,
+          heading: alreadyClaimed ? 'Prize already sent' : 'Prize claimed!',
+          message: alreadyClaimed
+            ? getEscrowPrizeClaimSuccessCopy({
+                prize_type: (raffle.prize_type ?? 'nft') as 'crypto' | 'nft',
+                prize_currency: raffle.prize_currency ?? null,
+              }).alreadySentDetail
+            : getEscrowPrizeClaimSuccessCopy({
+                prize_type: (raffle.prize_type ?? 'nft') as 'crypto' | 'nft',
+                prize_currency: raffle.prize_currency ?? null,
+              }).sentDetail,
+          showWinnerPng: true,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimPrizeLoadingId(null)
       }
     },
-    [loadDashboard]
+    [loadDashboard, presentClaimSuccess, walletAddr]
+  )
+
+  const handleClaimMilestoneBonus = useCallback(
+    async (row: MilestoneBonusWinRow) => {
+      setClaimActionError(null)
+      setClaimSuccess(null)
+      setClaimMilestoneLoadingId(row.milestone.id)
+      try {
+        const res = await fetch(
+          `/api/raffles/${row.raffleId}/milestones/${row.milestone.id}/claim`,
+          { method: 'POST', credentials: 'include' }
+        )
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setClaimActionError(
+            typeof (json as { error?: string }).error === 'string'
+              ? (json as { error: string }).error
+              : 'Could not claim bonus prize'
+          )
+          return
+        }
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: row.raffleTitle,
+          slug: row.raffleSlug,
+          heading: 'Bonus prize claimed!',
+          message: `${formatMilestonePrize(row.milestone)} was sent to your wallet.`,
+        })
+        await loadDashboard({ silent: true })
+      } finally {
+        setClaimMilestoneLoadingId(null)
+      }
+    },
+    [loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimFailedMinPrizeReturn = useCallback(
     async (raffleId: string) => {
+      const raffle =
+        (Array.isArray(data?.myRaffles) ? data.myRaffles : []).find((x) => x.id === raffleId) ?? null
       setClaimActionError(null)
+      setClaimSuccess(null)
       setClaimFailedMinPrizeReturnLoadingId(raffleId)
       try {
         const res = await fetch(`/api/raffles/${raffleId}/claim-failed-min-prize-return`, {
@@ -805,12 +884,22 @@ export default function DashboardPage() {
           )
           return
         }
+        const alreadyReturned = (json as { alreadyReturned?: boolean }).alreadyReturned === true
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: raffle?.title ?? 'Raffle prize',
+          slug: raffle?.slug ?? raffleId,
+          heading: alreadyReturned ? 'Prize already returned' : 'Prize returned!',
+          message: alreadyReturned
+            ? 'Your escrowed prize was already sent back to your wallet.'
+            : 'Your escrowed prize was sent back to your wallet.',
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimFailedMinPrizeReturnLoadingId(null)
       }
     },
-    [loadDashboard]
+    [data?.myRaffles, loadDashboard, presentClaimSuccess]
   )
 
   const handlePayCancellationFee = useCallback(
@@ -917,27 +1006,21 @@ export default function DashboardPage() {
           )
           return
         }
-        const txSig =
-          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
-            ? (json as { transactionSignature: string }).transactionSignature.trim()
-            : ''
-        const winnerWallet = (g.eligible_wallet ?? addr).trim()
-        if (txSig && winnerWallet) {
-          setClaimSuccess({
-            tx: txSig,
-            title: g.title?.trim() || 'Giveaway NFT',
-            slug: `giveaway-${g.id}`,
-            winnerWallet,
-            heading: 'NFT claimed!',
-            message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
-          })
-        }
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: g.title?.trim() || 'Giveaway NFT',
+          slug: `giveaway-${g.id}`,
+          winnerWallet: (g.eligible_wallet ?? addr).trim(),
+          heading: 'NFT claimed!',
+          message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
+          showWinnerPng: true,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimGiveawayLoadingId(null)
       }
     },
-    [loadDashboard, publicKey]
+    [loadDashboard, presentClaimSuccess, publicKey]
   )
 
   const handleClaimCommunityGiveaway = useCallback(
@@ -962,32 +1045,30 @@ export default function DashboardPage() {
           )
           return
         }
-        const txSig =
-          typeof (json as { transactionSignature?: string }).transactionSignature === 'string'
-            ? (json as { transactionSignature: string }).transactionSignature.trim()
-            : ''
-        const winnerWallet = (g.winner_wallet ?? addr).trim()
-        if (txSig && winnerWallet) {
-          setClaimSuccess({
-            tx: txSig,
-            title: g.title?.trim() || 'Community giveaway',
-            slug: `community-giveaway-${g.id}`,
-            winnerWallet,
-            heading: 'NFT claimed!',
-            message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
-          })
-        }
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: g.title?.trim() || 'Community giveaway',
+          slug: `community-giveaway-${g.id}`,
+          winnerWallet: (g.winner_wallet ?? addr).trim(),
+          heading: 'NFT claimed!',
+          message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
+          showWinnerPng: true,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimCommunityGiveawayLoadingId(null)
       }
     },
-    [loadDashboard, publicKey]
+    [loadDashboard, presentClaimSuccess, publicKey]
   )
 
   const handleClaimRefund = useCallback(
     async (entryId: string) => {
+      const row = (Array.isArray(data?.myEntries) ? data.myEntries : []).find(
+        (x) => x.entry.id === entryId
+      )
       setClaimActionError(null)
+      setClaimSuccess(null)
       setClaimRefundLoadingEntryId(entryId)
       try {
         const res = await fetch('/api/entries/claim-refund', {
@@ -1005,20 +1086,38 @@ export default function DashboardPage() {
           )
           return
         }
+        const alreadyRefunded = (json as { alreadyRefunded?: boolean }).alreadyRefunded === true
+        const amount = row ? Number(row.entry.amount_paid) : null
+        const currency = row?.entry.currency
+        const amountLabel =
+          amount != null && currency
+            ? `${amount.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+            : 'Your ticket payment'
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: row?.raffle.title ?? 'Ticket refund',
+          slug: row?.raffle.slug ?? 'dashboard',
+          heading: alreadyRefunded ? 'Refund already sent' : 'Refund claimed!',
+          message: alreadyRefunded
+            ? `${amountLabel} was already returned to your wallet.`
+            : `${amountLabel} was sent back to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimRefundLoadingEntryId(null)
       }
     },
-    [loadDashboard]
+    [data?.myEntries, loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimAllRefunds = useCallback(
     async (entryIds: string[]) => {
       if (entryIds.length === 0) return
       setClaimActionError(null)
+      setClaimSuccess(null)
       setIsClaimingAllRefunds(true)
       let claimed = 0
+      let lastTx: string | null = null
       try {
         for (const entryId of entryIds) {
           setClaimRefundLoadingEntryId(entryId)
@@ -1039,20 +1138,32 @@ export default function DashboardPage() {
             )
             return
           }
+          lastTx = extractTransactionSignature(json) ?? lastTx
           claimed++
         }
+        presentClaimSuccess({
+          tx: lastTx,
+          title: 'Ticket refunds',
+          slug: 'dashboard',
+          heading: 'Refunds claimed!',
+          message: `${claimed} ticket refund${claimed === 1 ? '' : 's'} sent to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimRefundLoadingEntryId(null)
         setIsClaimingAllRefunds(false)
       }
     },
-    [loadDashboard]
+    [loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimOfferRefund = useCallback(
     async (offerId: string) => {
+      const offer = (Array.isArray(data?.offerRefundCandidates) ? data.offerRefundCandidates : []).find(
+        (x) => x.offerId === offerId
+      )
       setClaimActionError(null)
+      setClaimSuccess(null)
       setClaimOfferRefundLoadingId(offerId)
       try {
         const res = await fetch(`/api/me/raffle-offers/${offerId}/claim-refund`, {
@@ -1068,20 +1179,33 @@ export default function DashboardPage() {
           )
           return
         }
+        const amountLabel =
+          offer != null
+            ? `${Number(offer.amount).toFixed(offer.currency === 'USDC' ? 2 : 4)} ${offer.currency}`
+            : 'Your bid deposit'
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: offer?.raffleTitle ?? 'Offer refund',
+          slug: offer?.raffleSlug ?? 'dashboard',
+          heading: 'Offer refund claimed!',
+          message: `${amountLabel} was sent back to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimOfferRefundLoadingId(null)
       }
     },
-    [loadDashboard]
+    [data?.offerRefundCandidates, loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimAllOfferRefunds = useCallback(
     async (offerIds: string[]) => {
       if (offerIds.length === 0) return
       setClaimActionError(null)
+      setClaimSuccess(null)
       setIsClaimingAllOfferRefunds(true)
       let claimed = 0
+      let lastTx: string | null = null
       try {
         for (const offerId of offerIds) {
           setClaimOfferRefundLoadingId(offerId)
@@ -1100,20 +1224,32 @@ export default function DashboardPage() {
             )
             return
           }
+          lastTx = extractTransactionSignature(json) ?? lastTx
           claimed++
         }
+        presentClaimSuccess({
+          tx: lastTx,
+          title: 'Offer refunds',
+          slug: 'dashboard',
+          heading: 'Offer refunds claimed!',
+          message: `${claimed} offer bid refund${claimed === 1 ? '' : 's'} sent to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } finally {
         setClaimOfferRefundLoadingId(null)
         setIsClaimingAllOfferRefunds(false)
       }
     },
-    [loadDashboard]
+    [loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimBuyoutRefund = useCallback(
     async (offer: { id: string; raffle_id: string }) => {
+      const meta = (Array.isArray(data?.buyoutOffers) ? data.buyoutOffers : []).find(
+        (x) => x.id === offer.id
+      )
       setClaimActionError(null)
+      setClaimSuccess(null)
       setBuyoutRefundLoadingId(offer.id)
       try {
         const res = await fetch(
@@ -1129,6 +1265,17 @@ export default function DashboardPage() {
           setClaimActionError(typeof json?.error === 'string' ? json.error : 'Refund failed')
           return
         }
+        const amountLabel =
+          meta != null
+            ? `${Number(meta.amount).toFixed(meta.currency === 'USDC' ? 2 : 4)} ${meta.currency}`
+            : 'Your buyout deposit'
+        presentClaimSuccess({
+          tx: extractTransactionSignature(json),
+          title: meta?.raffle_title ?? 'Buyout refund',
+          slug: meta?.raffle_slug ?? 'dashboard',
+          heading: 'Buyout refund claimed!',
+          message: `${amountLabel} was sent back to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } catch (e) {
         setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
@@ -1136,15 +1283,17 @@ export default function DashboardPage() {
         setBuyoutRefundLoadingId(null)
       }
     },
-    [loadDashboard, walletAddr]
+    [data?.buyoutOffers, loadDashboard, presentClaimSuccess, walletAddr]
   )
 
   const handleClaimAllBuyoutRefunds = useCallback(
     async (offers: { id: string; raffle_id: string }[]) => {
       if (offers.length === 0) return
       setClaimActionError(null)
+      setClaimSuccess(null)
       setIsClaimingAllBuyoutRefunds(true)
       let claimed = 0
+      let lastTx: string | null = null
       try {
         for (const offer of offers) {
           setBuyoutRefundLoadingId(offer.id)
@@ -1164,8 +1313,16 @@ export default function DashboardPage() {
             )
             return
           }
+          lastTx = extractTransactionSignature(json) ?? lastTx
           claimed++
         }
+        presentClaimSuccess({
+          tx: lastTx,
+          title: 'Buyout refunds',
+          slug: 'dashboard',
+          heading: 'Buyout refunds claimed!',
+          message: `${claimed} buyout deposit refund${claimed === 1 ? '' : 's'} sent to your wallet.`,
+        })
         await loadDashboard({ silent: true })
       } catch (e) {
         setClaimActionError(e instanceof Error ? e.message : 'Refund failed')
@@ -1174,7 +1331,7 @@ export default function DashboardPage() {
         setIsClaimingAllBuyoutRefunds(false)
       }
     },
-    [loadDashboard, walletAddr]
+    [loadDashboard, presentClaimSuccess, walletAddr]
   )
 
   const handleToggleLiveActivityMuted = useCallback(() => {
@@ -1326,6 +1483,11 @@ export default function DashboardPage() {
     return Array.from(byId.values())
   }, [myEntriesForMemo, walletForMemo])
 
+  const milestoneBonusWinRows = useMemo(
+    () => (Array.isArray(data?.milestoneBonusWins) ? data.milestoneBonusWins : []),
+    [data?.milestoneBonusWins]
+  )
+
   const raffleSummaries = useMemo((): RaffleEntrySummary[] => {
     const sourceEntries =
       entriesFilter === 'won'
@@ -1371,6 +1533,9 @@ export default function DashboardPage() {
     const cryptoClaimable = cryptoPrizeWinRows.filter((r) =>
       canClaimEscrowPrize(r as EntryWithRaffle['raffle'], walletForMemo)
     ).length
+    const milestoneClaimable = milestoneBonusWinRows.filter((r) =>
+      canClaimMilestoneBonus(r.milestone)
+    ).length
 
     return {
       creatorProceeds: pendingCreatorFundClaims.length > 0,
@@ -1378,6 +1543,7 @@ export default function DashboardPage() {
       community: communityReady > 0,
       nftWins: nftClaimable > 0,
       cryptoWins: cryptoClaimable > 0,
+      milestoneWins: milestoneClaimable > 0,
       myEntries: entriesFilter === 'won' || raffleSummaries.length <= 6,
       counts: {
         giveaways: giveaways.length,
@@ -1388,12 +1554,15 @@ export default function DashboardPage() {
         nftClaimable,
         cryptoWins: cryptoPrizeWinRows.length,
         cryptoClaimable,
+        milestoneWins: milestoneBonusWinRows.length,
+        milestoneClaimable,
       },
     }
   }, [
     data,
     nftPrizeDashboardRows,
     cryptoPrizeWinRows,
+    milestoneBonusWinRows,
     pendingCreatorFundClaims.length,
     walletForMemo,
     entriesFilter,
@@ -1424,13 +1593,16 @@ export default function DashboardPage() {
     const cryptoClaimable = cryptoPrizeWinRows.filter((r) =>
       canClaimEscrowPrize(r as EntryWithRaffle['raffle'], walletForMemo)
     ).length
+    const milestoneClaimable = milestoneBonusWinRows.filter((r) =>
+      canClaimMilestoneBonus(r.milestone)
+    ).length
     return {
       rafflesEntered: enteredRaffles.size,
       ticketsEntered,
-      wins: winRaffles.size,
+      wins: winRaffles.size + milestoneBonusWinRows.length,
       hostedRaffles: myRafflesForMemo.length,
       pendingClaims: pendingCreatorFundClaims.length,
-      prizesToClaim: giveawayReady + communityReady + nftClaimable + cryptoClaimable,
+      prizesToClaim: giveawayReady + communityReady + nftClaimable + cryptoClaimable + milestoneClaimable,
     }
   }, [
     myEntriesForMemo,
@@ -1440,6 +1612,7 @@ export default function DashboardPage() {
     data,
     nftPrizeDashboardRows,
     cryptoPrizeWinRows,
+    milestoneBonusWinRows,
   ])
 
   const entriesListMaxPage =
@@ -3626,6 +3799,83 @@ export default function DashboardPage() {
               </ul>
             )}
           </DashboardCollapsible>
+          {milestoneBonusWinRows.length > 0 && (
+            <DashboardCollapsible
+              title="Bonus milestone prizes (top buyer, etc.)"
+              count={winsSectionDefaults.counts.milestoneWins}
+              readyLabel={
+                winsSectionDefaults.counts.milestoneClaimable > 0
+                  ? `${winsSectionDefaults.counts.milestoneClaimable} to claim`
+                  : null
+              }
+              defaultOpen={winsSectionDefaults.milestoneWins}
+            >
+              <p className="text-xs text-muted-foreground mb-3">
+                Side prizes from raffles you entered — separate from the main raffle winner. Top-buyer bonuses appear
+                here even if you did not win the main prize.
+              </p>
+              <ul className="space-y-3">
+                {milestoneBonusWinRows.map((row) => {
+                  const claimable = canClaimMilestoneBonus(row.milestone)
+                  const claimed = Boolean(row.milestone.claimed_at && row.milestone.claim_tx)
+                  return (
+                    <li key={row.milestone.id} className="rounded-lg border border-border/50 p-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 space-y-1">
+                          <Link
+                            href={`/raffles/${row.raffleSlug}`}
+                            className="text-sm font-medium hover:underline truncate block"
+                          >
+                            {row.raffleTitle}
+                          </Link>
+                          <span className="text-sm text-muted-foreground block">
+                            Bonus: {formatMilestonePrize(row.milestone)} ·{' '}
+                            {milestoneWinnerModeLabel(row.milestone.winner_mode)}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {claimable && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              className="min-h-[44px] touch-manipulation"
+                              disabled={claimMilestoneLoadingId === row.milestone.id}
+                              onClick={() => handleClaimMilestoneBonus(row)}
+                            >
+                              {claimMilestoneLoadingId === row.milestone.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Gift className="h-4 w-4 mr-1" />
+                                  Claim bonus
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          {claimed && row.milestone.claim_tx?.trim() && (
+                            <Button type="button" variant="outline" size="sm" className="min-h-[44px]" asChild>
+                              <a
+                                href={solscanTxUrl(row.milestone.claim_tx.trim())}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                Bonus tx
+                              </a>
+                            </Button>
+                          )}
+                          <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" asChild>
+                            <Link href={`/raffles/${row.raffleSlug}`}>Open raffle</Link>
+                          </Button>
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </DashboardCollapsible>
+          )}
           <DashboardCollapsible
             title="Raffle winners (NFT prizes)"
             count={winsSectionDefaults.counts.nftWins}
@@ -3959,7 +4209,7 @@ export default function DashboardPage() {
         transactionSignature={claimSuccess?.tx ?? ''}
         solscanUrl={solscanTxUrl}
         winnerPng={
-          claimSuccess
+          claimSuccess?.showWinnerPng
             ? {
                 title: claimSuccess.title,
                 slug: claimSuccess.slug,

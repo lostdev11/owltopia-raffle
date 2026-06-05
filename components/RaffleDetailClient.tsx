@@ -156,6 +156,8 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
+import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
+import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
@@ -305,6 +307,11 @@ export function RaffleDetailClient({
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
   const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
+  const [actionClaimSuccess, setActionClaimSuccess] = useState<{
+    tx: string
+    heading: string
+    message: string
+  } | null>(null)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator =
@@ -1259,10 +1266,15 @@ export function RaffleDetailClient({
   }
 
   const claimTicketRefundOnce = useCallback(
-    async (entryId: string): Promise<boolean> => {
+    async (
+      entryId: string
+    ): Promise<
+      | { ok: false }
+      | { ok: true; tx: string | null; alreadyRefunded?: boolean }
+    > => {
       if (!connected || !publicKey) {
         setClaimRefundError('Please connect your wallet first.')
-        return false
+        return { ok: false }
       }
 
       const signInForRefund = async (): Promise<boolean> => {
@@ -1321,7 +1333,7 @@ export function RaffleDetailClient({
       })
       if (res.status === 401) {
         const ok = await signInForRefund()
-        if (!ok) return false
+        if (!ok) return { ok: false }
         res = await fetch('/api/entries/claim-refund', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1336,43 +1348,83 @@ export function RaffleDetailClient({
             ? (json as { error: string }).error
             : 'Could not claim refund'
         setClaimRefundError(msg)
-        return false
+        return { ok: false as const }
       }
-      return true
+      return {
+        ok: true as const,
+        tx: extractTransactionSignature(json),
+        alreadyRefunded: (json as { alreadyRefunded?: boolean }).alreadyRefunded === true,
+      }
     },
     [connected, publicKey, signMessage]
+  )
+
+  const presentActionClaimSuccess = useCallback(
+    (params: { tx?: string | null; heading: string; message: string }) => {
+      setActionClaimSuccess({
+        tx: params.tx?.trim() ?? '',
+        heading: params.heading,
+        message: params.message,
+      })
+    },
+    []
   )
 
   const handleClaimTicketRefund = useCallback(
     async (entryId: string) => {
       setClaimRefundLoadingEntryId(entryId)
       setClaimRefundError(null)
+      setActionClaimSuccess(null)
       try {
-        const ok = await claimTicketRefundOnce(entryId)
-        if (ok) router.refresh()
+        const result = await claimTicketRefundOnce(entryId)
+        if (result.ok) {
+          const entry = buyerRefundableEntries.find((e) => e.id === entryId)
+          const amountLabel =
+            entry != null
+              ? `${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+              : 'Your ticket payment'
+          presentActionClaimSuccess({
+            tx: result.tx,
+            heading: result.alreadyRefunded ? 'Refund already sent' : 'Refund claimed!',
+            message: result.alreadyRefunded
+              ? `${amountLabel} was already returned to your wallet.`
+              : `${amountLabel} was sent back to your wallet.`,
+          })
+          router.refresh()
+        }
       } finally {
         setClaimRefundLoadingEntryId(null)
       }
     },
-    [claimTicketRefundOnce, router]
+    [buyerRefundableEntries, claimTicketRefundOnce, presentActionClaimSuccess, router]
   )
 
   const handleClaimAllTicketRefunds = useCallback(async () => {
     if (buyerRefundableEntries.length === 0) return
     setClaimRefundError(null)
+    setActionClaimSuccess(null)
     setIsClaimingAllRefunds(true)
+    let claimed = 0
+    let lastTx: string | null = null
     try {
       for (const entry of buyerRefundableEntries) {
         setClaimRefundLoadingEntryId(entry.id)
-        const ok = await claimTicketRefundOnce(entry.id)
-        if (!ok) return
+        const result = await claimTicketRefundOnce(entry.id)
+        if (!result.ok) return
+        lastTx = result.tx ?? lastTx
+        claimed++
       }
+      presentActionClaimSuccess({
+        tx: lastTx,
+        heading: 'Refunds claimed!',
+        message: `${claimed} ticket refund${claimed === 1 ? '' : 's'} sent to your wallet.`,
+      })
       router.refresh()
     } finally {
       setClaimRefundLoadingEntryId(null)
       setIsClaimingAllRefunds(false)
     }
-  }, [buyerRefundableEntries, claimTicketRefundOnce, router])
+  }, [buyerRefundableEntries, claimTicketRefundOnce, presentActionClaimSuccess, router])
 
   const handleEnsureRefundTerminal = useCallback(async () => {
     setRefundTerminalLoading(true)
@@ -2261,6 +2313,7 @@ export function RaffleDetailClient({
 
   const handleClaimProceeds = useCallback(async () => {
     setClaimProceedsError(null)
+    setActionClaimSuccess(null)
     setClaimProceedsLoading(true)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
@@ -2276,16 +2329,25 @@ export function RaffleDetailClient({
         )
         return
       }
+      const alreadyClaimed = (data as { alreadyClaimed?: boolean }).alreadyClaimed === true
+      presentActionClaimSuccess({
+        tx: extractTransactionSignature(data),
+        heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
+        message: alreadyClaimed
+          ? 'Creator proceeds were already sent to your wallet.'
+          : 'Net ticket proceeds were sent to your wallet.',
+      })
       router.refresh()
     } catch (e) {
       setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
     } finally {
       setClaimProceedsLoading(false)
     }
-  }, [raffle.id, router])
+  }, [presentActionClaimSuccess, raffle.id, router])
 
   const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
     setError(null)
+    setActionClaimSuccess(null)
     setClaimFailedPrizeReturnLoading(true)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}/claim-failed-min-prize-return`, {
@@ -2301,13 +2363,21 @@ export function RaffleDetailClient({
         )
         return
       }
+      const alreadyReturned = (data as { alreadyReturned?: boolean }).alreadyReturned === true
+      presentActionClaimSuccess({
+        tx: extractTransactionSignature(data),
+        heading: alreadyReturned ? 'Prize already returned' : 'Prize returned!',
+        message: alreadyReturned
+          ? 'Your escrowed prize was already sent back to your wallet.'
+          : 'Your escrowed prize was sent back to your wallet.',
+      })
       router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
       setClaimFailedPrizeReturnLoading(false)
     }
-  }, [raffle.id, router])
+  }, [presentActionClaimSuccess, raffle.id, router])
 
   const fetchOffers = useCallback(async () => {
     setOffersLoading(true)
@@ -4824,6 +4894,17 @@ export function RaffleDetailClient({
         </div>
       )}
       <FreeEntryUnlockedDialog open={freeEntryUnlockedOpen} onOpenChange={setFreeEntryUnlockedOpen} />
+      <ClaimSuccessOverlay
+        open={actionClaimSuccess !== null}
+        heading={actionClaimSuccess?.heading}
+        message={actionClaimSuccess?.message ?? ''}
+        transactionSignature={actionClaimSuccess?.tx}
+        solscanUrl={solscanTransactionUrl}
+        onClose={() => {
+          setActionClaimSuccess(null)
+          router.refresh()
+        }}
+      />
       </div>
     </>
   )

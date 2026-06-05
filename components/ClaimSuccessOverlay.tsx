@@ -8,7 +8,8 @@ export type ClaimSuccessOverlayProps = {
   open: boolean
   heading?: string
   message: string
-  transactionSignature: string
+  /** When omitted or empty, the Solscan link is hidden. */
+  transactionSignature?: string | null
   solscanUrl: (signature: string) => string
   winnerPng?: {
     title: string
@@ -30,6 +31,8 @@ export function ClaimSuccessOverlay({
 }: ClaimSuccessOverlayProps) {
   if (!open) return null
 
+  const tx = transactionSignature?.trim() ?? ''
+
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4 safe-area-bottom"
@@ -48,12 +51,14 @@ export function ClaimSuccessOverlay({
           {heading}
         </h2>
         <p className="text-sm text-muted-foreground">{message}</p>
-        <Button type="button" variant="secondary" className="w-full min-h-[44px] touch-manipulation" asChild>
-          <a href={solscanUrl(transactionSignature)} target="_blank" rel="noopener noreferrer">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            View transaction on Solscan
-          </a>
-        </Button>
+        {tx ? (
+          <Button type="button" variant="secondary" className="w-full min-h-[44px] touch-manipulation" asChild>
+            <a href={solscanUrl(tx)} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-4 w-4 mr-2" />
+              View transaction on Solscan
+            </a>
+          </Button>
+        ) : null}
         {winnerPng ? (
           <RaffleWinnerPngButton
             title={winnerPng.title}

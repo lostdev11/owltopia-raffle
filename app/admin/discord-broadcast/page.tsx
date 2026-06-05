@@ -994,7 +994,8 @@ export default function AdminDiscordBroadcastPage() {
           <DialogHeader>
             <DialogTitle>Preview & send</DialogTitle>
             <DialogDescription>
-              This posts as Owltopia Bot with no @mentions. Confirm before sending.
+              This posts the full message at once as Owltopia Bot (no @mentions). First send can take a
+              few seconds on mobile — wait for confirmation before sending again.
             </DialogDescription>
           </DialogHeader>
           <textarea
@@ -1018,7 +1019,7 @@ export default function AdminDiscordBroadcastPage() {
               className="min-h-[44px]"
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Send to Discord
+              {sending ? 'Posting…' : 'Send to Discord'}
             </Button>
           </DialogFooter>
         </DialogContent>

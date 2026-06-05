@@ -21,6 +21,7 @@ Uses the same `DISCORD_BOT_TOKEN` as the main site (REST posts + slash commands)
 | `DISCORD_REPLY_ENABLED` | no | `false` to pause without stopping the process |
 | `DISCORD_REPLY_COOLDOWN_SEC` | no | Per-user cooldown (default `30`) |
 | `PORT` | no | Health check port (Railway sets this) |
+| `DISCORD_BROADCAST_WORKER_SECRET` | recommended | Shared secret with Vercel for `POST /broadcast` (instant scheduled/manual posts) |
 
 Example:
 
@@ -60,7 +61,16 @@ npm run dev
 - No @mentions in replies (avoids ping loops).
 - Per-user cooldown to reduce spam.
 
+## Broadcast fast path (optional)
+
+When `DISCORD_BROADCAST_WORKER_SECRET` is set on Railway **and** Vercel has:
+
+- `DISCORD_BROADCAST_WORKER_URL` = your Railway service URL (no trailing slash)
+- `DISCORD_BROADCAST_WORKER_SECRET` = same secret
+
+…Owl Vision posts the **full message at once** via `POST /broadcast` on this worker (Gateway `channel.send`), instead of slow REST from Vercel. Without these vars, broadcast still works via REST fallback.
+
 ## Notes
 
-- This does **not** replace Owl Vision **Discord broadcast** (scheduled/admin posts on Vercel).
+- Owl Vision **Discord broadcast** (scheduled/admin posts) runs on Vercel; this worker is an optional fast path for posting.
 - For new holder channel ids after a rename, update `DISCORD_REPLY_CHANNEL_IDS` on Railway (names do not matter, ids do).
