@@ -31,8 +31,8 @@ export function AdminOwlCenterViewModePanel() {
       <p className="mb-4 text-sm text-[#9BA8B4]">
         Choose what you see on <strong className="font-normal text-[#E8EEF2]">/owl-center</strong>.{' '}
         <strong className="font-normal text-[#E8EEF2]">Public</strong> is the holder experience (Gen2 mint, no launchpad
-        nav). <strong className="font-normal text-[#E8EEF2]">Admin</strong> adds generator, submit flow, and hub
-        links. Saved in this browser.
+        nav). <strong className="font-normal text-[#E8EEF2]">Admin</strong> adds generator, submit flow, and hub links.
+        Per browser — connect your admin wallet or stay signed in on /owl-center for this to apply.
       </p>
       <div
         className="inline-flex items-center gap-1 rounded-md border border-[#1A222B] bg-[#10161C] p-0.5"

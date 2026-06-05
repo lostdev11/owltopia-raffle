@@ -16,7 +16,8 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import {
   isOwlCenterAdminOnlyPath,
   OWL_CENTER_HOLDER_HOME,
-  readStoredOwlCenterViewMode,
+  OWL_CENTER_VIEW_MODE_STORAGE_KEY,
+  readStoredOwlCenterViewModeOrNull,
   writeStoredOwlCenterViewMode,
   type OwlCenterViewMode,
 } from '@/lib/owl-center/view-mode'
@@ -52,7 +53,19 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setHydrated(true)
-    setViewModeState(readStoredOwlCenterViewMode())
+    const stored = readStoredOwlCenterViewModeOrNull()
+    if (stored !== null) setViewModeState(stored)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== OWL_CENTER_VIEW_MODE_STORAGE_KEY) return
+      const next = event.newValue === 'admin' ? 'admin' : event.newValue === 'public' ? 'public' : null
+      if (next) setViewModeState(next)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
   useEffect(() => {
@@ -100,6 +113,14 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
   const isOwlCenterAdmin = isAdmin === true || adminSessionActive === true
   const adminLoading =
     !hydrated || (connected && isAdmin === null) || adminSessionActive === null
+
+  // Verified admins default to admin view until they explicitly choose public preview.
+  useEffect(() => {
+    if (!hydrated || adminLoading || !isOwlCenterAdmin) return
+    if (readStoredOwlCenterViewModeOrNull() !== null) return
+    setViewModeState('admin')
+    writeStoredOwlCenterViewMode('admin')
+  }, [hydrated, adminLoading, isOwlCenterAdmin])
 
   const effectiveViewMode: OwlCenterViewMode =
     isOwlCenterAdmin && viewMode === 'admin' ? 'admin' : 'public'

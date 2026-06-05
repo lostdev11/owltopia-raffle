@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminRole } from '@/lib/db/admins'
+
+import { getOwlVisionAdminRole } from '@/lib/admin/access'
 import { getSessionFromRequest } from '@/lib/auth-server'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
       if (!walletAddress || !SOLANA_ADDRESS_REGEX.test(walletAddress)) {
         return NextResponse.json({ isAdmin: false })
       }
-      const role = await getAdminRole(walletAddress)
+      const role = await getOwlVisionAdminRole(walletAddress)
       const isAdmin = role !== null
       return NextResponse.json({
         isAdmin,
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const role = await getAdminRole(walletAddress)
+    const role = await getOwlVisionAdminRole(walletAddress)
     const isAdmin = role !== null
 
     return NextResponse.json({

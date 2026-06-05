@@ -17,12 +17,18 @@ export function isOwlCenterAdminOnlyPath(pathname: string): boolean {
 }
 
 export function readStoredOwlCenterViewMode(): OwlCenterViewMode {
-  if (typeof window === 'undefined') return 'public'
+  return readStoredOwlCenterViewModeOrNull() ?? 'public'
+}
+
+/** `null` when the admin has not chosen a preference in this browser yet. */
+export function readStoredOwlCenterViewModeOrNull(): OwlCenterViewMode | null {
+  if (typeof window === 'undefined') return null
   try {
     const stored = localStorage.getItem(OWL_CENTER_VIEW_MODE_STORAGE_KEY)
-    return stored === 'admin' ? 'admin' : 'public'
+    if (stored === 'admin' || stored === 'public') return stored
+    return null
   } catch {
-    return 'public'
+    return null
   }
 }
 

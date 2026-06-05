@@ -1,25 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isOwlVisionAdmin } from '@/lib/admin/access'
 import { requireSession } from '@/lib/auth-server'
-import { isAdmin } from '@/lib/db/admins'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
-
-function parseAdminWalletsFromEnv(): string[] {
-  const raw = process.env.ADMIN_WALLETS?.trim()
-  if (!raw) return []
-  return raw
-    .split(',')
-    .map((s) => normalizeSolanaWalletAddress(s.trim()))
-    .filter((x): x is string => !!x)
-}
 
 /** Full admin (DB) or comma-separated `ADMIN_WALLETS` env (base58). */
 export async function isGen2PresaleAdmin(wallet: string): Promise<boolean> {
-  if (await isAdmin(wallet)) return true
-  const w = normalizeSolanaWalletAddress(wallet)
-  if (!w) return false
-  const envList = parseAdminWalletsFromEnv()
-  return envList.some((a) => a === w)
+  return isOwlVisionAdmin(wallet)
 }
 
 export async function requireGen2PresaleAdminSession(
