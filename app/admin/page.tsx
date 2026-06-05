@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -3149,6 +3149,21 @@ export default function AdminDashboardPage() {
                 <CardDescription>
                   Toggle whether purchases are live, view sold spots and recent purchases, gift mint credits, and look up
                   balances. Public page: /gen2-presale
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
+
+          <Card className="hover:border-primary transition-colors cursor-pointer">
+            <Link href="/admin/owl-center">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Rocket className="h-5 w-5" />
+                  Owl Center
+                </CardTitle>
+                <CardDescription>
+                  Gen2 launch controls, marketplace prep, and public vs admin preview for /owl-center (generator, submit
+                  flow, hub). Public mint: /owl-center/collection/gen2
                 </CardDescription>
               </CardHeader>
             </Link>
