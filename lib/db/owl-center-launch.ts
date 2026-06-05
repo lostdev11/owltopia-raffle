@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
-import type { OwlCenterLaunchPublic, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic, OwlCenterMintMode, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 
 function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
   return {
@@ -48,6 +48,11 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
         : null,
     creator_mint_currency: data.creator_mint_currency != null ? String(data.creator_mint_currency) : null,
     creator_launch_date: data.creator_launch_date != null ? String(data.creator_launch_date) : null,
+    mint_mode: (String(data.mint_mode ?? 'gen2_full') === 'public_simple' ? 'public_simple' : 'gen2_full') as OwlCenterMintMode,
+    mint_network:
+      data.mint_network === 'devnet' || data.mint_network === 'mainnet'
+        ? (data.mint_network as 'devnet' | 'mainnet')
+        : null,
   }
 }
 
@@ -139,6 +144,14 @@ export async function updateOwlCenterLaunchByIdAdmin(
     metadata_ready: boolean
     assets_ready: boolean
     marketplace_ready: boolean
+    mint_mode: OwlCenterMintMode
+    mint_network: 'devnet' | 'mainnet' | null
+    name: string
+    description: string | null
+    image_url: string | null
+    public_price_usdc: number | null
+    wallet_mint_limit: number
+    is_featured: boolean
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
@@ -150,6 +163,70 @@ export async function updateOwlCenterLaunchByIdAdmin(
     .single()
   if (error || !data) {
     console.error('updateOwlCenterLaunchByIdAdmin', error)
+    return null
+  }
+  return mapRow(data as Record<string, unknown>)
+}
+
+export type InsertOwlCenterLaunchInput = {
+  slug: string
+  name: string
+  symbol: string
+  description?: string | null
+  image_url?: string | null
+  creator_wallet?: string | null
+  treasury_wallet?: string | null
+  total_supply: number
+  public_supply?: number
+  wallet_mint_limit?: number
+  public_price_usdc?: number | null
+  mint_mode?: OwlCenterMintMode
+  mint_network?: 'devnet' | 'mainnet' | null
+  active_phase?: OwlCenterPhase
+  status?: OwlCenterStatus
+  candy_machine_id?: string | null
+  collection_mint?: string | null
+  devnet_candy_machine_id?: string | null
+  devnet_collection_mint?: string | null
+  is_featured?: boolean
+}
+
+/** Admin create — inserts launch row for public_simple demo/partner collections. */
+export async function insertOwlCenterLaunchAdmin(input: InsertOwlCenterLaunchInput): Promise<OwlCenterLaunchPublic | null> {
+  const db = getSupabaseAdmin()
+  const publicSupply = input.public_supply ?? input.total_supply
+  const { data, error } = await db
+    .from('owl_center_launches')
+    .insert({
+      slug: input.slug.trim().toLowerCase(),
+      name: input.name.trim(),
+      symbol: input.symbol.trim(),
+      description: input.description ?? null,
+      image_url: input.image_url ?? null,
+      creator_wallet: input.creator_wallet ?? null,
+      treasury_wallet: input.treasury_wallet ?? null,
+      total_supply: input.total_supply,
+      public_supply: publicSupply,
+      presale_supply: 0,
+      wl_supply: 0,
+      airdrop_supply: 0,
+      wallet_mint_limit: input.wallet_mint_limit ?? 5,
+      public_price_usdc: input.public_price_usdc ?? null,
+      mint_mode: input.mint_mode ?? 'public_simple',
+      mint_network: input.mint_network ?? null,
+      active_phase: input.active_phase ?? 'PUBLIC',
+      status: input.status ?? 'PUBLIC',
+      candy_machine_id: input.candy_machine_id ?? null,
+      collection_mint: input.collection_mint ?? null,
+      devnet_candy_machine_id: input.devnet_candy_machine_id ?? null,
+      devnet_collection_mint: input.devnet_collection_mint ?? null,
+      is_featured: input.is_featured ?? false,
+      is_paused: false,
+    })
+    .select('*')
+    .single()
+  if (error || !data) {
+    console.error('insertOwlCenterLaunchAdmin', error)
     return null
   }
   return mapRow(data as Record<string, unknown>)

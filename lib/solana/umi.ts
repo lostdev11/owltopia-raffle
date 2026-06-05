@@ -18,7 +18,7 @@ import { getSolanaRpcUrl } from '@/lib/solana/network'
  *
  * TODO(mainnet): Confirm RPC / commitment settings for production CM + guard groups.
  */
-export function createOwlCenterUmi(walletAdapter: WalletAdapter) {
-  const rpc = getSolanaRpcUrl()
+export function createOwlCenterUmi(walletAdapter: WalletAdapter, rpcUrl?: string) {
+  const rpc = rpcUrl?.trim() || getSolanaRpcUrl()
   return createUmi(rpc).use(mplCandyMachine()).use(mplTokenMetadata()).use(walletAdapterIdentity(walletAdapter))
 }

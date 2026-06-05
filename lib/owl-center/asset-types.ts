@@ -60,6 +60,8 @@ export type OwlCenterMarketplaceReadiness = {
   collection_mint: string | null
   candy_machine_id: string | null
   hash_list_url: string | null
+  hash_list_text: string | null
+  sellout_prepared_at: string | null
   magic_eden_url: string | null
   tensor_url: string | null
   metadata_status: OwlCenterMarketplaceTrackStatus

@@ -1,0 +1,25 @@
+{
+  "name": "Owl Center Launchpad Demo #1",
+  "symbol": "OWLDEMO",
+  "description": "Pre-rendered demo collection for Owl Center — proves Sugar → mint → sell-out → Magic Eden / Tensor flow. Token 1.",
+  "image": "1.png",
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "Purple"
+    },
+    {
+      "trait_type": "Owl",
+      "value": "Armored"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "1.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

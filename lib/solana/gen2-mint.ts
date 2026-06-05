@@ -5,7 +5,8 @@ import { fetchMetadata, findMetadataPda, findMasterEditionPda } from '@metaplex-
 import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
-import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled } from '@/lib/solana/network'
+import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 
 /** Optional DB-backed overrides (see `owl_center_launches` devnet columns). */
@@ -24,6 +25,8 @@ export type MintGen2Params = {
   phase: OwlCenterPhase
   /** When provided, resolves CM + collection from env + launch row (devnet vs mainnet). */
   launch?: Gen2MintLaunchRefs | null
+  /** Override cluster for public_simple collections (independent of Gen2 devnet flag). */
+  mintNetwork?: OwlMintNetwork
 }
 
 export type MintGen2Result =
@@ -45,7 +48,7 @@ export type MintGen2Result =
  */
 export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<MintGen2Result> {
   void params.phase
-  const { walletAdapter, candyMachineId, collectionMint, quantity, launch } = params
+  const { walletAdapter, candyMachineId, collectionMint, quantity, launch, mintNetwork } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
   }
@@ -53,7 +56,15 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     return { ok: false, error: 'Invalid quantity (max 25 per transaction)' }
   }
 
-  if (isDevnetMintEnabled() && getSolanaCluster().toLowerCase() !== 'devnet') {
+  const network =
+    mintNetwork ??
+    (launch && 'mint_mode' in launch
+      ? resolveLaunchMintNetwork(launch as Parameters<typeof resolveLaunchMintNetwork>[0])
+      : isDevnetMintEnabled()
+        ? 'devnet'
+        : 'mainnet')
+
+  if (network === 'devnet' && getSolanaCluster().toLowerCase() !== 'devnet' && !mintNetwork) {
     return {
       ok: false,
       error:
@@ -61,8 +72,16 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
   }
 
-  let cmId = candyMachineId.trim() || getGen2CandyMachineId(launch ?? undefined)
-  let colMint = collectionMint.trim() || getGen2CollectionMint(launch ?? undefined)
+  let cmId =
+    candyMachineId.trim() ||
+    (launch && 'mint_mode' in launch
+      ? getLaunchCandyMachineId(launch as Parameters<typeof getLaunchCandyMachineId>[0], network)
+      : getGen2CandyMachineId(launch ?? undefined))
+  let colMint =
+    collectionMint.trim() ||
+    (launch && 'mint_mode' in launch
+      ? getLaunchCollectionMint(launch as Parameters<typeof getLaunchCollectionMint>[0], network)
+      : getGen2CollectionMint(launch ?? undefined))
   if (!cmId) {
     return { ok: false, error: 'Missing Candy Machine ID — set env or Owl Center admin devnet fields.' }
   }
@@ -71,7 +90,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
   }
 
   try {
-    const umi = createOwlCenterUmi(walletAdapter)
+    const umi = createOwlCenterUmi(walletAdapter, getLaunchSolanaRpcUrl(network))
     const candyMachine = publicKey(cmId)
     const collectionMintPk = publicKey(colMint)
     const collectionMetadata = findMetadataPda(umi, { mint: collectionMintPk })

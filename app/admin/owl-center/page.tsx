@@ -266,6 +266,9 @@ export default function AdminOwlCenterPage() {
           <Link href="/admin/gen2-presale" className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35">
             Gen2 presale admin
           </Link>
+          <Link href="/admin/owl-center/demo" className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10">
+            Demo mint launchpad
+          </Link>
           <Link href="/owl-center/collection/gen2" className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35">
             Public mint page
           </Link>

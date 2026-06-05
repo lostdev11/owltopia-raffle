@@ -1,4 +1,5 @@
 import type { Gen2ClusterPresaleSummary } from '@/lib/gen2-presale/cluster-balance'
+import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 
 export type { Gen2ClusterPresaleSummary }
 
@@ -19,6 +20,9 @@ export type OwlCenterStatus =
   | 'PUBLIC'
   | 'SOLD_OUT'
   | 'TRADING_ACTIVE'
+
+/** gen2_full = Owltopia Gen2 phased mint; public_simple = PUBLIC-only partner/demo collections. */
+export type OwlCenterMintMode = 'gen2_full' | 'public_simple'
 
 export type OwlCenterLaunchPublic = {
   id: string
@@ -63,6 +67,43 @@ export type OwlCenterLaunchPublic = {
   creator_mint_price: number | null
   creator_mint_currency: string | null
   creator_launch_date: string | null
+  mint_mode: OwlCenterMintMode
+  /** devnet | mainnet — when set, overrides site-wide devnet flag for this launch. */
+  mint_network: 'devnet' | 'mainnet' | null
+}
+
+export type SimpleMintEligibilityResponse = {
+  active_phase: OwlCenterPhase
+  status: OwlCenterStatus
+  is_paused: boolean
+  is_eligible: boolean
+  max_mintable: number
+  reason: string | null
+  wallet_minted: number
+  wallet_mint_limit: number
+  unit_lamports_estimate: string | null
+  sol_usd_price: number | null
+  price_usdc: number | null
+  mint_network: 'devnet' | 'mainnet'
+  mint_operational: boolean
+}
+
+export type CollectionMintStateResponse = {
+  launch: OwlCenterLaunchPublic
+  mint_controls: OwlCenterMintControls
+  marketplace: {
+    trading_links_active: boolean
+    magic_eden_url: string | null
+    tensor_url: string | null
+    hash_list_ready: boolean
+    sellout_prepared_at: string | null
+    mint_addresses_recorded: number
+  }
+  supply: { total: number; minted: number; remaining: number; percent_minted: number }
+  prices_usdc: { public: number | null }
+  prices_lamports: { public: string | null }
+  mint_network: 'devnet' | 'mainnet'
+  terminal: MintTerminalLine[]
 }
 
 export type Gen2PresaleBalanceSlice = {

@@ -1,11 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 import { AssetStepForm, type AssetStepValues } from '@/components/owl-center/AssetStepForm'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
+import {
+  clearLaunchDraftFromSession,
+  readLaunchDraftFromSession,
+} from '@/lib/owl-center/generator/launch-draft'
 
 const STEPS = ['Collection info', 'Supply & mint', 'Assets & metadata', 'Review'] as const
 
@@ -22,6 +27,9 @@ const emptyAssets: AssetStepValues = {
 }
 
 export function LaunchSubmissionWizard() {
+  const searchParams = useSearchParams()
+  const fromGenerator = searchParams.get('from') === 'generator'
+  const [generatorPrefill, setGeneratorPrefill] = useState(false)
   const [step, setStep] = useState(0)
   const [status, setStatus] = useState<'idle' | 'sending' | 'ok' | 'err'>('idle')
   const [msg, setMsg] = useState<string | null>(null)
@@ -41,6 +49,19 @@ export function LaunchSubmissionWizard() {
   const [wlEnabled, setWlEnabled] = useState(false)
 
   const [assets, setAssets] = useState<AssetStepValues>(emptyAssets)
+
+  useEffect(() => {
+    if (!fromGenerator) return
+    const draft = readLaunchDraftFromSession()
+    if (!draft) return
+    setCollectionName(draft.collection_name)
+    setSymbol(draft.symbol)
+    setDescription(draft.description)
+    setTotalSupply(draft.total_supply)
+    setAssets((a) => ({ ...a, asset_notes: draft.asset_notes }))
+    setGeneratorPrefill(true)
+    clearLaunchDraftFromSession()
+  }, [fromGenerator])
 
   function next() {
     setMsg(null)
@@ -101,6 +122,12 @@ export function LaunchSubmissionWizard() {
       title="Submit Solana collection"
       subtitle="Internal review only — no deployment automation. Sign in optional; we bind your wallet when you use Sign-In with Solana."
     >
+      {generatorPrefill ? (
+        <p className="mb-6 rounded border border-[#00FF9C]/30 bg-[#00FF9C]/8 px-4 py-3 text-sm text-[#C5D0D8]">
+          Prefilled from <strong className="font-normal text-[#EAFBF4]">Owl Generator</strong> — confirm supply, export
+          your Sugar ZIP, then add asset package URLs in step 3.
+        </p>
+      ) : null}
       <nav className="mb-8 font-mono text-xs uppercase tracking-widest text-[#5C6773]">
         {STEPS.map((label, i) => (
           <span key={label}>

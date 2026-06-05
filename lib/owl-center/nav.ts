@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Coins, Home, Rocket, Sparkles, Upload } from 'lucide-react'
+import { Coins, Home, Layers, Rocket, Sparkles, Upload } from 'lucide-react'
 
 export type OwlCenterNavItem = {
   href: string
@@ -9,9 +9,12 @@ export type OwlCenterNavItem = {
   icon: LucideIcon
   /** Match pathname prefix (e.g. /owl-center/collection/gen2). */
   matchPrefix?: string
+  /** Hidden from public view — generator, launch submit, etc. */
+  adminOnly?: boolean
 }
 
-export const OWL_CENTER_NAV_ITEMS: OwlCenterNavItem[] = [
+/** Default nav for holders and visitors (matches pre-launchpad public Owl Center). */
+export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
   {
     href: '/owl-center',
     label: 'Hub',
@@ -42,14 +45,38 @@ export const OWL_CENTER_NAV_ITEMS: OwlCenterNavItem[] = [
     icon: Coins,
     matchPrefix: '/owl-center/drops',
   },
+]
+
+/** Launchpad tools — visible when an admin toggles Admin view. */
+export const OWL_CENTER_ADMIN_NAV_ITEMS: OwlCenterNavItem[] = [
+  {
+    href: '/owl-center/generator',
+    label: 'Generator',
+    shortLabel: 'Gen',
+    description: 'Trait layers, pairing rules, and Sugar export',
+    icon: Layers,
+    matchPrefix: '/owl-center/generator',
+    adminOnly: true,
+  },
   {
     href: '/owl-center/launch',
     label: 'Submit',
     description: 'Submit a collection for Owl Center review',
     icon: Upload,
     matchPrefix: '/owl-center/launch',
+    adminOnly: true,
   },
 ]
+
+/** Full nav (public + admin tools). Prefer owlCenterNavItemsForView() in UI. */
+export const OWL_CENTER_NAV_ITEMS: OwlCenterNavItem[] = [
+  ...OWL_CENTER_PUBLIC_NAV_ITEMS,
+  ...OWL_CENTER_ADMIN_NAV_ITEMS,
+]
+
+export function owlCenterNavItemsForView(showAdminFeatures: boolean): OwlCenterNavItem[] {
+  return showAdminFeatures ? OWL_CENTER_NAV_ITEMS : OWL_CENTER_PUBLIC_NAV_ITEMS
+}
 
 export type OwlCenterGen2Section = {
   id: string
@@ -75,6 +102,7 @@ export function isOwlCenterNavActive(pathname: string, item: OwlCenterNavItem): 
       (pathname.startsWith('/owl-center/') &&
         !pathname.startsWith('/owl-center/collection') &&
         !pathname.startsWith('/owl-center/drops') &&
+        !pathname.startsWith('/owl-center/generator') &&
         !pathname.startsWith('/owl-center/launch'))
     )
   }

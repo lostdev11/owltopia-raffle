@@ -8,6 +8,8 @@ function mapMarketplaceRow(row: Record<string, unknown>): OwlCenterMarketplaceRe
     collection_mint: row.collection_mint != null ? String(row.collection_mint) : null,
     candy_machine_id: row.candy_machine_id != null ? String(row.candy_machine_id) : null,
     hash_list_url: row.hash_list_url != null ? String(row.hash_list_url) : null,
+    hash_list_text: row.hash_list_text != null ? String(row.hash_list_text) : null,
+    sellout_prepared_at: row.sellout_prepared_at != null ? String(row.sellout_prepared_at) : null,
     magic_eden_url: row.magic_eden_url != null ? String(row.magic_eden_url) : null,
     tensor_url: row.tensor_url != null ? String(row.tensor_url) : null,
     metadata_status: String(row.metadata_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['metadata_status'],
@@ -38,6 +40,8 @@ export async function upsertMarketplaceReadinessForLaunch(
     collection_mint: string | null
     candy_machine_id: string | null
     hash_list_url: string | null
+    hash_list_text: string | null
+    sellout_prepared_at: string | null
     magic_eden_url: string | null
     tensor_url: string | null
     metadata_status: OwlCenterMarketplaceReadiness['metadata_status']

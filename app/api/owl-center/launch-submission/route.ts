@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
 import { getSessionFromRequest } from '@/lib/auth-server'
+import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
 import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-center/asset-validation'
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
@@ -20,6 +21,9 @@ export async function POST(request: NextRequest) {
   if (!rateLimit(`owl-launch-sub:${ip}`, 6, 3600_000).allowed) {
     return jsonError('Too many submissions — try later.', 429)
   }
+
+  const adminWallet = await getOwlCenterAdminWallet(request)
+  if (!adminWallet) return jsonError('Admin access required', 403)
 
   let body: Record<string, unknown>
   try {
