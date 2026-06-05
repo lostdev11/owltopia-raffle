@@ -118,13 +118,16 @@ function lintIfChainRule(
       continue
     }
     if (seenCategories.has(t.categoryId)) {
-      issues.push({
-        severity: 'error',
-        code: 'if_chain_same_category',
-        message: 'IF chain traits must each be from a different layer',
-        ruleId: rule.id,
-      })
-      break
+      const cat = project.categories.find((c) => c.id === t.categoryId)
+      if (!cat?.allowMultiple) {
+        issues.push({
+          severity: 'error',
+          code: 'if_chain_same_category',
+          message: 'IF chain traits must each be from a different layer',
+          ruleId: rule.id,
+        })
+        break
+      }
     }
     seenCategories.add(t.categoryId)
   }
@@ -171,15 +174,19 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
         .map((id) => traitById.get(id)?.categoryId)
         .filter((c): c is string => Boolean(c))
       const seen = new Set<string>()
+      const catById = new Map(project.categories.map((c) => [c.id, c]))
       for (const catId of categoryIds) {
         if (seen.has(catId)) {
-          issues.push({
-            severity: 'error',
-            code: 'same_category_link',
-            message:
-              'Linked traits cannot share a category — only one trait per category is used per NFT',
-            ruleId: rule.id,
-          })
+          const cat = catById.get(catId)
+          if (!cat?.allowMultiple) {
+            issues.push({
+              severity: 'error',
+              code: 'same_category_link',
+              message:
+                'Linked traits cannot share a category unless the layer allows multiple traits (e.g. Glasses)',
+              ruleId: rule.id,
+            })
+          }
           break
         }
         seen.add(catId)

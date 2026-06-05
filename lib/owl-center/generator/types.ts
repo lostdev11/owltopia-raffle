@@ -3,6 +3,8 @@ export type TraitCategory = {
   name: string
   /** Lower renders first. */
   zIndex: number
+  /** When true, multiple traits from this layer can stack (e.g. Glasses). */
+  allowMultiple?: boolean
 }
 
 export type TraitLayer = {
@@ -46,7 +48,9 @@ export type GeneratorProject = {
   updatedAt: string
 }
 
-export type TraitSelection = Record<string, string | null>
+export type CategorySelection = string | string[] | null
+
+export type TraitSelection = Record<string, CategorySelection>
 
 export type GeneratedNft = {
   index: number
@@ -60,6 +64,6 @@ export const DEFAULT_CATEGORIES: Omit<TraitCategory, 'id'>[] = [
   { name: 'Body', zIndex: 10 },
   { name: 'Hat', zIndex: 20 },
   { name: 'Eyes', zIndex: 25 },
-  { name: 'Glasses', zIndex: 30 },
+  { name: 'Glasses', zIndex: 30, allowMultiple: true },
   { name: 'Accessory', zIndex: 40 },
 ]

@@ -80,19 +80,27 @@ export function projectMissingDefaultLayers(project: GeneratorProject): boolean 
   return DEFAULT_CATEGORIES.some((c) => !existing.has(c.name.toLowerCase()))
 }
 
-/** Add any default layers (e.g. Eyes) missing from saved projects. */
+function defaultCategoryFlags(name: string): Pick<GeneratorProject['categories'][number], 'allowMultiple'> {
+  const template = DEFAULT_CATEGORIES.find((c) => c.name.toLowerCase() === name.toLowerCase())
+  return template?.allowMultiple ? { allowMultiple: true } : {}
+}
+
+/** Add missing default layers and sync flags (e.g. Eyes, Glasses multi-select). */
 export function ensureDefaultCategories(project: GeneratorProject): GeneratorProject {
   const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
   const missing = DEFAULT_CATEGORIES.filter((c) => !existing.has(c.name.toLowerCase()))
-  if (!missing.length) return project
-  const added = missing.map((c) => ({
-    ...c,
-    id: `cat-${crypto.randomUUID().slice(0, 8)}`,
-  }))
-  return {
-    ...project,
-    categories: [...project.categories, ...added].sort((a, b) => a.zIndex - b.zIndex),
-  }
+  const categories = [
+    ...project.categories.map((c) => ({ ...c, ...defaultCategoryFlags(c.name) })),
+    ...missing.map((c) => ({
+      ...c,
+      id: `cat-${crypto.randomUUID().slice(0, 8)}`,
+    })),
+  ].sort((a, b) => a.zIndex - b.zIndex)
+
+  const snapshot = (cats: GeneratorProject['categories']) =>
+    JSON.stringify(cats.map((c) => ({ id: c.id, name: c.name, zIndex: c.zIndex, allowMultiple: c.allowMultiple })))
+  if (snapshot(categories) === snapshot(project.categories)) return project
+  return { ...project, categories }
 }
 
 export function createEmptyProject(): GeneratorProject {

@@ -1,3 +1,8 @@
+import {
+  getCategorySelectionIds,
+  selectionHasTrait,
+  traitsForSelection,
+} from '@/lib/owl-center/generator/selection'
 import type {
   CompatibilityRule,
   TraitCategory,
@@ -5,31 +10,26 @@ import type {
   TraitSelection,
 } from '@/lib/owl-center/generator/types'
 
+export { attributesForSelection, traitsForSelection, selectionHasTrait } from '@/lib/owl-center/generator/selection'
+
 export function buildDna(traitIds: string[]): string {
   return [...traitIds].sort().join('-')
 }
 
-export function selectionFromTraits(traits: TraitLayer[]): TraitSelection {
+export function selectionFromTraits(traits: TraitLayer[], categories?: TraitCategory[]): TraitSelection {
   const sel: TraitSelection = {}
+  const catById = new Map(categories?.map((c) => [c.id, c]))
+
   for (const t of traits) {
-    sel[t.categoryId] = t.id
+    const cat = catById.get(t.categoryId)
+    if (cat?.allowMultiple) {
+      const existing = getCategorySelectionIds(sel, t.categoryId)
+      sel[t.categoryId] = [...existing, t.id]
+    } else {
+      sel[t.categoryId] = t.id
+    }
   }
   return sel
-}
-
-export function traitsForSelection(allTraits: TraitLayer[], selection: TraitSelection): TraitLayer[] {
-  const byId = new Map(allTraits.map((t) => [t.id, t]))
-  const out: TraitLayer[] = []
-  for (const traitId of Object.values(selection)) {
-    if (!traitId) continue
-    const t = byId.get(traitId)
-    if (t) out.push(t)
-  }
-  return out
-}
-
-function selectionHasTrait(selection: TraitSelection, traitId: string): boolean {
-  return Object.values(selection).includes(traitId)
 }
 
 export function comboTraitIds(rule: CompatibilityRule): string[] {
@@ -106,11 +106,11 @@ export function getCategoryPool(
     const whenTrait = traitById.get(rule.whenTraitId)
     if (!whenTrait || whenTrait.categoryId !== categoryId) continue
 
-    const targetPicked = selection[rule.targetCategoryId]
-    if (!targetPicked) continue
+    const targetPickedIds = getCategorySelectionIds(selection, rule.targetCategoryId)
+    if (!targetPickedIds.length) continue
 
     const allowed = rule.allowedTraitIds ?? []
-    if (!allowed.includes(targetPicked)) {
+    if (targetPickedIds.some((id) => !allowed.includes(id))) {
       pool = pool.filter((t) => t.id !== rule.whenTraitId)
     }
   }
@@ -129,8 +129,8 @@ export function getCategoryPool(
           if (otherId === chainTraitId) continue
           const other = traitById.get(otherId)
           if (!other) continue
-          const otherPicked = selection[other.categoryId]
-          if (otherPicked != null && otherPicked !== otherId) {
+          const otherPickedIds = getCategorySelectionIds(selection, other.categoryId)
+          if (otherPickedIds.length > 0 && !otherPickedIds.includes(otherId)) {
             blockChainTrait = true
             break
           }
@@ -191,9 +191,9 @@ export function validateSelection(
       if (!rule.whenTraitId || !rule.targetCategoryId) continue
       if (!selectionHasTrait(selection, rule.whenTraitId)) continue
 
-      const picked = selection[rule.targetCategoryId]
+      const pickedIds = getCategorySelectionIds(selection, rule.targetCategoryId)
       const allowed = rule.allowedTraitIds ?? []
-      if (picked && !allowed.includes(picked)) {
+      if (pickedIds.some((id) => !allowed.includes(id))) {
         const whenName = traitById?.get(rule.whenTraitId)?.name ?? 'trigger trait'
         return (
           rule.label ??
@@ -269,6 +269,19 @@ export function randomSelection(
         selection[cat.id] = null
         continue
       }
+
+      const activeIfPool = activeIfPoolRules(cat.id, selection, rules)
+      if (cat.allowMultiple && activeIfPool.length) {
+        selection[cat.id] = pool.map((t) => t.id)
+        continue
+      }
+
+      if (cat.allowMultiple) {
+        const picked = pickWeightedRandom(pool)
+        selection[cat.id] = picked ? [picked.id] : null
+        continue
+      }
+
       const picked = pickWeightedRandom(pool)
       selection[cat.id] = picked?.id ?? null
     }

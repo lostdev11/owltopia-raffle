@@ -1,3 +1,4 @@
+import { attributesForSelection } from '@/lib/owl-center/generator/selection'
 import { buildDna, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
 import type { GeneratedNft, GeneratorProject } from '@/lib/owl-center/generator/types'
 
@@ -89,7 +90,6 @@ function buildWarnings(project: GeneratorProject, result: Omit<SupplySimulationR
 /** Generate unique combos up to target supply and analyze trait distribution. */
 export function simulateSupply(project: GeneratorProject, target: number): SupplySimulationResult {
   const { categories, traits, rules } = project
-  const catById = new Map(categories.map((c) => [c.id, c]))
   const seen = new Set<string>()
   const combos: GeneratedNft[] = []
 
@@ -105,7 +105,7 @@ export function simulateSupply(project: GeneratorProject, target: number): Suppl
       continue
     }
 
-    const picked = traitsForSelection(traits, selection)
+    const picked = traitsForSelection(traits, selection, categories)
     if (!picked.length) {
       streak++
       continue
@@ -123,10 +123,7 @@ export function simulateSupply(project: GeneratorProject, target: number): Suppl
       index: combos.length,
       dna,
       traits: picked,
-      attributes: picked.map((t) => ({
-        trait_type: catById.get(t.categoryId)?.name ?? 'Trait',
-        value: t.name,
-      })),
+      attributes: attributesForSelection(categories, picked),
     })
   }
 
@@ -150,9 +147,14 @@ export function simulationResultToCsv(project: GeneratorProject, result: SupplyS
   const categories = [...project.categories].sort((a, b) => a.zIndex - b.zIndex)
   const header = ['index', ...categories.map((c) => c.name)].join(',')
   const rows = result.combos.map((combo) => {
-    const byCat = new Map(combo.traits.map((t) => [t.categoryId, t.name]))
+    const byCat = new Map<string, string[]>()
+    for (const t of combo.traits) {
+      const list = byCat.get(t.categoryId) ?? []
+      list.push(t.name)
+      byCat.set(t.categoryId, list)
+    }
     const cells = categories.map((c) => {
-      const value = byCat.get(c.id) ?? ''
+      const value = (byCat.get(c.id) ?? []).join(' + ')
       return `"${value.replace(/"/g, '""')}"`
     })
     return [combo.index + 1, ...cells].join(',')

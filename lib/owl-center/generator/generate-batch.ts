@@ -1,3 +1,4 @@
+import { attributesForSelection, getCategorySelectionIds } from '@/lib/owl-center/generator/selection'
 import { buildDna, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
 import type { GeneratedNft, GeneratorProject, TraitLayer, TraitSelection } from '@/lib/owl-center/generator/types'
 
@@ -17,8 +18,6 @@ export function generateBatch(
   const seen = new Set<string>()
   const out: GeneratedNft[] = []
 
-  const catById = new Map(categories.map((c) => [c.id, c]))
-
   for (let i = 0; i < count; i++) {
     let selection: TraitSelection | null = null
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -28,12 +27,12 @@ export function generateBatch(
       if (requireAll) {
         const hasEmpty = categories.some((c) => {
           const pool = traitsByCategory(traits, c.id)
-          return pool.length > 0 && !selection![c.id]
+          return pool.length > 0 && getCategorySelectionIds(selection!, c.id).length === 0
         })
         if (hasEmpty) continue
       }
 
-      const picked = traitsForSelection(traits, selection)
+      const picked = traitsForSelection(traits, selection, categories)
       if (!picked.length) continue
 
       const dna = buildDna(picked.map((t) => t.id))
@@ -44,10 +43,7 @@ export function generateBatch(
         index: out.length,
         dna,
         traits: picked,
-        attributes: picked.map((t) => ({
-          trait_type: catById.get(t.categoryId)?.name ?? 'Trait',
-          value: t.name,
-        })),
+        attributes: attributesForSelection(categories, picked),
       })
       break
     }

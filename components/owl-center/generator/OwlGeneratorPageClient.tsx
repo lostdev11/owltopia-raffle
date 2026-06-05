@@ -36,6 +36,11 @@ import {
   traitRarityPercent,
 } from '@/lib/owl-center/generator/rarity'
 import {
+  clearTraitFromSelection,
+  isTraitSelected,
+  toggleCategoryTrait,
+} from '@/lib/owl-center/generator/selection'
+import {
   randomSelection,
   traitsForSelection,
   validateSelection,
@@ -158,7 +163,7 @@ export function OwlGeneratorPageClient() {
   }, [project])
 
   const selectedTraits = useMemo(
-    () => (project ? traitsForSelection(project.traits, selection) : []),
+    () => (project ? traitsForSelection(project.traits, selection, project.categories) : []),
     [project, selection]
   )
 
@@ -303,11 +308,9 @@ export function OwlGeneratorPageClient() {
         }, []),
       })
       setSelection((s) => {
-        const next = { ...s }
-        for (const [catId, id] of Object.entries(next)) {
-          if (id === traitId) next[catId] = null
-        }
-        return next
+        const removed = project.traits.find((t) => t.id === traitId)
+        if (!removed) return s
+        return clearTraitFromSelection(s, traitId, removed.categoryId)
       })
     },
     [project, updateProject]
@@ -544,7 +547,8 @@ export function OwlGeneratorPageClient() {
           <CommandCard label="LAYERS // upload PNGs per category">
             <p className="mb-4 text-sm text-[#9BA8B4]">
               Transparent PNGs stacked bottom → top. Set rarity weight per trait (higher = more common in random
-              generation).
+              generation). <strong className="font-normal text-[#E8EEF2]">Glasses</strong> supports multiple
+              selections — tap to stack layers.
             </p>
             <div className="space-y-6">
               {categoriesSorted.map((cat) => {
@@ -581,7 +585,7 @@ export function OwlGeneratorPageClient() {
                               key={t.id}
                               className={cn(
                                 'border p-2',
-                                selection[cat.id] === t.id
+                                isTraitSelected(selection, cat.id, t.id)
                                   ? 'border-[#00FF9C]/50 bg-[#00FF9C]/8'
                                   : 'border-[#1A222B]'
                               )}
@@ -590,7 +594,9 @@ export function OwlGeneratorPageClient() {
                                 <button
                                   type="button"
                                   className="flex min-h-[44px] flex-1 touch-manipulation items-center gap-3 text-left"
-                                  onClick={() => setSelection((s) => ({ ...s, [cat.id]: t.id }))}
+                                  onClick={() =>
+                                    setSelection((s) => toggleCategoryTrait(s, cat, t.id))
+                                  }
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
