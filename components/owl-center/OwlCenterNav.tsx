@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-import { OwlCenterViewModeToggle } from '@/components/owl-center/OwlCenterHubSections'
 import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { isOwlCenterNavActive, owlCenterNavItemsForView } from '@/lib/owl-center/nav'
 import { cn } from '@/lib/utils'
@@ -43,7 +42,6 @@ export function OwlCenterNav() {
               )
             })}
           </nav>
-          <OwlCenterViewModeToggle />
         </div>
       </div>
     </div>

@@ -52,8 +52,11 @@ export function OwlCenterAdminGate({ children, title, subtitle }: OwlCenterAdmin
         <div className="max-w-lg space-y-4 text-sm text-[#9BA8B4]">
           <p>
             You are previewing what holders see — Gen2 mint without launchpad nav or admin tools. Switch to{' '}
-            <strong className="font-normal text-[#E8EEF2]">Admin</strong> to open the hub, generator, and
-            collection submit flow.
+            <strong className="font-normal text-[#E8EEF2]">Admin</strong> in{' '}
+            <Link href="/admin/owl-center" className="text-[#00C97A] hover:underline">
+              Owl Vision → Owl Center admin
+            </Link>{' '}
+            to open the hub, generator, and collection submit flow.
           </p>
           <DeployButton className="gap-2" onClick={() => setViewMode('admin')}>
             <Shield className="h-4 w-4" aria-hidden />

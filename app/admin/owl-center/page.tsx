@@ -12,6 +12,7 @@ import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintChecklist'
+import { AdminOwlCenterViewModePanel } from '@/components/admin/AdminOwlCenterViewModePanel'
 import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
@@ -257,6 +258,8 @@ export default function AdminOwlCenterPage() {
           </div>
           {signErr ? <p className="mt-2 text-sm text-[#FF9C9C]">{signErr}</p> : null}
         </CommandCard>
+
+        <AdminOwlCenterViewModePanel />
 
         <div className="flex flex-wrap gap-3">
           <DeployButton type="button" onClick={() => void load()} disabled={loading}>
