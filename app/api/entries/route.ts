@@ -179,7 +179,9 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
     }
 
     try {
-      const verificationResult = await verifyTransaction(sig, entry, raffle)
+      const verificationResult = await verifyTransaction(sig, entry, raffle, {
+        allowExpired: true,
+      })
 
       if (verificationResult.valid) {
         try {

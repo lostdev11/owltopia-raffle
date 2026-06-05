@@ -1,0 +1,18 @@
+{
+  "name": "Test Owl #2",
+  "symbol": "TOWL",
+  "description": "Test Owl collection mint flow rehearsal.",
+  "seller_fee_basis_points": 500,
+  "image": "2.png",
+  "attributes": [
+    { "trait_type": "Background", "value": "Light" },
+    { "trait_type": "Frame", "value": "Shield" },
+    { "trait_type": "Expression", "value": "Wink" },
+    { "trait_type": "Shirt", "value": "Red" },
+    { "trait_type": "Nest", "value": "Classic" }
+  ],
+  "properties": {
+    "files": [{ "uri": "2.png", "type": "image/png" }],
+    "category": "image"
+  }
+}

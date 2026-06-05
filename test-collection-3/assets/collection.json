@@ -1,0 +1,11 @@
+{
+  "name": "Test Owls",
+  "symbol": "TOWL",
+  "description": "3-item test collection for mint flow rehearsal.",
+  "seller_fee_basis_points": 500,
+  "image": "collection.png",
+  "properties": {
+    "files": [{ "uri": "collection.png", "type": "image/png" }],
+    "category": "image"
+  }
+}

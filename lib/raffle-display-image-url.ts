@@ -20,7 +20,8 @@ export function isDirectRaffleImageHost(hostname: string): boolean {
   return (
     h === 'firebasestorage.googleapis.com' ||
     h.endsWith('.firebasestorage.app') ||
-    h === 'storage.googleapis.com'
+    h === 'storage.googleapis.com' ||
+    h.endsWith('.supabase.co')
   )
 }
 

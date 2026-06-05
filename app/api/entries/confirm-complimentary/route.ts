@@ -9,7 +9,13 @@ import {
   InsufficientTicketsError,
   TxAlreadyUsedError,
 } from '@/lib/db/entries'
-import { isReferralAttributionEnabled, isReferralComplimentaryTicketEnabled } from '@/lib/referrals/config'
+import {
+  isReferralAttributionActive,
+  isReferralComplimentaryTicketEnabled,
+  isReferralGrowthProgramActive,
+} from '@/lib/referrals/config'
+import { markReferralRewardConfirmed } from '@/lib/db/referral-rewards'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
   tryAcquireVerificationLock,
   releaseVerificationLock,
@@ -28,7 +34,10 @@ const WINDOW_MS = 60_000
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!isReferralAttributionEnabled() || !isReferralComplimentaryTicketEnabled()) {
+    if (
+      !(await isReferralAttributionActive()) ||
+      (!isReferralComplimentaryTicketEnabled() && !(await isReferralGrowthProgramActive()))
+    ) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
@@ -61,6 +70,20 @@ export async function POST(request: NextRequest) {
 
     try {
       const result = await confirmComplimentaryReferralEntry(entryId, token)
+      const confirmedAt = new Date().toISOString()
+
+      if (entry.referral_reward_id) {
+        await markReferralRewardConfirmed(entry.referral_reward_id, result.entry.id)
+      }
+
+      await getSupabaseAdmin()
+        .from('entries')
+        .update({
+          reward_status: 'confirmed',
+          reward_confirmed_at: confirmedAt,
+        })
+        .eq('id', result.entry.id)
+
       return NextResponse.json({
         success: true,
         entryId: result.entry.id,

@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Eye, Ticket, Users, Shield, Percent } from 'lucide-react'
+import { ArrowLeft, Eye, Ticket, Users, Shield, Percent, Gift } from 'lucide-react'
+import { MILESTONE_BETA_NOTICE, buildMilestoneBonusRulesCopy } from '@/lib/raffles/milestones/copy'
+import { MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
 import {
   PLATFORM_NAME,
   OG_ALT,
@@ -88,6 +90,33 @@ export default function HowItWorksPage() {
           </ol>
           <p className="text-muted-foreground text-sm">
             Only <strong>confirmed</strong> entries (verified payments) are included in the draw. Pending or rejected entries do not count.
+          </p>
+        </section>
+
+        {/* Bonus milestones (beta) */}
+        <section className="mb-10">
+          <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+            <Gift className="h-6 w-6 text-green-500" />
+            Bonus milestones (beta)
+          </h2>
+          <p className="mb-4 text-amber-200/90 text-sm">{MILESTONE_BETA_NOTICE}</p>
+          <p className="mb-4">
+            Some raffles offer an extra <strong>bonus prize</strong> (SOL or USDC) in addition to the main prize. The
+            host prefunds that bonus into the same <strong>platform funds escrow</strong> wallet used for ticket sales
+            before the raffle goes live. You can see bonus rules and progress on the raffle page.
+          </p>
+          <ul className="list-disc pl-6 mb-4 space-y-2 text-sm">
+            {buildMilestoneBonusRulesCopy()
+              .filter((line) => line !== MILESTONE_BETA_NOTICE)
+              .map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+          </ul>
+          <p className="text-muted-foreground text-sm mb-0">
+            Bonus caps: up to <strong>{MILESTONE_MAX_PRIZE_SOL} SOL</strong> or{' '}
+            <strong>{milestoneMaxPrizeUsdc()} USDC</strong> equivalent per milestone. NFT bonus prizes are not offered
+            in beta. Claim a crypto bonus from the raffle page after the host&apos;s raffle succeeds and a milestone
+            winner is announced.
           </p>
         </section>
 

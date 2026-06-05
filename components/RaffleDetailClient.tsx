@@ -12,6 +12,11 @@ import { OwlVisionBadge } from '@/components/OwlVisionBadge'
 import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensionBadge'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { ReferralComplimentaryHint } from '@/components/ReferralComplimentaryHint'
+import { RaffleReferralPanel } from '@/components/referrals/RaffleReferralPanel'
+import { RaffleReferralShareCard } from '@/components/referrals/RaffleReferralShareCard'
+import { FreeEntryUnlockedDialog } from '@/components/referrals/FreeEntryUnlockedDialog'
+import type { RaffleReferralPromoterRow } from '@/lib/referrals/types'
+import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
@@ -29,7 +34,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency } from '@/lib/types'
+import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
+import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
 import {
@@ -59,12 +65,18 @@ import {
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { isOwlEnabled } from '@/lib/tokens'
-import { executeRafflePurchase } from '@/lib/client/execute-raffle-purchase'
+import {
+  executeRafflePurchase,
+  TICKETS_CONFIRMING_MESSAGE,
+} from '@/lib/client/execute-raffle-purchase'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { useCart } from '@/components/cart/CartProvider'
 import { formatDistance } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { getRaffleDisplayImageUrl, getRaffleImageFallbackRawUrl } from '@/lib/raffle-display-image-url'
+import {
+  buildRaffleImageAttemptChain,
+  getRaffleDisplayImageUrl,
+} from '@/lib/raffle-display-image-url'
 import Image from 'next/image'
 import {
   Users,
@@ -143,6 +155,9 @@ import {
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
+import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
+import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
@@ -180,15 +195,25 @@ function formatOfferAmount(amount: number, currency: string): string {
 interface RaffleDetailClientProps {
   raffle: Raffle
   entries: Entry[]
+  milestones?: RaffleMilestone[]
   owlVisionScore: OwlVisionScore
   sessionWallet: string | null
+  referralEnabled?: boolean
+  referralPromoters?: RaffleReferralPromoterRow[]
+  isCreatorViewer?: boolean
+  viewerReferralCode?: string | null
 }
 
 export function RaffleDetailClient({
   raffle,
   entries: initialEntries,
+  milestones: initialMilestones = [],
   owlVisionScore,
   sessionWallet,
+  referralEnabled = false,
+  referralPromoters = [],
+  isCreatorViewer = false,
+  viewerReferralCode = null,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -200,6 +225,7 @@ export function RaffleDetailClient({
   const { addItem: addCartItem } = useCart()
   const [ticketQuantity, setTicketQuantity] = useState(1)
   const [shareCopied, setShareCopied] = useState(false)
+  const [freeEntryUnlockedOpen, setFreeEntryUnlockedOpen] = useState(false)
   const [depositEscrowLoading, setDepositEscrowLoading] = useState(false)
   const [depositEscrowError, setDepositEscrowError] = useState<string | null>(null)
   /** Populated when verify fails with frozen escrow SPL account; cleared when error is not that case. */
@@ -276,10 +302,16 @@ export function RaffleDetailClient({
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [ticketsConfirming, setTicketsConfirming] = useState(false)
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
   const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
+  const [actionClaimSuccess, setActionClaimSuccess] = useState<{
+    tx: string
+    heading: string
+    message: string
+  } | null>(null)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator =
@@ -300,18 +332,11 @@ export function RaffleDetailClient({
   const [browseListError, setBrowseListError] = useState<string | null>(null)
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
-  type HeroImgPhase =
-    | 'primary'
-    | 'fallback'
-    | 'mint_loading'
-    | 'mint'
-    | 'admin'
-    | 'admin_raw'
-    | 'dead'
-  const [heroImgPhase, setHeroImgPhase] = useState<HeroImgPhase>('primary')
+  const [heroIdx, setHeroIdx] = useState(0)
   const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
+  const [mintHeroLoading, setMintHeroLoading] = useState(false)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const displayImageUrl = useMemo(() => {
+  const heroImageChain = useMemo(() => {
     const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
     const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
     const isLegacyOwltopiaPlaceholder =
@@ -324,38 +349,22 @@ export function RaffleDetailClient({
           ? '/solana-mark.svg'
           : '/usdc.png'
         : null
-    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) return cryptoCurrencyArt
-    return fromDb
-  }, [raffle.image_url, raffle.prize_type, raffle.prize_currency])
-  const displayAdminDisp = useMemo(
-    () => getRaffleDisplayImageUrl(raffle.image_fallback_url),
-    [raffle.image_fallback_url]
-  )
-  const adminHeroRaw = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayAdminDisp, raffle.image_fallback_url),
-    [displayAdminDisp, raffle.image_fallback_url]
-  )
-  const fallbackRawUrl = useMemo(
-    () => getRaffleImageFallbackRawUrl(displayImageUrl, raffle.image_url),
-    [displayImageUrl, raffle.image_url]
-  )
+    if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
+      return [cryptoCurrencyArt]
+    }
+    return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
+  }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
+  const heroImageChainKey = heroImageChain.join('\0')
   const canMintImageFallback =
     raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())
   const hasHeroImageSection =
-    !!(displayImageUrl ?? raffle.image_url) || !!displayAdminDisp || canMintImageFallback
+    heroImageChain.length > 0 || canMintImageFallback
 
   useEffect(() => {
+    setHeroIdx(0)
     setMintHeroSrc(null)
-    if (displayImageUrl?.trim()) {
-      setHeroImgPhase('primary')
-    } else if (displayAdminDisp) {
-      setHeroImgPhase('admin')
-    } else if (canMintImageFallback) {
-      setHeroImgPhase('mint_loading')
-    } else {
-      setHeroImgPhase('dead')
-    }
-  }, [raffle.id, displayImageUrl, raffle.image_fallback_url, displayAdminDisp, canMintImageFallback])
+    setMintHeroLoading(false)
+  }, [raffle.id, heroImageChainKey])
 
   useEffect(() => {
     if (!depositEscrowError || !isEscrowSplPrizeFrozenVerifyError(depositEscrowError)) {
@@ -364,12 +373,11 @@ export function RaffleDetailClient({
   }, [depositEscrowError])
 
   useEffect(() => {
-    if (heroImgPhase !== 'mint_loading') return
+    if (heroIdx < heroImageChain.length) return
+    if (!canMintImageFallback || mintHeroSrc || mintHeroLoading) return
     const mint = raffle.nft_mint_address?.trim()
-    if (!mint) {
-      setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
-      return
-    }
+    if (!mint) return
+    setMintHeroLoading(true)
     let cancelled = false
     fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -377,33 +385,53 @@ export function RaffleDetailClient({
         if (cancelled) return
         const raw = typeof data?.image === 'string' ? data.image.trim() : ''
         if (!raw) {
-          setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+          setMintHeroLoading(false)
           return
         }
-        const proxied = getRaffleDisplayImageUrl(raw) ?? raw
-        setMintHeroSrc(proxied)
-        setHeroImgPhase('mint')
+        setMintHeroSrc(getRaffleDisplayImageUrl(raw) ?? raw)
+        setMintHeroLoading(false)
       })
       .catch(() => {
-        if (!cancelled) setHeroImgPhase(displayAdminDisp ? 'admin' : 'dead')
+        if (!cancelled) setMintHeroLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [heroImgPhase, raffle.nft_mint_address, displayAdminDisp])
+  }, [
+    heroIdx,
+    heroImageChain.length,
+    heroImageChainKey,
+    canMintImageFallback,
+    raffle.nft_mint_address,
+    mintHeroSrc,
+    mintHeroLoading,
+  ])
+
+  const tryNextHeroImage = useCallback(() => {
+    setHeroIdx((i) => i + 1)
+  }, [])
+
+  const handleHeroLoadOrError = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      if (heroIdx < heroImageChain.length) {
+        if (e.type === 'error') {
+          tryNextHeroImage()
+          return
+        }
+        const el = e.currentTarget
+        if (el.naturalWidth < 2 || el.naturalHeight < 2) tryNextHeroImage()
+        return
+      }
+      if (mintHeroSrc) setMintHeroSrc(null)
+    },
+    [heroIdx, heroImageChain.length, tryNextHeroImage, mintHeroSrc]
+  )
 
   const heroImageSrc =
-    heroImgPhase === 'fallback' && fallbackRawUrl
-      ? fallbackRawUrl
-      : heroImgPhase === 'mint' && mintHeroSrc
-        ? mintHeroSrc
-        : heroImgPhase === 'admin_raw'
-          ? (adminHeroRaw ?? displayAdminDisp ?? '')
-          : heroImgPhase === 'admin'
-            ? (displayAdminDisp ?? '')
-            : displayImageUrl ?? raffle.image_url ?? ''
-  const heroImageDead = heroImgPhase === 'dead'
-  const heroImageMintLoading = heroImgPhase === 'mint_loading'
+    heroIdx < heroImageChain.length ? heroImageChain[heroIdx] : (mintHeroSrc ?? '')
+  const heroImageMintLoading =
+    heroIdx >= heroImageChain.length && mintHeroLoading && !mintHeroSrc
+  const heroImageDead = !heroImageSrc && !heroImageMintLoading
   const { serverNow: serverTime } = useServerTime()
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()
@@ -919,6 +947,7 @@ export function RaffleDetailClient({
     setIsProcessing(true)
     setError(null)
     setSuccess(false)
+    setTicketsConfirming(false)
 
     try {
       const res = await executeRafflePurchase({
@@ -932,13 +961,9 @@ export function RaffleDetailClient({
         celebrateOnComplimentary: true,
         celebrateOnPaymentConfirmed: false,
         onComplimentarySuccess: () => setSuccess(true),
-        afterPaymentTxConfirmed: () => {
-          setShowEnterRaffleDialog(false)
-          setSuccess(true)
-          requestAnimationFrame(() => fireGreenConfetti())
-        },
         onVerifyPending: async ({ entryId, transactionSignature }) => {
-          setSuccess(true)
+          setTicketsConfirming(true)
+          setSuccess(false)
           setError(null)
           router.refresh()
           await new Promise(resolve => setTimeout(resolve, 1000))
@@ -947,7 +972,7 @@ export function RaffleDetailClient({
           const refetchDelays = [2000, 5000, 10000, 20000]
           refetchDelays.forEach(ms => setTimeout(() => fetchEntries(), ms))
 
-          const verifyRetryDelays = [5000, 15000]
+          const verifyRetryDelays = [5000, 15000, 30000]
           verifyRetryDelays.forEach(ms => {
             setTimeout(async () => {
               try {
@@ -957,6 +982,16 @@ export function RaffleDetailClient({
                   body: JSON.stringify({ entryId, transactionSignature }),
                 })
                 if (retryRes.ok) {
+                  try {
+                    const retryJson = (await retryRes.json()) as { freeEntryUnlocked?: boolean }
+                    if (retryJson.freeEntryUnlocked) setFreeEntryUnlockedOpen(true)
+                  } catch {
+                    /* ignore */
+                  }
+                  setTicketsConfirming(false)
+                  setSuccess(true)
+                  setShowEnterRaffleDialog(false)
+                  requestAnimationFrame(() => fireGreenConfetti())
                   router.refresh()
                   fetchEntries()
                 }
@@ -967,6 +1002,10 @@ export function RaffleDetailClient({
           })
         },
         afterVerifyOk: async () => {
+          setTicketsConfirming(false)
+          setShowEnterRaffleDialog(false)
+          setSuccess(true)
+          requestAnimationFrame(() => fireGreenConfetti())
           await new Promise(resolve => setTimeout(resolve, 1000))
           fetchEntries()
           if (!isUsingRealtime) {
@@ -978,6 +1017,7 @@ export function RaffleDetailClient({
 
       if (!res.ok) {
         setSuccess(false)
+        setTicketsConfirming(false)
         setError(res.error)
         if (res.isUnconfirmedPayment) {
           router.refresh()
@@ -987,6 +1027,17 @@ export function RaffleDetailClient({
           delay(8000).then(() => fetchEntries())
         }
         return
+      }
+
+      if (res.verifying) {
+        setTicketsConfirming(true)
+        setSuccess(false)
+        router.refresh()
+        return
+      }
+
+      if (res.freeEntryUnlocked) {
+        setFreeEntryUnlockedOpen(true)
       }
 
       router.refresh()
@@ -1215,10 +1266,15 @@ export function RaffleDetailClient({
   }
 
   const claimTicketRefundOnce = useCallback(
-    async (entryId: string): Promise<boolean> => {
+    async (
+      entryId: string
+    ): Promise<
+      | { ok: false }
+      | { ok: true; tx: string | null; alreadyRefunded?: boolean }
+    > => {
       if (!connected || !publicKey) {
         setClaimRefundError('Please connect your wallet first.')
-        return false
+        return { ok: false }
       }
 
       const signInForRefund = async (): Promise<boolean> => {
@@ -1277,7 +1333,7 @@ export function RaffleDetailClient({
       })
       if (res.status === 401) {
         const ok = await signInForRefund()
-        if (!ok) return false
+        if (!ok) return { ok: false }
         res = await fetch('/api/entries/claim-refund', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1292,43 +1348,83 @@ export function RaffleDetailClient({
             ? (json as { error: string }).error
             : 'Could not claim refund'
         setClaimRefundError(msg)
-        return false
+        return { ok: false as const }
       }
-      return true
+      return {
+        ok: true as const,
+        tx: extractTransactionSignature(json),
+        alreadyRefunded: (json as { alreadyRefunded?: boolean }).alreadyRefunded === true,
+      }
     },
     [connected, publicKey, signMessage]
+  )
+
+  const presentActionClaimSuccess = useCallback(
+    (params: { tx?: string | null; heading: string; message: string }) => {
+      setActionClaimSuccess({
+        tx: params.tx?.trim() ?? '',
+        heading: params.heading,
+        message: params.message,
+      })
+    },
+    []
   )
 
   const handleClaimTicketRefund = useCallback(
     async (entryId: string) => {
       setClaimRefundLoadingEntryId(entryId)
       setClaimRefundError(null)
+      setActionClaimSuccess(null)
       try {
-        const ok = await claimTicketRefundOnce(entryId)
-        if (ok) router.refresh()
+        const result = await claimTicketRefundOnce(entryId)
+        if (result.ok) {
+          const entry = buyerRefundableEntries.find((e) => e.id === entryId)
+          const amountLabel =
+            entry != null
+              ? `${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+              : 'Your ticket payment'
+          presentActionClaimSuccess({
+            tx: result.tx,
+            heading: result.alreadyRefunded ? 'Refund already sent' : 'Refund claimed!',
+            message: result.alreadyRefunded
+              ? `${amountLabel} was already returned to your wallet.`
+              : `${amountLabel} was sent back to your wallet.`,
+          })
+          router.refresh()
+        }
       } finally {
         setClaimRefundLoadingEntryId(null)
       }
     },
-    [claimTicketRefundOnce, router]
+    [buyerRefundableEntries, claimTicketRefundOnce, presentActionClaimSuccess, router]
   )
 
   const handleClaimAllTicketRefunds = useCallback(async () => {
     if (buyerRefundableEntries.length === 0) return
     setClaimRefundError(null)
+    setActionClaimSuccess(null)
     setIsClaimingAllRefunds(true)
+    let claimed = 0
+    let lastTx: string | null = null
     try {
       for (const entry of buyerRefundableEntries) {
         setClaimRefundLoadingEntryId(entry.id)
-        const ok = await claimTicketRefundOnce(entry.id)
-        if (!ok) return
+        const result = await claimTicketRefundOnce(entry.id)
+        if (!result.ok) return
+        lastTx = result.tx ?? lastTx
+        claimed++
       }
+      presentActionClaimSuccess({
+        tx: lastTx,
+        heading: 'Refunds claimed!',
+        message: `${claimed} ticket refund${claimed === 1 ? '' : 's'} sent to your wallet.`,
+      })
       router.refresh()
     } finally {
       setClaimRefundLoadingEntryId(null)
       setIsClaimingAllRefunds(false)
     }
-  }, [buyerRefundableEntries, claimTicketRefundOnce, router])
+  }, [buyerRefundableEntries, claimTicketRefundOnce, presentActionClaimSuccess, router])
 
   const handleEnsureRefundTerminal = useCallback(async () => {
     setRefundTerminalLoading(true)
@@ -2217,6 +2313,7 @@ export function RaffleDetailClient({
 
   const handleClaimProceeds = useCallback(async () => {
     setClaimProceedsError(null)
+    setActionClaimSuccess(null)
     setClaimProceedsLoading(true)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
@@ -2232,16 +2329,25 @@ export function RaffleDetailClient({
         )
         return
       }
+      const alreadyClaimed = (data as { alreadyClaimed?: boolean }).alreadyClaimed === true
+      presentActionClaimSuccess({
+        tx: extractTransactionSignature(data),
+        heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
+        message: alreadyClaimed
+          ? 'Creator proceeds were already sent to your wallet.'
+          : 'Net ticket proceeds were sent to your wallet.',
+      })
       router.refresh()
     } catch (e) {
       setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
     } finally {
       setClaimProceedsLoading(false)
     }
-  }, [raffle.id, router])
+  }, [presentActionClaimSuccess, raffle.id, router])
 
   const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
     setError(null)
+    setActionClaimSuccess(null)
     setClaimFailedPrizeReturnLoading(true)
     try {
       const res = await fetch(`/api/raffles/${raffle.id}/claim-failed-min-prize-return`, {
@@ -2257,13 +2363,21 @@ export function RaffleDetailClient({
         )
         return
       }
+      const alreadyReturned = (data as { alreadyReturned?: boolean }).alreadyReturned === true
+      presentActionClaimSuccess({
+        tx: extractTransactionSignature(data),
+        heading: alreadyReturned ? 'Prize already returned' : 'Prize returned!',
+        message: alreadyReturned
+          ? 'Your escrowed prize was already sent back to your wallet.'
+          : 'Your escrowed prize was sent back to your wallet.',
+      })
       router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
       setClaimFailedPrizeReturnLoading(false)
     }
-  }, [raffle.id, router])
+  }, [presentActionClaimSuccess, raffle.id, router])
 
   const fetchOffers = useCallback(async () => {
     setOffersLoading(true)
@@ -2679,6 +2793,26 @@ export function RaffleDetailClient({
               </Button>
             )}
         </div>
+        {referralEnabled ? (
+          <RaffleReferralShareCard
+            slug={raffle.slug}
+            referralCode={viewerReferralCode}
+            hasSession={Boolean(sessionWallet?.trim())}
+            variant="compact"
+          />
+        ) : null}
+        {initialMilestones.length > 0 && (
+          <RaffleMilestonesPanel
+            raffle={raffle}
+            milestones={initialMilestones}
+            entries={entries}
+            sessionWallet={sessionWallet}
+            onRefresh={() => router.refresh()}
+          />
+        )}
+        {referralEnabled && referralPromoters.length > 0 ? (
+          <RaffleReferralPanel promoters={referralPromoters} />
+        ) : null}
         <Dialog open={requestCancelDialogOpen} onOpenChange={setRequestCancelDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -3429,6 +3563,11 @@ export function RaffleDetailClient({
                 <CardDescription className={`${classes.description} break-words`}>
                   <RaffleDescriptionText raffle={raffle} />
                 </CardDescription>
+                {raffle.creator_restricted_listing && (
+                  <div className="mt-3">
+                    <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
+                  </div>
+                )}
               </div>
               <div
                 className={`relative w-full sm:w-auto shrink-0 rounded-2xl bg-gradient-to-r from-emerald-400/70 via-emerald-500/80 to-emerald-300/70 p-[1px] shadow-[0_0_30px_rgba(16,185,129,0.85)] ${
@@ -3579,7 +3718,7 @@ export function RaffleDetailClient({
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element -- proxy + IPFS: native img matches RaffleCard */}
                   <img
-                    key={`${heroImgPhase}-${heroImageSrc}`}
+                    key={`hero-${heroIdx}-${heroImageSrc}`}
                     src={heroImageSrc}
                     alt={raffle.title}
                     width={1200}
@@ -3588,31 +3727,8 @@ export function RaffleDetailClient({
                     decoding="async"
                     fetchPriority="high"
                     className="h-full w-full object-contain"
-                    onError={() => {
-                      setHeroImgPhase((phase) => {
-                        if (phase === 'primary') {
-                          if (fallbackRawUrl) return 'fallback'
-                          if (canMintImageFallback) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'fallback') {
-                          if (canMintImageFallback) return 'mint_loading'
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'mint') {
-                          if (displayAdminDisp) return 'admin'
-                          return 'dead'
-                        }
-                        if (phase === 'admin') {
-                          if (adminHeroRaw && adminHeroRaw !== displayAdminDisp) return 'admin_raw'
-                          return 'dead'
-                        }
-                        if (phase === 'admin_raw') return 'dead'
-                        return phase
-                      })
-                    }}
+                    onError={handleHeroLoadOrError}
+                    onLoad={handleHeroLoadOrError}
                   />
                 </div>
               ) : (
@@ -3819,8 +3935,16 @@ export function RaffleDetailClient({
               </div>
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
-                <p className={classes.contentText + ' font-semibold break-all'}>
-                  {creatorDisplayName || creatorWallet || 'Unknown'}
+                {creatorDisplayName ? (
+                  <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
+                ) : null}
+                <p
+                  className={
+                    (creatorDisplayName ? 'text-sm ' : classes.contentText + ' font-semibold ') +
+                    'font-mono break-all text-foreground/90'
+                  }
+                >
+                  {creatorWallet || 'Unknown'}
                 </p>
               </div>
             </div>
@@ -4180,6 +4304,9 @@ export function RaffleDetailClient({
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Ticket purchases are temporarily blocked. Please check back later.
                   </p>
+                )}
+                {raffle.creator_restricted_listing && (
+                  <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
                 )}
                 <ReferralComplimentaryHint
                   variant="compact"
@@ -4631,6 +4758,11 @@ export function RaffleDetailClient({
               </div>
             )}
             
+            {ticketsConfirming && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm">
+                {TICKETS_CONFIRMING_MESSAGE}
+              </div>
+            )}
             {success && (
               <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
                 <p>Tickets purchased successfully! Transaction confirmed.</p>
@@ -4709,8 +4841,7 @@ export function RaffleDetailClient({
                   Claiming your prize…
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Stay on this screen. Your wallet may ask you to sign in first; after that we broadcast
-                  the NFT transfer from escrow. Solana usually confirms within a few seconds.
+                  {getEscrowPrizeClaimSuccessCopy(raffle).loadingDetail}
                 </p>
               </>
             ) : (
@@ -4722,12 +4853,12 @@ export function RaffleDetailClient({
                   <Trophy className="h-8 w-8" />
                 </div>
                 <h2 id="claim-prize-overlay-title" className="text-lg font-semibold text-foreground">
-                  {claimPrizeAlreadyClaimed ? 'Prize already sent' : 'Prize sent!'}
+                  {claimPrizeAlreadyClaimed ? 'Prize already sent' : 'Prize claimed!'}
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   {claimPrizeAlreadyClaimed
-                    ? 'This prize was already transferred to your wallet. Open Solscan below to verify the transaction.'
-                    : 'Your NFT prize has been sent to your connected wallet. You can confirm the transfer on Solscan.'}
+                    ? getEscrowPrizeClaimSuccessCopy(raffle).alreadySentDetail
+                    : getEscrowPrizeClaimSuccessCopy(raffle).sentDetail}
                 </p>
                 {claimPrizeTxSignature ? (
                   <a
@@ -4739,6 +4870,16 @@ export function RaffleDetailClient({
                     View transaction on Solscan
                     <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                   </a>
+                ) : null}
+                {raffle.winner_wallet?.trim() ? (
+                  <RaffleWinnerPngButton
+                    title={raffle.title}
+                    slug={raffle.slug}
+                    imageUrl={heroImageDead ? null : heroImageSrc}
+                    winnerWallet={raffle.winner_wallet.trim()}
+                    buttonLabel="Download winner PNG"
+                    fullWidth
+                  />
                 ) : null}
                 <Button
                   type="button"
@@ -4752,6 +4893,18 @@ export function RaffleDetailClient({
           </div>
         </div>
       )}
+      <FreeEntryUnlockedDialog open={freeEntryUnlockedOpen} onOpenChange={setFreeEntryUnlockedOpen} />
+      <ClaimSuccessOverlay
+        open={actionClaimSuccess !== null}
+        heading={actionClaimSuccess?.heading}
+        message={actionClaimSuccess?.message ?? ''}
+        transactionSignature={actionClaimSuccess?.tx}
+        solscanUrl={solscanTransactionUrl}
+        onClose={() => {
+          setActionClaimSuccess(null)
+          router.refresh()
+        }}
+      />
       </div>
     </>
   )

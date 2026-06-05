@@ -18,7 +18,12 @@ import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
-import { isReferralAttributionEnabled, isReferralComplimentaryTicketEnabled } from '@/lib/referrals/config'
+import {
+  isReferralAttributionActive,
+  isReferralComplimentaryTicketEnabled,
+  isReferralGrowthProgramActive,
+} from '@/lib/referrals/config'
+import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -59,9 +64,12 @@ export async function POST(request: NextRequest) {
     const { raffleId: raffleIdStr, walletAddress: walletAddressStr, ticketQuantity: ticketQuantityNum, paymentCurrency } =
       parsed.data
 
+    const referralAttributionActive = await isReferralAttributionActive()
+    const referralGrowthActive = await isReferralGrowthProgramActive()
+
     // Attribution uses httpOnly cookie only (set by GET /api/referrals/capture); never trust JSON body.
     let referralRaw: string | undefined
-    if (isReferralAttributionEnabled()) {
+    if (referralAttributionActive) {
       const cookieRaw = request.cookies.get(REFERRAL_COOKIE_NAME)?.value?.trim()
       if (cookieRaw) {
         try {
@@ -85,6 +93,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 404 })
     }
 
+    if (referralRaw && !raffleSupportsReferralProgram(raffle)) {
+      referralRaw = undefined
+    }
+
     await upgradeRaffleToFundsEscrowIfEligible(raffleIdStr)
     raffle = await getRaffleById(raffleIdStr)
     if (!raffle) {
@@ -96,11 +108,15 @@ export async function POST(request: NextRequest) {
     }
 
     // NFT raffles: block purchases until prize is verified in escrow (defense in depth)
-    if (
-      raffle.prize_type === 'nft' &&
+    if (raffle.prize_type === 'nft' &&
       !raffle.prize_deposited_at &&
       !nftRaffleExemptFromEscrowRequirement(raffle)
     ) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    const { raffleHasPendingMilestoneDeposits } = await import('@/lib/raffles/publish-after-deposits')
+    if (await raffleHasPendingMilestoneDeposits(raffleIdStr)) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
@@ -170,8 +186,9 @@ export async function POST(request: NextRequest) {
     const alreadyUsedGlobalFreeTicket =
       await hasConfirmedReferralComplimentaryGlobally(walletAddressStr)
     const eligibleComplimentary =
+      !referralGrowthActive &&
       isReferralComplimentaryTicketEnabled() &&
-      isReferralAttributionEnabled() &&
+      referralAttributionActive &&
       ticketQuantityNum === 1 &&
       Boolean(referralRaw) &&
       !hadConfirmed &&

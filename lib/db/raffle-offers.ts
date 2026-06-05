@@ -165,7 +165,7 @@ export async function claimOfferRefund(input: {
   offerId: string
   walletAddress: string
   refundTxSignature?: string | null
-}): Promise<void> {
+}): Promise<{ transactionSignature: string }> {
   const id = input.offerId.trim()
   const wallet = input.walletAddress.trim()
   if (!id || !wallet) throw new Error('Invalid offer refund request')
@@ -222,6 +222,8 @@ export async function claimOfferRefund(input: {
   if (update.error) {
     throw new Error(`Failed to mark offer refund: ${update.error.message}`)
   }
+
+  return { transactionSignature: txSig }
 }
 
 export async function acceptRaffleOffer(input: {

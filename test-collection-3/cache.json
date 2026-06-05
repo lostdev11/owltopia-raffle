@@ -1,0 +1,42 @@
+{
+  "program": {
+    "candyMachine": "EoxLvVL5WMZDRwP9aT6QCd6fdhMgH9FnjpLCJNR2phZe",
+    "candyGuard": "",
+    "candyMachineCreator": "EWH9WsF7XA39heAbQBjpjt6yXRtQiD5KFE4cMZwuEKhW",
+    "collectionMint": "3uboCJibyxhgXhtCqEoNshcD2viiS96kpJSyKbtfn9V1"
+  },
+  "items": {
+    "-1": {
+      "name": "Test Owls",
+      "image_hash": "0f40eb9b0540beefec9a2e7e20afe511efd2cecd000e72fbcd5a396155bcbabc",
+      "image_link": "https://gateway.irys.xyz/5om5pUNYWwgCyfx3ttVHDMDJYSAn74BQ9Jjcv6qNfXX1?ext=png",
+      "metadata_hash": "52e779b6dd8d4bd10e0acaed3134d8690cf79756d13cc213d76474bf39510c79",
+      "metadata_link": "https://gateway.irys.xyz/55tRZ58Vrnm4eeSDhJ3P2C8e3WumFuvsTSarya45v48q",
+      "onChain": true
+    },
+    "0": {
+      "name": "Test Owl #0",
+      "image_hash": "0f40eb9b0540beefec9a2e7e20afe511efd2cecd000e72fbcd5a396155bcbabc",
+      "image_link": "https://gateway.irys.xyz/EhLuRyLmNt4XvhEbqkGbNhVsB8Gr9vuLnAiGPSZSJEYB?ext=png",
+      "metadata_hash": "cb001a1ba19e387e257458eba7154a4326d67b7eb4aa1d69609bf27315b71969",
+      "metadata_link": "https://gateway.irys.xyz/GnakNoF7i2G9EjVxgYy5iwgyHA8UJpYnYN323sfjV3uv",
+      "onChain": true
+    },
+    "1": {
+      "name": "Test Owl #1",
+      "image_hash": "fcf525c2f000d371db9dfae55ef22fa3df8d27f88e6c59315950c1c2573e6467",
+      "image_link": "https://gateway.irys.xyz/Ad2zyV4HYqeACfhNJovXvWgGMhFYqJbqKwjJ5c5bDW1T?ext=png",
+      "metadata_hash": "f31a644a82ed1bf9ee444ea1eef5c5de4cfeaaf3c52f684bc6cfbe33fc907d36",
+      "metadata_link": "https://gateway.irys.xyz/8xdrGY4QMAJE76cyZo239go3tZEVQSAYib2ExuLfNNkx",
+      "onChain": true
+    },
+    "2": {
+      "name": "Test Owl #2",
+      "image_hash": "f14ed69fbdbede280b363f358ebf00a5e87ba1cb0a1f5b6ccaffa88b739e24f2",
+      "image_link": "https://gateway.irys.xyz/Ew6vb4WTkHFAKzGGe2k9FfqM2ydEbvFQqWxFmjHmhXax?ext=png",
+      "metadata_hash": "169fa3230b9dfa5d950304fd4034991f579d0db01d4647c4af01a757c2bb0dea",
+      "metadata_link": "https://gateway.irys.xyz/CwKFzVdGDSdZxijgPsiAUgzVqpYmL8dH3wLDP4x3Dk8H",
+      "onChain": true
+    }
+  }
+}

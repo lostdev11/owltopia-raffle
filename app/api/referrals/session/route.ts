@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { normalizeReferralCodeInput } from '@/lib/referrals/code-format'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
 import {
-  isReferralAttributionEnabled,
+  isReferralAttributionActive,
   isReferralComplimentaryTicketEnabled,
 } from '@/lib/referrals/config'
 import { hasConfirmedReferralComplimentaryGlobally } from '@/lib/db/entries'
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const raw = request.cookies.get(REFERRAL_COOKIE_NAME)?.value ?? ''
   const code = normalizeReferralCodeInput(raw)
   const showComplimentaryHint =
-    isReferralAttributionEnabled() &&
+    (await isReferralAttributionActive()) &&
     isReferralComplimentaryTicketEnabled() &&
     code != null &&
     code.length > 0

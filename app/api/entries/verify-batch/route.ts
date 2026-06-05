@@ -7,9 +7,10 @@ import {
   InsufficientTicketsError,
   ConfirmEntryInvalidStateError,
   saveTransactionSignature,
+  attachEntryPaymentSignature,
 } from '@/lib/db/entries'
 import type { Entry, Raffle } from '@/lib/types'
-import { getRaffleById } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { entriesVerifyBatchBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { tryAcquireVerificationLock, releaseVerificationLocks } from '@/lib/verify-in-flight'
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     let walletAnchor: string | null = null
 
     for (const id of entryIdsSorted) {
-      const entry = await getEntryById(id)
+      let entry = await getEntryById(id)
       if (!entry) return verifyBatchErr('entries_not_found', 404)
 
       const w = (entry.wallet_address || '').trim()
@@ -57,6 +58,34 @@ export async function POST(request: NextRequest) {
       const walletRl = rateLimit(`entries-verify-batch:wallet:${w}`, VERIFY_WALLET_LIMIT, VERIFY_WINDOW_MS)
       if (!walletRl.allowed) {
         return verifyBatchErr('rate_limited', 429, { 'Retry-After': '60' })
+      }
+
+      if (entry.status === 'rejected') {
+        try {
+          const reattached = await attachEntryPaymentSignature(
+            id,
+            w,
+            transactionSignatureRaw
+          )
+          if (!reattached) return verifyBatchErr('invalid_request', 400)
+          entry = reattached
+        } catch (e) {
+          if (e instanceof TransactionSignatureAlreadyUsedError) {
+            return verifyBatchErr('invalid_request', 400)
+          }
+          throw e
+        }
+      } else if (entry.status !== 'pending') {
+        if (entry.status === 'confirmed') {
+          const existingSig = (entry.transaction_signature || '').trim()
+          if (existingSig === transactionSignatureRaw.trim()) {
+            /* idempotent — include in batch confirm path below */
+          } else {
+            return verifyBatchErr('invalid_request', 400)
+          }
+        } else {
+          return verifyBatchErr('invalid_request', 400)
+        }
       }
 
       const raffle = await getRaffleById(entry.raffle_id)
@@ -155,6 +184,19 @@ export async function POST(request: NextRequest) {
           return verifyBatchErr('server_error', 503)
         }
         return verifyBatchErr('confirm_failed', 400)
+      }
+
+      try {
+        const raffleIds = [...new Set(pairsSorted.map((p) => p.entry.raffle_id))]
+        const { syncMilestoneUnlocksForRaffle } = await import('@/lib/raffles/milestones/unlock')
+        for (const raffleId of raffleIds) {
+          const raffle = await getRaffleById(raffleId)
+          if (!raffle) continue
+          const allEntries = await getEntriesByRaffleId(raffleId)
+          await syncMilestoneUnlocksForRaffle(raffle, allEntries)
+        }
+      } catch (unlockErr) {
+        console.error('[entries/verify-batch] milestone unlock sync:', unlockErr)
       }
 
       return NextResponse.json({

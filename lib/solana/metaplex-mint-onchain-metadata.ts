@@ -34,11 +34,11 @@ function stripNullPadding(s: string): string {
   return s.replace(/\0/g, '').trim()
 }
 
-/** Read Metaplex token-metadata name + symbol for a mint (server / Node). */
-export async function getMetaplexTokenMetadataNameSymbol(
+/** Read Metaplex token-metadata for a mint (server / Node). */
+export async function getMetaplexTokenMetadata(
   connection: Connection,
   mint: PublicKey
-): Promise<{ name: string; symbol: string } | null> {
+): Promise<{ name: string; symbol: string; uri: string } | null> {
   const pda = PublicKey.findProgramAddressSync(
     [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
     METADATA_PROGRAM_ID
@@ -55,5 +55,16 @@ export async function getMetaplexTokenMetadataNameSymbol(
   return {
     name: stripNullPadding(parsed.name),
     symbol: stripNullPadding(parsed.symbol),
+    uri: stripNullPadding(parsed.uri),
   }
+}
+
+/** Read Metaplex token-metadata name + symbol for a mint (server / Node). */
+export async function getMetaplexTokenMetadataNameSymbol(
+  connection: Connection,
+  mint: PublicKey
+): Promise<{ name: string; symbol: string } | null> {
+  const meta = await getMetaplexTokenMetadata(connection, mint)
+  if (!meta) return null
+  return { name: meta.name, symbol: meta.symbol }
 }

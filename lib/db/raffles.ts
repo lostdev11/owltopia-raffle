@@ -107,7 +107,7 @@ const RAFFLE_TAIL_MINIMAL = RAFFLE_TAIL_CORE + RAFFLE_TAIL_FUNDS_ESCROW
 /** `discord_partner_tenant_id` (084) is appended at runtime when `checkDiscordPartnerTenantColumnApplied` passes. */
 const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
-  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,list_on_platform,sol_domains_hub,buyout_closed_at'
+  ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,creator_restricted_listing,moderation_listing_fee_lamports,moderation_listing_fee_paid_at,moderation_listing_fee_payment_tx,list_on_platform,sol_domains_hub,buyout_closed_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -853,6 +853,21 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
     purchases_blocked_at: (row.purchases_blocked_at as string | null) ?? null,
+    creator_restricted_listing: (row as { creator_restricted_listing?: unknown }).creator_restricted_listing === true,
+    moderation_listing_fee_lamports: (() => {
+      const raw = (row as { moderation_listing_fee_lamports?: unknown }).moderation_listing_fee_lamports
+      if (raw == null || raw === '') return null
+      const n = Number(raw)
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+    })(),
+    moderation_listing_fee_paid_at:
+      ((row as { moderation_listing_fee_paid_at?: string | null }).moderation_listing_fee_paid_at as
+        | string
+        | null) ?? null,
+    moderation_listing_fee_payment_tx:
+      ((row as { moderation_listing_fee_payment_tx?: string | null }).moderation_listing_fee_payment_tx as
+        | string
+        | null) ?? null,
     list_on_platform: (row as { list_on_platform?: unknown }).list_on_platform === false ? false : true,
     sol_domains_hub: (row as { sol_domains_hub?: unknown }).sol_domains_hub === true,
     discord_partner_tenant_id: (row.discord_partner_tenant_id as string | null) ?? null,
@@ -1492,6 +1507,10 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.cancellation_refund_policy = raffle.cancellation_refund_policy ?? null
   insertData.cancellation_fee_paid_at = raffle.cancellation_fee_paid_at ?? null
   insertData.cancellation_fee_payment_tx = raffle.cancellation_fee_payment_tx ?? null
+  insertData.creator_restricted_listing = raffle.creator_restricted_listing === true
+  insertData.moderation_listing_fee_lamports = raffle.moderation_listing_fee_lamports ?? null
+  insertData.moderation_listing_fee_paid_at = raffle.moderation_listing_fee_paid_at ?? null
+  insertData.moderation_listing_fee_payment_tx = raffle.moderation_listing_fee_payment_tx ?? null
   if (raffle.ticket_payments_to_funds_escrow != null) {
     insertData.ticket_payments_to_funds_escrow = raffle.ticket_payments_to_funds_escrow
   }
@@ -1907,6 +1926,20 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
   await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
+
+  try {
+    const { settleUnawardedMilestones } = await import('@/lib/raffles/milestones/settlement')
+    const freshEntries = await getEntriesByRaffleId(raffleId)
+    const freshRaffle = (await getRaffleById(raffleId)) ?? raffle
+    await settleUnawardedMilestones({
+      raffle: freshRaffle,
+      entries: freshEntries,
+      mainWinnerWallet: winnerWallet,
+    })
+  } catch (milestoneErr) {
+    console.error(`[selectWinner] milestone settlement failed for ${raffleId}:`, milestoneErr)
+  }
+
   return winnerWallet
 }
 

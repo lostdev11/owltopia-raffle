@@ -125,6 +125,65 @@ export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
 
 export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
 
+export type RaffleMilestoneTriggerType = 'percent_max' | 'absolute_tickets' | 'draw_threshold'
+
+export type RaffleMilestoneWinnerMode = 'random' | 'top_buyer' | 'creator_initiated_pull'
+
+export type RaffleMilestoneWinnerSelectionMode =
+  | 'creator_triggered_random'
+  | 'auto_random'
+  | 'auto_top_buyer'
+
+export type RaffleMilestoneStatus =
+  | 'pending'
+  | 'unlocked'
+  | 'awarded'
+  | 'claimed'
+  | 'returned'
+  | 'void'
+
+export type RaffleMilestonePrizeType = 'crypto' | 'nft'
+
+/** Prefunded side prize unlocked by ticket sales; pays only when raffle draw threshold succeeds. */
+export interface RaffleMilestone {
+  id: string
+  raffle_id: string
+  sort_order: number
+  trigger_type: RaffleMilestoneTriggerType
+  trigger_value: number
+  prize_type: RaffleMilestonePrizeType
+  prize_amount: number | null
+  prize_currency: 'SOL' | 'USDC' | null
+  nft_mint_address: string | null
+  nft_token_id: string | null
+  winner_mode: RaffleMilestoneWinnerMode
+  status: RaffleMilestoneStatus
+  unlocked_at: string | null
+  winner_wallet: string | null
+  winner_selected_at: string | null
+  winner_selection_mode: RaffleMilestoneWinnerSelectionMode | null
+  deposit_tx: string | null
+  deposit_verified_at: string | null
+  claim_tx: string | null
+  claimed_at: string | null
+  returned_at: string | null
+  return_tx: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Client payload when configuring milestones at create time (before DB ids exist). */
+export type RaffleMilestoneCreateInput = {
+  trigger_type: RaffleMilestoneTriggerType
+  trigger_value: number
+  prize_type: RaffleMilestonePrizeType
+  prize_amount?: number | null
+  prize_currency?: 'SOL' | 'USDC' | null
+  nft_mint_address?: string | null
+  nft_token_id?: string | null
+  winner_mode: RaffleMilestoneWinnerMode
+}
+
 export interface Raffle {
   id: string
   slug: string
@@ -246,6 +305,12 @@ export interface Raffle {
   prize_standard?: PrizeStandard | null
   /** When admin blocked ticket purchases (e.g. NFT not in escrow). Null = purchases allowed. */
   purchases_blocked_at?: string | null
+  /** Host was on admin moderation list at create — show buyer caution on listing. */
+  creator_restricted_listing?: boolean
+  /** Lamports required before go-live for restricted creators (snapshot at create). */
+  moderation_listing_fee_lamports?: number | null
+  moderation_listing_fee_paid_at?: string | null
+  moderation_listing_fee_payment_tx?: string | null
   /** When true, ticket gross is paid to funds escrow; creator claims net after draw. */
   ticket_payments_to_funds_escrow?: boolean | null
   /** Prize escrow pubkey at creation (verification / support). */
@@ -333,6 +398,12 @@ export interface Entry {
   referral_complimentary?: boolean
   complimentary_confirm_token?: string | null
   complimentary_token_expires_at?: string | null
+  /** Referral growth reward audit (complimentary redemption). */
+  reward_mode_at_issue?: string | null
+  reward_issued_at?: string | null
+  reward_confirmed_at?: string | null
+  reward_status?: string | null
+  referral_reward_id?: string | null
 }
 
 export interface OwlVisionScore {

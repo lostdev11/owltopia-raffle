@@ -30,12 +30,12 @@ export async function POST(
       )
     }
 
-    await claimOfferRefund({
+    const result = await claimOfferRefund({
       offerId,
       walletAddress: session.wallet,
       refundTxSignature,
     })
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, transactionSignature: result.transactionSignature })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to claim offer refund'
     const status =

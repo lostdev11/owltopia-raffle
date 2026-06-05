@@ -9,7 +9,7 @@ import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-i
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { clearOrphanedActiveNftNestsForWallet } from '@/lib/nesting/clear-orphaned-active-nests'
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
-import { clearCrossWalletStaleNestsForHolder } from '@/lib/nesting/clear-cross-wallet-stale-nests'
+import { clearCrossWalletStaleNestsForWallet } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import {
   readOwlClaimNftNestLockEligibility,
 } from '@/lib/nesting/nft-freeze'
@@ -56,6 +56,7 @@ export type NestingWalletIssueKind =
   | 'orphaned_pending'
   | 'owner_thawed_active'
   | 'ledger_active_onchain_locked'
+  | 'ghost_active_nest'
 
 export type NestingWalletIssue = {
   kind: NestingWalletIssueKind
@@ -76,6 +77,7 @@ export type NestingWalletDiagnostics = {
     active: number
     pending: number
     unstaked: number
+    ghost_active: number
   }
   issues: NestingWalletIssue[]
   cross_wallet_rows: Array<{
@@ -114,11 +116,26 @@ export async function diagnoseNestingWallet(
   const issues: NestingWalletIssue[] = []
 
   const positions = await listStakingPositionsByWallet(holder)
-  const byStatus = { active: 0, pending: 0, unstaked: 0 }
+  const byStatus = { active: 0, pending: 0, unstaked: 0, ghost_active: 0 }
+  let ghostActive = 0
   for (const p of positions) {
-    if (p.status === 'active') byStatus.active += 1
-    else if (p.status === 'pending') byStatus.pending += 1
+    if (p.status === 'active') {
+      byStatus.active += 1
+      if (!p.asset_identifier?.trim()) {
+        ghostActive += 1
+        byStatus.ghost_active += 1
+      }
+    } else if (p.status === 'pending') byStatus.pending += 1
     else byStatus.unstaked += 1
+  }
+
+  if (ghostActive > 0) {
+    issues.push({
+      kind: 'ghost_active_nest',
+      severity: 'medium',
+      message: `${ghostActive} active nest row(s) have no mint in the ledger — they are skipped for Claim all until cleared.`,
+      suggested_action: 'Admin: Clear ghost actives only (one click). Does not close real nests or remove claimable OWL.',
+    })
   }
 
   const heliusRpcUrl = getHeliusMainnetRpcUrl()
@@ -368,21 +385,8 @@ export async function healHolderWalletNests(
     clearedActive = r.cleared_count
   }
   if (clearCross) {
-    const pool = await getStakingPoolBySlug('owl-nest-365')
-    const heliusRpcUrl = getHeliusMainnetRpcUrl()
-    if (pool && heliusRpcUrl) {
-      const candidates = resolveWalletOwlNestCollectionCandidates(pool)
-      const mints: string[] = []
-      for (const candidate of candidates) {
-        const batch = await fetchWalletNftsInCollectionDas(heliusRpcUrl, holder, candidate)
-        for (const item of batch) {
-          const id = item.id?.trim()
-          if (id && item.burnt !== true) mints.push(id)
-        }
-      }
-      const r = await clearCrossWalletStaleNestsForHolder(holder, mints)
-      clearedCross = r.cleared_count
-    }
+    const r = await clearCrossWalletStaleNestsForWallet(holder)
+    clearedCross = r.cleared_count
   }
 
   return {

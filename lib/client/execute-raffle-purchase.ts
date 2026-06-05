@@ -23,11 +23,16 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { clearReferralComplimentarySessionCache } from '@/lib/referrals/complimentary-session-client'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { attachPaymentSignature } from '@/lib/client/attach-payment-signature'
 import { isMobileDevice, isAndroidDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export type ExecuteRafflePurchaseResult =
-  | { ok: true }
+  | { ok: true; verifying?: boolean; freeEntryUnlocked?: boolean }
   | { ok: false; error: string; isUnconfirmedPayment?: boolean }
+
+/** Shown while payment is on-chain but tickets are not confirmed yet. */
+export const TICKETS_CONFIRMING_MESSAGE =
+  'Payment received — confirming your tickets. Keep this page open for a moment; tickets appear once confirmed.'
 
 export type PurchasePaymentDetails = {
   recipient?: string
@@ -669,12 +674,13 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
     }
 
-    await confirmSignatureSuccessOnChain(connection, signature)
+    await attachPaymentSignature({
+      entryId,
+      transactionSignature: signature,
+      walletAddress: publicKey.toBase58(),
+    })
 
-    afterPaymentTxConfirmed?.()
-    if (celebrateOnPaymentConfirmed) {
-      requestAnimationFrame(() => fireGreenConfetti())
-    }
+    await confirmSignatureSuccessOnChain(connection, signature)
 
     const verifyResponse = await fetch('/api/entries/verify', {
       method: 'POST',
@@ -688,7 +694,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       } else {
         routerRefresh()
       }
-      return { ok: true }
+      return { ok: true, verifying: true }
     }
 
     if (!verifyResponse.ok) {
@@ -708,9 +714,22 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       throw new Error(errorMessage)
     }
 
+    afterPaymentTxConfirmed?.()
+    if (celebrateOnPaymentConfirmed) {
+      requestAnimationFrame(() => fireGreenConfetti())
+    }
+
+    let freeEntryUnlocked = false
+    try {
+      const verifyJson = (await verifyResponse.json()) as { freeEntryUnlocked?: boolean }
+      freeEntryUnlocked = verifyJson.freeEntryUnlocked === true
+    } catch {
+      /* ignore */
+    }
+
     routerRefresh()
     afterVerifyOk?.()
-    return { ok: true }
+    return { ok: true, freeEntryUnlocked: freeEntryUnlocked || undefined }
   } catch (err: unknown) {
     const { message, isUnconfirmedPayment } = classifyPurchaseError(err)
     return { ok: false, error: message, isUnconfirmedPayment }

@@ -1,6 +1,7 @@
 import { ownsOwltopia } from '@/lib/platform-fees'
 import { HOLDER_FEE_BPS, PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { getActivePartnerCommunityWalletSet } from '@/lib/raffles/partner-communities'
+import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export type GetCreatorFeeTierOptions = {
   /** When true, always verify holder status (skip cache). Use for dashboard and when creating/updating a raffle. */
@@ -32,10 +33,15 @@ export async function getCreatorFeeTier(
   }
 
   const partners = await getActivePartnerCommunityWalletSet()
-  if (partners.has(normalized)) {
-    return {
-      feeBps: PARTNER_COMMUNITY_FEE_BPS,
-      reason: 'partner_community',
+  const norm = normalizeSolanaWalletAddress(normalized)
+  if (norm) {
+    for (const partnerWallet of partners) {
+      if (walletsEqualSolana(partnerWallet, norm)) {
+        return {
+          feeBps: PARTNER_COMMUNITY_FEE_BPS,
+          reason: 'partner_community',
+        }
+      }
     }
   }
 

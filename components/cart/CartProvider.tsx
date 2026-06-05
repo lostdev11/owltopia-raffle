@@ -20,6 +20,7 @@ import {
   formatSplTokenTransferFailure,
   type PurchasePaymentDetails,
 } from '@/lib/client/execute-raffle-purchase'
+import { attachPaymentSignaturesBatch } from '@/lib/client/attach-payment-signature'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import type { CartLine } from '@/lib/cart/types'
@@ -417,6 +418,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
               skipPreflight: false,
               preflightCommitment: 'confirmed',
               maxRetries: 3,
+            })
+            await attachPaymentSignaturesBatch({
+              entryIds,
+              transactionSignature: signature,
+              walletAddress: publicKey.toBase58(),
             })
           } catch (err: unknown) {
             const wm = err instanceof Error ? err.message : String(err)

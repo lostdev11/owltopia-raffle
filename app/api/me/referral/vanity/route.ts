@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { parseOr400, referralVanityBody } from '@/lib/validations'
+import { isReferralProgramEnabled } from '@/lib/referrals/config'
 import { setVanityReferralCode } from '@/lib/db/referrals'
 import { REFERRAL_CODE_MAX_LEN } from '@/lib/referrals/code-format'
 
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest) {
 
     const session = await requireSession(request)
     if (session instanceof NextResponse) return session
+
+    if (!(await isReferralProgramEnabled())) {
+      return NextResponse.json({ error: 'Referral program is not available' }, { status: 403 })
+    }
 
     const walletRl = rateLimit(`referral-vanity:wallet:${session.wallet}`, WALLET_LIMIT, WINDOW_MS)
     if (!walletRl.allowed) {

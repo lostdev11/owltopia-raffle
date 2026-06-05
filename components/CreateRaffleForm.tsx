@@ -35,19 +35,20 @@ import {
 } from '@/lib/solana/escrow-deposit-log'
 import { isEscrowSplPrizeFrozenVerifyError } from '@/lib/raffles/verify-prize-deposit-client'
 import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
+import { nftPrizeRaffleTitleFromWalletSelection } from '@/lib/raffles/nft-prize-raffle-title'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
-import { NIGHT_MODE_PRESETS } from '@/lib/night-mode-presets'
 import type { ThemeAccent } from '@/lib/types'
 import {
   getThemeAccentBorderStyle,
   getThemeAccentClasses,
   THEME_ACCENT_SELECT_OPTIONS,
 } from '@/lib/theme-accent'
+import { DateTimePicker } from '@/components/DateTimePicker'
 import { formatDateTimeWithTimezone, localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import type { DuplicateNftPrizeConflictReason } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
@@ -73,15 +74,28 @@ import {
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
+import { explainCreateRaffleThreshold } from '@/lib/raffle-profit'
 import {
-  normalizeRaffleTicketCurrency,
-  previewCreateRaffleThreshold,
-} from '@/lib/raffle-profit'
-import { isOwlEnabled } from '@/lib/tokens'
+  buildCreateRaffleFeeCopy,
+  type PlatformFeeReason,
+} from '@/lib/raffles/creator-fee-copy'
+import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import {
   BAMBOO_TICKET_CURRENCY,
   canWalletUseBambooTicketCurrency,
 } from '@/lib/raffles/bamboo-ticket-currency'
+import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
+import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
+import type { Raffle, RaffleMilestone, RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
+import {
+  fetchFundsEscrowAddress,
+  milestoneDepositTotalForPrizeCurrency,
+  sendMilestoneDepositTransaction,
+  sumMilestoneDepositsByCurrency,
+  verifyCreateMilestoneDepositsFromClient,
+  pendingCryptoMilestonesForCreate,
+  appendSolMilestoneTransfersToTransaction,
+} from '@/lib/client/create-raffle-milestone-deposit'
 
 function focusFormField(elementId: string) {
   const el = document.getElementById(elementId)
@@ -125,6 +139,47 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
   persistUntilDismiss: false,
 }
 
+type MilestoneDraftRow = {
+  trigger_type: RaffleMilestoneTriggerType
+  trigger_value: string
+  prize_amount: string
+  prize_currency: 'SOL' | 'USDC'
+  winner_mode: RaffleMilestoneWinnerMode
+  /** When true, ticket-count target follows the live draw goal from floor ÷ ticket or partner min. */
+  followDrawGoal?: boolean
+}
+
+const DEFAULT_MILESTONE_ROW: MilestoneDraftRow = {
+  trigger_type: 'draw_threshold',
+  trigger_value: '1',
+  prize_amount: '0.1',
+  prize_currency: 'SOL',
+  winner_mode: 'random',
+  followDrawGoal: true,
+}
+
+function parseCreateRaffleResponse(body: unknown): { raffle: Raffle; milestones: RaffleMilestone[] } {
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const milestones = Array.isArray(raw.milestones)
+    ? (raw.milestones as RaffleMilestone[])
+    : []
+  const { milestones: _m, ...rest } = raw
+  return { raffle: rest as unknown as Raffle, milestones }
+}
+
+/** Milestone currencies that must be deposited in a follow-up tx (not the main prize currency). */
+function milestoneCurrenciesNeedingFollowUpTx(
+  milestones: RaffleMilestone[],
+  prizeCurrency: string | null
+): Array<'SOL' | 'USDC'> {
+  const prize = (prizeCurrency ?? '').trim().toUpperCase()
+  const totals = sumMilestoneDepositsByCurrency(pendingCryptoMilestonesForCreate(milestones))
+  const out: Array<'SOL' | 'USDC'> = []
+  if ((totals.SOL ?? 0) > 0 && prize !== 'SOL') out.push('SOL')
+  if ((totals.USDC ?? 0) > 0 && prize !== 'USDC') out.push('USDC')
+  return out
+}
+
 export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlow?: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -133,8 +188,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
+  const [milestonesEnabled, setMilestonesEnabled] = useState(false)
+  const [milestoneRows, setMilestoneRows] = useState<MilestoneDraftRow[]>([{ ...DEFAULT_MILESTONE_ROW }])
+  const milestoneRulesCopy = useMemo(() => buildMilestoneBonusRulesCopy(), [])
   // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
   // causing raffles to start/end earlier or later than intended.
   const [startTime, setStartTime] = useState(() => {
@@ -176,6 +233,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [canSetLinkOnlyVisibility, setCanSetLinkOnlyVisibility] = useState(false)
   /** Active `partner_community_creators` wallet — unlocks extra SPL prize tickers beyond SOL/USDC. */
   const [isPartnerCommunityCreator, setIsPartnerCommunityCreator] = useState(false)
+  const [platformFeeBps, setPlatformFeeBps] = useState<number | null>(null)
+  const [platformFeeReason, setPlatformFeeReason] = useState<PlatformFeeReason | null>(null)
+  const [platformFeeTierLoaded, setPlatformFeeTierLoaded] = useState(false)
   /** Wallet is linked in admin partner-creators to a Discord partner tenant (server webhooks). */
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
@@ -266,15 +326,23 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [connected, publicKey])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !connected) {
+    if (typeof window === 'undefined' || !connected || !publicKey) {
       setCanSetLinkOnlyVisibility(false)
       setPartnerDiscordLinked(false)
       setIsPartnerCommunityCreator(false)
+      setPlatformFeeBps(null)
+      setPlatformFeeReason(null)
+      setPlatformFeeTierLoaded(false)
       setHideFromPublicBrowse(false)
       return
     }
     let cancelled = false
-    fetch('/api/raffles/visibility-options', { credentials: 'include' })
+    setPlatformFeeTierLoaded(false)
+    const walletParam = publicKey.toBase58()
+    fetch(
+      `/api/raffles/visibility-options?wallet=${encodeURIComponent(walletParam)}`,
+      { credentials: 'include' }
+    )
       .then((r) => (cancelled || !r.ok ? null : r.json()))
       .then(
         (
@@ -282,13 +350,28 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             canSetLinkOnly?: boolean
             partnerDiscordLinked?: boolean
             isPartnerCommunityCreator?: boolean
+            platformFeeBps?: number | null
+            platformFeeReason?: PlatformFeeReason | null
           } | null
         ) => {
-          if (cancelled || !d) return
+          if (cancelled) return
+          if (!d) {
+            setPlatformFeeTierLoaded(true)
+            return
+          }
           const ok = d.canSetLinkOnly === true
           setCanSetLinkOnlyVisibility(ok)
           setPartnerDiscordLinked(d.partnerDiscordLinked === true)
           setIsPartnerCommunityCreator(d.isPartnerCommunityCreator === true)
+          const bps = d.platformFeeBps
+          setPlatformFeeBps(typeof bps === 'number' && Number.isFinite(bps) ? bps : null)
+          const reason = d.platformFeeReason
+          setPlatformFeeReason(
+            reason === 'holder' || reason === 'standard' || reason === 'partner_community'
+              ? reason
+              : null
+          )
+          setPlatformFeeTierLoaded(true)
           if (!ok) setHideFromPublicBrowse(false)
           if (ok && partnerCreateMode && !snsDomainHubFlow && !partnerModeDefaultAppliedRef.current) {
             setHideFromPublicBrowse(true)
@@ -301,6 +384,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           setCanSetLinkOnlyVisibility(false)
           setPartnerDiscordLinked(false)
           setIsPartnerCommunityCreator(false)
+          setPlatformFeeBps(null)
+          setPlatformFeeReason(null)
+          setPlatformFeeTierLoaded(true)
           setHideFromPublicBrowse(false)
         }
       })
@@ -308,6 +394,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       cancelled = true
     }
   }, [connected, publicKey, partnerCreateMode, snsDomainHubFlow])
+
+  const createRaffleFeeCopy = useMemo(
+    () =>
+      buildCreateRaffleFeeCopy({
+        connected: connected && !!publicKey,
+        feeTierLoaded: platformFeeTierLoaded,
+        feeBps: platformFeeBps ?? undefined,
+        feeReason: platformFeeReason ?? undefined,
+      }),
+    [connected, publicKey, platformFeeTierLoaded, platformFeeBps, platformFeeReason]
+  )
 
   /**
    * When floor changes: set ticket to floor ÷ default ticket count only if the ticket is empty, or
@@ -376,27 +473,46 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     return p.ok ? p.value : null
   }, [ticketPrice])
 
-  const thresholdPreview = useMemo(() => {
-    return previewCreateRaffleThreshold({
-      prizeMode,
-      ticketCurrency: raffleCurrency,
-      ticketPrice: ticketPriceParsedForPreview,
-      floorPriceInput: floorPrice,
-      partnerMinTickets: prizeMode === 'token' ? partnerMinTicketsParsed : null,
-      partnerPrizeAmount: prizeMode === 'token' ? partnerPrizeAmountParsed : null,
-      partnerPrizeCurrency: tokenPrizeCurrency,
-    })
-  }, [
-    prizeMode,
-    raffleCurrency,
-    ticketPriceParsedForPreview,
-    floorPrice,
-    partnerMinTicketsParsed,
-    partnerPrizeAmountParsed,
-    tokenPrizeCurrency,
-  ])
+  const effectiveDrawGoalTickets = useMemo(() => {
+    if (prizeMode === 'token') return partnerMinTicketsParsed
+    return derivedDrawGoal
+  }, [prizeMode, partnerMinTicketsParsed, derivedDrawGoal])
 
-  const thresholdPreviewLabel = prizeMode === 'nft' ? 'Revenue threshold' : 'Threshold'
+  useEffect(() => {
+    if (!milestonesEnabled || effectiveDrawGoalTickets == null || effectiveDrawGoalTickets < 1) return
+    const goalStr = String(effectiveDrawGoalTickets)
+    setMilestoneRows((prev) =>
+      prev.map((row) => {
+        if (row.trigger_type === 'draw_threshold') return row
+        if (row.followDrawGoal) {
+          return { ...row, trigger_value: goalStr }
+        }
+        return row
+      })
+    )
+  }, [milestonesEnabled, effectiveDrawGoalTickets])
+
+  const thresholdExplain = useMemo(
+    () =>
+      explainCreateRaffleThreshold({
+        prizeMode,
+        ticketCurrency: raffleCurrency,
+        ticketPrice: ticketPriceParsedForPreview,
+        floorPriceInput: floorPrice,
+        partnerMinTickets: prizeMode === 'token' ? partnerMinTicketsParsed : null,
+        partnerPrizeAmount: prizeMode === 'token' ? partnerPrizeAmountParsed : null,
+        partnerPrizeCurrency: tokenPrizeCurrency,
+      }),
+    [
+      prizeMode,
+      raffleCurrency,
+      ticketPriceParsedForPreview,
+      floorPrice,
+      partnerMinTicketsParsed,
+      partnerPrizeAmountParsed,
+      tokenPrizeCurrency,
+    ]
+  )
 
   /** TRQ, CANE, etc. — only admins + partner-community wallets; SOL/USDC stay open to all creators. */
   const canSelectPartnerPrizeTokens = viewerIsAdmin === true || isPartnerCommunityCreator
@@ -466,21 +582,80 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
   }
 
-  const handlePresetSelect = (presetName: string) => {
-    const preset = NIGHT_MODE_PRESETS.find(p => p.name === presetName)
-    if (preset) {
-      setSelectedPreset(presetName)
-      setThemeAccent(preset.themeAccent)
-      const presetEndTime = preset.getEndTime()
-      // Convert the Date object (which is in local time) to datetime-local format
-      const year = presetEndTime.getFullYear()
-      const month = String(presetEndTime.getMonth() + 1).padStart(2, '0')
-      const day = String(presetEndTime.getDate()).padStart(2, '0')
-      const hours = String(presetEndTime.getHours()).padStart(2, '0')
-      const minutes = String(presetEndTime.getMinutes()).padStart(2, '0')
-      setEndTime(`${year}-${month}-${day}T${hours}:${minutes}`)
-    }
-  }
+  const depositFollowUpMilestonesAfterPrize = useCallback(
+    async (params: {
+      raffle: Raffle
+      createdMilestones: RaffleMilestone[]
+      prizeCurrency: string | null
+      mainDepositSig: string | null
+      /** Currencies already deposited in the main prize transaction (e.g. SOL bundled with SPL NFT). */
+      skipCurrencies?: Array<'SOL' | 'USDC'>
+    }) => {
+      if (!publicKey || !connected) return
+
+      const prizeCur = (params.prizeCurrency ?? '').trim().toUpperCase()
+      if (params.mainDepositSig && (prizeCur === 'SOL' || prizeCur === 'USDC')) {
+        const bundled = milestoneDepositTotalForPrizeCurrency(params.createdMilestones, prizeCur)
+        if (bundled > 0) {
+          const v = await verifyCreateMilestoneDepositsFromClient({
+            raffleId: params.raffle.id,
+            depositTx: params.mainDepositSig,
+            currency: prizeCur,
+          })
+          if (!v.ok) {
+            throw new Error(v.error ?? 'Bonus deposit verification failed.')
+          }
+        }
+      }
+
+      const skip = new Set(params.skipCurrencies ?? [])
+      const followUp = milestoneCurrenciesNeedingFollowUpTx(
+        params.createdMilestones,
+        params.prizeCurrency
+      ).filter((c) => !skip.has(c))
+      if (followUp.length === 0) return
+
+      const fundsAddress = await fetchFundsEscrowAddress()
+      if (!fundsAddress) {
+        throw new Error(
+          'Funds escrow is not configured. Open your raffle page to deposit bonus milestones manually.'
+        )
+      }
+
+      const pending = pendingCryptoMilestonesForCreate(params.createdMilestones)
+      const totals = sumMilestoneDepositsByCurrency(pending)
+
+      for (const currency of followUp) {
+        const amount = totals[currency] ?? 0
+        if (amount <= 0) continue
+        setEscrowProgress((p) => ({
+          ...p,
+          open: true,
+          phase: 'loading',
+          persistUntilDismiss: false,
+          title: 'Bonus milestone deposit',
+          description: `When your wallet opens, approve sending ${amount} ${currency} bonus to escrow.`,
+        }))
+        const sig = await sendMilestoneDepositTransaction({
+          connection,
+          sendTransaction,
+          publicKey,
+          currency,
+          amount,
+          fundsEscrowAddress: fundsAddress,
+        })
+        const v = await verifyCreateMilestoneDepositsFromClient({
+          raffleId: params.raffle.id,
+          depositTx: sig,
+          currency,
+        })
+        if (!v.ok) {
+          throw new Error(v.error ?? 'Bonus deposit verification failed.')
+        }
+      }
+    },
+    [publicKey, connected, connection, sendTransaction]
+  )
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -523,10 +698,20 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       }
     }
 
-    const titleTrimmed = ((formData.get('title') as string) ?? '').trim()
+    const isNftPrizeMode = prizeMode === 'nft'
+    const titleTrimmed = isNftPrizeMode
+      ? selectedNft
+        ? nftPrizeRaffleTitleFromWalletSelection(selectedNft.name, selectedNft.mint)
+        : ''
+      : ((formData.get('title') as string) ?? '').trim()
     if (!titleTrimmed) {
-      alert('Please enter a raffle title (scroll up if you don’t see the title field).')
-      focusFormField('title')
+      alert(
+        isNftPrizeMode
+          ? 'Select an NFT from your wallet — the raffle title is set from that NFT’s name.'
+          : 'Please enter a raffle title.'
+      )
+      if (!isNftPrizeMode) focusFormField('title')
+      else document.getElementById('nft-prize-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
 
@@ -536,7 +721,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       return
     }
     if (!endTime?.trim()) {
-      alert('Please set an end time, or tap a Night Mode preset (Midnight / Dawn / Prime Time) to fill dates.')
+      alert('Please set an end time for your raffle.')
       focusFormField('end_time')
       return
     }
@@ -691,6 +876,26 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       const promo = (formData.get('promo_x_handle') as string)?.trim()
       if (promo) data.promo_x_handle = promo
     }
+    if (milestonesEnabled && milestoneRows.length > 0) {
+      const built = milestoneRows
+        .map((row) => ({
+          trigger_type: row.trigger_type,
+          trigger_value:
+            row.trigger_type === 'draw_threshold' ? 1 : parseFloat(row.trigger_value),
+          prize_type: 'crypto' as const,
+          prize_amount: parseFloat(row.prize_amount),
+          prize_currency: row.prize_currency,
+          winner_mode: row.winner_mode,
+        }))
+        .filter(
+          (row) =>
+            Number.isFinite(row.trigger_value) &&
+            row.trigger_value > 0 &&
+            Number.isFinite(row.prize_amount) &&
+            row.prize_amount > 0
+        )
+      if (built.length > 0) data.milestones = built
+    }
     if (canUseBambooTicketCurrency) {
       if (currency === 'SOL' && alternateBambooTicketPrice.trim()) {
         const ap = parseNftTicketPrice(alternateBambooTicketPrice.trim())
@@ -728,7 +933,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       })
 
       if (response.ok) {
-        const raffle = await response.json()
+        const { raffle, milestones: createdMilestones } = parseCreateRaffleResponse(await response.json())
         // NFT raffles: one flow — sign transfer to escrow, retry verify until RPC catches up, then redirect
         if (
           raffle.prize_type === 'nft' &&
@@ -847,13 +1052,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
             let depositSig: string | null = null
             let lastMplCoreEscrowError: string | null = null
+            let bundledSolWithNft = 0
+
+            const nftMilestoneSol = milestoneDepositTotalForPrizeCurrency(createdMilestones, 'SOL')
+            const nftWalletHint =
+              nftMilestoneSol > 0
+                ? `approve sending the prize NFT and ${nftMilestoneSol} SOL bonus to escrow in one transaction.`
+                : 'approve the transaction to send the prize NFT to escrow.'
 
             setEscrowProgress((p) => ({
               ...p,
               phase: 'loading',
               persistUntilDismiss: false,
-              description:
-                'When your wallet opens, approve the transaction to send the prize NFT to escrow.',
+              description: `When your wallet opens, ${nftWalletHint}`,
             }))
 
             if (resolvedHolder) {
@@ -916,10 +1127,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     tokenProgram
                   )
                 )
+                const bundle = await appendSolMilestoneTransfersToTransaction(
+                  tx,
+                  publicKey,
+                  createdMilestones
+                )
+                if (bundle) bundledSolWithNft = bundle.amount
                 logEscrowDepositPath(depositLogCtx, 'spl_transfer', {
                   tokenProgram: tokenProgram.toBase58(),
                   sourceTokenAccount: sourceTokenAccount.toBase58(),
                   escrowAta: escrowAta.toBase58(),
+                  bundledSolMilestone: bundledSolWithNft > 0 ? bundledSolWithNft : undefined,
                 })
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
@@ -1108,6 +1326,45 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 return
               }
             }
+            try {
+              if (bundledSolWithNft > 0 && depositSig) {
+                const v = await verifyCreateMilestoneDepositsFromClient({
+                  raffleId: raffle.id,
+                  depositTx: depositSig,
+                  currency: 'SOL',
+                })
+                if (!v.ok) {
+                  throw new Error(v.error ?? 'Bonus deposit verification failed.')
+                }
+              }
+              await depositFollowUpMilestonesAfterPrize({
+                raffle,
+                createdMilestones,
+                prizeCurrency: raffle.prize_currency,
+                mainDepositSig: depositSig,
+                skipCurrencies: bundledSolWithNft > 0 ? ['SOL'] : [],
+              })
+            } catch (milestoneErr) {
+              const msg =
+                milestoneErr instanceof Error
+                  ? milestoneErr.message
+                  : 'Bonus milestone deposit failed.'
+              setEscrowProgress({
+                open: true,
+                title: 'Bonus deposit needed',
+                description: `${msg} Open your raffle to finish bonus deposits.`,
+                phase: 'result',
+                persistUntilDismiss: true,
+                primaryAction: {
+                  label: 'Open raffle',
+                  onClick: () => {
+                    setEscrowProgress(CREATE_ESCROW_IDLE)
+                    router.push(`/raffles/${raffle.slug}#bonus-milestones`)
+                  },
+                },
+              })
+              return
+            }
             router.push(`/raffles/${raffle.slug}`)
           } catch (transferErr) {
             logEscrowDepositError(
@@ -1161,6 +1418,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 return
               }
               const escrowPubkey = new PublicKey(escrowAddress)
+              const milestoneBonus = milestoneDepositTotalForPrizeCurrency(createdMilestones, prizeCur)
+              const prizeHuman = Number(raffle.prize_amount ?? 0)
               let depositSig: string
               if (prizeCur === 'SOL') {
                 if (rawNeed > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -1168,11 +1427,26 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   router.push(`/raffles/${raffle.slug}?deposit=1`)
                   return
                 }
+                let fundsEscrowAddress: string | null = null
+                if (milestoneBonus > 0) {
+                  fundsEscrowAddress = await fetchFundsEscrowAddress()
+                  if (!fundsEscrowAddress) {
+                    alert(
+                      'Funds escrow is not configured. Your raffle is saved — deposit bonuses on the raffle page.'
+                    )
+                    router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    return
+                  }
+                }
+                const walletCopy =
+                  milestoneBonus > 0
+                    ? `approve sending ${(prizeHuman + milestoneBonus).toFixed(4)} SOL (${prizeHuman} prize + ${milestoneBonus} bonus) to escrow.`
+                    : 'approve the transaction to send SOL to escrow.'
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
                   persistUntilDismiss: false,
-                  description: 'When your wallet opens, approve the transaction to send SOL to escrow.',
+                  description: `When your wallet opens, ${walletCopy}`,
                 }))
                 const tx = new Transaction().add(
                   SystemProgram.transfer({
@@ -1181,6 +1455,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     lamports: Number(rawNeed),
                   })
                 )
+                if (milestoneBonus > 0 && fundsEscrowAddress) {
+                  tx.add(
+                    SystemProgram.transfer({
+                      fromPubkey: publicKey,
+                      toPubkey: new PublicKey(fundsEscrowAddress),
+                      lamports: Math.round(milestoneBonus * 1e9),
+                    })
+                  )
+                }
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
               } else {
@@ -1252,11 +1535,59 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     tokenProgram
                   )
                 )
+                if (prizeCur === 'USDC' && milestoneBonus > 0) {
+                  const fundsEscrowAddress = await fetchFundsEscrowAddress()
+                  if (!fundsEscrowAddress) {
+                    alert(
+                      'Funds escrow is not configured. Your raffle is saved — deposit bonuses on the raffle page.'
+                    )
+                    router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    return
+                  }
+                  const fundsPk = new PublicKey(fundsEscrowAddress)
+                  const fundsAta = await getAssociatedTokenAddress(
+                    mintPk,
+                    fundsPk,
+                    false,
+                    tokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
+                  )
+                  try {
+                    await getAccount(connection, fundsAta, 'confirmed', tokenProgram)
+                  } catch {
+                    tx.add(
+                      createAssociatedTokenAccountInstruction(
+                        publicKey,
+                        fundsAta,
+                        fundsPk,
+                        mintPk,
+                        tokenProgram,
+                        ASSOCIATED_TOKEN_PROGRAM_ID
+                      )
+                    )
+                  }
+                  const usdcDecimals = getTokenInfo('USDC').decimals
+                  const bonusRaw = BigInt(Math.round(milestoneBonus * Math.pow(10, usdcDecimals)))
+                  tx.add(
+                    createTransferInstruction(
+                      sourceTokenAccount,
+                      fundsAta,
+                      publicKey,
+                      bonusRaw,
+                      [],
+                      tokenProgram
+                    )
+                  )
+                }
+                const walletCopy =
+                  milestoneBonus > 0
+                    ? `approve sending ${prizeHuman + milestoneBonus} ${prizeCur} (${prizeHuman} prize + ${milestoneBonus} bonus) to escrow.`
+                    : `approve the transaction to send ${prizeCur} to escrow.`
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
                   persistUntilDismiss: false,
-                  description: `When your wallet opens, approve the transaction to send ${prizeCur} to escrow.`,
+                  description: `When your wallet opens, ${walletCopy}`,
                 }))
                 depositSig = await sendTransaction(tx, connection)
                 await confirmSignatureSuccessOnChain(connection, depositSig)
@@ -1364,6 +1695,34 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   })
                   return
                 }
+              }
+              try {
+                await depositFollowUpMilestonesAfterPrize({
+                  raffle,
+                  createdMilestones,
+                  prizeCurrency: prizeCur,
+                  mainDepositSig: depositSig,
+                })
+              } catch (milestoneErr) {
+                const msg =
+                  milestoneErr instanceof Error
+                    ? milestoneErr.message
+                    : 'Bonus milestone deposit failed.'
+                setEscrowProgress({
+                  open: true,
+                  title: 'Bonus deposit needed',
+                  description: `${msg} Open your raffle to finish bonus deposits.`,
+                  phase: 'result',
+                  persistUntilDismiss: true,
+                  primaryAction: {
+                    label: 'Open raffle',
+                    onClick: () => {
+                      setEscrowProgress(CREATE_ESCROW_IDLE)
+                      router.push(`/raffles/${raffle.slug}#bonus-milestones`)
+                    },
+                  },
+                })
+                return
               }
               router.push(`/raffles/${raffle.slug}`)
             } catch (transferErr) {
@@ -1478,10 +1837,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           noValidate
           className="space-y-6"
         >
-          <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
-            <Input id="title" name="title" required />
-          </div>
+          {prizeMode === 'token' ? (
+            <div className="space-y-2">
+              <Label htmlFor="title">Title *</Label>
+              <Input id="title" name="title" required />
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
@@ -1621,6 +1982,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   value={partnerMinTickets}
                   onChange={(e) => setPartnerMinTickets(e.target.value)}
                 />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  How many confirmed tickets must sell before a winner can be drawn after the raffle ends.
+                </p>
               </div>
             </div>
           )}
@@ -1742,6 +2106,34 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   Selected: {selectedNft.name ?? selectedNft.mint}
                 </p>
               )}
+              {prizeMode === 'nft' ? (
+                <div className="space-y-2 pt-2">
+                  <Label htmlFor="title">Title *</Label>
+                  {selectedNft ? (
+                    <>
+                      <Input
+                        id="title"
+                        name="title"
+                        readOnly
+                        required
+                        value={nftPrizeRaffleTitleFromWalletSelection(
+                          selectedNft.name,
+                          selectedNft.mint
+                        )}
+                        className="bg-muted/50"
+                        aria-readonly="true"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Raffle title is the selected NFT&apos;s name (from your wallet metadata).
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Pick an NFT above to set the raffle title.
+                    </p>
+                  )}
+                </div>
+              ) : null}
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">
@@ -1833,6 +2225,24 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="floor_price">Floor price (prize value) *</Label>
+                <Input
+                  id="floor_price"
+                  name="floor_price"
+                  type="text"
+                  inputMode="decimal"
+                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
+                  value={floorPrice ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setFloorPrice(v)
+                    applyFloorToTicketAutofill(v)
+                  }}
+                  placeholder="e.g., 0.25 or 5.5 (same as currency above)"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="ticket_price">Ticket price *</Label>
                 <Input
                   id="ticket_price"
@@ -1851,45 +2261,45 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   }}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="floor_price">Floor price (prize value) *</Label>
-                <Input
-                  id="floor_price"
-                  name="floor_price"
-                  type="text"
-                  inputMode="decimal"
-                  className="text-base sm:text-sm touch-manipulation min-h-[44px]"
-                  value={floorPrice ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setFloorPrice(v)
-                    applyFloorToTicketAutofill(v)
-                  }}
-                  placeholder="e.g., 0.25 or 5.5 (same as currency above)"
-                  required
-                />
-              </div>
             </div>
-            {thresholdPreview != null && (
-              <div
-                className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="text-xs text-muted-foreground">{thresholdPreviewLabel}</p>
-                <p className="text-sm font-semibold tabular-nums">
-                  {thresholdPreview.value.toFixed(
-                    normalizeRaffleTicketCurrency(thresholdPreview.currency) === 'USDC' ? 2 : 4
-                  )}{' '}
-                  {normalizeRaffleTicketCurrency(thresholdPreview.currency)}
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {prizeMode === 'nft'
+                ? 'Draw goal updates automatically when you change ticket price or prize value.'
+                : 'Changing ticket price updates the sales goal below; minimum tickets stays what you set for the draw.'}
+            </p>
+            <div
+              className="rounded-lg border bg-muted/40 px-3 py-2.5 sm:px-4 space-y-2"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm font-medium text-foreground">Your raffle goals</p>
+              {!thresholdExplain.ready ? (
+                <p className="text-xs text-muted-foreground leading-relaxed">{thresholdExplain.intro}</p>
+              ) : (
+                <ul className="text-sm text-foreground space-y-1.5 list-none pl-0">
+                  {thresholdExplain.minTicketsLine ? (
+                    <li className="leading-snug">{thresholdExplain.minTicketsLine}</li>
+                  ) : null}
+                  {thresholdExplain.salesGoalLine ? (
+                    <li className="leading-snug font-medium tabular-nums">{thresholdExplain.salesGoalLine}</li>
+                  ) : null}
+                </ul>
+              )}
+              {thresholdExplain.footnote ? (
+                <p className="text-xs text-muted-foreground leading-relaxed">{thresholdExplain.footnote}</p>
+              ) : null}
+            </div>
+            <div className="rounded-lg border border-border/80 bg-background/50 px-3 py-2.5 sm:px-4 space-y-1.5">
+              <p className="text-sm font-medium text-foreground">{createRaffleFeeCopy.heading}</p>
+              {createRaffleFeeCopy.lines.map((line) => (
+                <p key={line} className="text-xs text-muted-foreground leading-relaxed">
+                  {line}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {prizeMode === 'nft'
-                    ? 'Ticket revenue past this bar counts as surplus on the raffle page (same rule after you publish).'
-                    : 'Matches the threshold shown on the live raffle once ticket sales start.'}
-                </p>
-              </div>
-            )}
+              ))}
+              {createRaffleFeeCopy.yourRate ? (
+                <p className="text-xs font-medium text-foreground pt-0.5">{createRaffleFeeCopy.yourRate}</p>
+              ) : null}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1902,6 +2312,223 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
+          </div>
+
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer touch-manipulation min-h-[44px]">
+              <input
+                type="checkbox"
+                checked={milestonesEnabled}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setMilestonesEnabled(on)
+                  if (!on) {
+                    setMilestoneRows([{ ...DEFAULT_MILESTONE_ROW }])
+                  }
+                }}
+                className="mt-1 h-5 w-5"
+              />
+              <span>
+                <span className="text-sm font-medium text-foreground">Add bonus milestone(s)</span>
+                <span className="block text-xs text-amber-200/90 mt-0.5">{MILESTONE_BETA_NOTICE}</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Bonuses in the same currency as your prize are charged in the same wallet step as the main prize.
+                  Prefund to platform funds escrow (max {MILESTONE_MAX_PRIZE_SOL} SOL or {milestoneMaxPrizeUsdc()}{' '}
+                  USDC per milestone). Default winner mode is random (ticket-weighted).
+                </span>
+              </span>
+            </label>
+            {milestonesEnabled && (
+              <>
+                <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
+                  {milestoneRulesCopy.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                {milestoneRows.map((row, idx) => (
+                  <div key={idx} className="border border-border/50 rounded-md p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-foreground">
+                        Milestone {idx + 1}
+                        {milestoneRows.length > 1 ? ` of ${milestoneRows.length}` : ''}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-[44px] min-w-[44px] touch-manipulation text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                        aria-label={`Remove milestone ${idx + 1}`}
+                        onClick={() => {
+                          setMilestoneRows((prev) => {
+                            const next = prev.filter((_, i) => i !== idx)
+                            if (next.length === 0) {
+                              setMilestonesEnabled(false)
+                              return [{ ...DEFAULT_MILESTONE_ROW }]
+                            }
+                            return next
+                          })
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Trigger</Label>
+                      <select
+                        value={row.trigger_type}
+                        onChange={(e) => {
+                          const v = e.target.value as RaffleMilestoneTriggerType
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => {
+                              if (i !== idx) return r
+                              if (v === 'draw_threshold') {
+                                return {
+                                  ...r,
+                                  trigger_type: v,
+                                  trigger_value: '1',
+                                  followDrawGoal: true,
+                                }
+                              }
+                              if (v === 'absolute_tickets') {
+                                return {
+                                  ...r,
+                                  trigger_type: v,
+                                  trigger_value:
+                                    effectiveDrawGoalTickets != null
+                                      ? String(effectiveDrawGoalTickets)
+                                      : r.trigger_value,
+                                  followDrawGoal: true,
+                                }
+                              }
+                              return { ...r, trigger_type: v, followDrawGoal: false }
+                            })
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="draw_threshold">When draw goal is met (recommended)</option>
+                        <option value="absolute_tickets">Custom ticket count</option>
+                        <option value="percent_max">% of max tickets</option>
+                      </select>
+                    </div>
+                    {row.trigger_type === 'draw_threshold' ? (
+                      <div className="space-y-1 sm:col-span-1">
+                        <Label className="text-xs">Unlock target</Label>
+                        <p className="text-sm text-muted-foreground min-h-[44px] flex items-center tabular-nums">
+                          {effectiveDrawGoalTickets != null && effectiveDrawGoalTickets > 0
+                            ? `${effectiveDrawGoalTickets} tickets (matches draw goal)`
+                            : 'Set floor, ticket price, or draw goal first'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Target value</Label>
+                        <Input
+                          type="number"
+                          min={effectiveDrawGoalTickets ?? 1}
+                          value={row.trigger_value}
+                          onChange={(e) =>
+                            setMilestoneRows((prev) =>
+                              prev.map((r, i) =>
+                                i === idx
+                                  ? { ...r, trigger_value: e.target.value, followDrawGoal: false }
+                                  : r
+                              )
+                            )
+                          }
+                          className="min-h-[44px] touch-manipulation"
+                        />
+                        {row.trigger_type === 'absolute_tickets' &&
+                          effectiveDrawGoalTickets != null &&
+                          effectiveDrawGoalTickets > 0 && (
+                            <button
+                              type="button"
+                              className="text-xs text-primary underline-offset-2 hover:underline touch-manipulation"
+                              onClick={() =>
+                                setMilestoneRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx
+                                      ? {
+                                          ...r,
+                                          trigger_value: String(effectiveDrawGoalTickets),
+                                          followDrawGoal: true,
+                                        }
+                                      : r
+                                  )
+                                )
+                              }
+                            >
+                              Use draw goal ({effectiveDrawGoalTickets} tickets)
+                            </button>
+                          )}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Bonus amount</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.prize_amount}
+                        onChange={(e) =>
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, prize_amount: e.target.value } : r))
+                          )
+                        }
+                        className="min-h-[44px] touch-manipulation"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Currency</Label>
+                      <select
+                        value={row.prize_currency}
+                        onChange={(e) => {
+                          const v = e.target.value as 'SOL' | 'USDC'
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, prize_currency: v } : r))
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="SOL">SOL</option>
+                        <option value="USDC">USDC</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs">Winner selection</Label>
+                      <select
+                        value={row.winner_mode}
+                        onChange={(e) => {
+                          const v = e.target.value as RaffleMilestoneWinnerMode
+                          setMilestoneRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, winner_mode: v } : r))
+                          )
+                        }}
+                        className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="random">Random (ticket-weighted) — recommended</option>
+                        <option value="top_buyer">Top buyer (ties broken randomly)</option>
+                        <option value="creator_initiated_pull">Creator starts random draw when unlocked</option>
+                      </select>
+                    </div>
+                    </div>
+                  </div>
+                ))}
+                {milestoneRows.length < MILESTONE_MAX_PER_RAFFLE && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-[44px] touch-manipulation"
+                    onClick={() =>
+                      setMilestoneRows((prev) => [...prev, { ...DEFAULT_MILESTONE_ROW }])
+                    }
+                  >
+                    Add another milestone
+                  </Button>
+                )}
+              </>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -1995,36 +2622,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             </div>
           )}
 
-          <div className="space-y-4">
-            <Label>Night Mode Presets (optional)</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {NIGHT_MODE_PRESETS.map(preset => (
-                <Button
-                  key={preset.name}
-                  type="button"
-                  variant={selectedPreset === preset.name ? 'default' : 'outline'}
-                  onClick={() => handlePresetSelect(preset.name)}
-                  className="flex flex-col h-auto py-3 min-h-[60px] touch-manipulation"
-                >
-                  <span className="font-semibold text-sm sm:text-base">{preset.label}</span>
-                  <span className="text-xs opacity-80">{preset.description}</span>
-                </Button>
-              ))}
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="start_time">Start Time *</Label>
-              <div className="flex gap-2">
-                <Input
+              <div className="flex gap-2 items-start">
+                <DateTimePicker
                   id="start_time"
                   name="start_time"
-                  type="datetime-local"
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={setStartTime}
                   required
-                  className="text-base sm:text-sm flex-1"
+                  datePlaceholder="Choose start date"
                 />
                 <Button
                   type="button"
@@ -2039,7 +2647,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     setStartTime(`${year}-${month}-${day}T${hours}:${minutes}`)
                   }}
                   title="Set to current time"
-                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
+                  className="touch-manipulation min-h-[44px] shrink-0 px-3 sm:px-4"
                 >
                   Now
                 </Button>
@@ -2047,22 +2655,25 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             </div>
             <div className="space-y-2">
               <Label htmlFor="end_time">End Time * (Max 7 days from start)</Label>
-              <div className="flex gap-2">
-                <Input
+              <div className="flex gap-2 items-start">
+                <DateTimePicker
                   id="end_time"
                   name="end_time"
-                  type="datetime-local"
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={setEndTime}
                   required
-                  className="text-base sm:text-sm flex-1"
-                  max={startTime ? (() => {
-                    // Build max in local time, but base calculations on the UTC conversion to avoid browser parsing quirks.
-                    const startUtc = localDateTimeToUtc(startTime)
-                    const maxUtc = new Date(startUtc)
-                    maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
-                    return utcToLocalDateTime(maxUtc.toISOString())
-                  })() : undefined}
+                  datePlaceholder="Choose end date"
+                  min={startTime || undefined}
+                  max={
+                    startTime
+                      ? (() => {
+                          const startUtc = localDateTimeToUtc(startTime)
+                          const maxUtc = new Date(startUtc)
+                          maxUtc.setUTCDate(maxUtc.getUTCDate() + 7)
+                          return utcToLocalDateTime(maxUtc.toISOString())
+                        })()
+                      : undefined
+                  }
                 />
                 <Button
                   type="button"
@@ -2074,7 +2685,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     setEndTime(utcToLocalDateTime(maxUtc.toISOString()))
                   }}
                   title="Set to 7 days from start"
-                  className="touch-manipulation min-h-[44px] px-3 sm:px-4"
+                  className="touch-manipulation min-h-[44px] shrink-0 px-3 sm:px-4"
                 >
                   Max
                 </Button>

@@ -132,6 +132,13 @@ export default function TermsPage() {
             <li>For <strong>NFT</strong> prizes, the prize is expected to be held in <strong>prize escrow</strong> before a draw. The winning wallet may need to <strong>claim</strong> the NFT through the Platform after the draw</li>
             <li>For raffles that route ticket proceeds through funds escrow, the creator&apos;s net share after the platform fee may be available to <strong>claim</strong> after settlement, as shown in the product</li>
             <li>Winners are reflected on the Platform (e.g. raffle detail, dashboard). You are responsible for monitoring your wallet and the Platform for claim steps</li>
+            <li>
+              Some raffles offer optional <strong>bonus milestones</strong> (beta): extra SOL or USDC prizes prefunded by the
+              host into funds escrow, separate from the main prize. A milestone unlocks when ticket sales cross the
+              published target; it pays out only if the raffle succeeds (draw threshold met and a main winner selected).
+              Milestone winners are chosen by Platform software (random or top-buyer rules published on the raffle).
+              Bonus claims and caps are described on <Link href="/how-it-works" className="text-green-500 hover:underline">How it works</Link>
+            </li>
             <li>The Platform is not responsible for assets after successful on-chain delivery to the wallet you used, or for user error (wrong wallet, failed claim, etc.)</li>
           </ul>
         </section>

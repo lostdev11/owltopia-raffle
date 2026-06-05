@@ -20,6 +20,7 @@ import {
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-community-creators-admin'
+import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -132,6 +133,17 @@ export async function handleDiscordApplicationCommand(
 
   const guildName = 'Discord guild' // name not always in interaction; optional upgrade with REST cache
   const { sub, strOptions } = getSubcommandAndOptions(interaction.data)
+
+  const access = await assertDiscordPartnerCommandAccess(interaction.member?.user?.id, guildId)
+  if (!access.ok) {
+    return ephemeral(access.message)
+  }
+
+  if (!access.isFounder && !memberCanManageWebhooks(interaction.member)) {
+    return ephemeral(
+      'You need **Manage Webhooks** (or server Administrator) to run Owltopia partner commands. Ask a server admin to run these, or link your own admin Discord on the Owltopia dashboard if you are Partner Pro.'
+    )
+  }
 
   if (sub === 'subscribe') {
     const price = await discordPartnerSubscribePriceUsdc(guildId)
@@ -248,9 +260,6 @@ export async function handleDiscordApplicationCommand(
   }
 
   if (sub === 'webhook') {
-    if (!memberCanManageWebhooks(interaction.member)) {
-      return ephemeral('You need **Manage Webhooks** permission to set the webhook URL.')
-    }
     const url = (strOptions.url ?? '').trim()
     if (!url || !isAllowedDiscordIncomingWebhookUrl(url)) {
       return ephemeral('Invalid webhook URL. Use a Discord **incoming** webhook (`https://discord.com/api/webhooks/…`).')
@@ -268,9 +277,6 @@ export async function handleDiscordApplicationCommand(
   }
 
   if (sub === 'webhook-raffle-created' || sub === 'webhook-raffle-winner') {
-    if (!memberCanManageWebhooks(interaction.member)) {
-      return ephemeral('You need **Manage Webhooks** permission to set the webhook URL.')
-    }
     const url = (strOptions.url ?? '').trim()
     if (!url || !isAllowedDiscordIncomingWebhookUrl(url)) {
       return ephemeral('Invalid webhook URL. Use a Discord **incoming** webhook (`https://discord.com/api/webhooks/…`).')

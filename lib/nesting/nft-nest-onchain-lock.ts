@@ -3,7 +3,7 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { StakingUserError } from '@/lib/nesting/errors'
 import {
   assertWalletNftFrozenForNesting,
-  readOwlClaimNftNestLockEligibility,
+  readOwlClaimNftNestLockEligibilityWithRetry,
 } from '@/lib/nesting/nft-freeze'
 
 /** NFT perches that use MPL Core FreezeDelegate (holder wallet, non-transferable while nested). */
@@ -49,7 +49,7 @@ export async function assertNftNestOnChainLockHeld(params: {
     return
   }
 
-  const lockState = await readOwlClaimNftNestLockEligibility({
+  const lockState = await readOwlClaimNftNestLockEligibilityWithRetry({
     assetId,
     ownerWallet,
     collectionMint: params.collectionMint,
@@ -96,6 +96,38 @@ export function assertPoolConfiguredForOnChainNftFreeze(pool: StakingPoolRow): v
     throw new StakingUserError(
       'This Owl Nest perch must use on-chain NFT locks before new nests can open. Contact support.',
       503
+    )
+  }
+}
+
+const CLAIM_ALL_LOCK_VERIFY_CONCURRENCY = 3
+const CLAIM_ALL_LOCK_CHUNK_DELAY_MS = 200
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Batched on-chain lock checks for Claim all (limits RPC burst / 429 false failures). */
+export async function verifyActiveNestLocksForClaimAll(
+  positions: StakingPositionRow[],
+  poolById: Map<string, StakingPoolRow>
+): Promise<void> {
+  const rowsToVerify = positions.filter((row) => {
+    const pool = poolById.get(row.pool_id)
+    return pool && positionRequiresOnChainNftFreezeLock(row, pool)
+  })
+
+  for (let i = 0; i < rowsToVerify.length; i += CLAIM_ALL_LOCK_VERIFY_CONCURRENCY) {
+    if (i > 0) await sleepMs(CLAIM_ALL_LOCK_CHUNK_DELAY_MS)
+    const chunk = rowsToVerify.slice(i, i + CLAIM_ALL_LOCK_VERIFY_CONCURRENCY)
+    await Promise.all(
+      chunk.map(async (row) => {
+        const rowPool = poolById.get(row.pool_id)
+        if (!rowPool) {
+          throw new StakingUserError('Pool not found', 400)
+        }
+        await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
+      })
     )
   }
 }

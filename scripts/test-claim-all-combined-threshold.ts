@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict'
 import type { StakingPositionRow } from '../lib/db/staking-positions'
 import {
+  activeOwlNestHasMint,
   buildFullPositionClaimPlan,
   buildOwlClaimAllPreview,
   buildOwlClaimPlansForPositions,
@@ -92,6 +93,16 @@ const subMinNest = mockOwlNest({ id: 'a', claimedRewards: 3.23, stakedDaysAgo: 4
     'per-nest claim on large nest'
   )
   assert.equal(buildFullPositionClaimPlan(subMinNest, AS_OF_MS), null, 'per-nest blocked under 1 OWL')
+}
+
+{
+  const ghost = mockOwlNest({ id: 'ghost', claimedRewards: 0, stakedDaysAgo: 30 })
+  ghost.asset_identifier = null
+  assert.equal(activeOwlNestHasMint(ghost), false)
+  assert.equal(buildFullPositionClaimPlan(ghost, AS_OF_MS), null)
+  const withReal = mockOwlNest({ id: 'real', claimedRewards: 0, stakedDaysAgo: 30 })
+  const preview = buildOwlClaimAllPreview([ghost, withReal], AS_OF_MS)
+  assert.equal(preview.count, 1)
 }
 
 console.log('claim-all-combined-threshold: ok')

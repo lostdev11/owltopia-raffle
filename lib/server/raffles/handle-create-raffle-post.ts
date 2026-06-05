@@ -6,6 +6,7 @@ import {
   findNonTerminalNftRaffleByPrizeAssetId,
   findNonTerminalPartnerCryptoRaffleByCreator,
   generateUniqueSlug,
+  getRaffleById,
   getRaffleCreationCountForCreatorToday,
 } from '@/lib/db/raffles'
 import { requireSession } from '@/lib/auth-server'
@@ -29,6 +30,10 @@ import {
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
 import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
+import {
+  buildDuplicatePartnerCryptoPrizeConflictBody,
+  shouldBlockPartnerCryptoDuplicateCreate,
+} from '@/lib/raffles/duplicate-partner-crypto-prize-conflict'
 import { isNftBurntPerHeliusDas } from '@/lib/helius-das-burn'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import {
@@ -43,6 +48,14 @@ import { normalizePrizeAssetIdForRaffle, normalizeSolanaWalletAddress } from '@/
 import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { getMetaplexTokenMetadataNameSymbol } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { onchainMetadataLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
+import {
+  nftPrizeRaffleTitleMatchesAnyCandidate,
+  resolveNftPrizeRaffleTitleCandidatesFromMint,
+} from '@/lib/raffles/nft-prize-raffle-title'
+import { validateMilestonesForRaffle } from '@/lib/raffles/milestones/validation'
+import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
+import { listingFeeSolForStrikeCount } from '@/lib/raffles/creator-moderation-policy'
+import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
@@ -502,14 +515,20 @@ export async function handleCreateRafflePost(
           'supabase error'
         )
         if (existingPartner) {
-          return NextResponse.json(
-            {
-              error:
-                'You already have an active SPL token prize raffle. Finish or cancel it before starting another with the same prize token.',
-              existing_slug: existingPartner.slug,
-            },
-            { status: 409 }
+          const existingRaffle = await withTimeout(
+            getRaffleById(existingPartner.id),
+            SUPABASE_TIMEOUT_MS,
+            'supabase error'
           )
+          if (
+            existingRaffle &&
+            (await shouldBlockPartnerCryptoDuplicateCreate(existingRaffle))
+          ) {
+            return NextResponse.json(
+              buildDuplicatePartnerCryptoPrizeConflictBody(existingRaffle),
+              { status: 409 }
+            )
+          }
         }
       }
 
@@ -706,9 +725,41 @@ export async function handleCreateRafflePost(
       const rank = body.rank && body.rank.trim() ? body.rank.trim() : null
       const floorPrice = fpParsed.string
 
+      const titleCandidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
+        getSolanaReadConnection(),
+        prizeAssetId
+      )
+      const canonicalNftTitle = titleCandidates[0]!
+      const submittedTitle = typeof body.title === 'string' ? body.title : ''
+      if (
+        submittedTitle.trim() &&
+        !nftPrizeRaffleTitleMatchesAnyCandidate(submittedTitle, titleCandidates)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Raffle title must match the selected NFT name. Pick the NFT again or use the name shown in your wallet.',
+          },
+          { status: 400 }
+        )
+      }
+
+      if (!body.slug) {
+        slug = await withTimeout(
+          generateUniqueSlug(
+            canonicalNftTitle
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)/g, '')
+          ),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+      }
+
       raffleData = {
         slug,
-        title: body.title,
+        title: canonicalNftTitle,
         description: body.description || null,
         image_url: body.image_url || null,
         image_fallback_url:
@@ -806,12 +857,77 @@ export async function handleCreateRafflePost(
       )
     }
 
+    const moderationCtx =
+      adminRole === null
+        ? await getCreatorModerationCreateContext(walletAddress)
+        : {
+            blacklisted: false,
+            banned: false,
+            strikeCount: 0,
+            listingFeeLamports: null,
+            reason: null,
+          }
+
+    if (moderationCtx.banned) {
+      return NextResponse.json(
+        {
+          error:
+            'This wallet cannot create new raffles due to moderation restrictions. Contact support if you believe this is a mistake.',
+          moderationBanned: true,
+          strikeCount: moderationCtx.strikeCount,
+        },
+        { status: 403 }
+      )
+    }
+
+    const moderationRaffleFields = {
+      creator_restricted_listing: moderationCtx.blacklisted,
+      moderation_listing_fee_lamports: moderationCtx.listingFeeLamports,
+      moderation_listing_fee_paid_at: null as string | null,
+      moderation_listing_fee_payment_tx: null as string | null,
+    }
+
+    const milestoneValidation = validateMilestonesForRaffle(
+      {
+        max_tickets: raffleData.max_tickets,
+        min_tickets: raffleData.min_tickets,
+        prize_type: raffleData.prize_type,
+        floor_price: raffleData.floor_price,
+        ticket_price: raffleData.ticket_price,
+      },
+      body.milestones
+    )
+    if (!milestoneValidation.ok) {
+      return NextResponse.json({ error: milestoneValidation.error }, { status: 400 })
+    }
+
+    raffleData = { ...raffleData, ...moderationRaffleFields }
+
     try {
       const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
+      if (milestoneValidation.milestones.length > 0) {
+        await insertRaffleMilestones(raffle.id, milestoneValidation.milestones)
+      }
+
       await notifyRaffleCreated(raffle)
 
-      return NextResponse.json(raffle, { status: 201 })
+      const milestones = await getMilestonesByRaffleId(raffle.id)
+      return NextResponse.json(
+        {
+          ...raffle,
+          milestones,
+          creatorModeration: moderationCtx.blacklisted
+            ? {
+                listingFeeLamports: moderationCtx.listingFeeLamports,
+                listingFeeSol: listingFeeSolForStrikeCount(moderationCtx.strikeCount),
+                strikeCount: moderationCtx.strikeCount,
+                buyerCaution: true,
+              }
+            : null,
+        },
+        { status: 201 }
+      )
     } catch (createErr) {
       if (createErr instanceof DuplicateActiveNftPrizeError) {
         const mintRaw =

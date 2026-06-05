@@ -9,11 +9,14 @@ import {
   TransactionSignatureAlreadyUsedError,
   ComplimentaryQuotaExceededError,
   saveTransactionSignature,
+  attachEntryPaymentSignature,
 } from '@/lib/db/entries'
-import { getRaffleById } from '@/lib/db/raffles'
+import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import { entriesVerifyBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { tryIssueReferralRewardsOnPaidEntryConfirm } from '@/lib/referrals/reward-engine'
+import { isReferralGrowthProgramActive } from '@/lib/referrals/config'
 import {
   tryAcquireVerificationLock,
   releaseVerificationLock,
@@ -97,11 +100,32 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      if (entry.status !== 'pending') {
+      let activeEntry = entry
+      if (entry.status === 'rejected') {
+        const reattached = await attachEntryPaymentSignature(
+          entryId,
+          entry.wallet_address,
+          transactionSignature
+        )
+        if (!reattached) {
+          return NextResponse.json(ERROR_BODY, { status: 400 })
+        }
+        activeEntry = reattached
+      } else if (entry.status !== 'pending') {
         return NextResponse.json(ERROR_BODY, { status: 400 })
+      } else {
+        try {
+          const withSig = await saveTransactionSignature(entryId, transactionSignature)
+          if (withSig) activeEntry = withSig
+        } catch (err) {
+          if (err instanceof TransactionSignatureAlreadyUsedError) {
+            return NextResponse.json(ERROR_BODY, { status: 400 })
+          }
+          console.error(`Error saving transaction signature for entry ${entryId}:`, err)
+        }
       }
 
-      const raffle = await getRaffleById(entry.raffle_id)
+      const raffle = await getRaffleById(activeEntry.raffle_id)
       if (!raffle) {
         return NextResponse.json(ERROR_BODY, { status: 404 })
       }
@@ -109,7 +133,7 @@ export async function POST(request: NextRequest) {
       // --- 1) Validate blockchain transaction FIRST (no DB write until verified) ---
       const verificationResult = await verifyTransaction(
         transactionSignature,
-        entry,
+        activeEntry,
         raffle
       )
 
@@ -161,17 +185,39 @@ export async function POST(request: NextRequest) {
       // Entry is only "released" (lock removed) after this completes — reset-after-verify ordering
       const result = await confirmEntryWithTx(
         entryId,
-        entry.raffle_id,
-        entry.wallet_address,
+        activeEntry.raffle_id,
+        activeEntry.wallet_address,
         transactionSignature,
-        Number(entry.amount_paid),
-        entry.ticket_quantity
+        Number(activeEntry.amount_paid),
+        activeEntry.ticket_quantity
       )
+
+      try {
+        const raffleForUnlock = await getRaffleById(activeEntry.raffle_id)
+        if (raffleForUnlock) {
+          const allEntries = await getEntriesByRaffleId(activeEntry.raffle_id)
+          const { syncMilestoneUnlocksForRaffle } = await import('@/lib/raffles/milestones/unlock')
+          await syncMilestoneUnlocksForRaffle(raffleForUnlock, allEntries)
+        }
+      } catch (unlockErr) {
+        console.error('[entries/verify] milestone unlock sync:', unlockErr)
+      }
+
+      let freeEntryUnlocked = false
+      if (await isReferralGrowthProgramActive()) {
+        try {
+          const unlock = await tryIssueReferralRewardsOnPaidEntryConfirm(result.entry)
+          freeEntryUnlocked = Boolean(unlock.buyerReward)
+        } catch (rewardErr) {
+          console.error('[entries/verify] referral rewards:', rewardErr)
+        }
+      }
 
       return NextResponse.json({
         success: true,
         entryId: result.entry.id,
         transactionSignature: result.entry.transaction_signature ?? transactionSignature,
+        ...(freeEntryUnlocked ? { freeEntryUnlocked: true as const } : {}),
       })
     } finally {
       releaseVerificationLock(entryId)

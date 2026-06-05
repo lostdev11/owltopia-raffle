@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { normalizeReferralCodeInput } from '@/lib/referrals/code-format'
 import { REFERRAL_COOKIE_NAME, REFERRAL_COOKIE_MAX_AGE_SEC } from '@/lib/referrals/constants'
-import { isReferralAttributionEnabled } from '@/lib/referrals/config'
+import { isReferralAttributionActive, isReferralGrowthProgramActive } from '@/lib/referrals/config'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,7 @@ const WINDOW_MS = 60_000
  */
 export async function GET(request: NextRequest) {
   try {
-    if (!isReferralAttributionEnabled()) {
+    if (!(await isReferralAttributionActive()) || (await isReferralGrowthProgramActive())) {
       return new NextResponse(null, { status: 204 })
     }
 

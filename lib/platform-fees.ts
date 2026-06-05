@@ -275,6 +275,17 @@ export async function ownsOwltopia(
     }
   }
 
+  // Live DAS did not confirm holder. A fresh positive DB snapshot avoids false 6% tier when search
+  // misses (rate limits, very large wallets) — same 7-day TTL as the normal snapshot short-circuit.
+  const freshPositiveSnapshot = await getOwltopiaSnapshotIfFresh(normalized)
+  if (freshPositiveSnapshot === true) {
+    ownsOwltopiaCache.set(normalized, {
+      value: true,
+      expiresAt: Date.now() + OWLTOPIA_DAS_CACHE_TTL_MS,
+    })
+    return true
+  }
+
   // No NFT proved via DAS (missing Helius/key/collection, errors, rate limits, or wallet has no matching NFT).
   ownsOwltopiaCache.set(normalized, {
     value: false,

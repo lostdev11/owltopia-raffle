@@ -81,8 +81,6 @@ export async function POST(
     return NextResponse.json({
       offerId: offer.id,
       depositWallet,
-      /** @deprecated Use depositWallet — was treasury before funds-escrow routing */
-      treasuryWallet: depositWallet,
       amount,
       currency,
     })

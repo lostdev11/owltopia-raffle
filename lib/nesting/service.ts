@@ -47,8 +47,10 @@ import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
 import {
   assertActiveNftNestOnChainLock,
+  verifyActiveNestLocksForClaimAll,
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
+import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 
 export async function executeStake(params: {
   wallet: string
@@ -90,6 +92,11 @@ export async function executeStake(params: {
     throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
   }
   if (pool.asset_type === 'nft' && asset_identifier) {
+    await tryClearCrossWalletBlockerForMint({
+      holderWallet: params.wallet,
+      poolId: pool.id,
+      assetMint: asset_identifier,
+    })
     const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
     if (existing) {
       const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
@@ -378,19 +385,7 @@ export async function executeClaimAll(params: { wallet: string }) {
     }
   }
 
-  const CLAIM_LOCK_VERIFY_CONCURRENCY = 6
-  for (let i = 0; i < rowsToVerify.length; i += CLAIM_LOCK_VERIFY_CONCURRENCY) {
-    const chunk = rowsToVerify.slice(i, i + CLAIM_LOCK_VERIFY_CONCURRENCY)
-    await Promise.all(
-      chunk.map(async (row) => {
-        const rowPool = poolById.get(row.pool_id)
-        if (!rowPool) {
-          throw new StakingUserError('Pool not found', 400)
-        }
-        await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
-      })
-    )
-  }
+  await verifyActiveNestLocksForClaimAll(rowsToVerify, poolById)
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {
