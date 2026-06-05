@@ -15,6 +15,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import {
   isOwlCenterAdminOnlyPath,
+  OWL_CENTER_HOLDER_HOME,
   readStoredOwlCenterViewMode,
   writeStoredOwlCenterViewMode,
   type OwlCenterViewMode,
@@ -111,17 +112,17 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
       setViewModeState(next)
       writeStoredOwlCenterViewMode(next)
       if (next === 'public' && isOwlCenterAdminOnlyPath(pathname)) {
-        router.push('/owl-center')
+        router.push(OWL_CENTER_HOLDER_HOME)
       }
     },
     [isOwlCenterAdmin, pathname, router]
   )
 
-  // Non-admin on admin-only route → hub
+  // Non-admin on admin-only route → holder mint console
   useEffect(() => {
     if (adminLoading || isOwlCenterAdmin) return
     if (isOwlCenterAdminOnlyPath(pathname)) {
-      router.replace('/owl-center')
+      router.replace(OWL_CENTER_HOLDER_HOME)
     }
   }, [adminLoading, isOwlCenterAdmin, pathname, router])
 
