@@ -10,7 +10,7 @@
 
 import type { Connection } from '@solana/web3.js'
 
-function sanitizeRpcUrl(rpcUrl: string): string {
+export function sanitizeRpcUrl(rpcUrl: string): string {
   let u = rpcUrl.trim()
   if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
     if (!u.includes('://')) u = `https://${u}`

@@ -2,6 +2,7 @@ import type { Gen2DiscordRoleType } from '@/lib/db/discord-role-claims'
 import { isWalletOnGen2Whitelist } from '@/lib/db/gen2-whitelist'
 import { getPrimaryWalletForAddress, getWalletClusterAddresses } from '@/lib/db/wallet-links'
 import { getBalanceByWallet } from '@/lib/gen2-presale/db'
+import { isGen2PresalePaidParticipant } from '@/lib/gen2-presale/presale-participation'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export type Gen2DiscordEligibility = {
@@ -15,7 +16,7 @@ export async function walletQualifiesForGen2PresaleDiscord(wallet: string): Prom
   const w = normalizeSolanaWalletAddress(wallet)
   if (!w) return false
   const bal = await getBalanceByWallet(w)
-  return (bal?.purchased_mints ?? 0) > 0
+  return isGen2PresalePaidParticipant(bal)
 }
 
 export async function walletQualifiesForGen2WhitelistDiscord(wallet: string): Promise<boolean> {

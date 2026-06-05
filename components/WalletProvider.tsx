@@ -21,7 +21,8 @@ import {
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
-import { resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
+import { resolvePublicSolanaRpcUrl, resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
+import { getSolanaRpcUrl, isDevnetMintEnabled, walletAdapterShouldUseDevnet } from '@/lib/solana/network'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
@@ -36,9 +37,15 @@ interface WalletContextProviderProps {
 
 /** Inner provider; mounts only when page/extensions are ready, with autoConnect true from the start. */
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
-  const network = WalletAdapterNetwork.Mainnet
+  const useDevnetCluster = walletAdapterShouldUseDevnet()
+  const network = useDevnetCluster ? WalletAdapterNetwork.Devnet : WalletAdapterNetwork.Mainnet
   const shouldAutoConnect = typeof window !== 'undefined' && isMobileDevice()
-  const endpoint = useMemo(() => resolveWalletAdapterRpcUrl(), [])
+  const endpoint = useMemo(() => {
+    if (useDevnetCluster) {
+      return isDevnetMintEnabled() ? getSolanaRpcUrl() : resolvePublicSolanaRpcUrl()
+    }
+    return resolveWalletAdapterRpcUrl()
+  }, [useDevnetCluster])
 
   // Build wallets only on client so extension/Standard Wallet is available and no SSR mismatch
   const wallets = useMemo(

@@ -61,3 +61,18 @@ export async function getOptionalUnitLamportsQuote(): Promise<{
     return null
   }
 }
+
+/** WL/public mint display quote: USDC-notional → lamports using live SOL/USD (same formula as presale). */
+export async function getOptionalLamportsQuoteForUsdc(
+  priceUsdc: number
+): Promise<{ unitLamports: bigint; solUsdPrice: number } | null> {
+  try {
+    if (!Number.isFinite(priceUsdc) || priceUsdc <= 0) return null
+    const solUsd = await resolveGen2SolUsdPrice()
+    const unitSol = priceUsdc / solUsd
+    const unitLamports = BigInt(Math.round(unitSol * LAMPORTS_PER_SOL))
+    return { unitLamports, solUsdPrice: solUsd }
+  } catch {
+    return null
+  }
+}

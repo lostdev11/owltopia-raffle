@@ -21,6 +21,7 @@ import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 import { AdminTweetMirrorHost } from '@/components/admin/AdminTweetMirrorHost'
 import { MaintenanceBanner } from '@/components/MaintenanceBanner'
+import { Gen2PresaleBanner } from '@/components/owl-center/Gen2PresaleBanner'
 import { MobileClientUpdateBanner } from '@/components/MobileClientUpdateBanner'
 import { ReferralCapture } from '@/components/ReferralCapture'
 import { PlatformMusicProvider } from '@/components/PlatformMusic'
@@ -258,6 +259,7 @@ export default function RootLayout({
               <div className="flex flex-col min-h-screen">
                 <MaintenanceBanner />
                 <MobileClientUpdateBanner />
+                <Gen2PresaleBanner />
                 <ConditionalHeader />
                 <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
                   <PageTransition>{children}</PageTransition>

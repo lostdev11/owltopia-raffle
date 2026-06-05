@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
+import type { ReactNode } from 'react'
 
+import { OwlCenterChrome } from '@/components/owl-center/OwlCenterChrome'
 import {
   DEFAULT_OG_IMAGE_DIMS,
   DEFAULT_OG_IMAGE_TYPE,
@@ -12,7 +14,7 @@ import {
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 const DESCRIPTION =
-  'Owl Center is where Owltopia Gen2 minting opens. Redeem presale credits here when mint goes live.'
+  'Solana NFT launch infrastructure — presales, phased mints, sellouts, and trading activation for Owltopia Gen2 and future collections.'
 
 export const metadata: Metadata = {
   title: `Owl Center | ${PLATFORM_NAME}`,
@@ -34,6 +36,6 @@ export const metadata: Metadata = {
   },
 }
 
-export default function OwlCenterLayout({ children }: { children: React.ReactNode }) {
-  return children
+export default function OwlCenterLayout({ children }: { children: ReactNode }) {
+  return <OwlCenterChrome>{children}</OwlCenterChrome>
 }

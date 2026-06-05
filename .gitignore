@@ -44,5 +44,8 @@ docs/SECURITY_MINDSET.md
 # devnet keypair for mint script (never commit)
 scripts/phantom-devnet-keypair.json
 
+# Local Sugar candy-machine test projects (assets + dev wallets)
+test-collection-*/
+
 # Anchor / Rust build output (local only)
 governance-anchor/target/

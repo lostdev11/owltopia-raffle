@@ -32,7 +32,22 @@ export function useSiwsSignIn() {
       }
       const { message } = (await nonceRes.json()) as { message: string }
       const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
+
+      const SIGN_TIMEOUT_MS = 120_000
+      const signature = await Promise.race([
+        signMessage(messageBytes),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  'Timed out waiting for a wallet signature. Open Phantom (or your wallet), approve the Sign Message request, or disconnect and reconnect if nothing appears.'
+                )
+              ),
+            SIGN_TIMEOUT_MS
+          )
+        ),
+      ])
       const signatureBase64 =
         typeof signature === 'string'
           ? btoa(signature)

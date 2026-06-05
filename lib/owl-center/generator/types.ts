@@ -1,0 +1,62 @@
+export type TraitCategory = {
+  id: string
+  name: string
+  /** Lower renders first. */
+  zIndex: number
+}
+
+export type TraitLayer = {
+  id: string
+  categoryId: string
+  name: string
+  /** Relative rarity weight (default 100). */
+  weight: number
+  /** Persisted base64 data URL or public path for demo assets. */
+  imageSrc: string
+}
+
+export type CompatibilityRuleType = 'require' | 'exclude' | 'lock_set' | 'if_pool'
+
+export type CompatibilityRule = {
+  id: string
+  type: CompatibilityRuleType
+  /** Combo rules (require | exclude | lock_set) — two or more trait ids. */
+  traitIds?: string[]
+  /** if_pool — when this trait is selected… */
+  whenTraitId?: string
+  /** if_pool — …only roll from these traits in this category. */
+  targetCategoryId?: string
+  allowedTraitIds?: string[]
+  label?: string
+}
+
+export type GeneratorProject = {
+  id: string
+  name: string
+  collectionName: string
+  symbol: string
+  description: string
+  categories: TraitCategory[]
+  traits: TraitLayer[]
+  rules: CompatibilityRule[]
+  /** Intended collection supply for launch handoff (optional). */
+  targetSupply?: number
+  updatedAt: string
+}
+
+export type TraitSelection = Record<string, string | null>
+
+export type GeneratedNft = {
+  index: number
+  dna: string
+  traits: TraitLayer[]
+  attributes: { trait_type: string; value: string }[]
+}
+
+export const DEFAULT_CATEGORIES: Omit<TraitCategory, 'id'>[] = [
+  { name: 'Background', zIndex: 0 },
+  { name: 'Body', zIndex: 10 },
+  { name: 'Hat', zIndex: 20 },
+  { name: 'Glasses', zIndex: 30 },
+  { name: 'Accessory', zIndex: 40 },
+]

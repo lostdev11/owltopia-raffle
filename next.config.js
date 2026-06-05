@@ -1,5 +1,30 @@
 const path = require('path')
 
+/** CSP string; omits upgrade-insecure-requests on plain HTTP (e.g. local `next start`) so Chromium does not rewrite `/_next/*` to HTTPS and break the app. */
+function contentSecurityPolicy() {
+  const directives = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://solana.drpc.org https://va.vercel-scripts.com",
+    "worker-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "img-src 'self' data: https: blob:",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "connect-src 'self' https: wss: https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
+    "frame-src 'self' https://connect.solflare.com https://solflare.com https://*.solflare.com https://pay.coinbase.com https://keys.coinbase.com https://www.coinbase.com https://wallet.coinbase.com",
+    "frame-ancestors 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ]
+  if (
+    process.env.VERCEL === '1' ||
+    process.env.CSP_UPGRADE_INSECURE_REQUESTS === '1'
+  ) {
+    directives.push('upgrade-insecure-requests')
+  }
+  return directives.join('; ')
+}
+
 /**
  * Bubblegum / DAS need an indexer RPC in the browser. Many deployments set HELIUS_API_KEY for server
  * routes only; without NEXT_PUBLIC_HELIUS_RPC_URL, cNFT → escrow fails on mainnet when the wallet
@@ -128,6 +153,12 @@ const nextConfig = {
         ],
       },
       {
+        source: '/owl-center/collection/gen2/wl-check/:wallet/opengraph-image',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=3600' },
+        ],
+      },
+      {
         // Apply security headers to all routes
         source: '/:path*',
         headers: [
@@ -156,24 +187,7 @@ const nextConfig = {
             // 'unsafe-inline' and 'unsafe-eval' are needed for Next.js and wallet adapters
             // Wallet extensions (Phantom, etc.) inject scripts via chrome-extension:// URLs which are allowed by default
             key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://solana.drpc.org https://va.vercel-scripts.com",
-              "worker-src 'self' blob:",
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "img-src 'self' data: https: blob:",
-              "font-src 'self' data: https://fonts.gstatic.com",
-              // Allow RPC connections - includes common providers and HTTPS connections for custom endpoints
-              // This allows any HTTPS RPC endpoint to work (required for custom RPC providers)
-              "connect-src 'self' https: wss: https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
-              // Solflare (desktop) embeds https://connect.solflare.com — 'self' alone blocks the iframe and breaks connect.
-              "frame-src 'self' https://connect.solflare.com https://solflare.com https://*.solflare.com https://pay.coinbase.com https://keys.coinbase.com https://www.coinbase.com https://wallet.coinbase.com",
-              "frame-ancestors 'self'",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "upgrade-insecure-requests"
-            ].join('; ')
+            value: contentSecurityPolicy(),
           }
         ],
       },

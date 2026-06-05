@@ -102,7 +102,7 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
     {
       href: '/owl-center',
       label: 'Owl Center',
-      description: 'Owltopia hub — news, links, and tools',
+      description: 'Launches, mints, and collection infrastructure',
       icon: Rocket,
     },
   ],
@@ -117,9 +117,15 @@ export const OWLS_NAV_GROUP: SiteNavGroup = {
   iconAccentClass: 'text-violet-400/90',
   items: [
     {
+      href: '/owl-center/collection/gen2',
+      label: 'Gen2 Mint',
+      description: 'Check allocation and mint Owltopia Gen2',
+      icon: Rocket,
+    },
+    {
       href: '/gen2-presale',
       label: 'Gen2 Presale',
-      description: 'Mint and presale for Gen2 owls',
+      description: 'Buy presale spots before mint',
       icon: Sparkles,
     },
     {

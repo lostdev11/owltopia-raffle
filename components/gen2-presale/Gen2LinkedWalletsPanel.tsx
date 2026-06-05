@@ -145,8 +145,8 @@ export function Gen2LinkedWalletsPanel({
       </div>
       <p className="mt-2 text-xs leading-relaxed text-[#A9CBB9]">
         Presale on one wallet and whitelist on another? Link them to your{' '}
-        <strong className="text-[#EAFBF4]">primary</strong> wallet (the one you sign in with). Each
-        linked wallet must sign once to prove you control it.
+        <strong className="text-[#EAFBF4]">primary</strong> wallet (the one you sign in with). Each linked wallet must sign
+        once to prove you control it. Minting still happens per wallet — switch in Phantom or Solflare to mint from each.
       </p>
 
       {fetchError ? (
