@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Layers, Link2, Rocket, Shuffle, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Layers, Link2, Plus, Rocket, Shuffle, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -35,6 +35,14 @@ import {
   estimateMaxUniqueSupply,
   traitRarityPercent,
 } from '@/lib/owl-center/generator/rarity'
+import {
+  addCategoryToProject,
+  MAX_TRAIT_CATEGORIES,
+  removeCategoryFromProject,
+  renameCategoryInProject,
+  setCategoryAllowMultiple,
+} from '@/lib/owl-center/generator/categories'
+import { formatIfChainLabel, normalizeIfChainSteps } from '@/lib/owl-center/generator/if-chain'
 import {
   clearTraitFromSelection,
   isTraitSelected,
@@ -80,6 +88,7 @@ export function OwlGeneratorPageClient() {
   const [cloudBusy, setCloudBusy] = useState(false)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [newLayerName, setNewLayerName] = useState('')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -168,7 +177,7 @@ export function OwlGeneratorPageClient() {
   )
 
   const selectionError = useMemo(
-    () => (project ? validateSelection(selection, project.rules) : null),
+    () => (project ? validateSelection(selection, project.rules, undefined, project.categories) : null),
     [project, selection]
   )
 
@@ -284,6 +293,52 @@ export function OwlGeneratorPageClient() {
     [project, updateProject]
   )
 
+  const handleRenameCategory = useCallback(
+    (categoryId: string, name: string) => {
+      if (!project) return
+      updateProject(renameCategoryInProject(project, categoryId, name))
+    },
+    [project, updateProject]
+  )
+
+  const handleToggleCategoryMulti = useCallback(
+    (categoryId: string, allowMultiple: boolean) => {
+      if (!project) return
+      updateProject(setCategoryAllowMultiple(project, categoryId, allowMultiple))
+    },
+    [project, updateProject]
+  )
+
+  const handleAddCategory = useCallback(() => {
+    if (!project || !newLayerName.trim()) return
+    const result = addCategoryToProject(project, newLayerName)
+    if ('error' in result) {
+      setMessage(result.error)
+      return
+    }
+    updateProject(result)
+    setNewLayerName('')
+    setMessage(`Added layer "${result.categories[result.categories.length - 1]?.name}"`)
+  }, [project, newLayerName, updateProject])
+
+  const handleRemoveCategory = useCallback(
+    (categoryId: string) => {
+      if (!project) return
+      const result = removeCategoryFromProject(project, categoryId)
+      if ('error' in result) {
+        setMessage(result.error)
+        return
+      }
+      updateProject(result)
+      setSelection((s) => {
+        const next = { ...s }
+        delete next[categoryId]
+        return next
+      })
+    },
+    [project, updateProject]
+  )
+
   const removeTrait = useCallback(
     (traitId: string) => {
       if (!project) return
@@ -298,8 +353,13 @@ export function OwlGeneratorPageClient() {
             return acc
           }
           if (r.type === 'if_chain') {
-            const chain = (r.chainTraitIds ?? []).filter((id) => id !== traitId)
-            if (chain.length >= 2) acc.push({ ...r, chainTraitIds: chain })
+            const steps = normalizeIfChainSteps(r)
+              .map((s) => ({ traitIds: s.traitIds.filter((id) => id !== traitId) }))
+              .filter((s) => s.traitIds.length)
+            const total = steps.reduce((n, s) => n + s.traitIds.length, 0)
+            if (steps.length >= 2 && total >= 2) {
+              acc.push({ ...r, chainSteps: steps, chainTraitIds: undefined })
+            }
             return acc
           }
           const traitIds = (r.traitIds ?? []).filter((id) => id !== traitId)
@@ -393,17 +453,20 @@ export function OwlGeneratorPageClient() {
   )
 
   const addIfChainRule = useCallback(
-    (chainTraitIds: string[]) => {
-      if (!project || chainTraitIds.length < 2) return
-      const names = chainTraitIds
-        .map((id) => project.traits.find((t) => t.id === id)?.name)
-        .filter(Boolean)
-        .join(' → ')
+    (chainStepGroups: string[][]) => {
+      const steps = chainStepGroups.filter((s) => s.length > 0)
+      if (!project || steps.length < 2) return
+      const traitById = new Map(project.traits.map((t) => [t.id, t]))
+      const label = formatIfChainLabel(
+        steps.map((ids) => ({ traitIds: ids })),
+        traitById,
+        (catId) => project.categories.find((c) => c.id === catId)?.name ?? 'Layer'
+      )
       const rule: CompatibilityRule = {
         id: uid(),
         type: 'if_chain',
-        chainTraitIds,
-        label: `Chain: ${names}`,
+        chainSteps: steps.map((ids) => ({ traitIds: ids })),
+        label: `Chain: ${label}`,
       }
       updateProject({ rules: [...project.rules, rule] })
     },
@@ -546,9 +609,9 @@ export function OwlGeneratorPageClient() {
 
           <CommandCard label="LAYERS // upload PNGs per category">
             <p className="mb-4 text-sm text-[#9BA8B4]">
-              Transparent PNGs stacked bottom → top. Set rarity weight per trait (higher = more common in random
-              generation). <strong className="font-normal text-[#E8EEF2]">Glasses</strong> supports multiple
-              selections — tap to stack layers.
+              Rename layers, add up to {MAX_TRAIT_CATEGORIES} sections (3 or 10+), stack bottom → top. Enable{' '}
+              <strong className="font-normal text-[#E8EEF2]">Multi stack</strong> to select multiple traits in one
+              layer (e.g. Glasses).
             </p>
             <div className="space-y-6">
               {categoriesSorted.map((cat) => {
@@ -556,11 +619,35 @@ export function OwlGeneratorPageClient() {
                 return (
                   <div key={cat.id} className="border border-[#1A222B] bg-[#0F1419]/60 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="flex items-center gap-2 font-bold text-[#F4FBF8]">
-                        <Layers className="h-4 w-4 text-[#00FF9C]" aria-hidden />
-                        {cat.name}
-                        <span className="font-mono text-[10px] font-normal text-[#5C6773]">z{cat.zIndex}</span>
-                      </h3>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                        <Layers className="h-4 w-4 shrink-0 text-[#00FF9C]" aria-hidden />
+                        <input
+                          className="min-h-[44px] min-w-[120px] flex-1 border border-[#1A222B] bg-[#0B0F12] px-3 text-sm font-bold text-[#F4FBF8] touch-manipulation"
+                          value={cat.name}
+                          onChange={(e) => handleRenameCategory(cat.id, e.target.value)}
+                          aria-label="Layer name"
+                        />
+                        <span className="font-mono text-[10px] text-[#5C6773]">z{cat.zIndex}</span>
+                        <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-xs text-[#9BA8B4] touch-manipulation">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-[#00FF9C]"
+                            checked={Boolean(cat.allowMultiple)}
+                            onChange={(e) => handleToggleCategoryMulti(cat.id, e.target.checked)}
+                          />
+                          Multi stack
+                        </label>
+                        {!traits.length ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove empty layer ${cat.name}`}
+                            className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                            onClick={() => handleRemoveCategory(cat.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </div>
                       <label className="inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center gap-2 border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-4 text-xs font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16">
                         <Upload className="h-4 w-4" aria-hidden />
                         Add PNGs
@@ -639,6 +726,29 @@ export function OwlGeneratorPageClient() {
                   </div>
                 )
               })}
+            </div>
+            <div className="mt-6 flex flex-wrap items-end gap-2 border border-dashed border-[#1A222B] p-4">
+              <label className="min-w-[160px] flex-1 text-sm">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">New layer name</span>
+                <input
+                  className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-[#E8EEF2] touch-manipulation"
+                  placeholder="e.g. Mouth, Wings, FX"
+                  value={newLayerName}
+                  onChange={(e) => setNewLayerName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddCategory()
+                  }}
+                />
+              </label>
+              <DeployButton
+                variant="ghost"
+                className="gap-2"
+                disabled={!newLayerName.trim() || project.categories.length >= MAX_TRAIT_CATEGORIES}
+                onClick={handleAddCategory}
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                Add layer ({project.categories.length}/{MAX_TRAIT_CATEGORIES})
+              </DeployButton>
             </div>
           </CommandCard>
 
@@ -786,7 +896,7 @@ function RulesSection({
     allowedTraitIds: string[],
     options?: { alsoReverse?: boolean }
   ) => void
-  onAddIfChainRule: (chainTraitIds: string[]) => void
+  onAddIfChainRule: (chainStepGroups: string[][]) => void
   onRemoveRule: (id: string) => void
 }) {
   const [ruleType, setRuleType] = useState<CompatibilityRuleType>('require')
@@ -795,7 +905,9 @@ function RulesSection({
   const [ifTargetCategory, setIfTargetCategory] = useState<string | null>(null)
   const [ifAllowed, setIfAllowed] = useState<string[]>([])
   const [ifAlsoReverse, setIfAlsoReverse] = useState(true)
-  const [chainSteps, setChainSteps] = useState<string[]>([])
+  const [chainStepGroups, setChainStepGroups] = useState<string[][]>([])
+  const [chainDraft, setChainDraft] = useState<string[]>([])
+  const [chainDraftCategory, setChainDraftCategory] = useState<string | null>(null)
 
   const traitLabel = (id: string) => project.traits.find((t) => t.id === id)?.name ?? id.slice(0, 8)
   const categoryLabel = (id: string) => project.categories.find((c) => c.id === id)?.name ?? 'Layer'
@@ -808,16 +920,38 @@ function RulesSection({
   const ifPoolRules = project.rules.filter((r) => r.type === 'if_pool')
   const ifChainRules = project.rules.filter((r) => r.type === 'if_chain')
 
-  const chainUsedCategories = new Set(
-    chainSteps.map((id) => project.traits.find((t) => t.id === id)?.categoryId).filter(Boolean)
-  )
+  const chainUsedCategories = new Set([
+    ...chainStepGroups.map((group) => project.traits.find((t) => t.id === group[0])?.categoryId),
+    chainDraftCategory,
+  ].filter(Boolean))
+
+  const toggleChainDraftTrait = (traitId: string, categoryId: string) => {
+    if (chainUsedCategories.has(categoryId) && categoryId !== chainDraftCategory) return
+    if (!chainDraftCategory) {
+      setChainDraftCategory(categoryId)
+      setChainDraft([traitId])
+      return
+    }
+    if (categoryId !== chainDraftCategory) return
+    setChainDraft((p) => (p.includes(traitId) ? p.filter((x) => x !== traitId) : [...p, traitId]))
+  }
+
+  const commitChainDraft = () => {
+    if (!chainDraft.length) return
+    setChainStepGroups((p) => [...p, chainDraft])
+    setChainDraft([])
+    setChainDraftCategory(null)
+  }
+
+  const totalChainLayers = chainStepGroups.length + (chainDraft.length ? 1 : 0)
 
   return (
     <>
       <CommandCard label="RULES // trait pairing">
         <p className="mb-4 text-sm text-[#9BA8B4]">
           <strong className="font-normal text-[#E8EEF2]">Require</strong> — linked traits must appear together.{' '}
-          <strong className="font-normal text-[#E8EEF2]">Exclude</strong> — cannot combine.{' '}
+          <strong className="font-normal text-[#E8EEF2]">Exclude</strong> — cannot combine (pick 3+ traits in one
+          exclude rule, e.g. Cyber Eyewear + every hat except No Trait).{' '}
           <strong className="font-normal text-[#E8EEF2]">Lock set</strong> — all or none.
         </p>
 
@@ -1075,61 +1209,86 @@ function RulesSection({
 
       <CommandCard label="RULES // IF chain (multi-layer)">
         <p className="mb-4 text-sm text-[#9BA8B4]">
-          Link <strong className="font-normal text-[#E8EEF2]">2+ traits across layers</strong> in order — e.g.{' '}
-          Stampede Hat → Brown Body → Medshade Glasses → Owl Chain. All chain traits must appear together;
-          randomize and export respect the full chain.
+          Build layer-by-layer. Tap <strong className="font-normal text-[#E8EEF2]">multiple traits per step</strong>{' '}
+          (bases/outfits = pick one of; glasses = stack all). Then <strong className="font-normal text-[#E8EEF2]">Next
+          layer</strong> before the next category.
         </p>
 
         {project.traits.length >= 2 ? (
           <div className="space-y-4">
-            {chainSteps.length ? (
+            {chainStepGroups.length || chainDraft.length ? (
               <ol className="space-y-2 border border-[#1A222B] bg-[#0F1419]/80 px-3 py-3 text-sm text-[#C5D0D8]">
-                {chainSteps.map((id, i) => {
-                  const t = project.traits.find((tr) => tr.id === id)
-                  const cat = project.categories.find((c) => c.id === t?.categoryId)?.name
+                {chainStepGroups.map((group, i) => {
+                  const catId = project.traits.find((tr) => tr.id === group[0])?.categoryId
+                  const cat = project.categories.find((c) => c.id === catId)
+                  const joiner = cat?.allowMultiple ? ' + ' : ' / '
                   return (
-                    <li key={id} className="flex flex-wrap items-center justify-between gap-2">
+                    <li key={`group-${i}`} className="flex flex-wrap items-center justify-between gap-2">
                       <span>
                         <span className="font-mono text-[10px] text-[#5C6773]">{i + 1}.</span>{' '}
-                        {cat}: <span className="text-[#E8EEF2]">{t?.name}</span>
+                        {cat?.name}:{' '}
+                        <span className="text-[#E8EEF2]">{group.map(traitLabel).join(joiner)}</span>
                       </span>
                       <button
                         type="button"
-                        aria-label="Remove chain step"
+                        aria-label="Remove chain layer"
                         className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
-                        onClick={() => setChainSteps((p) => p.filter((x) => x !== id))}
+                        onClick={() => setChainStepGroups((p) => p.filter((_, idx) => idx !== i))}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </li>
                   )
                 })}
+                {chainDraft.length ? (
+                  <li className="flex flex-wrap items-center justify-between gap-2 border border-dashed border-[#00FF9C]/25 px-2 py-1">
+                    <span>
+                      <span className="font-mono text-[10px] text-[#00C97A]">{chainStepGroups.length + 1}.</span>{' '}
+                      {project.categories.find((c) => c.id === chainDraftCategory)?.name}:{' '}
+                      <span className="text-[#E8FDF4]">
+                        {chainDraft.map(traitLabel).join(
+                          project.categories.find((c) => c.id === chainDraftCategory)?.allowMultiple
+                            ? ' + '
+                            : ' / '
+                        )}
+                      </span>
+                    </span>
+                  </li>
+                ) : null}
               </ol>
             ) : (
-              <p className="font-mono text-xs text-[#5C6773]">Pick traits in order — one per layer.</p>
+              <p className="font-mono text-xs text-[#5C6773]">Step 1 — pick trait(s) for one layer, then Next layer.</p>
             )}
 
             <div>
               <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                {chainSteps.length ? `Next step (${chainSteps.length + 1})` : 'Step 1'}
+                {chainDraftCategory
+                  ? `Current layer — ${project.categories.find((c) => c.id === chainDraftCategory)?.name}`
+                  : chainStepGroups.length
+                    ? `Next layer (${chainStepGroups.length + 1})`
+                    : 'Step 1'}
               </span>
               <div className="mt-2 flex flex-wrap gap-2">
                 {project.traits.map((t) => {
-                  const cat = project.categories.find((c) => c.id === t.categoryId)?.name
-                  const used = chainSteps.includes(t.id) || chainUsedCategories.has(t.categoryId)
+                  const cat = project.categories.find((c) => c.id === t.categoryId)
+                  const layerTaken =
+                    chainUsedCategories.has(t.categoryId) && t.categoryId !== chainDraftCategory
+                  const active = chainDraft.includes(t.id)
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      disabled={used}
+                      disabled={layerTaken}
                       className={cn(
                         'min-h-[44px] touch-manipulation border px-3 text-xs',
-                        'border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/30',
-                        used && 'cursor-not-allowed opacity-40'
+                        active
+                          ? 'border-[#00FF9C]/45 bg-[#00FF9C]/12 text-[#E8FDF4]'
+                          : 'border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/30',
+                        layerTaken && 'cursor-not-allowed opacity-40'
                       )}
-                      onClick={() => setChainSteps((p) => [...p, t.id])}
+                      onClick={() => toggleChainDraftTrait(t.id, t.categoryId)}
                     >
-                      {cat}: {t.name}
+                      {cat?.name}: {t.name}
                     </button>
                   )
                 })}
@@ -1139,19 +1298,38 @@ function RulesSection({
             <div className="flex flex-wrap gap-2">
               <DeployButton
                 variant="ghost"
+                disabled={!chainDraft.length}
+                onClick={commitChainDraft}
+              >
+                Next layer
+              </DeployButton>
+              <DeployButton
+                variant="ghost"
                 className="gap-2"
-                disabled={chainSteps.length < 2}
+                disabled={totalChainLayers < 2}
                 onClick={() => {
-                  onAddIfChainRule(chainSteps)
-                  setChainSteps([])
+                  const groups = chainDraft.length
+                    ? [...chainStepGroups, chainDraft]
+                    : chainStepGroups
+                  onAddIfChainRule(groups)
+                  setChainStepGroups([])
+                  setChainDraft([])
+                  setChainDraftCategory(null)
                 }}
               >
                 <Link2 className="h-4 w-4" aria-hidden />
-                Add IF chain ({chainSteps.length} traits)
+                Add IF chain ({totalChainLayers} layers)
               </DeployButton>
-              {chainSteps.length ? (
-                <DeployButton variant="ghost" onClick={() => setChainSteps([])}>
-                  Clear steps
+              {chainStepGroups.length || chainDraft.length ? (
+                <DeployButton
+                  variant="ghost"
+                  onClick={() => {
+                    setChainStepGroups([])
+                    setChainDraft([])
+                    setChainDraftCategory(null)
+                  }}
+                >
+                  Clear
                 </DeployButton>
               ) : null}
             </div>
@@ -1170,7 +1348,14 @@ function RulesSection({
                 <span className="text-[#C5D0D8]">
                   <span className="font-mono text-[10px] uppercase text-[#00C97A]">if chain</span>
                   {' · '}
-                  {(r.chainTraitIds ?? []).map(traitLabel).join(' → ')}
+                  {normalizeIfChainSteps(r)
+                    .map((step) => {
+                      const catId = project.traits.find((t) => t.id === step.traitIds[0])?.categoryId
+                      const cat = project.categories.find((c) => c.id === catId)
+                      const joiner = cat?.allowMultiple ? ' + ' : ' / '
+                      return step.traitIds.map(traitLabel).join(joiner)
+                    })
+                    .join(' → ')}
                 </span>
                 <button
                   type="button"

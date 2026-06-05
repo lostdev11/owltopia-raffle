@@ -1,4 +1,5 @@
 import type { CompatibilityRule, GeneratorProject, TraitLayer } from '@/lib/owl-center/generator/types'
+import { applyLegacyCategoryRenames } from '@/lib/owl-center/generator/categories'
 import { DEFAULT_CATEGORIES } from '@/lib/owl-center/generator/types'
 import { urlToDataUrl } from '@/lib/owl-center/generator/storage'
 
@@ -89,13 +90,13 @@ function defaultCategoryFlags(name: string): Pick<GeneratorProject['categories']
 export function ensureDefaultCategories(project: GeneratorProject): GeneratorProject {
   const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
   const missing = DEFAULT_CATEGORIES.filter((c) => !existing.has(c.name.toLowerCase()))
-  const categories = [
+  const categories = applyLegacyCategoryRenames([
     ...project.categories.map((c) => ({ ...c, ...defaultCategoryFlags(c.name) })),
     ...missing.map((c) => ({
       ...c,
       id: `cat-${crypto.randomUUID().slice(0, 8)}`,
     })),
-  ].sort((a, b) => a.zIndex - b.zIndex)
+  ]).sort((a, b) => a.zIndex - b.zIndex)
 
   const snapshot = (cats: GeneratorProject['categories']) =>
     JSON.stringify(cats.map((c) => ({ id: c.id, name: c.name, zIndex: c.zIndex, allowMultiple: c.allowMultiple })))
@@ -134,8 +135,10 @@ export async function createDemoProject(): Promise<GeneratorProject> {
   const bodyCat = project.categories.find((c) => c.name === 'Body')
   const hatCat = project.categories.find((c) => c.name === 'Hat')
   const glassesCat = project.categories.find((c) => c.name === 'Glasses')
-  const accessoryCat = project.categories.find((c) => c.name === 'Accessory')
-  if (!bgCat || !bodyCat || !hatCat || !glassesCat || !accessoryCat) return project
+  const outfitsCat = project.categories.find(
+    (c) => c.name === 'Outfits' || c.name === 'Accessory'
+  )
+  if (!bgCat || !bodyCat || !hatCat || !glassesCat || !outfitsCat) return project
 
   const noneSvg = transparentLayerSvg()
   const traits: TraitLayer[] = []
@@ -159,9 +162,9 @@ export async function createDemoProject(): Promise<GeneratorProject> {
   traits.push(traitFromDataUrl(glassesCat.id, 'None', noneSvg, 50))
 
   for (const item of DEMO_ACCESSORIES) {
-    traits.push(await traitFromFile(accessoryCat.id, item.name, item.file))
+    traits.push(await traitFromFile(outfitsCat.id, item.name, item.file))
   }
-  traits.push(traitFromDataUrl(accessoryCat.id, 'None', noneSvg, 70))
+  traits.push(traitFromDataUrl(outfitsCat.id, 'None', noneSvg, 70))
 
   const byName = (catId: string, name: string) =>
     traits.find((t) => t.categoryId === catId && t.name === name)?.id

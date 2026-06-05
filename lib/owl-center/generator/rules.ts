@@ -1,4 +1,14 @@
 import {
+  flattenIfChainSteps,
+  ifChainForcedAllTraits,
+  ifChainStepBlockedByOtherSteps,
+  ifChainStepCategoryId,
+  ifChainStepMode,
+  isIfChainActive,
+  isIfChainFullySatisfied,
+  normalizeIfChainSteps,
+} from '@/lib/owl-center/generator/if-chain'
+import {
   getCategorySelectionIds,
   selectionHasTrait,
   traitsForSelection,
@@ -37,15 +47,7 @@ export function comboTraitIds(rule: CompatibilityRule): string[] {
 }
 
 export function chainTraitIds(rule: CompatibilityRule): string[] {
-  return rule.chainTraitIds ?? []
-}
-
-function chainTraitInCategory(
-  ids: string[],
-  categoryId: string,
-  traitById: Map<string, TraitLayer>
-): string | undefined {
-  return ids.find((id) => traitById.get(id)?.categoryId === categoryId)
+  return flattenIfChainSteps(normalizeIfChainSteps(rule))
 }
 
 export function isIfPoolRule(rule: CompatibilityRule): boolean {
@@ -80,7 +82,8 @@ export function getCategoryPool(
   categoryId: string,
   selection: TraitSelection,
   allTraits: TraitLayer[],
-  rules: CompatibilityRule[]
+  rules: CompatibilityRule[],
+  categories?: TraitCategory[]
 ): TraitLayer[] {
   const traitById = new Map(allTraits.map((t) => [t.id, t]))
   let pool = allTraits.filter((t) => t.categoryId === categoryId)
@@ -115,35 +118,44 @@ export function getCategoryPool(
     }
   }
 
+  const catById = new Map(categories?.map((c) => [c.id, c]))
+
   for (const rule of rules) {
     if (rule.type === 'if_chain') {
-      const ids = chainTraitIds(rule)
-      if (ids.length < 2) continue
+      const steps = normalizeIfChainSteps(rule)
+      if (steps.length < 2) continue
+      if (!isIfChainActive(steps, selection)) continue
 
-      const present = ids.filter((id) => selectionHasTrait(selection, id))
-      const chainTraitId = chainTraitInCategory(ids, categoryId, traitById)
+      const stepForCat = steps.find(
+        (step) => ifChainStepCategoryId(step, traitById) === categoryId
+      )
+      if (!stepForCat) continue
 
-      if (chainTraitId) {
-        let blockChainTrait = false
-        for (const otherId of ids) {
-          if (otherId === chainTraitId) continue
-          const other = traitById.get(otherId)
-          if (!other) continue
-          const otherPickedIds = getCategorySelectionIds(selection, other.categoryId)
-          if (otherPickedIds.length > 0 && !otherPickedIds.includes(otherId)) {
-            blockChainTrait = true
-            break
-          }
-        }
-        if (blockChainTrait) {
-          pool = pool.filter((t) => t.id !== chainTraitId)
-        }
+      const cat = catById?.get(categoryId)
+      const mode = ifChainStepMode(cat, stepForCat)
+      const allowed = new Set(stepForCat.traitIds)
+
+      if (ifChainStepBlockedByOtherSteps(stepForCat, steps, selection, traitById)) {
+        pool = pool.filter((t) => !allowed.has(t.id))
+        continue
       }
 
-      if (present.length > 0 && chainTraitId && !selectionHasTrait(selection, chainTraitId)) {
-        pool = pool.filter((t) => t.id === chainTraitId)
+      pool = pool.filter((t) => allowed.has(t.id))
+
+      const presentInStep = stepForCat.traitIds.filter((id) => selectionHasTrait(selection, id))
+      if (mode === 'all' && presentInStep.length > 0 && presentInStep.length < stepForCat.traitIds.length) {
+        const missing = new Set(
+          stepForCat.traitIds.filter((id) => !selectionHasTrait(selection, id))
+        )
+        pool = pool.filter((t) => missing.has(t.id))
         if (!pool.length) return []
       }
+
+      if ((mode === 'single' || mode === 'one_of') && presentInStep.length === 0) {
+        // Chain active — must pick from this step's options.
+        if (!pool.length) return []
+      }
+
       continue
     }
 
@@ -184,7 +196,8 @@ export function getCategoryPool(
 export function validateSelection(
   selection: TraitSelection,
   rules: CompatibilityRule[],
-  traitById?: Map<string, TraitLayer>
+  traitById?: Map<string, TraitLayer>,
+  categories?: TraitCategory[]
 ): string | null {
   for (const rule of rules) {
     if (rule.type === 'if_pool') {
@@ -204,11 +217,14 @@ export function validateSelection(
     }
 
     if (rule.type === 'if_chain') {
-      const ids = chainTraitIds(rule)
-      if (ids.length < 2) continue
-      const present = ids.filter((id) => selectionHasTrait(selection, id))
-      if (present.length > 0 && present.length < ids.length) {
-        return rule.label ?? 'Trait chain incomplete — all chain traits must appear together'
+      const steps = normalizeIfChainSteps(rule)
+      if (steps.length < 2) continue
+      if (!isIfChainActive(steps, selection)) continue
+      if (!traitById || !categories) {
+        return rule.label ?? 'Trait chain incomplete — all chain steps must be satisfied'
+      }
+      if (!isIfChainFullySatisfied(steps, selection, categories, traitById)) {
+        return rule.label ?? 'Trait chain incomplete — finish every chain step'
       }
       continue
     }
@@ -264,9 +280,15 @@ export function randomSelection(
     const selection: TraitSelection = {}
 
     for (const cat of sorted) {
-      const pool = getCategoryPool(cat.id, selection, allTraits, rules)
+      const pool = getCategoryPool(cat.id, selection, allTraits, rules, sorted)
       if (!pool.length) {
         selection[cat.id] = null
+        continue
+      }
+
+      const chainAll = ifChainForcedAllTraits(cat.id, selection, rules, traitById, sorted)
+      if (chainAll?.length) {
+        selection[cat.id] = chainAll
         continue
       }
 
@@ -286,7 +308,7 @@ export function randomSelection(
       selection[cat.id] = picked?.id ?? null
     }
 
-    if (!validateSelection(selection, rules, traitById)) return selection
+    if (!validateSelection(selection, rules, traitById, sorted)) return selection
   }
   return null
 }

@@ -29,7 +29,9 @@ export type CompatibilityRule = {
   /** if_pool — …only roll from these traits in this category. */
   targetCategoryId?: string
   allowedTraitIds?: string[]
-  /** if_chain — ordered traits that must appear together across layers. */
+  /** if_chain — ordered layer steps (preferred). */
+  chainSteps?: { traitIds: string[] }[]
+  /** @deprecated Legacy flat list — migrated to chainSteps on load. */
   chainTraitIds?: string[]
   label?: string
 }
@@ -65,5 +67,5 @@ export const DEFAULT_CATEGORIES: Omit<TraitCategory, 'id'>[] = [
   { name: 'Hat', zIndex: 20 },
   { name: 'Eyes', zIndex: 25 },
   { name: 'Glasses', zIndex: 30, allowMultiple: true },
-  { name: 'Accessory', zIndex: 40 },
+  { name: 'Outfits', zIndex: 40 },
 ]

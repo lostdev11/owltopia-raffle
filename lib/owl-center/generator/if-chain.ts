@@ -1,0 +1,127 @@
+import { getCategorySelectionIds, selectionHasTrait } from '@/lib/owl-center/generator/selection'
+import type { CompatibilityRule, TraitCategory, TraitLayer, TraitSelection } from '@/lib/owl-center/generator/types'
+
+export type IfChainStep = {
+  traitIds: string[]
+}
+
+export type IfChainStepMode = 'single' | 'one_of' | 'all'
+
+export function normalizeIfChainSteps(rule: CompatibilityRule): IfChainStep[] {
+  if (rule.chainSteps?.length) {
+    return rule.chainSteps.filter((s) => s.traitIds.length > 0)
+  }
+  if (rule.chainTraitIds?.length) {
+    return rule.chainTraitIds.map((id) => ({ traitIds: [id] }))
+  }
+  return []
+}
+
+export function flattenIfChainSteps(steps: IfChainStep[]): string[] {
+  return steps.flatMap((s) => s.traitIds)
+}
+
+export function ifChainStepCategoryId(
+  step: IfChainStep,
+  traitById: Map<string, TraitLayer>
+): string | undefined {
+  const first = traitById.get(step.traitIds[0])
+  return first?.categoryId
+}
+
+export function ifChainStepMode(category: TraitCategory | undefined, step: IfChainStep): IfChainStepMode {
+  if (step.traitIds.length <= 1) return 'single'
+  if (category?.allowMultiple) return 'all'
+  return 'one_of'
+}
+
+export function isIfChainStepSatisfied(
+  step: IfChainStep,
+  selection: TraitSelection,
+  category: TraitCategory | undefined
+): boolean {
+  const present = step.traitIds.filter((id) => selectionHasTrait(selection, id))
+  const mode = ifChainStepMode(category, step)
+  if (mode === 'all') return present.length === step.traitIds.length
+  return present.length === 1
+}
+
+export function isIfChainActive(steps: IfChainStep[], selection: TraitSelection): boolean {
+  return flattenIfChainSteps(steps).some((id) => selectionHasTrait(selection, id))
+}
+
+export function isIfChainFullySatisfied(
+  steps: IfChainStep[],
+  selection: TraitSelection,
+  categories: TraitCategory[],
+  traitById: Map<string, TraitLayer>
+): boolean {
+  const catById = new Map(categories.map((c) => [c.id, c]))
+  return steps.every((step) => {
+    const catId = ifChainStepCategoryId(step, traitById)
+    const cat = catId ? catById.get(catId) : undefined
+    return isIfChainStepSatisfied(step, selection, cat)
+  })
+}
+
+/** Another chain step has traits selected outside that step's allowed set. */
+export function ifChainStepBlockedByOtherSteps(
+  step: IfChainStep,
+  steps: IfChainStep[],
+  selection: TraitSelection,
+  traitById: Map<string, TraitLayer>
+): boolean {
+  const stepCat = ifChainStepCategoryId(step, traitById)
+  if (!stepCat) return false
+
+  for (const other of steps) {
+    if (other === step) continue
+    const otherCat = ifChainStepCategoryId(other, traitById)
+    if (!otherCat) continue
+    const picked = getCategorySelectionIds(selection, otherCat)
+    if (!picked.length) continue
+    const allowed = new Set(other.traitIds)
+    if (picked.some((id) => !allowed.has(id))) return true
+  }
+  return false
+}
+
+/** When chain is active, glasses (or other allowMultiple) steps pick every trait in the step. */
+export function ifChainForcedAllTraits(
+  categoryId: string,
+  selection: TraitSelection,
+  rules: CompatibilityRule[],
+  traitById: Map<string, TraitLayer>,
+  categories: TraitCategory[]
+): string[] | null {
+  const catById = new Map(categories.map((c) => [c.id, c]))
+
+  for (const rule of rules) {
+    if (rule.type !== 'if_chain') continue
+    const steps = normalizeIfChainSteps(rule)
+    if (!isIfChainActive(steps, selection)) continue
+
+    const step = steps.find((s) => ifChainStepCategoryId(s, traitById) === categoryId)
+    if (!step) continue
+
+    const cat = catById.get(categoryId)
+    if (ifChainStepMode(cat, step) === 'all') return step.traitIds
+  }
+
+  return null
+}
+
+export function formatIfChainLabel(
+  steps: IfChainStep[],
+  traitById: Map<string, TraitLayer>,
+  categoryName: (categoryId: string) => string
+): string {
+  return steps
+    .map((step) => {
+      const catId = ifChainStepCategoryId(step, traitById)
+      const names = step.traitIds.map((id) => traitById.get(id)?.name ?? id.slice(0, 8))
+      const joiner = step.traitIds.length > 1 ? ' + ' : ''
+      return `${catId ? categoryName(catId) : 'Layer'}: ${names.join(joiner)}`
+    })
+    .join(' → ')
+}

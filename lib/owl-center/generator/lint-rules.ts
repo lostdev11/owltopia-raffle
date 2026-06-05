@@ -1,4 +1,5 @@
 import type { CompatibilityRule, GeneratorProject } from '@/lib/owl-center/generator/types'
+import { ifChainStepCategoryId, normalizeIfChainSteps } from '@/lib/owl-center/generator/if-chain'
 import { chainTraitIds, comboTraitIds } from '@/lib/owl-center/generator/rules'
 
 export type RuleLintSeverity = 'error' | 'warning' | 'info'
@@ -92,44 +93,69 @@ function lintIfPoolRule(
 function lintIfChainRule(
   rule: CompatibilityRule,
   traitById: Map<string, GeneratorProject['traits'][number]>,
+  project: GeneratorProject,
   issues: RuleLintIssue[]
 ): void {
-  const ids = chainTraitIds(rule)
-  if (ids.length < 2) {
+  const steps = normalizeIfChainSteps(rule)
+  const totalTraits = chainTraitIds(rule).length
+
+  if (steps.length < 2 || totalTraits < 2) {
     issues.push({
       severity: 'error',
       code: 'if_chain_too_short',
-      message: 'IF chain needs at least 2 traits across different layers',
+      message: 'IF chain needs at least 2 layers with traits',
       ruleId: rule.id,
     })
     return
   }
 
   const seenCategories = new Set<string>()
-  for (const id of ids) {
-    const t = traitById.get(id)
-    if (!t) {
+  for (const step of steps) {
+    if (!step.traitIds.length) {
       issues.push({
         severity: 'error',
-        code: 'missing_trait',
-        message: 'IF chain references a trait that was removed',
+        code: 'if_chain_empty_step',
+        message: 'IF chain step cannot be empty',
         ruleId: rule.id,
       })
       continue
     }
-    if (seenCategories.has(t.categoryId)) {
-      const cat = project.categories.find((c) => c.id === t.categoryId)
-      if (!cat?.allowMultiple) {
+
+    const catId = ifChainStepCategoryId(step, traitById)
+    if (!catId) continue
+
+    const catsInStep = new Set<string>()
+    for (const id of step.traitIds) {
+      const t = traitById.get(id)
+      if (!t) {
         issues.push({
           severity: 'error',
-          code: 'if_chain_same_category',
-          message: 'IF chain traits must each be from a different layer',
+          code: 'missing_trait',
+          message: 'IF chain references a trait that was removed',
           ruleId: rule.id,
         })
-        break
+        continue
       }
+      if (t.categoryId !== catId) {
+        issues.push({
+          severity: 'error',
+          code: 'if_chain_mixed_category',
+          message: 'Each IF chain step must use traits from one layer only',
+          ruleId: rule.id,
+        })
+      }
+      catsInStep.add(t.categoryId)
     }
-    seenCategories.add(t.categoryId)
+
+    if (seenCategories.has(catId)) {
+      issues.push({
+        severity: 'error',
+        code: 'if_chain_duplicate_layer',
+        message: 'IF chain cannot repeat the same layer — combine traits into one step',
+        ruleId: rule.id,
+      })
+    }
+    seenCategories.add(catId)
   }
 }
 
@@ -145,7 +171,7 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     }
 
     if (rule.type === 'if_chain') {
-      lintIfChainRule(rule, traitById, issues)
+      lintIfChainRule(rule, traitById, project, issues)
       continue
     }
 
@@ -200,7 +226,7 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
       rule.type === 'if_pool'
         ? `if_pool:${rule.whenTraitId}:${rule.targetCategoryId}:${ruleTraitKey(rule.allowedTraitIds ?? [])}`
         : rule.type === 'if_chain'
-          ? `if_chain:${ruleTraitKey(chainTraitIds(rule))}`
+          ? `if_chain:${ruleTraitKey(normalizeIfChainSteps(rule).flatMap((s) => s.traitIds))}`
           : `${rule.type}:${ruleTraitKey(comboTraitIds(rule))}`
     if (seenRules.has(key)) {
       issues.push({
