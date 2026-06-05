@@ -171,14 +171,22 @@ export function OwlGeneratorPageClient() {
     return map
   }, [project])
 
+  const traitById = useMemo(
+    () => (project ? new Map(project.traits.map((t) => [t.id, t])) : undefined),
+    [project]
+  )
+
   const selectedTraits = useMemo(
     () => (project ? traitsForSelection(project.traits, selection, project.categories) : []),
     [project, selection]
   )
 
   const selectionError = useMemo(
-    () => (project ? validateSelection(selection, project.rules, undefined, project.categories) : null),
-    [project, selection]
+    () =>
+      project && traitById
+        ? validateSelection(selection, project.rules, traitById, project.categories)
+        : null,
+    [project, selection, traitById]
   )
 
   useEffect(() => {

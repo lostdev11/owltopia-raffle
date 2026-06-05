@@ -1,5 +1,10 @@
 import type { CompatibilityRule, GeneratorProject, TraitLayer } from '@/lib/owl-center/generator/types'
-import { applyLegacyCategoryRenames } from '@/lib/owl-center/generator/categories'
+import {
+  applyLegacyCategoryRenames,
+  flagsForCategoryName,
+  missingDefaultSlots,
+  removeGhostDefaultLayers,
+} from '@/lib/owl-center/generator/categories'
 import { DEFAULT_CATEGORIES } from '@/lib/owl-center/generator/types'
 import { urlToDataUrl } from '@/lib/owl-center/generator/storage'
 
@@ -77,21 +82,15 @@ function traitFromDataUrl(
 }
 
 export function projectMissingDefaultLayers(project: GeneratorProject): boolean {
-  const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
-  return DEFAULT_CATEGORIES.some((c) => !existing.has(c.name.toLowerCase()))
+  return missingDefaultSlots(project.categories).length > 0
 }
 
-function defaultCategoryFlags(name: string): Pick<GeneratorProject['categories'][number], 'allowMultiple'> {
-  const template = DEFAULT_CATEGORIES.find((c) => c.name.toLowerCase() === name.toLowerCase())
-  return template?.allowMultiple ? { allowMultiple: true } : {}
-}
-
-/** Add missing default layers and sync flags (e.g. Eyes, Glasses multi-select). */
+/** Add missing default layers, remove ghost duplicates, sync flags (e.g. Eyes, Eyewear multi-select). */
 export function ensureDefaultCategories(project: GeneratorProject): GeneratorProject {
-  const existing = new Set(project.categories.map((c) => c.name.toLowerCase()))
-  const missing = DEFAULT_CATEGORIES.filter((c) => !existing.has(c.name.toLowerCase()))
+  const deduped = removeGhostDefaultLayers(project.categories, project.traits)
+  const missing = missingDefaultSlots(deduped)
   const categories = applyLegacyCategoryRenames([
-    ...project.categories.map((c) => ({ ...c, ...defaultCategoryFlags(c.name) })),
+    ...deduped.map((c) => ({ ...c, ...flagsForCategoryName(c.name) })),
     ...missing.map((c) => ({
       ...c,
       id: `cat-${crypto.randomUUID().slice(0, 8)}`,
@@ -100,7 +99,9 @@ export function ensureDefaultCategories(project: GeneratorProject): GeneratorPro
 
   const snapshot = (cats: GeneratorProject['categories']) =>
     JSON.stringify(cats.map((c) => ({ id: c.id, name: c.name, zIndex: c.zIndex, allowMultiple: c.allowMultiple })))
-  if (snapshot(categories) === snapshot(project.categories)) return project
+  const prevSnapshot = snapshot(project.categories)
+  const nextSnapshot = snapshot(categories)
+  if (nextSnapshot === prevSnapshot) return project
   return { ...project, categories }
 }
 

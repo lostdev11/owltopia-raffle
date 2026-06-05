@@ -1,12 +1,69 @@
 import type { CompatibilityRule, GeneratorProject, TraitCategory } from '@/lib/owl-center/generator/types'
+import { DEFAULT_CATEGORIES } from '@/lib/owl-center/generator/types'
 import { normalizeIfChainSteps } from '@/lib/owl-center/generator/if-chain'
 
 export const MAX_TRAIT_CATEGORIES = 24
 export const MIN_TRAIT_CATEGORIES = 1
 
+/** Recognized renames for default layer slots (e.g. Body → Base, Hat → Headwear). */
+export const DEFAULT_LAYER_ALIASES: Record<string, readonly string[]> = {
+  Background: ['backgrounds', 'bg'],
+  Body: ['base', 'bases'],
+  Hat: ['headwear', 'head wear', 'hats'],
+  Eyes: ['eye'],
+  Glasses: ['eyewear', 'eye wear'],
+  Outfits: ['outfit', 'accessories', 'accessory'],
+}
+
 /** Old default names → current defaults (applied once on project load). */
 const LEGACY_CATEGORY_RENAMES: Record<string, string> = {
   accessory: 'Outfits',
+}
+
+export function categoryMatchesDefaultSlot(categoryName: string, defaultSlotName: string): boolean {
+  const lower = categoryName.toLowerCase()
+  if (lower === defaultSlotName.toLowerCase()) return true
+  return (DEFAULT_LAYER_ALIASES[defaultSlotName] ?? []).some((alias) => alias === lower)
+}
+
+export function defaultSlotIsFilled(categories: TraitCategory[], slotName: string): boolean {
+  return categories.some((c) => categoryMatchesDefaultSlot(c.name, slotName))
+}
+
+export function missingDefaultSlots(
+  categories: TraitCategory[]
+): Omit<TraitCategory, 'id'>[] {
+  return DEFAULT_CATEGORIES.filter((d) => !defaultSlotIsFilled(categories, d.name))
+}
+
+/** Drop empty Body/Hat/etc. when the user already renamed that slot (e.g. Base, Headwear). */
+export function removeGhostDefaultLayers(
+  categories: TraitCategory[],
+  traits: { categoryId: string }[]
+): TraitCategory[] {
+  const traitCount = new Map<string, number>()
+  for (const t of traits) {
+    traitCount.set(t.categoryId, (traitCount.get(t.categoryId) ?? 0) + 1)
+  }
+
+  return categories.filter((cat) => {
+    if ((traitCount.get(cat.id) ?? 0) > 0) return true
+    for (const defaultCat of DEFAULT_CATEGORIES) {
+      if (cat.name.toLowerCase() !== defaultCat.name.toLowerCase()) continue
+      const others = categories.filter((c) => c.id !== cat.id)
+      if (defaultSlotIsFilled(others, defaultCat.name)) return false
+    }
+    return true
+  })
+}
+
+export function flagsForCategoryName(name: string): Pick<TraitCategory, 'allowMultiple'> {
+  for (const d of DEFAULT_CATEGORIES) {
+    if (categoryMatchesDefaultSlot(name, d.name) && d.allowMultiple) {
+      return { allowMultiple: true }
+    }
+  }
+  return {}
 }
 
 export function sanitizeCategoryName(raw: string): string {

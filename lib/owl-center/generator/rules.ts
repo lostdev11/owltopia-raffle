@@ -220,9 +220,7 @@ export function validateSelection(
       const steps = normalizeIfChainSteps(rule)
       if (steps.length < 2) continue
       if (!isIfChainActive(steps, selection)) continue
-      if (!traitById || !categories) {
-        return rule.label ?? 'Trait chain incomplete — all chain steps must be satisfied'
-      }
+      if (!traitById || !categories) continue
       if (!isIfChainFullySatisfied(steps, selection, categories, traitById)) {
         return rule.label ?? 'Trait chain incomplete — finish every chain step'
       }
