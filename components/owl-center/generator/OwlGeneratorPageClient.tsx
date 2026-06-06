@@ -461,19 +461,20 @@ export function OwlGeneratorPageClient() {
   )
 
   const addIfChainRule = useCallback(
-    (chainStepGroups: string[][]) => {
-      const steps = chainStepGroups.filter((s) => s.length > 0)
+    (chainStepGroups: { traitIds: string[]; stackAll?: boolean }[]) => {
+      const steps = chainStepGroups.filter((s) => s.traitIds.length > 0)
       if (!project || steps.length < 2) return
       const traitById = new Map(project.traits.map((t) => [t.id, t]))
       const label = formatIfChainLabel(
-        steps.map((ids) => ({ traitIds: ids })),
+        steps,
         traitById,
-        (catId) => project.categories.find((c) => c.id === catId)?.name ?? 'Layer'
+        (catId) => project.categories.find((c) => c.id === catId)?.name ?? 'Layer',
+        project.categories
       )
       const rule: CompatibilityRule = {
         id: uid(),
         type: 'if_chain',
-        chainSteps: steps.map((ids) => ({ traitIds: ids })),
+        chainSteps: steps,
         label: `Chain: ${label}`,
       }
       updateProject({ rules: [...project.rules, rule] })
@@ -904,7 +905,7 @@ function RulesSection({
     allowedTraitIds: string[],
     options?: { alsoReverse?: boolean }
   ) => void
-  onAddIfChainRule: (chainStepGroups: string[][]) => void
+  onAddIfChainRule: (chainStepGroups: { traitIds: string[]; stackAll?: boolean }[]) => void
   onRemoveRule: (id: string) => void
 }) {
   const [ruleType, setRuleType] = useState<CompatibilityRuleType>('require')
@@ -913,8 +914,11 @@ function RulesSection({
   const [ifTargetCategory, setIfTargetCategory] = useState<string | null>(null)
   const [ifAllowed, setIfAllowed] = useState<string[]>([])
   const [ifAlsoReverse, setIfAlsoReverse] = useState(true)
-  const [chainStepGroups, setChainStepGroups] = useState<string[][]>([])
+  const [chainStepGroups, setChainStepGroups] = useState<
+    { traitIds: string[]; stackAll?: boolean }[]
+  >([])
   const [chainDraft, setChainDraft] = useState<string[]>([])
+  const [chainDraftStackAll, setChainDraftStackAll] = useState(false)
   const [chainDraftCategory, setChainDraftCategory] = useState<string | null>(null)
 
   const traitLabel = (id: string) => project.traits.find((t) => t.id === id)?.name ?? id.slice(0, 8)
@@ -929,7 +933,7 @@ function RulesSection({
   const ifChainRules = project.rules.filter((r) => r.type === 'if_chain')
 
   const chainUsedCategories = new Set([
-    ...chainStepGroups.map((group) => project.traits.find((t) => t.id === group[0])?.categoryId),
+    ...chainStepGroups.map((group) => project.traits.find((t) => t.id === group.traitIds[0])?.categoryId),
     chainDraftCategory,
   ].filter(Boolean))
 
@@ -946,8 +950,12 @@ function RulesSection({
 
   const commitChainDraft = () => {
     if (!chainDraft.length) return
-    setChainStepGroups((p) => [...p, chainDraft])
+    setChainStepGroups((p) => [
+      ...p,
+      { traitIds: chainDraft, stackAll: chainDraftStackAll || undefined },
+    ])
     setChainDraft([])
+    setChainDraftStackAll(false)
     setChainDraftCategory(null)
   }
 
@@ -1218,8 +1226,9 @@ function RulesSection({
       <CommandCard label="RULES // IF chain (multi-layer)">
         <p className="mb-4 text-sm text-[#9BA8B4]">
           Build layer-by-layer. Tap <strong className="font-normal text-[#E8EEF2]">multiple traits per step</strong>{' '}
-          (bases/outfits = pick one of; glasses = stack all). Then <strong className="font-normal text-[#E8EEF2]">Next
-          layer</strong> before the next category.
+          to offer options (pick one). On eyewear, enable <strong className="font-normal text-[#E8EEF2]">Stack all</strong>{' '}
+          only when you want every PNG combined. Then <strong className="font-normal text-[#E8EEF2]">Next layer</strong>{' '}
+          before the next category.
         </p>
 
         {project.traits.length >= 2 ? (
@@ -1227,15 +1236,15 @@ function RulesSection({
             {chainStepGroups.length || chainDraft.length ? (
               <ol className="space-y-2 border border-[#1A222B] bg-[#0F1419]/80 px-3 py-3 text-sm text-[#C5D0D8]">
                 {chainStepGroups.map((group, i) => {
-                  const catId = project.traits.find((tr) => tr.id === group[0])?.categoryId
+                  const catId = project.traits.find((tr) => tr.id === group.traitIds[0])?.categoryId
                   const cat = project.categories.find((c) => c.id === catId)
-                  const joiner = cat?.allowMultiple ? ' + ' : ' / '
+                  const joiner = group.stackAll ? ' + ' : ' / '
                   return (
                     <li key={`group-${i}`} className="flex flex-wrap items-center justify-between gap-2">
                       <span>
                         <span className="font-mono text-[10px] text-[#5C6773]">{i + 1}.</span>{' '}
                         {cat?.name}:{' '}
-                        <span className="text-[#E8EEF2]">{group.map(traitLabel).join(joiner)}</span>
+                        <span className="text-[#E8EEF2]">{group.traitIds.map(traitLabel).join(joiner)}</span>
                       </span>
                       <button
                         type="button"
@@ -1254,11 +1263,7 @@ function RulesSection({
                       <span className="font-mono text-[10px] text-[#00C97A]">{chainStepGroups.length + 1}.</span>{' '}
                       {project.categories.find((c) => c.id === chainDraftCategory)?.name}:{' '}
                       <span className="text-[#E8FDF4]">
-                        {chainDraft.map(traitLabel).join(
-                          project.categories.find((c) => c.id === chainDraftCategory)?.allowMultiple
-                            ? ' + '
-                            : ' / '
-                        )}
+                        {chainDraft.map(traitLabel).join(chainDraftStackAll ? ' + ' : ' / ')}
                       </span>
                     </span>
                   </li>
@@ -1301,6 +1306,18 @@ function RulesSection({
                   )
                 })}
               </div>
+              {chainDraft.length > 1 &&
+              project.categories.find((c) => c.id === chainDraftCategory)?.allowMultiple ? (
+                <label className="mt-3 flex min-h-[44px] touch-manipulation cursor-pointer items-center gap-2 text-xs text-[#9BA8B4]">
+                  <input
+                    type="checkbox"
+                    checked={chainDraftStackAll}
+                    onChange={(e) => setChainDraftStackAll(e.target.checked)}
+                    className="h-4 w-4 accent-[#00FF9C]"
+                  />
+                  Stack all eyewear PNGs in this step (default: pick one)
+                </label>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -1317,11 +1334,15 @@ function RulesSection({
                 disabled={totalChainLayers < 2}
                 onClick={() => {
                   const groups = chainDraft.length
-                    ? [...chainStepGroups, chainDraft]
+                    ? [
+                        ...chainStepGroups,
+                        { traitIds: chainDraft, stackAll: chainDraftStackAll || undefined },
+                      ]
                     : chainStepGroups
                   onAddIfChainRule(groups)
                   setChainStepGroups([])
                   setChainDraft([])
+                  setChainDraftStackAll(false)
                   setChainDraftCategory(null)
                 }}
               >
@@ -1334,6 +1355,7 @@ function RulesSection({
                   onClick={() => {
                     setChainStepGroups([])
                     setChainDraft([])
+                    setChainDraftStackAll(false)
                     setChainDraftCategory(null)
                   }}
                 >

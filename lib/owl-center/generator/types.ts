@@ -30,7 +30,7 @@ export type CompatibilityRule = {
   targetCategoryId?: string
   allowedTraitIds?: string[]
   /** if_chain — ordered layer steps (preferred). */
-  chainSteps?: { traitIds: string[] }[]
+  chainSteps?: { traitIds: string[]; stackAll?: boolean }[]
   /** @deprecated Legacy flat list — migrated to chainSteps on load. */
   chainTraitIds?: string[]
   label?: string

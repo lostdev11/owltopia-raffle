@@ -3,6 +3,8 @@ import type { CompatibilityRule, TraitCategory, TraitLayer, TraitSelection } fro
 
 export type IfChainStep = {
   traitIds: string[]
+  /** When true on a multi-trait step, stack every trait (e.g. combine eyewear PNGs). Default: pick one. */
+  stackAll?: boolean
 }
 
 export type IfChainStepMode = 'single' | 'one_of' | 'all'
@@ -29,9 +31,9 @@ export function ifChainStepCategoryId(
   return first?.categoryId
 }
 
-export function ifChainStepMode(category: TraitCategory | undefined, step: IfChainStep): IfChainStepMode {
+export function ifChainStepMode(_category: TraitCategory | undefined, step: IfChainStep): IfChainStepMode {
   if (step.traitIds.length <= 1) return 'single'
-  if (category?.allowMultiple) return 'all'
+  if (step.stackAll) return 'all'
   return 'one_of'
 }
 
@@ -86,7 +88,7 @@ export function ifChainStepBlockedByOtherSteps(
   return false
 }
 
-/** When chain is active, glasses (or other allowMultiple) steps pick every trait in the step. */
+/** When chain is active, steps with stackAll pick every trait in the step. */
 export function ifChainForcedAllTraits(
   categoryId: string,
   selection: TraitSelection,
@@ -114,13 +116,17 @@ export function ifChainForcedAllTraits(
 export function formatIfChainLabel(
   steps: IfChainStep[],
   traitById: Map<string, TraitLayer>,
-  categoryName: (categoryId: string) => string
+  categoryName: (categoryId: string) => string,
+  categories?: TraitCategory[]
 ): string {
+  const catById = categories ? new Map(categories.map((c) => [c.id, c])) : undefined
   return steps
     .map((step) => {
       const catId = ifChainStepCategoryId(step, traitById)
+      const cat = catId && catById ? catById.get(catId) : undefined
       const names = step.traitIds.map((id) => traitById.get(id)?.name ?? id.slice(0, 8))
-      const joiner = step.traitIds.length > 1 ? ' + ' : ''
+      const mode = ifChainStepMode(cat, step)
+      const joiner = mode === 'all' ? ' + ' : mode === 'one_of' ? ' / ' : ''
       return `${catId ? categoryName(catId) : 'Layer'}: ${names.join(joiner)}`
     })
     .join(' → ')
