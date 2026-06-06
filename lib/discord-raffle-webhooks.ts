@@ -139,7 +139,9 @@ export type XShareTemplate = {
 }
 
 function resolveDiscordEmbedImageUrl(raffle: Raffle): string | undefined {
-  const raw = (raffle.image_url || raffle.image_fallback_url || '').trim()
+  const fallback = (raffle.image_fallback_url || '').trim()
+  const primary = (raffle.image_url || '').trim()
+  const raw = fallback || primary
   if (!raw) return undefined
 
   try {

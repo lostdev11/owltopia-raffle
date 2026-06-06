@@ -576,7 +576,7 @@ export function RaffleCard({
                     alt=""
                     width={160}
                     height={160}
-                    loading={priority ? 'eager' : 'lazy'}
+                    loading="eager"
                     decoding="async"
                     className={`pointer-events-none absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-3' : 'object-cover object-center'}`}
                     onError={handleThumbLoadOrError}

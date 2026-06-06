@@ -71,10 +71,11 @@ export function extractIpfsContentPath(urlStr: string): string | null {
 
 /** Try original URL first, then the same content on other gateways (full path preserved). */
 export function ipfsGatewayCandidateUrls(originalHttpsUrl: string): string[] {
-  const normalized = rewriteDeadIpfsGatewayHttpsUrl(originalHttpsUrl.trim())
+  const trimmed = originalHttpsUrl.trim()
+  const normalized = rewriteDeadIpfsGatewayHttpsUrl(trimmed)
   const pathAfter = extractIpfsContentPath(normalized)
-  if (!pathAfter) return [normalized]
+  if (!pathAfter) return [...new Set([trimmed, normalized].filter(Boolean))]
   const alternates = IPFS_HTTPS_GATEWAY_PREFIXES.map((p) => `${p}${pathAfter}`)
-  const ordered = [normalized, ...alternates.filter((u) => u !== normalized)]
+  const ordered = [trimmed, normalized, ...alternates.filter((u) => u !== trimmed && u !== normalized)]
   return [...new Set(ordered)]
 }

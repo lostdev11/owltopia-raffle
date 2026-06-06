@@ -25,6 +25,48 @@ export function isDirectRaffleImageHost(hostname: string): boolean {
   )
 }
 
+/** NFT CDN / gateway hosts that load reliably in mobile browsers without the image proxy. */
+export function isBrowserDirectRaffleImageHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  if (isDirectRaffleImageHost(h)) return true
+  if (/^[^.]+\.ipfs\.(w3s|nftstorage|dweb|storacha)\.link$/.test(h)) return true
+  if (h === 'gateway.irys.xyz' || h === 'ardrive.net') return true
+  return (
+    h === 'arweave.net' ||
+    h === 'arweave.dev' ||
+    h.endsWith('.arweave.net') ||
+    h.endsWith('.arweave.dev')
+  )
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  const deduped: string[] = []
+  const seen = new Set<string>()
+  for (const u of urls) {
+    if (!u?.trim() || seen.has(u)) continue
+    seen.add(u)
+    deduped.push(u)
+  }
+  return deduped
+}
+
+function pushHttpsUrl(chain: string[], url: string | null | undefined) {
+  if (!url?.trim()) return
+  const trimmed = url.trim()
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    chain.push(trimmed)
+    return
+  }
+  try {
+    const u = new URL(trimmed)
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      chain.push(u.toString())
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Image src for `next/image` on raffle UI. External NFT artwork (IPFS, Arweave, CDNs) is
  * served via `/api/proxy-image` so:
@@ -52,7 +94,7 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
           const u = new URL(decoded)
           if (
             (u.protocol === 'http:' || u.protocol === 'https:') &&
-            isDirectRaffleImageHost(u.hostname)
+            isBrowserDirectRaffleImageHost(u.hostname)
           ) {
             return decoded
           }
@@ -86,7 +128,7 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return url
 
-    if (isDirectRaffleImageHost(u.hostname)) return url
+    if (isBrowserDirectRaffleImageHost(u.hostname)) return url
 
     if (publicSiteOrigin && u.origin === publicSiteOrigin) return url
     if (!publicSiteOrigin && typeof window !== 'undefined' && u.origin === window.location.origin) {
@@ -102,7 +144,7 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
 /** When `/api/proxy-image` fails in the browser, try a direct HTTPS URL (gateway for ipfs://). */
 export function getRaffleImageFallbackRawUrl(
   displayImageUrl: string | null | undefined,
-  _originalImageUrl: string | null | undefined
+  originalImageUrl: string | null | undefined
 ): string | null {
   const display = displayImageUrl?.trim()
   if (display?.startsWith('/api/proxy-image')) {
@@ -126,61 +168,67 @@ export function getRaffleImageFallbackRawUrl(
       return null
     }
   }
+
+  const original = originalImageUrl?.trim()
+  if (!original) return null
+  let url = rewriteDeadIpfsGatewayHttpsUrl(original)
+  const arHttps = arweaveUriToHttps(url)
+  if (arHttps) url = arHttps
+  if (url === original || url === display) return null
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString()
+  } catch {
+    return null
+  }
   return null
 }
 
 /**
  * Ordered URLs to try in the browser when loading raffle artwork (primary, then optional admin fallback).
- * Each logical source adds proxy URL first, then a direct gateway/raw URL when applicable.
+ * Direct HTTPS URLs (stored metadata, Supabase fallbacks, live IPFS subdomains) are tried before
+ * `/api/proxy-image`, which can take ~14s when ipfs.io blocks server-side fetches.
  */
 export function buildRaffleImageAttemptChain(
   imageUrl: string | null | undefined,
   imageFallbackUrl: string | null | undefined
 ): string[] {
-  const chain: string[] = []
-  const addSource = (raw: string | null | undefined) => {
-    if (!raw?.trim()) return
-    const disp = getRaffleDisplayImageUrl(raw)
-    const rawFallback = getRaffleImageFallbackRawUrl(disp, raw)
-    if (disp) chain.push(disp)
-    if (rawFallback && rawFallback !== disp) chain.push(rawFallback)
-  }
-  addSource(imageUrl)
-  addSource(imageFallbackUrl)
+  const directCandidates: string[] = []
+  const proxyCandidates: string[] = []
 
-  /** Extra HTTPS gateway URLs for the same IPFS CID (proxy/mobile dead ends are common). */
-  const pushIpfsGatewayVariants = (raw: string | null | undefined) => {
+  const pushFromRaw = (raw: string | null | undefined) => {
     if (!raw?.trim()) return
-    let u = rewriteDeadIpfsGatewayHttpsUrl(raw.trim())
-    const ar = arweaveUriToHttps(u)
-    if (ar) u = ar
-    const fromIpfsScheme = /^ipfs:\/\//i.test(u) ? ipfsUriToHttpsGatewayUrl(u) : null
-    const seed = fromIpfsScheme ?? u
-    if (!/^https?:\/\//i.test(seed) || !seed.includes('/ipfs/')) return
-    for (const g of ipfsGatewayCandidateUrls(seed)) {
-      chain.push(g)
+    const trimmed = raw.trim()
+
+    pushHttpsUrl(directCandidates, trimmed)
+
+    let normalized = rewriteDeadIpfsGatewayHttpsUrl(trimmed)
+    const arHttps = arweaveUriToHttps(normalized)
+    if (arHttps) normalized = arHttps
+    pushHttpsUrl(directCandidates, normalized)
+
+    const disp = getRaffleDisplayImageUrl(trimmed)
+    if (disp?.startsWith('/api/proxy-image')) {
+      proxyCandidates.push(disp)
+      pushHttpsUrl(directCandidates, getRaffleImageFallbackRawUrl(disp, trimmed))
+    } else {
+      pushHttpsUrl(directCandidates, disp)
+    }
+
+    for (const gatewayUrl of ipfsGatewayCandidateUrls(trimmed)) {
+      pushHttpsUrl(directCandidates, gatewayUrl)
+    }
+
+    if (isIrysUploaderHttpsUrl(trimmed)) {
+      for (const mirror of irysUploaderMirrorHttpsUrls(trimmed)) {
+        pushHttpsUrl(directCandidates, mirror)
+      }
     }
   }
-  pushIpfsGatewayVariants(imageUrl)
-  pushIpfsGatewayVariants(imageFallbackUrl)
 
-  const pushIrysMirrors = (raw: string | null | undefined) => {
-    if (!raw?.trim()) return
-    const u = raw.trim()
-    if (!isIrysUploaderHttpsUrl(u)) return
-    for (const m of irysUploaderMirrorHttpsUrls(u)) {
-      chain.push(m)
-    }
-  }
-  pushIrysMirrors(imageUrl)
-  pushIrysMirrors(imageFallbackUrl)
+  // Admin Supabase fallbacks are reliable — try before slow/dead primary IPFS gateways.
+  pushFromRaw(imageFallbackUrl)
+  pushFromRaw(imageUrl)
 
-  const deduped: string[] = []
-  const seen = new Set<string>()
-  for (const u of chain) {
-    if (!u?.trim() || seen.has(u)) continue
-    seen.add(u)
-    deduped.push(u)
-  }
-  return deduped
+  return dedupeUrls([...directCandidates, ...proxyCandidates])
 }

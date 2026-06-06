@@ -356,9 +356,10 @@ export async function GET(request: NextRequest) {
     }
 
     let targetUrl: URL
+    let decodedInput = ''
     try {
-      const decoded = fullyDecodeURIComponentSafe(rawUrl)
-      const normalized = toHttpsImageUrl(decoded)
+      decodedInput = fullyDecodeURIComponentSafe(rawUrl).trim()
+      const normalized = toHttpsImageUrl(decodedInput)
       targetUrl = new URL(normalized)
     } catch {
       return NextResponse.json({ error: 'Invalid url' }, { status: 400 })
@@ -369,11 +370,13 @@ export async function GET(request: NextRequest) {
     }
 
     const targetStr = targetUrl.toString()
+    /** Prefer the caller's HTTPS URL (e.g. `{cid}.ipfs.w3s.link`) before normalized ipfs.io rewrites. */
+    const gatewaySeed = /^https?:\/\//i.test(decodedInput) ? decodedInput : targetStr
     const urlsToTry = isArweaveUrl(targetStr)
       ? expandArweaveProxyUrls(targetStr)
       : isIrysUploaderHttpsUrl(targetStr)
         ? irysUploaderMirrorHttpsUrls(targetStr)
-        : getIpfsGatewayUrls(targetStr)
+        : getIpfsGatewayUrls(gatewaySeed)
 
     if (urlsToTry.length === 0) {
       return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })

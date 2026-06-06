@@ -39,6 +39,14 @@ const PRIZE_RETURN_REASONS = [
   { value: 'min_threshold_not_met', label: 'Min tickets not met (after extension)' },
 ] as const
 
+function listingArtworkPayloadFromUrl(url: string): {
+  image_url: string
+  image_fallback_url: string
+} {
+  const trimmed = url.trim()
+  return { image_url: trimmed, image_fallback_url: trimmed }
+}
+
 interface AdminRaffleActionsProps {
   raffle: Raffle
   entries?: Entry[]
@@ -531,17 +539,19 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
     setSavingImageFallback(true)
     setMessage(null)
     try {
+      const fb = imageFallbackInput.trim()
+      const payload = fb
+        ? listingArtworkPayloadFromUrl(fb)
+        : { image_fallback_url: null as string | null }
       const res = await fetch(`/api/raffles/${raffle.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          image_fallback_url: imageFallbackInput.trim() ? imageFallbackInput.trim() : null,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        setMessage({ type: 'success', text: 'Fallback listing image saved.' })
+        setMessage({ type: 'success', text: 'Listing artwork saved.' })
         router.refresh()
       } else {
         setMessage({ type: 'error', text: typeof data?.error === 'string' ? data.error : 'Failed to save' })
@@ -588,7 +598,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ image_fallback_url: uploadedUrl }),
+        body: JSON.stringify(listingArtworkPayloadFromUrl(uploadedUrl)),
       })
       const saveData = await saveRes.json().catch(() => ({}))
       if (!saveRes.ok) {
@@ -604,7 +614,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
       setFallbackUploadFile(null)
       if (fallbackFileInputRef.current) fallbackFileInputRef.current.value = ''
-      setMessage({ type: 'success', text: 'Fallback image uploaded and saved.' })
+      setMessage({ type: 'success', text: 'Listing artwork uploaded and saved.' })
       router.refresh()
     } catch (e) {
       setMessage({
@@ -1025,9 +1035,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
         <Card>
           <CardHeader>
-            <CardTitle>Listing artwork fallback</CardTitle>
+            <CardTitle>Listing artwork</CardTitle>
             <CardDescription>
-              If the prize NFT image fails to load (broken IPFS, etc.), this URL is shown on raffle cards and the detail page after normal fallbacks. Use HTTPS or ipfs://. Clear the field and save to remove.
+              Upload or paste artwork shown on raffle cards, the detail page, and share previews. When set, this replaces broken NFT IPFS links immediately. Clear the field and save to remove the override only (original metadata URL stays in the database until you upload again).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

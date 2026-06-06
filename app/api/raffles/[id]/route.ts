@@ -85,33 +85,62 @@ export async function PATCH(
     const bodyKeys = Object.keys(body).filter(
       (k) => k !== 'wallet_address' && (body as Record<string, unknown>)[k] !== undefined
     )
-    const isImageFallbackOnlyPatch =
-      bodyKeys.length === 1 && bodyKeys[0] === 'image_fallback_url'
+    const isListingArtworkPatch =
+      bodyKeys.length > 0 &&
+      bodyKeys.every((k) => k === 'image_fallback_url' || k === 'image_url')
 
-    if (isImageFallbackOnlyPatch) {
-      const raw = body.image_fallback_url
-      let image_fallback_url: string | null
-      if (raw === null || raw === '') {
-        image_fallback_url = null
-      } else if (typeof raw === 'string') {
-        const t = raw.trim()
-        if (!t) {
-          image_fallback_url = null
-        } else if (t.length > 2048) {
+    if (isListingArtworkPatch) {
+      const updates: { image_fallback_url?: string | null; image_url?: string | null } = {}
+
+      if (body.image_fallback_url !== undefined) {
+        const raw = body.image_fallback_url
+        if (raw === null || raw === '') {
+          updates.image_fallback_url = null
+        } else if (typeof raw === 'string') {
+          const t = raw.trim()
+          if (!t) {
+            updates.image_fallback_url = null
+          } else if (t.length > 2048) {
+            return NextResponse.json(
+              { error: 'image_fallback_url must be at most 2048 characters' },
+              { status: 400 }
+            )
+          } else {
+            updates.image_fallback_url = t
+          }
+        } else {
           return NextResponse.json(
-            { error: 'image_fallback_url must be at most 2048 characters' },
+            { error: 'image_fallback_url must be a string, null, or empty' },
             { status: 400 }
           )
-        } else {
-          image_fallback_url = t
         }
-      } else {
-        return NextResponse.json(
-          { error: 'image_fallback_url must be a string, null, or empty' },
-          { status: 400 }
-        )
       }
-      const raffle = await updateRaffle(raffleId, { image_fallback_url })
+
+      if (body.image_url !== undefined) {
+        const raw = body.image_url
+        if (raw === null || raw === '') {
+          updates.image_url = null
+        } else if (typeof raw === 'string') {
+          const t = raw.trim()
+          if (!t) {
+            updates.image_url = null
+          } else if (t.length > 2048) {
+            return NextResponse.json(
+              { error: 'image_url must be at most 2048 characters' },
+              { status: 400 }
+            )
+          } else {
+            updates.image_url = t
+          }
+        } else {
+          return NextResponse.json(
+            { error: 'image_url must be a string, null, or empty' },
+            { status: 400 }
+          )
+        }
+      }
+
+      const raffle = await updateRaffle(raffleId, updates)
       if (!raffle) {
         return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
       }
