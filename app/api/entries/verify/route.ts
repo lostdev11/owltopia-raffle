@@ -12,6 +12,10 @@ import {
   attachEntryPaymentSignature,
 } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import {
+  isDefinitiveOnChainFailure,
+  isTemporaryVerificationError,
+} from '@/lib/entries/verification-errors'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import { entriesVerifyBody, parseOr400 } from '@/lib/validations'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -138,46 +142,43 @@ export async function POST(request: NextRequest) {
       )
 
       if (!verificationResult.valid) {
-        const isTemporaryError =
-          verificationResult.error?.includes('Transaction not found') ||
-          verificationResult.error?.includes('still be confirming') ||
-          verificationResult.error?.includes('temporary issue') ||
-          verificationResult.error?.includes('Verification error')
+        const err = verificationResult.error || ''
 
         // For temporary errors, keep the entry pending and signal 202 so the
         // client can show a "verifying" state and retry later.
-        // Save the signature so GET /api/entries can auto-verify when RPC has the tx,
-        // and the client can show "X confirming" for pending entries.
-        if (isTemporaryError) {
-          console.log(
-            `Verification failed temporarily for entry ${entryId}. Error: ${verificationResult.error}`
-          )
+        if (isTemporaryVerificationError(err)) {
+          console.log(`Verification failed temporarily for entry ${entryId}. Error: ${err}`)
           try {
             await saveTransactionSignature(entryId, transactionSignature)
-          } catch (err) {
+          } catch (saveErr) {
             console.error(
               `Error saving transaction signature for entry ${entryId} (temporary):`,
-              err
+              saveErr
             )
           }
           return NextResponse.json(ERROR_BODY, { status: 202 })
         }
 
-        // For non-temporary errors, store the transaction signature so that
-        // background verification and admin restore flows can inspect it,
-        // but keep the entry in "pending" rather than marking it as rejected.
-        // This avoids tickets incorrectly showing as permanently rejected when
-        // funds were actually sent, while still requiring explicit confirmation
-        // before the entry counts towards tickets sold.
         try {
           await saveTransactionSignature(entryId, transactionSignature)
-        } catch (err) {
+        } catch (saveErr) {
           console.error(
             `Error saving transaction signature for entry ${entryId} during failed verification:`,
-            err
+            saveErr
           )
         }
 
+        if (isDefinitiveOnChainFailure(err)) {
+          try {
+            await updateEntryStatus(entryId, 'rejected', transactionSignature)
+            console.log(`Rejected entry ${entryId}: on-chain tx failed (${err.slice(0, 160)})`)
+          } catch (rejectErr) {
+            console.error(`Error rejecting entry ${entryId} after on-chain failure:`, rejectErr)
+          }
+          return NextResponse.json(ERROR_BODY, { status: 400 })
+        }
+
+        // Other non-temporary failures (amount mismatch, etc.) — keep pending for admin review.
         return NextResponse.json(ERROR_BODY, { status: 202 })
       }
 

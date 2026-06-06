@@ -8,7 +8,12 @@ import {
   InsufficientTicketsError,
   TransactionSignatureAlreadyUsedError,
   TxAlreadyUsedError,
+  updateEntryStatus,
 } from '@/lib/db/entries'
+import {
+  isDefinitiveOnChainFailure,
+  isTemporaryVerificationError,
+} from '@/lib/entries/verification-errors'
 import { verifyBatchPaidEntries } from '@/lib/verify-batch-transaction'
 import { verifyTransaction } from '@/lib/verify-transaction'
 import type { Entry } from '@/lib/types'
@@ -132,18 +137,26 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
           const blockchain = await verifyBatchPaidEntries(sig, pairs)
           if (!blockchain.valid) {
             const err = blockchain.error || ''
-            const isTemporary =
-              err.includes('Transaction not found') ||
-              err.includes('still be confirming') ||
-              err.includes('temporary issue') ||
-              err.includes('Verification error') ||
-              err.includes('Transaction metadata not available')
 
-            if (isTemporary) {
+            if (isTemporaryVerificationError(err)) {
               console.log(`⏳ Cart batch auto-verify pending (temporary): ${err.slice(0, 220)}`)
+            } else if (isDefinitiveOnChainFailure(err)) {
+              for (const { entry: batchEntry } of pairs) {
+                try {
+                  await updateEntryStatus(batchEntry.id, 'rejected', sig)
+                  console.log(
+                    `❌ Auto-rejected cart batch entry ${batchEntry.id}: on-chain tx failed (${err.slice(0, 120)})`
+                  )
+                } catch (rejectErr) {
+                  console.error(
+                    `Failed to reject cart batch entry ${batchEntry.id} after on-chain failure:`,
+                    rejectErr
+                  )
+                }
+              }
             } else {
               console.warn(
-                `⚠️ Cart batch auto-verify on-chain check failed (kept pending): ${err.slice(0, 280)}`
+                `⚠️ Cart batch auto-verify failed (kept pending): ${err.slice(0, 280)}`
               )
             }
             continue
@@ -206,26 +219,29 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
           }
         }
       } else {
-        // Check if this is a temporary error that might resolve
-        const isTemporaryError =
-          verificationResult.error?.includes('Transaction not found') ||
-          verificationResult.error?.includes('still be confirming') ||
-          verificationResult.error?.includes('temporary issue') ||
-          verificationResult.error?.includes('Verification error')
+        const err = verificationResult.error || ''
 
-        if (isTemporaryError) {
-          // Leave as pending for retry - don't log as error, just info
-          console.log(
-            `⏳ Entry ${entry.id} verification pending (temporary error): ${verificationResult.error}`
-          )
+        if (isTemporaryVerificationError(err)) {
+          console.log(`⏳ Entry ${entry.id} verification pending (temporary error): ${err}`)
           continue
         }
 
-        // For non-temporary verification failures, keep the entry pending so it
-        // can be manually reviewed or retried via admin restore flows instead
-        // of marking it as permanently rejected when funds may have been sent.
+        if (isDefinitiveOnChainFailure(err)) {
+          try {
+            await updateEntryStatus(entry.id, 'rejected', sig)
+            console.log(
+              `❌ Auto-rejected entry ${entry.id}: on-chain tx failed (${err.slice(0, 160)})`
+            )
+          } catch (rejectErr) {
+            console.error(`Failed to reject entry ${entry.id} after on-chain failure:`, rejectErr)
+          }
+          continue
+        }
+
+        // Other failures (amount mismatch, wallet mismatch, etc.) may still have moved funds —
+        // keep pending for admin review or restore flows.
         console.warn(
-          `⚠️ Verification failed for entry ${entry.id} (kept as pending, not rejected): ${verificationResult.error}`
+          `⚠️ Verification failed for entry ${entry.id} (kept as pending, not rejected): ${err}`
         )
       }
     } catch (error: unknown) {

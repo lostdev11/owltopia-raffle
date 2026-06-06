@@ -334,6 +334,7 @@ export function RaffleDetailClient({
   const [creatorDisplayName, setCreatorDisplayName] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [heroIdx, setHeroIdx] = useState(0)
+  const [heroLoaded, setHeroLoaded] = useState(false)
   const [mintHeroSrc, setMintHeroSrc] = useState<string | null>(null)
   const [mintHeroLoading, setMintHeroLoading] = useState(false)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
@@ -363,6 +364,7 @@ export function RaffleDetailClient({
 
   useEffect(() => {
     setHeroIdx(0)
+    setHeroLoaded(false)
     setMintHeroSrc(null)
     setMintHeroLoading(false)
   }, [raffle.id, heroImageChainKey])
@@ -389,6 +391,7 @@ export function RaffleDetailClient({
           setMintHeroLoading(false)
           return
         }
+        setHeroLoaded(false)
         setMintHeroSrc(getRaffleDisplayImageUrl(raw) ?? raw)
         setMintHeroLoading(false)
       })
@@ -409,6 +412,7 @@ export function RaffleDetailClient({
   ])
 
   const tryNextHeroImage = useCallback(() => {
+    setHeroLoaded(false)
     setHeroIdx((i) => i + 1)
   }, [])
 
@@ -420,10 +424,23 @@ export function RaffleDetailClient({
           return
         }
         const el = e.currentTarget
-        if (el.naturalWidth < 2 || el.naturalHeight < 2) tryNextHeroImage()
+        if (el.naturalWidth < 2 || el.naturalHeight < 2) {
+          tryNextHeroImage()
+          return
+        }
+        setHeroLoaded(true)
         return
       }
-      if (mintHeroSrc) setMintHeroSrc(null)
+      if (e.type === 'error') {
+        if (mintHeroSrc) setMintHeroSrc(null)
+        return
+      }
+      const el = e.currentTarget
+      if (el.naturalWidth < 2 || el.naturalHeight < 2) {
+        setMintHeroSrc(null)
+        return
+      }
+      setHeroLoaded(true)
     },
     [heroIdx, heroImageChain.length, tryNextHeroImage, mintHeroSrc]
   )
@@ -438,12 +455,13 @@ export function RaffleDetailClient({
     if (heroIdx < heroImageChain.length) {
       tryNextHeroImage()
     } else if (mintHeroSrc) {
+      setHeroLoaded(false)
       setMintHeroSrc(null)
     }
   }, [heroIdx, heroImageChain.length, tryNextHeroImage, mintHeroSrc])
 
   useImageAttemptTimeout(
-    Boolean(heroImageSrc) && !heroImageMintLoading,
+    Boolean(heroImageSrc) && !heroImageMintLoading && !heroLoaded,
     `${heroIdx}:${heroImageSrc}`,
     onHeroTimeout
   )

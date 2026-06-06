@@ -8,7 +8,12 @@ import {
   ConfirmEntryInvalidStateError,
   saveTransactionSignature,
   attachEntryPaymentSignature,
+  updateEntryStatus,
 } from '@/lib/db/entries'
+import {
+  isDefinitiveOnChainFailure,
+  isTemporaryVerificationError,
+} from '@/lib/entries/verification-errors'
 import type { Entry, Raffle } from '@/lib/types'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { entriesVerifyBatchBody, parseOr400 } from '@/lib/validations'
@@ -118,14 +123,8 @@ export async function POST(request: NextRequest) {
       if (!blockchain.valid) {
         const err = blockchain.error || ''
         console.warn('[entries/verify-batch] on-chain verify invalid', err.slice(0, 280))
-        const isTemporary =
-          err.includes('Transaction not found') ||
-          err.includes('still be confirming') ||
-          err.includes('temporary issue') ||
-          err.includes('Verification error') ||
-          err.includes('Transaction metadata not available')
 
-        if (isTemporary) {
+        if (isTemporaryVerificationError(err)) {
           await Promise.all(
             pairsSorted.map(({ entry }) =>
               saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
@@ -137,13 +136,25 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        // Mirror /api/entries/verify: keep entries pending but persist signature so retries,
-        // background fetches, and admin tools can reconcile when verification flaps or fixes ship.
         await Promise.all(
           pairsSorted.map(({ entry }) =>
             saveTransactionSignature(entry.id, transactionSignatureRaw).catch(() => {})
           )
         )
+
+        if (isDefinitiveOnChainFailure(err)) {
+          await Promise.all(
+            pairsSorted.map(({ entry }) =>
+              updateEntryStatus(entry.id, 'rejected', transactionSignatureRaw).catch(rejectErr => {
+                console.error(
+                  `[entries/verify-batch] reject entry ${entry.id} after on-chain failure:`,
+                  rejectErr
+                )
+              })
+            )
+          )
+        }
+
         return verifyBatchErr('chain_verify_failed', 400)
       }
 

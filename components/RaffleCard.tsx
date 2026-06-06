@@ -154,6 +154,7 @@ export function RaffleCard({
   }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
   const imageAttemptChainKey = imageAttemptChain.join('\0')
   const [thumbIdx, setThumbIdx] = useState(0)
+  const [thumbLoaded, setThumbLoaded] = useState(false)
   const [modalImgIdx, setModalImgIdx] = useState(0)
   const [listMintThumbSrc, setListMintThumbSrc] = useState<string | null>(null)
   const [listMintThumbLoading, setListMintThumbLoading] = useState(false)
@@ -191,6 +192,7 @@ export function RaffleCard({
 
   useEffect(() => {
     setThumbIdx(0)
+    setThumbLoaded(false)
     setListMintThumbSrc(null)
     setListMintThumbLoading(false)
   }, [raffle.id, imageAttemptChainKey])
@@ -215,6 +217,7 @@ export function RaffleCard({
           setListMintThumbLoading(false)
           return
         }
+        setThumbLoaded(false)
         setListMintThumbSrc(getRaffleDisplayImageUrl(raw) ?? raw)
         setListMintThumbLoading(false)
       })
@@ -235,6 +238,7 @@ export function RaffleCard({
   ])
 
   const tryNextThumb = useCallback(() => {
+    setThumbLoaded(false)
     setThumbIdx((i) => i + 1)
   }, [])
 
@@ -246,10 +250,23 @@ export function RaffleCard({
           return
         }
         const el = e.currentTarget
-        if (el.naturalWidth < 2 || el.naturalHeight < 2) tryNextThumb()
+        if (el.naturalWidth < 2 || el.naturalHeight < 2) {
+          tryNextThumb()
+          return
+        }
+        setThumbLoaded(true)
         return
       }
-      if (listMintThumbSrc) setListMintThumbSrc(null)
+      if (e.type === 'error') {
+        if (listMintThumbSrc) setListMintThumbSrc(null)
+        return
+      }
+      const el = e.currentTarget
+      if (el.naturalWidth < 2 || el.naturalHeight < 2) {
+        setListMintThumbSrc(null)
+        return
+      }
+      setThumbLoaded(true)
     },
     [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc]
   )
@@ -258,6 +275,7 @@ export function RaffleCard({
     if (thumbIdx < imageAttemptChain.length) {
       tryNextThumb()
     } else if (listMintThumbSrc) {
+      setThumbLoaded(false)
       setListMintThumbSrc(null)
     }
   }, [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc])
@@ -273,7 +291,7 @@ export function RaffleCard({
   const listThumbDead = !listThumbSrc && !listThumbMintLoading
 
   useImageAttemptTimeout(
-    Boolean(listThumbSrc) && !listThumbMintLoading,
+    Boolean(listThumbSrc) && !listThumbMintLoading && !thumbLoaded,
     `${thumbIdx}:${listThumbSrc}`,
     onThumbTimeout
   )
