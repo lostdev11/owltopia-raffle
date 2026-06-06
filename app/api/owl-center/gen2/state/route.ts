@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
       public: launch.public_supply,
     },
     prices_usdc: {
-      presale: launch.presale_price_usdc,
+      presale: null,
       whitelist: launch.wl_price_usdc,
       public: launch.public_price_usdc,
     },

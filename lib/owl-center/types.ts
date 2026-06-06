@@ -56,6 +56,8 @@ export type OwlCenterLaunchPublic = {
   is_featured: boolean
   is_paused: boolean
   launch_deadline_at: string | null
+  /** Optional ISO start time per mint phase (AIRDROP, PRESALE, …). */
+  phase_schedule: Partial<Record<OwlCenterPhase, string>>
   updated_at: string
   /** Asset + metadata package gates (Owl Center launchpad). */
   metadata_ready: boolean
@@ -140,6 +142,8 @@ export type Gen2EligibilityResponse = {
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
   price_usdc: number | null
+  /** Scheduled open time for the active phase (if configured). */
+  phase_starts_at?: string | null
 }
 
 export type Gen2MintCheckPhasePreview = {
@@ -157,6 +161,8 @@ export type Gen2MintCheckPhasePreview = {
   reserved_mints: number
   /** Informational when the phase is not currently active but the wallet still has allocation. */
   phase_note: string | null
+  /** Scheduled open time for this phase (if configured). */
+  phase_starts_at?: string | null
   gen1?: {
     is_holder: boolean
     gen1_nft_count: number

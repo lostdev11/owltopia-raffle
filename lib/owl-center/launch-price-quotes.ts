@@ -7,20 +7,18 @@ export type LaunchPriceQuotes = {
   public: string | null
 }
 
-/** Live SOL lamports quotes for presale / WL / public list prices (USDC-notional on server). */
+/** Live SOL lamports quotes for mint-time prices (WL / public). Presale redemption is free — buyers paid in advance. */
 export async function getLaunchPriceLamportsQuotes(launch: OwlCenterLaunchPublic): Promise<LaunchPriceQuotes> {
-  const presaleUsdc = launch.presale_price_usdc ?? 20
   const wlUsdc = launch.wl_price_usdc ?? 30
   const publicUsdc = launch.public_price_usdc ?? 40
 
-  const [presale, whitelist, pub] = await Promise.all([
-    getOptionalLamportsQuoteForUsdc(presaleUsdc),
+  const [whitelist, pub] = await Promise.all([
     getOptionalLamportsQuoteForUsdc(wlUsdc),
     getOptionalLamportsQuoteForUsdc(publicUsdc),
   ])
 
   return {
-    presale: presale ? presale.unitLamports.toString() : null,
+    presale: null,
     whitelist: whitelist ? whitelist.unitLamports.toString() : null,
     public: pub ? pub.unitLamports.toString() : null,
   }

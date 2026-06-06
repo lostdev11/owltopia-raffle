@@ -8,7 +8,9 @@ import {
 import {
   arweaveUriToHttps,
   fullyDecodeURIComponentSafe,
+  irysGatewayMirrorHttpsUrls,
   irysUploaderMirrorHttpsUrls,
+  isIrysGatewayHttpsUrl,
   isIrysUploaderHttpsUrl,
 } from '@/lib/nft-media-uri'
 
@@ -376,7 +378,9 @@ export async function GET(request: NextRequest) {
       ? expandArweaveProxyUrls(targetStr)
       : isIrysUploaderHttpsUrl(targetStr)
         ? irysUploaderMirrorHttpsUrls(targetStr)
-        : getIpfsGatewayUrls(gatewaySeed)
+        : isIrysGatewayHttpsUrl(targetStr)
+          ? irysGatewayMirrorHttpsUrls(targetStr)
+          : getIpfsGatewayUrls(gatewaySeed)
 
     if (urlsToTry.length === 0) {
       return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })

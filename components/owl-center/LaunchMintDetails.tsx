@@ -1,15 +1,10 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
+import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
-
-function formatDeadline(iso: string | null): string {
-  if (!iso) return 'TBA'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return 'TBA'
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-}
+import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 type PhaseRow = { label: string; supply: number; note?: string }
 
@@ -23,7 +18,7 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
     })
   }
   if (launch.presale_supply > 0) {
-    rows.push({ label: 'Presale', supply: launch.presale_supply, note: 'paid spots' })
+    rows.push({ label: 'Presale', supply: launch.presale_supply, note: 'prepaid · free mint' })
   }
   if (launch.presale_overage_supply > 0) {
     rows.push({
@@ -44,10 +39,14 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
 export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPublic }) {
   const phases = phaseRows(launch)
   const priceLamports = await getLaunchPriceLamportsQuotes(launch)
+  const countdown = getMintCountdownInfo(launch)
 
   return (
     <div className="space-y-3 border-t border-[#1A222B] pt-3">
       <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Mint details</p>
+      {countdown ? (
+        <MintCountdown launch={launch} initial={countdown} />
+      ) : null}
       <SupplyProgress minted={launch.minted_count} total={launch.total_supply} />
       {phases.length > 0 ? (
         <dl className="grid gap-1.5 font-mono text-xs text-[#9BA8B4] sm:grid-cols-2">
@@ -64,8 +63,8 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
       ) : null}
       <dl className="space-y-1.5 font-mono text-xs text-[#9BA8B4]">
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-          <dt className="text-[#5C6773]">Presale</dt>
-          <dd className="text-[#00FF9C]">{formatPhasePriceSolOrFree(priceLamports.presale)}</dd>
+          <dt className="text-[#5C6773]">Presale mint</dt>
+          <dd className="text-[#00FF9C]">{formatPhasePriceSolOrFree(priceLamports.presale, { paid: false })}</dd>
         </div>
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
           <dt className="text-[#5C6773]">Whitelist</dt>
@@ -76,8 +75,8 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
           <dd className="text-[#E8EEF2]">{formatPhasePriceSolOrFree(priceLamports.public)}</dd>
         </div>
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 border-t border-[#1A222B]/80 pt-1.5">
-          <dt className="text-[#5C6773]">Deadline</dt>
-          <dd className="text-[#E8EEF2]">{formatDeadline(launch.launch_deadline_at)}</dd>
+          <dt className="text-[#5C6773]">Mint opens</dt>
+          <dd className="text-[#E8EEF2]">{formatMintDate(launch.launch_deadline_at)}</dd>
         </div>
         {launch.wallet_mint_limit > 0 ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

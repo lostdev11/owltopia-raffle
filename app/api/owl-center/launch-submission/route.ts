@@ -7,6 +7,7 @@ import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-c
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -74,8 +75,11 @@ export async function POST(request: NextRequest) {
 
   let launchDeadline: string | null = null
   if (typeof body.launch_date === 'string' && body.launch_date.trim()) {
-    const d = new Date(body.launch_date)
-    if (!Number.isNaN(d.getTime())) launchDeadline = d.toISOString()
+    launchDeadline = datetimeLocalToIso(body.launch_date.trim()) ?? new Date(body.launch_date).toISOString()
+  }
+  const phaseSchedule = parsePhaseSchedule(body.phase_schedule)
+  if (launchDeadline && !phaseSchedule.AIRDROP) {
+    phaseSchedule.AIRDROP = launchDeadline
   }
 
   const slug = `sub-${randomUUID().replace(/-/g, '')}`
@@ -141,6 +145,7 @@ export async function POST(request: NextRequest) {
       is_featured: false,
       is_paused: true,
       launch_deadline_at: launchDeadline,
+      phase_schedule: phaseSchedule,
       creator_presale_enabled: presaleEnabled,
       creator_wl_enabled: wlEnabled,
       creator_mint_price: price,

@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
+import { parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic, OwlCenterMintMode, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 
 function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
@@ -35,6 +36,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     is_featured: Boolean(data.is_featured),
     is_paused: Boolean(data.is_paused),
     launch_deadline_at: data.launch_deadline_at != null ? String(data.launch_deadline_at) : null,
+    phase_schedule: parsePhaseSchedule(data.phase_schedule),
     updated_at: String(data.updated_at ?? ''),
     metadata_ready: Boolean(data.metadata_ready),
     assets_ready: Boolean(data.assets_ready),
@@ -66,6 +68,18 @@ export async function getOwlCenterLaunchBySlug(slug: string): Promise<OwlCenterL
     return null
   }
   return mapRow(data as Record<string, unknown>)
+}
+
+/** Admin/service — all launches including draft / pending review. */
+export async function listOwlCenterLaunchesAdmin(): Promise<OwlCenterLaunchPublic[]> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_launches')
+    .select('*')
+    .order('is_featured', { ascending: false })
+    .order('updated_at', { ascending: false })
+  if (error || !data) return []
+  return (data as Record<string, unknown>[]).map(mapRow)
 }
 
 export async function listOwlCenterLaunchesPublic(): Promise<OwlCenterLaunchPublic[]> {
@@ -112,6 +126,8 @@ export async function updateOwlCenterLaunchAdmin(
     metadata_ready: boolean
     assets_ready: boolean
     marketplace_ready: boolean
+    launch_deadline_at: string | null
+    phase_schedule: Record<string, string>
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
@@ -152,6 +168,8 @@ export async function updateOwlCenterLaunchByIdAdmin(
     public_price_usdc: number | null
     wallet_mint_limit: number
     is_featured: boolean
+    launch_deadline_at: string | null
+    phase_schedule: Record<string, string>
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

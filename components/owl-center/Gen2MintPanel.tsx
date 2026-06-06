@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -56,12 +56,28 @@ function stepLabel(s: MintUiStep): string {
   }
 }
 
+function MintPanelShell({
+  embedded,
+  label,
+  children,
+}: {
+  embedded?: boolean
+  label: string
+  children: ReactNode
+}) {
+  if (embedded) {
+    return <div className="mt-6 border-t border-[#1A222B] pt-6">{children}</div>
+  }
+  return <CommandCard label={label}>{children}</CommandCard>
+}
+
 export function Gen2MintPanel({
   launch,
   remaining,
   presaleSoldOut = false,
   mintControls,
   onRefresh,
+  embedded = false,
 }: {
   launch: OwlCenterLaunchPublic
   remaining: number
@@ -69,6 +85,8 @@ export function Gen2MintPanel({
   presaleSoldOut?: boolean
   mintControls: OwlCenterMintControls
   onRefresh: () => void
+  /** When true, render inline inside supply_and_phases (no nested CommandCard). */
+  embedded?: boolean
 }) {
   const { publicKey, connected, wallet } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
@@ -183,24 +201,24 @@ export function Gen2MintPanel({
 
   if (trading) {
     return (
-      <CommandCard label="trading.sys">
+      <MintPanelShell embedded={embedded} label="trading.sys">
         <p className="text-sm text-[#9BA8B4]">Trading is now active — secondary markets only.</p>
         <div className="mt-4">
           <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
         </div>
-      </CommandCard>
+      </MintPanelShell>
     )
   }
 
   if (soldOut) {
     return (
-      <CommandCard label="sold_out.sys">
+      <MintPanelShell embedded={embedded} label="sold_out.sys">
         <p className="font-mono text-lg font-bold text-[#FF9C9C]">SOLD OUT</p>
         <p className="mt-2 text-sm text-[#9BA8B4]">Primary mint supply exhausted. Awaiting or viewing trading activation.</p>
         <div className="mt-4">
           <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
         </div>
-      </CommandCard>
+      </MintPanelShell>
     )
   }
 
@@ -217,7 +235,7 @@ export function Gen2MintPanel({
       : null
 
   return (
-    <CommandCard label="mint_console">
+    <MintPanelShell embedded={embedded} label="mint_console">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A222B] pb-4">
           <div className="font-mono text-xs text-[#9BA8B4]">
@@ -303,6 +321,13 @@ export function Gen2MintPanel({
             </p>
           ) : null}
 
+          {elig?.reason === 'phase_not_started' && elig.phase_starts_at ? (
+            <p className="text-sm text-[#FFD769]">
+              This phase is scheduled to open {new Date(elig.phase_starts_at).toLocaleString()}. Check the countdown in
+              Overview.
+            </p>
+          ) : null}
+
           {wrongPhaseHint ? <p className="text-sm text-[#9BA8B4]">{wrongPhaseHint}</p> : null}
 
           {launch.active_phase === 'AIRDROP' && elig?.reason === 'gen1_collection_not_configured' ? (
@@ -334,9 +359,9 @@ export function Gen2MintPanel({
           (elig.presale_balance.purchased_available_mints ?? 0) > 0 &&
           elig.is_eligible ? (
             <p className="text-sm text-[#9BA8B4]">
-              Presale redemption: mint up to{' '}
-              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your paid presale credits (
-              {elig.presale_balance.purchased_available_mints} left). Sign once per NFT.
+              Presale redemption (free — already paid): mint up to{' '}
+              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your presale credits (
+              {elig.presale_balance.purchased_available_mints} left). Sign once per NFT; you only pay network fees.
             </p>
           ) : null}
 
@@ -407,6 +432,6 @@ export function Gen2MintPanel({
             eligibility.
           </p>
         </div>
-    </CommandCard>
+    </MintPanelShell>
   )
 }

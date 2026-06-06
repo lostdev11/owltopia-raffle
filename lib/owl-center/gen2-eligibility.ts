@@ -21,6 +21,7 @@ import {
 import type { Gen2EligibilityResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isOwlCenterMintGloballyDisabled, isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
+import { getPhaseStartsAt, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -111,6 +112,16 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
 
   if (!w) {
     return { ...base, is_eligible: false, max_mintable: 0, reason: 'wallet_required' }
+  }
+
+  if (!isPhaseOpenBySchedule(launch, phase)) {
+    return {
+      ...base,
+      is_eligible: false,
+      max_mintable: 0,
+      reason: 'phase_not_started',
+      phase_starts_at: getPhaseStartsAt(launch, phase),
+    }
   }
 
   if (phase === 'AIRDROP') {

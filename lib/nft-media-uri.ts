@@ -26,6 +26,7 @@ export function arweaveUriToHttps(uri: string): string | null {
 }
 
 const IRYS_UPLOADER_HOSTS = new Set(['uploader.irys.xyz', 'cdn.irys.xyz'])
+const IRYS_GATEWAY_HOSTS = new Set(['gateway.irys.xyz', 'ardrive.net'])
 
 export function isIrysUploaderHttpsUrl(urlStr: string): boolean {
   try {
@@ -33,6 +34,49 @@ export function isIrysUploaderHttpsUrl(urlStr: string): boolean {
   } catch {
     return false
   }
+}
+
+export function isIrysGatewayHttpsUrl(urlStr: string): boolean {
+  try {
+    return IRYS_GATEWAY_HOSTS.has(new URL(urlStr.trim()).hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * gateway.irys.xyz / ardrive.net often hang in mobile browsers; the same Arweave path usually resolves.
+ */
+export function irysGatewayMirrorHttpsUrls(urlStr: string): string[] {
+  try {
+    const u = new URL(urlStr.trim())
+    if (!IRYS_GATEWAY_HOSTS.has(u.hostname.toLowerCase())) return [urlStr]
+    const path = u.pathname + u.search + u.hash
+    return [
+      ...new Set([
+        `https://arweave.net${path}`,
+        `https://arweave.dev${path}`,
+        `https://uploader.irys.xyz${path}`,
+        urlStr,
+      ]),
+    ]
+  } catch {
+    return [urlStr]
+  }
+}
+
+/** Best browser-facing HTTPS URL for on-chain NFT artwork metadata. */
+export function preferredNftImageHttpsUrl(urlStr: string): string {
+  const trimmed = urlStr.trim()
+  if (!trimmed) return trimmed
+  if (isIrysGatewayHttpsUrl(trimmed)) {
+    return irysGatewayMirrorHttpsUrls(trimmed)[0] ?? trimmed
+  }
+  if (isIrysUploaderHttpsUrl(trimmed)) {
+    const mirrors = irysUploaderMirrorHttpsUrls(trimmed)
+    return mirrors.find((m) => m.startsWith('https://arweave.net')) ?? mirrors[0] ?? trimmed
+  }
+  return trimmed
 }
 
 /**

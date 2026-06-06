@@ -77,6 +77,7 @@ import {
   buildRaffleImageAttemptChain,
   getRaffleDisplayImageUrl,
 } from '@/lib/raffle-display-image-url'
+import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
 import Image from 'next/image'
 import {
   Users,
@@ -432,6 +433,21 @@ export function RaffleDetailClient({
   const heroImageMintLoading =
     heroIdx >= heroImageChain.length && mintHeroLoading && !mintHeroSrc
   const heroImageDead = !heroImageSrc && !heroImageMintLoading
+
+  const onHeroTimeout = useCallback(() => {
+    if (heroIdx < heroImageChain.length) {
+      tryNextHeroImage()
+    } else if (mintHeroSrc) {
+      setMintHeroSrc(null)
+    }
+  }, [heroIdx, heroImageChain.length, tryNextHeroImage, mintHeroSrc])
+
+  useImageAttemptTimeout(
+    Boolean(heroImageSrc) && !heroImageMintLoading,
+    `${heroIdx}:${heroImageSrc}`,
+    onHeroTimeout
+  )
+
   const { serverNow: serverTime } = useServerTime()
   const startTimeMs = new Date(raffle.start_time).getTime()
   const endTimeMs = new Date(raffle.end_time).getTime()

@@ -23,12 +23,13 @@ import { Gen2MintCheckCard } from '@/components/owl-center/Gen2MintCheckCard'
 import { OwlCenterLinkedWalletsSection } from '@/components/owl-center/OwlCenterLinkedWalletsSection'
 
 import { Gen2MintPanel } from '@/components/owl-center/Gen2MintPanel'
-import { Gen2SupplyPhaseMintCta } from '@/components/owl-center/Gen2SupplyPhaseMintCta'
 
 import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
 
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
+import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 import { OwlCenterSectionNav } from '@/components/owl-center/OwlCenterSectionNav'
 
@@ -251,6 +252,7 @@ export function Gen2MintPageClient() {
 
 
   const { launch, supply, phases, prices_lamports, presale_pool, terminal, mint_controls } = state
+  const mintCountdown = getMintCountdownInfo(launch)
   const mintControls: OwlCenterMintControls = mint_controls ?? {
     disabled: launch.is_paused,
     env_kill_switch: false,
@@ -419,9 +421,9 @@ export function Gen2MintPageClient() {
 
           <StatPanel
 
-            label="Deadline"
+            label="Mint opens"
 
-            value={launch.launch_deadline_at ? new Date(launch.launch_deadline_at).toLocaleDateString() : '—'}
+            value={formatMintDate(launch.launch_deadline_at)}
 
           />
 
@@ -432,6 +434,12 @@ export function Gen2MintPageClient() {
 
 
         <CommandCard label="supply_and_phases">
+
+          {mintCountdown ? (
+            <div className="mb-6">
+              <MintCountdown launch={launch} initial={mintCountdown} />
+            </div>
+          ) : null}
 
           <SupplyProgress minted={supply.minted} total={supply.total} />
 
@@ -451,7 +459,7 @@ export function Gen2MintPageClient() {
 
               Presale <span className="text-[#00FF9C]">{phases.presale}</span>{' '}
 
-              <span className="text-[#5C6773]">· paid buyers</span>
+              <span className="text-[#5C6773]">· free · prepaid buyers</span>
 
               {userMintPhase === 'PRESALE' ? (
                 <span className="ml-1 text-[#00FF9C]">· your mint</span>
@@ -489,6 +497,7 @@ export function Gen2MintPageClient() {
 
             <LaunchPhaseTimeline
               active={launch.active_phase}
+              launch={launch}
               userMintPhase={userMintPhase}
               userReservedPhases={userReservedPhases}
             />
@@ -523,16 +532,13 @@ export function Gen2MintPageClient() {
 
           ) : null}
 
-          <Gen2SupplyPhaseMintCta
-
+          <Gen2MintPanel
             launch={launch}
-
             remaining={supply.remaining}
-
             presaleSoldOut={presaleSoldOut}
-
             mintControls={mintControls}
-
+            onRefresh={() => void load()}
+            embedded
           />
 
         </CommandCard>
@@ -640,30 +646,6 @@ export function Gen2MintPageClient() {
           loading={mintCheckLoading}
           err={mintCheckErr}
           onRefresh={refreshMintCheck}
-        />
-
-      </section>
-
-
-
-      <section className="mb-12 space-y-4">
-
-        <SectionHeading
-
-          id="mint"
-
-          title="Mint"
-
-          hint="Mint only when the active phase matches your allocation. Phantom or Solflare on mobile — one signature per NFT."
-
-        />
-
-        <Gen2MintPanel
-          launch={launch}
-          remaining={supply.remaining}
-          presaleSoldOut={presaleSoldOut}
-          mintControls={mintControls}
-          onRefresh={() => void load()}
         />
 
       </section>

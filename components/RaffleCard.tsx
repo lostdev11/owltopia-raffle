@@ -62,6 +62,7 @@ import {
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
+import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
 
 /** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
 function raffleImageUnoptimized(src: string): boolean {
@@ -253,6 +254,14 @@ export function RaffleCard({
     [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc]
   )
 
+  const onThumbTimeout = useCallback(() => {
+    if (thumbIdx < imageAttemptChain.length) {
+      tryNextThumb()
+    } else if (listMintThumbSrc) {
+      setListMintThumbSrc(null)
+    }
+  }, [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc])
+
   const listThumbSrc =
     thumbIdx < imageAttemptChain.length
       ? imageAttemptChain[thumbIdx]
@@ -262,6 +271,12 @@ export function RaffleCard({
   const listThumbMintLoading =
     thumbIdx >= imageAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
   const listThumbDead = !listThumbSrc && !listThumbMintLoading
+
+  useImageAttemptTimeout(
+    Boolean(listThumbSrc) && !listThumbMintLoading,
+    `${thumbIdx}:${listThumbSrc}`,
+    onThumbTimeout
+  )
 
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
   const startTime = new Date(raffle.start_time)

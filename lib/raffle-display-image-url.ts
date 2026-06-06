@@ -6,7 +6,9 @@ import {
 import {
   arweaveUriToHttps,
   fullyDecodeURIComponentSafe,
+  irysGatewayMirrorHttpsUrls,
   irysUploaderMirrorHttpsUrls,
+  isIrysGatewayHttpsUrl,
   isIrysUploaderHttpsUrl,
 } from '@/lib/nft-media-uri'
 
@@ -30,7 +32,6 @@ export function isBrowserDirectRaffleImageHost(hostname: string): boolean {
   const h = hostname.toLowerCase()
   if (isDirectRaffleImageHost(h)) return true
   if (/^[^.]+\.ipfs\.(w3s|nftstorage|dweb|storacha)\.link$/.test(h)) return true
-  if (h === 'gateway.irys.xyz' || h === 'ardrive.net') return true
   return (
     h === 'arweave.net' ||
     h === 'arweave.dev' ||
@@ -128,6 +129,10 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return url
 
+    if (isIrysGatewayHttpsUrl(url)) {
+      return irysGatewayMirrorHttpsUrls(url)[0] ?? url
+    }
+
     if (isBrowserDirectRaffleImageHost(u.hostname)) return url
 
     if (publicSiteOrigin && u.origin === publicSiteOrigin) return url
@@ -153,6 +158,11 @@ export function getRaffleImageFallbackRawUrl(
       const raw = parsed.searchParams.get('url')
       if (!raw) return null
       const decoded = rewriteDeadIpfsGatewayHttpsUrl(fullyDecodeURIComponentSafe(raw))
+      if (isIrysGatewayHttpsUrl(decoded)) {
+        const mirrors = irysGatewayMirrorHttpsUrls(decoded)
+        const arMirror = mirrors.find((m) => m.startsWith('https://arweave.net'))
+        if (arMirror && arMirror !== decoded) return arMirror
+      }
       if (isIrysUploaderHttpsUrl(decoded)) {
         const mirrors = irysUploaderMirrorHttpsUrls(decoded)
         const arMirror = mirrors.find((m) => m.startsWith('https://arweave.net'))
@@ -200,7 +210,13 @@ export function buildRaffleImageAttemptChain(
     if (!raw?.trim()) return
     const trimmed = raw.trim()
 
-    pushHttpsUrl(directCandidates, trimmed)
+    if (isIrysGatewayHttpsUrl(trimmed)) {
+      for (const mirror of irysGatewayMirrorHttpsUrls(trimmed)) {
+        pushHttpsUrl(directCandidates, mirror)
+      }
+    } else {
+      pushHttpsUrl(directCandidates, trimmed)
+    }
 
     let normalized = rewriteDeadIpfsGatewayHttpsUrl(trimmed)
     const arHttps = arweaveUriToHttps(normalized)
@@ -223,6 +239,10 @@ export function buildRaffleImageAttemptChain(
       for (const mirror of irysUploaderMirrorHttpsUrls(trimmed)) {
         pushHttpsUrl(directCandidates, mirror)
       }
+    }
+
+    if (isIrysGatewayHttpsUrl(trimmed)) {
+      proxyCandidates.push(`/api/proxy-image?url=${encodeURIComponent(trimmed)}`)
     }
   }
 

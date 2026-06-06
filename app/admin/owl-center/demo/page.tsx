@@ -85,6 +85,10 @@ export default function AdminOwlCenterDemoPage() {
           is_featured: Boolean(demo.is_featured),
           is_paused: Boolean(demo.is_paused),
           launch_deadline_at: demo.launch_deadline_at != null ? String(demo.launch_deadline_at) : null,
+          phase_schedule:
+            demo.phase_schedule && typeof demo.phase_schedule === 'object' && !Array.isArray(demo.phase_schedule)
+              ? (demo.phase_schedule as OwlCenterLaunchPublic['phase_schedule'])
+              : {},
           updated_at: String(demo.updated_at ?? ''),
           metadata_ready: Boolean(demo.metadata_ready),
           assets_ready: Boolean(demo.assets_ready),
@@ -215,9 +219,9 @@ export default function AdminOwlCenterDemoPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
-      <Link href="/admin/owl-center" className="mb-6 inline-flex items-center gap-2 text-sm text-[#9BA8B4] hover:text-[#00FF9C]">
+      <Link href="/admin/owl-center" className="mb-6 inline-flex min-h-[44px] touch-manipulation items-center gap-2 text-sm text-[#9BA8B4] hover:text-[#00FF9C]">
         <ArrowLeft className="h-4 w-4" aria-hidden />
-        Owl Center admin
+        Launchpad hub
       </Link>
 
       <h1 className="font-display text-3xl text-[#F4FBF8]">Demo mint launchpad</h1>

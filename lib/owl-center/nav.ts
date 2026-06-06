@@ -88,7 +88,6 @@ export const OWL_CENTER_GEN2_SECTIONS: OwlCenterGen2Section[] = [
   { id: 'overview', label: 'Overview', shortLabel: 'Status' },
   { id: 'wallets', label: 'Wallets', shortLabel: 'Link' },
   { id: 'allocation', label: 'Allocation', shortLabel: 'Check' },
-  { id: 'mint', label: 'Mint', shortLabel: 'Mint' },
   { id: 'activity', label: 'Activity', shortLabel: 'Log' },
 ]
 

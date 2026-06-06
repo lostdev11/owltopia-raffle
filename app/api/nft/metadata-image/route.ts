@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchNftMintMetaFromHelius } from '@/lib/nft-helius-image'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
+import { preferredNftImageHttpsUrl } from '@/lib/nft-media-uri'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -25,7 +26,10 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get('preferMainnet') === 'true'
     const meta = await fetchNftMintMetaFromHelius(mint, { preferMainnet })
     return NextResponse.json(
-      { image: meta?.image ?? null, name: meta?.name ?? null },
+      {
+        image: meta?.image ? preferredNftImageHttpsUrl(meta.image) : null,
+        name: meta?.name ?? null,
+      },
       { status: 200 }
     )
   } catch (e) {

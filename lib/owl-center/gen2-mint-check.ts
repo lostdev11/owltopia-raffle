@@ -33,6 +33,7 @@ import {
 } from '@/lib/owl-center/presale-mint-pool'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { getPhaseStartsAt, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -49,6 +50,16 @@ async function getWlRow(wallet: string): Promise<WlRow | null> {
     used_mints: Number(r.used_mints ?? 0),
     community: r.community != null ? String(r.community) : null,
   }
+}
+
+function applyPhaseScheduleGate(
+  isActive: boolean,
+  scheduleOpen: boolean,
+  isEligible: boolean,
+  reason: string | null
+): { is_eligible: boolean; reason: string | null } {
+  if (isActive && !scheduleOpen) return { is_eligible: false, reason: 'phase_not_started' }
+  return { is_eligible: isEligible, reason }
 }
 
 function phaseInactiveNote(
@@ -118,7 +129,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   const unitLamportsForPhase = (phase: OwlCenterPhase): string | null => {
     if (phase === 'WHITELIST') return priceLamports.whitelist
     if (phase === 'PUBLIC') return priceLamports.public
-    if (phase === 'PRESALE') return priceLamports.presale
     return null
   }
 
@@ -139,6 +149,8 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
 
   for (const phase of phaseOrder) {
     const label = owlCenterPhaseLabel(phase)
+    const phase_starts_at = getPhaseStartsAt(launch, phase)
+    const scheduleOpen = isPhaseOpenBySchedule(launch, phase)
     const phase_supply =
       phase === 'AIRDROP'
         ? launch.airdrop_supply
@@ -164,6 +176,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc: price_usdc > 0 ? price_usdc : null,
         unit_lamports_estimate: unitLamportsForPhase(phase),
         phase_supply,
+        phase_starts_at,
         is_active: isPhaseMintLive(phase),
         is_eligible: false,
         max_mintable: 0,
@@ -194,33 +207,41 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         : 0
       const reserved_mints = gen1Remaining
       const isActive = isPhaseMintLive(phase)
+      const gen1Reason = !gen1.collection_configured
+        ? 'gen1_collection_not_configured'
+        : gen1OnLinked
+          ? 'gen1_on_linked_wallet'
+          : !gen1.is_holder
+            ? 'not_gen1_holder'
+            : reserved_mints <= 0
+              ? minted_in_phase >= gen1.gen1_nft_count
+                ? 'gen1_mint_limit'
+                : airdropRemaining <= 0
+                  ? 'gen1_pool_exhausted'
+                  : 'gen1_mint_limit'
+              : null
+      const gen1Gate = applyPhaseScheduleGate(
+        isActive,
+        scheduleOpen,
+        maxFromGen1 > 0 && isActive && !launch.is_paused,
+        gen1Reason
+      )
       phases.push({
         phase,
         label,
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_starts_at,
         is_active: isActive,
-        is_eligible: maxFromGen1 > 0 && isActive && !launch.is_paused,
+        is_eligible: gen1Gate.is_eligible,
         max_mintable: isActive ? maxFromGen1 : reserved_mints,
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
             : null,
-        reason: !gen1.collection_configured
-          ? 'gen1_collection_not_configured'
-          : gen1OnLinked
-            ? 'gen1_on_linked_wallet'
-            : !gen1.is_holder
-              ? 'not_gen1_holder'
-              : reserved_mints <= 0
-                ? minted_in_phase >= gen1.gen1_nft_count
-                  ? 'gen1_mint_limit'
-                  : airdropRemaining <= 0
-                    ? 'gen1_pool_exhausted'
-                    : 'gen1_mint_limit'
-                : null,
+        reason: gen1Gate.reason,
         gen1: {
           ...gen1,
           minted_in_phase,
@@ -242,32 +263,40 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       })
       const isActive = isPhaseMintLive(phase)
       const reserved_mints = purchasedAvailable
+      const presaleReason = !bal || !isGen2PresalePaidParticipant(bal)
+        ? 'not_presale_participant'
+        : purchasedAvailable <= 0
+          ? 'no_paid_presale_credits'
+          : !isActive &&
+              launch.active_phase === phase &&
+              !airdrop_phase_complete &&
+              purchasedAvailable > 0
+            ? 'gen1_phase_pending'
+          : max <= 0 && isActive
+            ? 'presale_pool_exhausted'
+            : null
+      const presaleGate = applyPhaseScheduleGate(
+        isActive,
+        scheduleOpen,
+        max > 0 && isActive && !launch.is_paused,
+        presaleReason
+      )
       phases.push({
         phase,
         label,
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_starts_at,
         is_active: isActive,
-        is_eligible: max > 0 && isActive && !launch.is_paused,
+        is_eligible: presaleGate.is_eligible,
         max_mintable: isActive ? max : reserved_mints,
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
             : null,
-        reason: !bal || !isGen2PresalePaidParticipant(bal)
-          ? 'not_presale_participant'
-          : purchasedAvailable <= 0
-            ? 'no_paid_presale_credits'
-            : !isActive &&
-                launch.active_phase === phase &&
-                !airdrop_phase_complete &&
-                purchasedAvailable > 0
-              ? 'gen1_phase_pending'
-            : max <= 0 && isActive
-              ? 'presale_pool_exhausted'
-              : null,
+        reason: presaleGate.reason,
         presale: {
           purchased_mints: allowance.purchased_mints,
           gifted_mints: allowance.gifted_mints,
@@ -296,35 +325,43 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       })
       const isActive = isPhaseMintLive(phase)
       const reserved_mints = availOverage
+      const overageReason =
+        !bal || !isGen2PresalePaidParticipant(bal)
+          ? 'not_presale_participant'
+          : !overage || availOverage <= 0
+            ? 'not_on_overage_list'
+            : purchasedAvailable <= 0
+              ? 'no_paid_presale_credits'
+              : !isActive &&
+                  launch.active_phase === phase &&
+                  !airdrop_phase_complete &&
+                  purchasedAvailable > 0
+                ? 'gen1_phase_pending'
+              : max <= 0 && isActive
+                ? 'overage_pool_exhausted'
+                : null
+      const overageGate = applyPhaseScheduleGate(
+        isActive,
+        scheduleOpen,
+        max > 0 && isActive && !launch.is_paused,
+        overageReason
+      )
       phases.push({
         phase,
         label,
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_starts_at,
         is_active: isActive,
-        is_eligible: max > 0 && isActive && !launch.is_paused,
+        is_eligible: overageGate.is_eligible,
         max_mintable: isActive ? max : reserved_mints,
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
             : null,
-        reason:
-          !bal || !isGen2PresalePaidParticipant(bal)
-            ? 'not_presale_participant'
-            : !overage || availOverage <= 0
-              ? 'not_on_overage_list'
-              : purchasedAvailable <= 0
-                ? 'no_paid_presale_credits'
-                : !isActive &&
-                    launch.active_phase === phase &&
-                    !airdrop_phase_complete &&
-                    purchasedAvailable > 0
-                  ? 'gen1_phase_pending'
-                : max <= 0 && isActive
-                  ? 'overage_pool_exhausted'
-                  : null,
+        reason: overageGate.reason,
         presale: bal
           ? {
               purchased_mints: bal.purchased_mints,
@@ -364,31 +401,39 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const isActive = isPhaseMintLive(phase)
       const reserved_mints = availWl
       const admin_allocated = allowed > 0
+      const wlReason = wlOnLinked
+        ? 'wl_on_linked_wallet'
+        : availWl <= 0
+          ? discord_whitelist && !admin_allocated
+            ? 'wl_pending_allocation'
+            : 'not_whitelisted'
+          : max <= 0 && isActive
+            ? wlPoolRemaining <= 0
+              ? 'wl_pool_exhausted'
+              : null
+            : null
+      const wlGate = applyPhaseScheduleGate(
+        isActive,
+        scheduleOpen,
+        max > 0 && isActive && !launch.is_paused,
+        wlReason
+      )
       phases.push({
         phase,
         label,
         price_usdc,
         unit_lamports_estimate: unitLamportsForPhase(phase),
         phase_supply,
+        phase_starts_at,
         is_active: isActive,
-        is_eligible: max > 0 && isActive && !launch.is_paused,
+        is_eligible: wlGate.is_eligible,
         max_mintable: isActive ? max : reserved_mints,
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
             : null,
-        reason: wlOnLinked
-          ? 'wl_on_linked_wallet'
-          : availWl <= 0
-            ? discord_whitelist && !admin_allocated
-              ? 'wl_pending_allocation'
-              : 'not_whitelisted'
-            : max <= 0 && isActive
-              ? wlPoolRemaining <= 0
-                ? 'wl_pool_exhausted'
-                : null
-              : null,
+        reason: wlGate.reason,
         wl: {
           allowed_mints: allowed,
           used_mints: used,
@@ -408,21 +453,29 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     const max = Math.min(cap, Math.max(0, launch.total_supply - launch.minted_count))
     const isActive = isPhaseMintLive(phase)
     const reserved_mints = cap
+    const publicReason = reserved_mints <= 0 ? 'wallet_mint_limit' : null
+    const publicGate = applyPhaseScheduleGate(
+      isActive,
+      scheduleOpen,
+      max > 0 && isActive && !launch.is_paused,
+      publicReason
+    )
     phases.push({
       phase,
       label,
       price_usdc,
       unit_lamports_estimate: unitLamportsForPhase(phase),
       phase_supply,
+      phase_starts_at,
       is_active: isActive,
-      is_eligible: max > 0 && isActive && !launch.is_paused,
+      is_eligible: publicGate.is_eligible,
       max_mintable: isActive ? max : reserved_mints,
       reserved_mints,
       phase_note:
         reserved_mints > 0 && (!isActive || launch.is_paused)
           ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
           : null,
-      reason: reserved_mints <= 0 ? 'wallet_mint_limit' : null,
+      reason: publicGate.reason,
     })
   }
 

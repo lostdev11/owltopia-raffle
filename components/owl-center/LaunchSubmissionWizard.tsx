@@ -45,6 +45,9 @@ export function LaunchSubmissionWizard() {
   const [currency, setCurrency] = useState<'SOL' | 'USDC'>('SOL')
   const [walletMintLimit, setWalletMintLimit] = useState('5')
   const [launchDate, setLaunchDate] = useState('')
+  const [presaleStart, setPresaleStart] = useState('')
+  const [wlStart, setWlStart] = useState('')
+  const [publicStart, setPublicStart] = useState('')
   const [presaleEnabled, setPresaleEnabled] = useState(false)
   const [wlEnabled, setWlEnabled] = useState(false)
 
@@ -87,6 +90,12 @@ export function LaunchSubmissionWizard() {
         currency,
         wallet_mint_limit: Number(walletMintLimit),
         launch_date: launchDate.trim() || null,
+        phase_schedule: {
+          ...(launchDate.trim() ? { AIRDROP: launchDate.trim() } : {}),
+          ...(presaleEnabled && presaleStart.trim() ? { PRESALE: presaleStart.trim() } : {}),
+          ...(wlEnabled && wlStart.trim() ? { WHITELIST: wlStart.trim() } : {}),
+          ...(publicStart.trim() ? { PUBLIC: publicStart.trim() } : {}),
+        },
         presale_enabled: presaleEnabled,
         wl_enabled: wlEnabled,
         logo_url: assets.logo_url.trim() || null,
@@ -245,12 +254,43 @@ export function LaunchSubmissionWizard() {
                 />
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Launch date (optional)
+                Mint opens (kickoff)
                 <input
                   type="datetime-local"
                   value={launchDate}
                   onChange={(e) => setLaunchDate(e.target.value)}
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              {presaleEnabled ? (
+                <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                  Presale redemption starts (optional)
+                  <input
+                    type="datetime-local"
+                    value={presaleStart}
+                    onChange={(e) => setPresaleStart(e.target.value)}
+                    className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                  />
+                </label>
+              ) : null}
+              {wlEnabled ? (
+                <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                  Whitelist phase starts (optional)
+                  <input
+                    type="datetime-local"
+                    value={wlStart}
+                    onChange={(e) => setWlStart(e.target.value)}
+                    className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                  />
+                </label>
+              ) : null}
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Public phase starts (optional)
+                <input
+                  type="datetime-local"
+                  value={publicStart}
+                  onChange={(e) => setPublicStart(e.target.value)}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
               </label>
               <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getOwlCenterLaunchBySlugAdmin, updateOwlCenterLaunchAdmin } from '@/lib/db/owl-center-launch'
+import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -79,6 +80,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'minted_count cannot exceed total_supply' }, { status: 400 })
     }
     patch.minted_count = n
+  }
+  if (body.launch_deadline_at === null) patch.launch_deadline_at = null
+  else if (typeof body.launch_deadline_at === 'string') {
+    const trimmed = body.launch_deadline_at.trim()
+    if (!trimmed) patch.launch_deadline_at = null
+    else {
+      const iso =
+        datetimeLocalToIso(trimmed) ??
+        (Number.isFinite(new Date(trimmed).getTime()) ? new Date(trimmed).toISOString() : null)
+      if (iso) patch.launch_deadline_at = iso
+    }
+  }
+  if (body.phase_schedule !== undefined) {
+    patch.phase_schedule = parsePhaseSchedule(body.phase_schedule) as Record<string, string>
   }
 
   if (Object.keys(patch).length === 0) {

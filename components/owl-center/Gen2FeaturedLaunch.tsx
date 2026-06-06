@@ -66,9 +66,9 @@ export function Gen2FeaturedLaunch({
 
         {presaleSoldOut
 
-          ? 'Presale is sold out. Check allocation on the Gen2 mint page and mint when your phase goes live.'
+          ? 'Presale is sold out. Check allocation on the Gen2 mint page — redemption is free (you already paid during presale).'
 
-          : 'Presale spots redeem on the Gen2 mint page when your phase is live — one paid spot equals one mint.'}
+          : 'Presale spots redeem on the Gen2 mint page when your phase is live — one prepaid spot equals one free mint.'}
 
       </p>
 

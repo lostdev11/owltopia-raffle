@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -58,6 +59,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (typeof body.status === 'string') patch.status = body.status as OwlCenterStatus
   if (body.public_price_usdc != null) patch.public_price_usdc = Number(body.public_price_usdc)
   if (body.wallet_mint_limit != null) patch.wallet_mint_limit = Number(body.wallet_mint_limit)
+  if (body.launch_deadline_at === null) patch.launch_deadline_at = null
+  else if (typeof body.launch_deadline_at === 'string') {
+    const trimmed = body.launch_deadline_at.trim()
+    if (!trimmed) patch.launch_deadline_at = null
+    else {
+      const iso =
+        datetimeLocalToIso(trimmed) ??
+        (Number.isFinite(new Date(trimmed).getTime()) ? new Date(trimmed).toISOString() : null)
+      if (iso) patch.launch_deadline_at = iso
+    }
+  }
+  if (body.phase_schedule !== undefined) {
+    patch.phase_schedule = parsePhaseSchedule(body.phase_schedule) as Record<string, string>
+  }
 
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
   if (!updated) return jsonError('Update failed', 500)

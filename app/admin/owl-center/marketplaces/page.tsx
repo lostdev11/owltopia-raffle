@@ -23,7 +23,7 @@ export default async function AdminOwlCenterMarketplacesHubPage() {
           <p className="font-mono text-sm text-[#FF9C9C]">Gen2 launch row missing.</p>
         )}
         <Link href="/admin/owl-center" className="block font-mono text-xs text-[#5C6773] hover:text-[#00FF9C]">
-          ← Owl Center admin
+          ← Launchpad hub
         </Link>
       </div>
     </main>

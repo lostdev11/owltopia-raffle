@@ -1,20 +1,23 @@
 import { cn } from '@/lib/utils'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
-import type { OwlCenterPhase } from '@/lib/owl-center/types'
+import { formatPhaseStartShort, getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
+import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
 const ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
 
 type Props = {
   active: OwlCenterPhase
+  launch?: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>
   /** Phase where the connected wallet can mint right now. */
   userMintPhase?: OwlCenterPhase | null
   /** Phases with reserved allocation that are not live yet. */
   userReservedPhases?: readonly OwlCenterPhase[]
 }
 
-export function LaunchPhaseTimeline({ active, userMintPhase = null, userReservedPhases = [] }: Props) {
+export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, userReservedPhases = [] }: Props) {
   const idx = ORDER.indexOf(active === 'SOLD_OUT' ? 'PUBLIC' : active)
   const reservedSet = new Set(userReservedPhases)
+
   return (
     <ol className="flex flex-wrap gap-2 md:gap-0 md:divide-x md:divide-[#1A222B]">
       {ORDER.map((p, i) => {
@@ -22,6 +25,9 @@ export function LaunchPhaseTimeline({ active, userMintPhase = null, userReserved
         const current = active === p || (active === 'SOLD_OUT' && p === 'PUBLIC')
         const isUserMint = userMintPhase === p
         const isUserReserved = reservedSet.has(p) && !current && !isUserMint
+        const startsAt = launch ? getPhaseStartsAt(launch, p) : null
+        const startLabel = formatPhaseStartShort(startsAt)
+
         return (
           <li
             key={p}
@@ -35,6 +41,11 @@ export function LaunchPhaseTimeline({ active, userMintPhase = null, userReserved
             )}
           >
             <span>{owlCenterPhaseLabel(p)}</span>
+            {startLabel ? (
+              <span className="mt-0.5 text-[8px] font-normal normal-case tracking-normal text-[#5C6773]">
+                {startLabel}
+              </span>
+            ) : null}
             {isUserMint ? (
               <span className="mt-0.5 text-[8px] font-bold normal-case tracking-wider text-[#00FF9C]">Your mint</span>
             ) : isUserReserved ? (
