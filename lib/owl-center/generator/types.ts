@@ -36,6 +36,16 @@ export type CompatibilityRule = {
   label?: string
 }
 
+export type OneOfOnePlacement = 'start' | 'end' | 'random'
+
+/** Hand-drawn 1/1 art merged into the collection with a custom metadata trait (e.g. Special: The Widow King). */
+export type OneOfOneEntry = {
+  id: string
+  imageSrc: string
+  traitType: string
+  traitValue: string
+}
+
 export type GeneratorProject = {
   id: string
   name: string
@@ -47,6 +57,10 @@ export type GeneratorProject = {
   rules: CompatibilityRule[]
   /** Intended collection supply for launch handoff (optional). */
   targetSupply?: number
+  /** Unique 1/1 pieces — occupy slots in the final collection (not extra on top of supply). */
+  oneOfOnes?: OneOfOneEntry[]
+  /** Where 1/1 token indices land relative to generative pieces. */
+  oneOfOnePlacement?: OneOfOnePlacement
   updatedAt: string
 }
 
@@ -59,6 +73,8 @@ export type GeneratedNft = {
   dna: string
   traits: TraitLayer[]
   attributes: { trait_type: string; value: string }[]
+  /** When set, export uses this image instead of compositing trait layers. */
+  oneOfOneImageSrc?: string
 }
 
 export const DEFAULT_CATEGORIES: Omit<TraitCategory, 'id'>[] = [

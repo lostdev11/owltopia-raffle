@@ -30,6 +30,13 @@ export function validateGeneratorProjectPayload(raw: unknown): { ok: true; proje
       typeof p.targetSupply === 'number' && Number.isInteger(p.targetSupply) && p.targetSupply > 0
         ? Math.min(p.targetSupply, 1_000_000)
         : undefined,
+    oneOfOnes: Array.isArray(p.oneOfOnes)
+      ? (p.oneOfOnes as GeneratorProject['oneOfOnes'])
+      : undefined,
+    oneOfOnePlacement:
+      p.oneOfOnePlacement === 'start' || p.oneOfOnePlacement === 'end' || p.oneOfOnePlacement === 'random'
+        ? p.oneOfOnePlacement
+        : undefined,
   }
   return { ok: true, project }
 }

@@ -29,6 +29,13 @@ import {
 import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
+import {
+  DEFAULT_ONE_OF_ONE_TRAIT_TYPE,
+  defaultTraitValueFromFilename,
+  generativeCountForSupply,
+  mergeOneOfOnesIntoCollection,
+  oneOfOnesForProject,
+} from '@/lib/owl-center/generator/one-of-one'
 import { hasBlockingLintIssues, lintGeneratorProject } from '@/lib/owl-center/generator/lint-rules'
 import {
   clampTraitWeight,
@@ -63,6 +70,8 @@ import type {
   CompatibilityRule,
   CompatibilityRuleType,
   GeneratorProject,
+  OneOfOneEntry,
+  OneOfOnePlacement,
   TraitLayer,
   TraitSelection,
 } from '@/lib/owl-center/generator/types'
@@ -82,6 +91,7 @@ export function OwlGeneratorPageClient() {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [batchSize, setBatchSize] = useState(5)
   const [exportBusy, setExportBusy] = useState(false)
+  const [exportFullBusy, setExportFullBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
   const [cloudUpdatedAt, setCloudUpdatedAt] = useState<string | null>(null)
@@ -154,6 +164,8 @@ export function OwlGeneratorPageClient() {
   const lintBlocked = hasBlockingLintIssues(lintIssues)
   const maxUnique = project ? estimateMaxUniqueSupply(project) : 0
   const targetSupply = project?.targetSupply ?? 2000
+  const oneOfOnes = project ? oneOfOnesForProject(project) : []
+  const oneOfOnePlacement = project?.oneOfOnePlacement ?? 'random'
 
   const categoriesSorted = useMemo(
     () => (project ? [...project.categories].sort((a, b) => a.zIndex - b.zIndex) : []),
@@ -491,24 +503,109 @@ export function OwlGeneratorPageClient() {
     setMessage('Demo loaded — backgrounds, bodies, hats, glasses, accessories + sample IF rules')
   }, [])
 
+  const addOneOfOneFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!project || !files?.length) return
+      const added: OneOfOneEntry[] = []
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) continue
+        const imageSrc = await fileToDataUrl(file)
+        added.push({
+          id: uid(),
+          imageSrc,
+          traitType: DEFAULT_ONE_OF_ONE_TRAIT_TYPE,
+          traitValue: defaultTraitValueFromFilename(file.name),
+        })
+      }
+      if (!added.length) return
+      updateProject({ oneOfOnes: [...oneOfOnesForProject(project), ...added] })
+      setMessage(`Added ${added.length} 1/1 image(s)`)
+    },
+    [project, updateProject]
+  )
+
+  const updateOneOfOne = useCallback(
+    (entryId: string, patch: Partial<Pick<OneOfOneEntry, 'traitType' | 'traitValue'>>) => {
+      if (!project) return
+      updateProject({
+        oneOfOnes: oneOfOnesForProject(project).map((o) =>
+          o.id === entryId ? { ...o, ...patch } : o
+        ),
+      })
+    },
+    [project, updateProject]
+  )
+
+  const removeOneOfOne = useCallback(
+    (entryId: string) => {
+      if (!project) return
+      updateProject({
+        oneOfOnes: oneOfOnesForProject(project).filter((o) => o.id !== entryId),
+      })
+    },
+    [project, updateProject]
+  )
+
+  const exportMergedBatch = useCallback(
+    async (generativeCount: number, label: string) => {
+      if (!project) return
+      if (lintBlocked) {
+        setMessage('Fix linter errors before exporting')
+        return
+      }
+      const entries = oneOfOnesForProject(project)
+      if (generativeCount > 0 && !project.traits.length) {
+        setMessage('Add trait layers before exporting generative pieces')
+        return
+      }
+      const generative =
+        generativeCount > 0 ? generateBatch(project, generativeCount, { requireAllCategories: true }) : []
+      const batch = mergeOneOfOnesIntoCollection(
+        generative,
+        entries,
+        project.oneOfOnePlacement,
+        project.id
+      )
+      await exportBatchAsSugarZip(project, batch)
+      setMessage(`Exported ${batch.length} Sugar-ready asset(s) (${label})`)
+    },
+    [project, lintBlocked]
+  )
+
   const handleExport = useCallback(async () => {
     if (!project) return
-    if (lintBlocked) {
-      setMessage('Fix linter errors before exporting')
-      return
-    }
     setExportBusy(true)
     setMessage(null)
     try {
-      const batch = generateBatch(project, Math.min(50, Math.max(1, batchSize)))
-      await exportBatchAsSugarZip(project, batch)
-      setMessage(`Exported ${batch.length} Sugar-ready asset(s) as ZIP`)
+      const entries = oneOfOnesForProject(project)
+      const totalRequested = Math.min(50, Math.max(1, batchSize))
+      const generativeCount = Math.max(0, totalRequested - entries.length)
+      await exportMergedBatch(generativeCount, `${totalRequested} preview batch`)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setExportBusy(false)
     }
-  }, [project, batchSize, lintBlocked])
+  }, [project, batchSize, exportMergedBatch])
+
+  const handleExportFullSupply = useCallback(async () => {
+    if (!project) return
+    setExportFullBusy(true)
+    setMessage(null)
+    try {
+      const entries = oneOfOnesForProject(project)
+      const generativeCount = generativeCountForSupply(targetSupply, entries.length)
+      if (generativeCount <= 0 && !entries.length) {
+        setMessage('Set target supply or add 1/1 images before exporting')
+        return
+      }
+      await exportMergedBatch(generativeCount, `full supply ${targetSupply.toLocaleString()}`)
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Full export failed')
+    } finally {
+      setExportFullBusy(false)
+    }
+  }, [project, targetSupply, exportMergedBatch])
 
   const handleLaunchHandoff = useCallback(() => {
     if (!project) return
@@ -612,6 +709,100 @@ export function OwlGeneratorPageClient() {
                 />
               </label>
             </div>
+          </CommandCard>
+
+          <CommandCard label="1/1 // unique pieces">
+            <p className="mb-4 text-sm text-[#9BA8B4]">
+              Upload hand-drawn 1/1 art that uses the same Sugar metadata as generative pieces, with a custom trait
+              (Gen1 example: <strong className="font-normal text-[#E8EEF2]">Special: The Widow King</strong>). 1/1s
+              occupy slots in target supply — they are not added on top.
+            </p>
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <label className="block min-w-[200px] flex-1 text-sm">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                  1/1 placement
+                </span>
+                <select
+                  className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-[#E8EEF2] touch-manipulation"
+                  value={oneOfOnePlacement}
+                  onChange={(e) =>
+                    updateProject({ oneOfOnePlacement: e.target.value as OneOfOnePlacement })
+                  }
+                >
+                  <option value="start">At the start</option>
+                  <option value="end">At the end</option>
+                  <option value="random">Randomly</option>
+                </select>
+              </label>
+              <label className="inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center gap-2 border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-4 text-xs font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16">
+                <Upload className="h-4 w-4" aria-hidden />
+                Upload 1/1 PNGs
+                <input
+                  type="file"
+                  accept="image/png,image/webp,image/jpeg"
+                  multiple
+                  className="sr-only"
+                  onChange={(e) => {
+                    void addOneOfOneFiles(e.target.files)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+            </div>
+            {oneOfOnes.length ? (
+              <ul className="grid gap-3 sm:grid-cols-2">
+                {oneOfOnes.map((entry) => (
+                  <li key={entry.id} className="border border-[#1A222B] bg-[#0F1419]/60 p-3">
+                    <div className="flex items-start gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={entry.imageSrc}
+                        alt=""
+                        className="h-16 w-16 shrink-0 border border-[#1A222B] bg-[#10161C] object-contain"
+                      />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <label className="block text-xs">
+                          <span className="font-mono text-[10px] uppercase text-[#5C6773]">Trait type</span>
+                          <input
+                            className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0B0F12] px-2 text-[#E8EEF2] touch-manipulation"
+                            value={entry.traitType}
+                            onChange={(e) => updateOneOfOne(entry.id, { traitType: e.target.value })}
+                            placeholder="Special"
+                          />
+                        </label>
+                        <label className="block text-xs">
+                          <span className="font-mono text-[10px] uppercase text-[#5C6773]">Trait value</span>
+                          <input
+                            className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0B0F12] px-2 text-[#E8EEF2] touch-manipulation"
+                            value={entry.traitValue}
+                            onChange={(e) => updateOneOfOne(entry.id, { traitValue: e.target.value })}
+                            placeholder="The Widow King"
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Remove 1/1"
+                        className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                        onClick={() => removeOneOfOne(entry.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="font-mono text-xs text-[#5C6773]">
+                No 1/1 images yet — drag PNGs here or use Upload 1/1 PNGs.
+              </p>
+            )}
+            {oneOfOnes.length && targetSupply ? (
+              <p className="mt-3 font-mono text-[10px] text-[#5C6773]">
+                {oneOfOnes.length} 1/1 slot(s) · {generativeCountForSupply(targetSupply, oneOfOnes.length).toLocaleString()}{' '}
+                generative pieces → {targetSupply.toLocaleString()} total
+              </p>
+            ) : null}
           </CommandCard>
 
           <GeneratorRuleLinter issues={lintIssues} />
@@ -832,7 +1023,8 @@ export function OwlGeneratorPageClient() {
 
           <CommandCard label="EXPORT // Sugar batch">
             <p className="text-sm text-[#9BA8B4]">
-              Unique DNA combos respecting weights and rules. Blocked while linter reports errors.
+              Unique DNA combos respecting weights and rules{oneOfOnes.length ? ` · ${oneOfOnes.length} 1/1(s) merged at export` : ''}.
+              Blocked while linter reports errors.
             </p>
             <label className="mt-4 block text-sm">
               <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Batch size (max 50)</span>
@@ -847,15 +1039,31 @@ export function OwlGeneratorPageClient() {
             </label>
             <DeployButton
               className="mt-4 w-full"
-              disabled={exportBusy || !project.traits.length || lintBlocked}
+              disabled={exportBusy || exportFullBusy || (!project.traits.length && !oneOfOnes.length) || lintBlocked}
               onClick={() => void handleExport()}
             >
-              {exportBusy ? 'Exporting…' : 'Download Sugar ZIP'}
+              {exportBusy ? 'Exporting…' : 'Download Sugar ZIP (preview batch)'}
+            </DeployButton>
+            <DeployButton
+              variant="ghost"
+              className="mt-3 w-full"
+              disabled={
+                exportBusy ||
+                exportFullBusy ||
+                lintBlocked ||
+                (!project.traits.length && !oneOfOnes.length) ||
+                (generativeCountForSupply(targetSupply, oneOfOnes.length) <= 0 && !oneOfOnes.length)
+              }
+              onClick={() => void handleExportFullSupply()}
+            >
+              {exportFullBusy
+                ? `Exporting ${targetSupply.toLocaleString()}…`
+                : `Download full supply (${targetSupply.toLocaleString()})`}
             </DeployButton>
             <DeployButton
               variant="ghost"
               className="mt-3 w-full gap-2"
-              disabled={lintBlocked || !project.traits.length}
+              disabled={lintBlocked || (!project.traits.length && !oneOfOnes.length)}
               onClick={handleLaunchHandoff}
             >
               <Rocket className="h-4 w-4" aria-hidden />

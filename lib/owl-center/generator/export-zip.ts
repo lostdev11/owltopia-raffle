@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 
 import { compositeTraitsToBlob } from '@/lib/owl-center/generator/composite'
+import { dataUrlToBlob } from '@/lib/owl-center/generator/one-of-one'
 import type { GeneratedNft, GeneratorProject } from '@/lib/owl-center/generator/types'
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -24,7 +25,9 @@ export async function exportBatchAsSugarZip(
   const { collectionName, symbol, description } = project
 
   for (const nft of batch) {
-    const png = await compositeTraitsToBlob(nft.traits, project.categories)
+    const png = nft.oneOfOneImageSrc
+      ? await dataUrlToBlob(nft.oneOfOneImageSrc)
+      : await compositeTraitsToBlob(nft.traits, project.categories)
     assets.file(`${nft.index}.png`, png)
     assets.file(
       `${nft.index}.json`,

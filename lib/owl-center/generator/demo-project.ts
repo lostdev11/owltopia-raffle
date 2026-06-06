@@ -120,6 +120,8 @@ export function createEmptyProject(): GeneratorProject {
     categories,
     traits: [],
     rules: [],
+    oneOfOnes: [],
+    oneOfOnePlacement: 'random',
     updatedAt: now,
   }
 }

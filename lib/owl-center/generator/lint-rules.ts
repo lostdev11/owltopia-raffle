@@ -331,6 +331,26 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     })
   }
 
+  const oneOfOnes = project.oneOfOnes ?? []
+  if (oneOfOnes.length) {
+    const missing = oneOfOnes.filter((o) => !o.traitValue.trim())
+    if (missing.length) {
+      issues.push({
+        severity: 'warning',
+        code: 'one_of_one_missing_trait',
+        message: `${missing.length} 1/1 image(s) need a trait value (e.g. The Widow King)`,
+      })
+    }
+    const supply = project.targetSupply ?? 0
+    if (supply > 0 && oneOfOnes.length >= supply) {
+      issues.push({
+        severity: 'error',
+        code: 'one_of_one_supply',
+        message: `1/1 count (${oneOfOnes.length}) must be less than target supply (${supply})`,
+      })
+    }
+  }
+
   const errors = issues.filter((i) => i.severity === 'error')
   if (project.rules.length > 0 && errors.length === 0 && project.traits.length >= 2) {
     issues.push({
