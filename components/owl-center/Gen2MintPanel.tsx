@@ -225,14 +225,18 @@ export function Gen2MintPanel({
               <span>Checking live eligibility…</span>
             ) : (
               <span>
-                Active phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
-                {' · '}
                 {elig.is_eligible ? (
                   <>
+                    Your mint phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
+                    {' · '}
                     Can mint <span className="text-[#F4FBF8]">{elig.max_mintable}</span> now
                   </>
                 ) : (
-                  <span className="text-[#FFD769]">Not eligible to mint in this phase</span>
+                  <>
+                    Active phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
+                    {' · '}
+                    <span className="text-[#FFD769]">Not eligible to mint in this phase</span>
+                  </>
                 )}
                 {' · '}
                 <a href="#allocation" className="text-[#00FF9C] underline-offset-2 hover:underline">

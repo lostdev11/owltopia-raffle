@@ -42,12 +42,16 @@ import { StatusBadge } from '@/components/owl-center/StatusBadge'
 
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 
+import { useGen2MintCheck } from '@/hooks/use-gen2-mint-check'
+
 import { OWL_CENTER_GEN2_SECTIONS } from '@/lib/owl-center/nav'
 
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
-import type { MintTerminalLine, OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import type { MintTerminalLine, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
 import { isDevnetMintEnabled } from '@/lib/solana/network'
+
+import { cn } from '@/lib/utils'
 
 
 
@@ -120,6 +124,13 @@ function SectionHeading({ id, title, hint }: { id: string; title: string; hint?:
 
 
 
+function supplyPhaseRowClass(phase: OwlCenterPhase, userMintPhase: OwlCenterPhase | null): string {
+  if (userMintPhase !== phase) return ''
+  return 'rounded border border-[#00FF9C]/45 bg-[#00FF9C]/8 px-2 py-1'
+}
+
+
+
 export function Gen2MintPageClient() {
 
   const { publicKey, connected } = useWallet()
@@ -128,11 +139,24 @@ export function Gen2MintPageClient() {
 
   const [clusterRefresh, setClusterRefresh] = useState(0)
 
+  const { check: mintCheck, loading: mintCheckLoading, error: mintCheckErr, refresh: refreshMintCheck } =
+    useGen2MintCheck(sessionWallet, clusterRefresh)
+
   const [state, setState] = useState<Gen2StateApi | null>(null)
 
   const [loadErr, setLoadErr] = useState<string | null>(null)
 
   const [adminTradingWarn, setAdminTradingWarn] = useState(false)
+
+  const userMintPhase =
+    connected && mintCheck
+      ? (mintCheck.phases.find((p) => p.is_active && p.is_eligible && p.max_mintable > 0)?.phase ?? null)
+      : null
+
+  const userReservedPhases =
+    connected && mintCheck
+      ? mintCheck.phases.filter((p) => !p.is_active && p.reserved_mints > 0).map((p) => p.phase)
+      : []
 
 
 
@@ -413,33 +437,49 @@ export function Gen2MintPageClient() {
 
           <div className="mt-6 grid gap-3 font-mono text-xs text-[#9BA8B4] sm:grid-cols-2">
 
-            <p>
+            <p className={cn(supplyPhaseRowClass('AIRDROP', userMintPhase))}>
 
               GEN1 <span className="text-[#00FF9C]">{phases.airdrop}</span> <span className="text-[#5C6773]">· free</span>
 
+              {userMintPhase === 'AIRDROP' ? (
+                <span className="ml-1 text-[#00FF9C]">· your mint</span>
+              ) : null}
+
             </p>
 
-            <p>
+            <p className={cn(supplyPhaseRowClass('PRESALE', userMintPhase))}>
 
               Presale <span className="text-[#00FF9C]">{phases.presale}</span>{' '}
 
               <span className="text-[#5C6773]">· paid buyers</span>
 
+              {userMintPhase === 'PRESALE' ? (
+                <span className="ml-1 text-[#00FF9C]">· your mint</span>
+              ) : null}
+
             </p>
 
-            <p>
+            <p className={cn(supplyPhaseRowClass('WHITELIST', userMintPhase))}>
 
               WL <span className="text-[#00FF9C]">{phases.whitelist}</span>{' '}
 
               <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.whitelist)} · FCFS</span>
 
+              {userMintPhase === 'WHITELIST' ? (
+                <span className="ml-1 text-[#00FF9C]">· your mint</span>
+              ) : null}
+
             </p>
 
-            <p>
+            <p className={cn(supplyPhaseRowClass('PUBLIC', userMintPhase))}>
 
               Public <span className="text-[#00FF9C]">{phases.public}</span>{' '}
 
               <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.public)}</span>
+
+              {userMintPhase === 'PUBLIC' ? (
+                <span className="ml-1 text-[#00FF9C]">· your mint</span>
+              ) : null}
 
             </p>
 
@@ -447,7 +487,11 @@ export function Gen2MintPageClient() {
 
           <div className="mt-6 border-t border-[#1A222B] pt-6">
 
-            <LaunchPhaseTimeline active={launch.active_phase} />
+            <LaunchPhaseTimeline
+              active={launch.active_phase}
+              userMintPhase={userMintPhase}
+              userReservedPhases={userReservedPhases}
+            />
 
           </div>
 
@@ -591,7 +635,12 @@ export function Gen2MintPageClient() {
 
         />
 
-        <Gen2MintCheckCard refreshKey={clusterRefresh} />
+        <Gen2MintCheckCard
+          check={mintCheck}
+          loading={mintCheckLoading}
+          err={mintCheckErr}
+          onRefresh={refreshMintCheck}
+        />
 
       </section>
 

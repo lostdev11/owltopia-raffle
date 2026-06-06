@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useWallet } from '@solana/wallet-adapter-react'
 
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel'
@@ -14,9 +15,13 @@ import { StatPanel } from '@/components/owl-center/StatPanel'
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
+import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
 export function CollectionMintPageClient({ slug, launchName }: { slug: string; launchName: string }) {
+  const { publicKey, connected } = useWallet()
+  const walletStr = publicKey?.toBase58() ?? null
+  const { elig } = useCollectionMintEligibility(slug, walletStr, connected)
   const [state, setState] = useState<CollectionMintStateResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -66,6 +71,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const { launch, supply, mint_controls, marketplace, terminal, mint_network } = state
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
+  const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
 
   return (
     <OwlCenterShell
@@ -82,7 +88,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div className="space-y-8">
           <SupplyProgress minted={supply.minted} total={supply.total} />
-          <LaunchPhaseTimeline active={launch.active_phase} />
+          <LaunchPhaseTimeline active={launch.active_phase} userMintPhase={userMintPhase} />
           <CollectionMintPanel
             slug={slug}
             launch={launch}

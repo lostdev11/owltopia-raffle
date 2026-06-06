@@ -85,13 +85,17 @@ export function Gen2SupplyPhaseMintCta({ launch, remaining, presaleSoldOut = fal
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 font-mono text-xs text-[#9BA8B4]">
           <p>
-            Phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
             {connected && elig && elig.is_eligible ? (
               <>
+                Your mint phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
                 {' · '}
                 Can mint <span className="text-[#F4FBF8]">{elig.max_mintable}</span> now
               </>
-            ) : null}
+            ) : (
+              <>
+                Phase: <span className="text-[#00FF9C]">{phaseLabel}</span>
+              </>
+            )}
           </p>
           {disabledReason ? (
             <p className={cn('mt-1', mintControls.disabled ? 'text-[#FFD769]' : 'text-[#5C6773]')}>{disabledReason}</p>

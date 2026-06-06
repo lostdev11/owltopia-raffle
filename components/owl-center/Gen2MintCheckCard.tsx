@@ -1,6 +1,5 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -57,37 +56,19 @@ function phaseHeaderRight(p: Gen2MintCheckPhasePreview, connected: boolean): str
   return '—'
 }
 
-export function Gen2MintCheckCard({ refreshKey = 0 }: { refreshKey?: number }) {
+export function Gen2MintCheckCard({
+  check,
+  loading,
+  err,
+  onRefresh,
+}: {
+  check: Gen2MintCheckResponse | null
+  loading: boolean
+  err: string | null
+  onRefresh: () => void
+}) {
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
-
-  const [check, setCheck] = useState<Gen2MintCheckResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const res = await fetch('/api/owl-center/gen2/mint-check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: walletStr }),
-      })
-      const j = (await res.json()) as Gen2MintCheckResponse & { error?: string }
-      if (!res.ok) throw new Error(j.error || 'mint_check_failed')
-      setCheck(j)
-    } catch (e) {
-      setCheck(null)
-      setErr(e instanceof Error ? e.message : 'mint_check_failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [walletStr])
-
-  useEffect(() => {
-    void load()
-  }, [load, refreshKey])
 
   const pool = check?.presale_pool
   const cluster = check?.wallet_cluster
@@ -109,7 +90,7 @@ export function Gen2MintCheckCard({ refreshKey = 0 }: { refreshKey?: number }) {
             ) : null}
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => void onRefresh()}
               disabled={loading}
               className="min-h-[44px] touch-manipulation px-3 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] underline-offset-4 hover:underline disabled:opacity-50"
             >
@@ -188,19 +169,30 @@ export function Gen2MintCheckCard({ refreshKey = 0 }: { refreshKey?: number }) {
             {check.phases.map((p) => {
               const active = p.is_active
               const eligible = p.is_eligible
+              const canMintNow = connected && active && eligible && p.max_mintable > 0
+              const hasUserAllocation = connected && p.reserved_mints > 0
               const activeTag = phaseActiveTag(p, check.presale_sold_out)
               return (
                 <li
                   key={p.phase}
                   className={cn(
                     'border px-3 py-3 font-mono text-xs',
-                    active ? 'border-[#00FF9C]/40 bg-[#00FF9C]/6' : 'border-[#1A222B] bg-[#0B0F14]'
+                    canMintNow && 'border-[#00FF9C] bg-[#00FF9C]/12 ring-1 ring-[#00FF9C]/45',
+                    active && !canMintNow && 'border-[#00FF9C]/40 bg-[#00FF9C]/6',
+                    !active && hasUserAllocation && 'border-[#00FF9C]/30 border-dashed bg-[#00FF9C]/5',
+                    !active && !hasUserAllocation && !canMintNow && 'border-[#1A222B] bg-[#0B0F14]'
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-bold uppercase tracking-widest text-[#C5D0D8]">
                       {p.label}
-                      {activeTag ? <span className="ml-2 text-[#00FF9C]">· {activeTag}</span> : null}
+                      {canMintNow ? (
+                        <span className="ml-2 text-[#00FF9C]">· Your mint</span>
+                      ) : activeTag ? (
+                        <span className="ml-2 text-[#00FF9C]">· {activeTag}</span>
+                      ) : !active && hasUserAllocation ? (
+                        <span className="ml-2 text-[#9BA8B4]">· Your allocation</span>
+                      ) : null}
                     </span>
                     <span
                       className={
