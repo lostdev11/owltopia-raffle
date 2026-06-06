@@ -16,6 +16,7 @@ import { launchPhaseLabel, type LaunchpadHubPayload } from '@/lib/owl-center/lau
 import { formatMintDate } from '@/lib/owl-center/phase-schedule'
 
 const QUICK_LINKS = [
+  { href: '/admin/owl-center/gen2#wl-upload', label: 'Upload WL wallets', hint: 'Bulk add collab whitelist' },
   { href: '/admin/owl-center/gen2', label: 'Gen2 console', hint: 'Phases, schedule, CM, WL' },
   { href: '/admin/gen2-presale', label: 'Gen2 presale', hint: 'Credits, gifts, purchases' },
   { href: '/admin/owl-center/demo', label: 'Demo launchpad', hint: 'Partner-style public mint' },
@@ -171,8 +172,14 @@ export function LaunchpadHubClient() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link
+                  href="/admin/owl-center/gen2#wl-upload"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center gap-2 border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-4 text-sm font-bold text-[#00FF9C]"
+                >
+                  Upload WL wallets
+                </Link>
+                <Link
                   href="/admin/owl-center/gen2"
-                  className="inline-flex min-h-[44px] touch-manipulation items-center gap-2 border border-[#00FF9C]/40 px-4 text-sm font-bold text-[#00FF9C]"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center gap-2 border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35"
                 >
                   <Settings2 className="h-4 w-4" /> Open console
                 </Link>

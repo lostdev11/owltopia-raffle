@@ -4,28 +4,18 @@ import { useCallback, useRef, useState } from 'react'
 import { Loader2, Upload } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
-import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
 import { cn } from '@/lib/utils'
 
-type UploadKind = 'wl' | 'overage'
-
 type Props = {
-  kind: UploadKind
   connected: boolean
-  onSuccess?: () => void
   className?: string
 }
 
-const ENDPOINTS: Record<UploadKind, string> = {
-  wl: '/api/admin/owl-center/gen2/wl-allocations/bulk',
-  overage: '/api/admin/owl-center/gen2/presale-overage/bulk',
-}
-
-export function AdminWalletBulkUpload({ kind, connected, onSuccess, className }: Props) {
+/** Bulk upload for Presale+13 overage wallets (spots 658–670). */
+export function AdminWalletBulkUpload({ connected, className }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [defaultAllowed, setDefaultAllowed] = useState(1)
-  const [community, setCommunity] = useState('')
   const [uploading, setUploading] = useState(false)
   const [resultMsg, setResultMsg] = useState<string | null>(null)
   const [resultErr, setResultErr] = useState(false)
@@ -49,19 +39,14 @@ export function AdminWalletBulkUpload({ kind, connected, onSuccess, className }:
     setFailures([])
     setResultErr(false)
     try {
-      const body: Record<string, unknown> = {
-        text,
-        default_allowed_mints: defaultAllowed,
-      }
-      if (kind === 'wl' && community.trim()) {
-        body.community = community.trim()
-      }
-
-      const res = await fetch(ENDPOINTS[kind], {
+      const res = await fetch('/api/admin/owl-center/gen2/presale-overage/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          text,
+          default_allowed_mints: defaultAllowed,
+        }),
       })
       const data = (await res.json().catch(() => ({}))) as {
         error?: string
@@ -86,24 +71,19 @@ export function AdminWalletBulkUpload({ kind, connected, onSuccess, className }:
         }`
       )
       setResultErr(failed.length > 0)
-      if ((data.upserted ?? 0) > 0) onSuccess?.()
     } catch (e) {
       setResultMsg(e instanceof Error ? e.message : 'Upload failed')
       setResultErr(true)
     } finally {
       setUploading(false)
     }
-  }, [text, defaultAllowed, community, kind, onSuccess])
-
-  const title = kind === 'wl' ? 'Upload WL wallets' : 'Upload Presale+13 wallets'
-  const hint =
-    kind === 'wl'
-      ? 'One wallet per line, or CSV: wallet, allowed_mints, community. Example: 7xKXtg…abcd, 2, pandarianz'
-      : 'One wallet per line, or wallet, allowed_mints. Max 50 per upload. For spots 658–670 (paid presale buyers).'
+  }, [text, defaultAllowed])
 
   return (
     <div className={cn('space-y-3', className)}>
-      <p className="text-xs leading-relaxed text-[#9BA8B4]">{hint}</p>
+      <p className="text-xs leading-relaxed text-[#9BA8B4]">
+        One wallet per line, or wallet, allowed_mints. Max 50 per upload. For spots 658–670 (paid presale buyers).
+      </p>
 
       <textarea
         value={text}
@@ -120,32 +100,12 @@ export function AdminWalletBulkUpload({ kind, connected, onSuccess, className }:
           <input
             type="number"
             min={0}
-            max={kind === 'overage' ? 5 : 50}
+            max={5}
             value={defaultAllowed}
             onChange={(e) => setDefaultAllowed(Number(e.target.value) || 1)}
             className="w-20 border border-[#1A222B] bg-[#0F1419] px-2 py-2 font-mono text-sm"
           />
         </label>
-
-        {kind === 'wl' ? (
-          <label className="grid min-w-[140px] flex-1 gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Default community (optional)
-            <input
-              list="wl-communities"
-              value={community}
-              onChange={(e) => setCommunity(e.target.value)}
-              placeholder="pandarianz"
-              className="border border-[#1A222B] bg-[#0F1419] px-2 py-2 font-mono text-sm"
-            />
-            <datalist id="wl-communities">
-              {GEN2_WL_COLLAB_COMMUNITIES.map((c) => (
-                <option key={c.slug} value={c.slug}>
-                  {c.label}
-                </option>
-              ))}
-            </datalist>
-          </label>
-        ) : null}
 
         <input
           ref={fileRef}
@@ -174,7 +134,7 @@ export function AdminWalletBulkUpload({ kind, connected, onSuccess, className }:
               Uploading…
             </>
           ) : (
-            title
+            'Upload Presale+13 wallets'
           )}
         </DeployButton>
       </div>

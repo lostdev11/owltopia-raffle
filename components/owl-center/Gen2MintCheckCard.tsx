@@ -175,8 +175,10 @@ export function Gen2MintCheckCard({
               return (
                 <li
                   key={p.phase}
+                  id={p.phase === 'WHITELIST' ? 'whitelist-detail' : undefined}
                   className={cn(
-                    'border px-3 py-3 font-mono text-xs',
+                    'scroll-mt-28 border px-3 py-3 font-mono text-xs md:scroll-mt-24',
+                    p.phase === 'WHITELIST' && hasUserAllocation && 'ring-1 ring-[#00FF9C]/25',
                     canMintNow && 'border-[#00FF9C] bg-[#00FF9C]/12 ring-1 ring-[#00FF9C]/45',
                     active && !canMintNow && 'border-[#00FF9C]/40 bg-[#00FF9C]/6',
                     !active && hasUserAllocation && 'border-[#00FF9C]/30 border-dashed bg-[#00FF9C]/5',

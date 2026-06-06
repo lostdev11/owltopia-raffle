@@ -13,6 +13,7 @@ import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintChecklist'
 import { AdminOwlCenterViewModePanel } from '@/components/admin/AdminOwlCenterViewModePanel'
+import { AdminWlCommunityManager } from '@/components/admin/AdminWlCommunityManager'
 import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { PhaseScheduleEditor } from '@/components/owl-center/PhaseScheduleEditor'
 import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
@@ -118,6 +119,16 @@ export default function AdminOwlCenterPage() {
   useEffect(() => {
     void refreshWlSummary()
   }, [refreshWlSummary])
+
+  useEffect(() => {
+    const hash = window.location.hash.slice(1)
+    if (!hash) return
+    const scrollToTarget = () => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    const t = window.setTimeout(scrollToTarget, 150)
+    return () => window.clearTimeout(t)
+  }, [state])
 
   async function savePatch() {
     setSaveMsg(null)
@@ -281,6 +292,12 @@ export default function AdminOwlCenterPage() {
           <Link href="/admin/gen2-presale" className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35">
             Gen2 presale admin
           </Link>
+          <Link
+            href="#wl-upload"
+            className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/15"
+          >
+            Upload WL wallets
+          </Link>
           <Link href="/admin/owl-center/demo" className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10">
             Demo mint launchpad
           </Link>
@@ -313,6 +330,87 @@ export default function AdminOwlCenterPage() {
                 slug={state.launch.slug} · featured={String(state.launch.is_featured)} · mint opens=
                 {state.launch.launch_deadline_at ?? '—'}
               </p>
+            </CommandCard>
+
+            <CommandCard label="wl_ops.sys">
+              <p className="mb-4 text-sm text-[#9BA8B4]">
+                Add collab whitelist wallets by community — pick a community, paste wallets, then switch to View to audit
+                what was saved. Summary totals are below the upload form.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="#wl-upload"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-4 text-sm font-bold text-[#00FF9C]"
+                >
+                  Upload WL wallets
+                </a>
+                <a
+                  href="#wl-audit"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                >
+                  WL allocation audit
+                </a>
+                <a
+                  href="#wl-overage"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                >
+                  Presale+13 overage
+                </a>
+              </div>
+              {wlSummary ? (
+                <p className="mt-4 font-mono text-xs text-[#C5D0D8]">
+                  {wlSummary.wallet_count} wallets · {wlSummary.total_allowed}/{wlSummary.wl_cap} spots allocated ·{' '}
+                  {wlSummary.total_used} used
+                  {wlSummary.over_allocated_by > 0 ? (
+                    <span className="text-[#FFD769]"> · over cap by {wlSummary.over_allocated_by}</span>
+                  ) : (
+                    <span className="text-[#00FF9C]"> · within cap</span>
+                  )}
+                </p>
+              ) : (
+                <p className="mt-4 text-xs text-[#5C6773]">Sign in as admin to see WL allocation summary.</p>
+              )}
+            </CommandCard>
+
+            <CommandCard id="wl-upload" label="upload_wl_wallets.sys">
+              <AdminWlCommunityManager connected={connected} onSuccess={() => void refreshWlSummary()} />
+            </CommandCard>
+
+            <CommandCard id="wl-overage" label="upload_presale_overage.sys">
+              <p className="mb-3 text-xs text-[#9BA8B4]">
+                Assign wallets for the <strong className="text-[#EAFBF4]">Presale+13</strong> phase (spots 658–670). Wallets
+                must be paid presale participants with credits remaining.
+              </p>
+              <AdminWalletBulkUpload connected={connected} />
+            </CommandCard>
+
+            <CommandCard id="wl-audit" label="wl_allocation_audit.sys">
+              <p className="mb-3 text-xs text-[#9BA8B4]">
+                FCFS collab channels: {GEN2_WL_COLLAB_COMMUNITIES.map((c) => c.label).join(', ')}. Tag rows with{' '}
+                <code className="text-[10px]">community</code> per upload or CSV column.
+              </p>
+              {wlSummary ? (
+                <div className="space-y-2 font-mono text-xs text-[#C5D0D8]">
+                  <p>
+                    Wallets {wlSummary.wallet_count} · allowed {wlSummary.total_allowed} / cap {wlSummary.wl_cap} · used{' '}
+                    {wlSummary.total_used}
+                  </p>
+                  {wlSummary.over_allocated_by > 0 ? (
+                    <p className="text-[#FFD769]">Over-allocated by {wlSummary.over_allocated_by} spots — trim before WL goes live.</p>
+                  ) : (
+                    <p className="text-[#00FF9C]">Within WL supply cap.</p>
+                  )}
+                  <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto border border-[#1A222B] bg-[#0B0F14] p-2">
+                    {Object.entries(wlSummary.by_community).map(([k, v]) => (
+                      <li key={k} className="text-[#9BA8B4]">
+                        {k}: {v.wallets} wallets · {v.allowed} allowed · {v.used} used
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-xs text-[#5C6773]">Sign in as admin to load WL summary.</p>
+              )}
             </CommandCard>
 
             <CommandCard label="controls.sys">
@@ -562,47 +660,6 @@ export default function AdminOwlCenterPage() {
                   {giftMsg}
                 </p>
               ) : null}
-            </CommandCard>
-
-            <CommandCard label="upload_wl_wallets.sys">
-              <AdminWalletBulkUpload kind="wl" connected={connected} onSuccess={() => void refreshWlSummary()} />
-            </CommandCard>
-
-            <CommandCard label="upload_presale_overage.sys">
-              <p className="mb-3 text-xs text-[#9BA8B4]">
-                Assign wallets for the <strong className="text-[#EAFBF4]">Presale+13</strong> phase (spots 658–670). Wallets
-                must be paid presale participants with credits remaining.
-              </p>
-              <AdminWalletBulkUpload kind="overage" connected={connected} />
-            </CommandCard>
-
-            <CommandCard label="wl_allocation_audit.sys">
-              <p className="mb-3 text-xs text-[#9BA8B4]">
-                FCFS collab channels: {GEN2_WL_COLLAB_COMMUNITIES.map((c) => c.label).join(', ')}. Tag rows with{' '}
-                <code className="text-[10px]">community</code> per upload or CSV column.
-              </p>
-              {wlSummary ? (
-                <div className="space-y-2 font-mono text-xs text-[#C5D0D8]">
-                  <p>
-                    Wallets {wlSummary.wallet_count} · allowed {wlSummary.total_allowed} / cap {wlSummary.wl_cap} · used{' '}
-                    {wlSummary.total_used}
-                  </p>
-                  {wlSummary.over_allocated_by > 0 ? (
-                    <p className="text-[#FFD769]">Over-allocated by {wlSummary.over_allocated_by} spots — trim before WL goes live.</p>
-                  ) : (
-                    <p className="text-[#00FF9C]">Within WL supply cap.</p>
-                  )}
-                  <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto border border-[#1A222B] bg-[#0B0F14] p-2">
-                    {Object.entries(wlSummary.by_community).map(([k, v]) => (
-                      <li key={k} className="text-[#9BA8B4]">
-                        {k}: {v.wallets} wallets · {v.allowed} allowed · {v.used} used
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-xs text-[#5C6773]">Sign in as admin to load WL summary.</p>
-              )}
             </CommandCard>
 
             <CommandCard label="mint_events.sys">

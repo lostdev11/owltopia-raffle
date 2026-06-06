@@ -1,27 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { parseWalletUploadText } from '@/lib/admin/parse-wallet-upload'
-import { bulkUpsertWlAllocations, listWlAllocations } from '@/lib/db/owl-center-wl-allocations'
+import { bulkUpsertWlAllocations } from '@/lib/db/owl-center-wl-allocations'
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
-
-/** GET — list WL allocations (admin). */
-export async function GET(request: NextRequest) {
-  const session = await requireGen2PresaleAdminSession(request)
-  if (session instanceof NextResponse) return session
-
-  try {
-    const limitRaw = request.nextUrl.searchParams.get('limit')
-    const limit = limitRaw ? Number(limitRaw) : 500
-    const rows = await listWlAllocations(limit)
-    return NextResponse.json({ rows })
-  } catch (e) {
-    console.error('[admin/wl-allocations GET]', e)
-    return NextResponse.json({ error: 'Failed to load WL allocations' }, { status: 500 })
-  }
-}
 
 /** POST — bulk upload wallets. Body: { text, default_allowed_mints?, community? } */
 export async function POST(request: NextRequest) {
@@ -62,7 +46,7 @@ export async function POST(request: NextRequest) {
     const rows = parsed.rows.map((r) => ({
       wallet: r.wallet,
       allowed_mints: r.allowed_mints,
-      community: r.community ?? defaultCommunity,
+      community: defaultCommunity ?? r.community,
     }))
 
     const result = await bulkUpsertWlAllocations(rows)

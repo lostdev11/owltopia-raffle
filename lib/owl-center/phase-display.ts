@@ -70,6 +70,7 @@ export function owlCenterMintWrongPhaseHint(input: MintWrongPhaseHintInput): str
 
 /** FCFS collab channels from Discord (for admin reference + WL tagging). */
 export const GEN2_WL_COLLAB_COMMUNITIES = [
+  { slug: 'gen2-wl', label: 'Discord GEN2 WL (Atlas3)' },
   { slug: 'pandarianz', label: 'Pandarianz' },
   { slug: 'sharkyfi', label: 'SharkyFi' },
   { slug: 'luckysea', label: 'Lucky Sea' },

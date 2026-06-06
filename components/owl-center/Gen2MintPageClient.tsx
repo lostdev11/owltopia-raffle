@@ -19,6 +19,7 @@ import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 
 import { Gen2MintCheckCard } from '@/components/owl-center/Gen2MintCheckCard'
+import { Gen2WlStatusCard } from '@/components/owl-center/Gen2WlStatusCard'
 
 import { OwlCenterLinkedWalletsSection } from '@/components/owl-center/OwlCenterLinkedWalletsSection'
 
@@ -158,6 +159,12 @@ export function Gen2MintPageClient() {
     connected && mintCheck
       ? mintCheck.phases.filter((p) => !p.is_active && p.reserved_mints > 0).map((p) => p.phase)
       : []
+
+  const wlPhasePreview = mintCheck?.phases.find((p) => p.phase === 'WHITELIST')
+  const userHasWlSpots =
+    connected &&
+    ((wlPhasePreview?.wl?.admin_allocated && (wlPhasePreview.wl.available_mints ?? 0) > 0) ||
+      (wlPhasePreview?.reserved_mints ?? 0) > 0)
 
 
 
@@ -358,13 +365,11 @@ export function Gen2MintPageClient() {
           ) : null}
 
           <p className="mt-3 max-w-xl text-xs text-[#5C6773]">
-
-            {presaleSoldOut
-
-              ? 'Presale is sold out. Use Allocation to see reserved spots, then Mint when your phase is live.'
-
-              : 'Use the sections below: check allocation first, link presale wallets if needed, then mint when your phase is active.'}
-
+            {userHasWlSpots
+              ? 'You have WL spots — jump to Whitelist below. Mint from Overview when WL is live.'
+              : presaleSoldOut
+                ? 'Presale is sold out. Check Whitelist or Allocation for reserved spots, then mint when your phase is live.'
+                : 'Use Whitelist for WL spots, Allocation for all phases, then mint when your phase is active.'}
           </p>
 
         </div>
@@ -532,14 +537,16 @@ export function Gen2MintPageClient() {
 
           ) : null}
 
-          <Gen2MintPanel
-            launch={launch}
-            remaining={supply.remaining}
-            presaleSoldOut={presaleSoldOut}
-            mintControls={mintControls}
-            onRefresh={() => void load()}
-            embedded
-          />
+          <div id="mint" className="scroll-mt-28 md:scroll-mt-24">
+            <Gen2MintPanel
+              launch={launch}
+              remaining={supply.remaining}
+              presaleSoldOut={presaleSoldOut}
+              mintControls={mintControls}
+              onRefresh={() => void load()}
+              embedded
+            />
+          </div>
 
         </CommandCard>
 
@@ -598,6 +605,22 @@ export function Gen2MintPageClient() {
 
 
       <section className="mb-12 space-y-4">
+        <SectionHeading
+          id="whitelist"
+          title="Whitelist"
+          hint="Your WL mint spots — assigned by admins, FCFS when the phase opens. This is the quick view; full phase breakdown is under Allocation."
+        />
+        <Gen2WlStatusCard
+          check={mintCheck}
+          loading={mintCheckLoading}
+          activePhase={launch.active_phase}
+          wlSupply={phases.whitelist}
+          wlPriceLamports={prices_lamports?.whitelist ?? null}
+          onRefresh={refreshMintCheck}
+        />
+      </section>
+
+      <section className="mb-12 space-y-4">
 
         <SectionHeading
 
@@ -637,7 +660,7 @@ export function Gen2MintPageClient() {
 
           title="Your allocation"
 
-          hint="Reserved spots for every phase — even before that phase goes live. Connect the wallet that holds Gen1, presale credits, or WL rows."
+          hint="Full breakdown for every phase. For WL only, use the Whitelist section above."
 
         />
 

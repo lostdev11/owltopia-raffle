@@ -3154,6 +3154,21 @@ export default function AdminDashboardPage() {
             </Link>
           </Card>
 
+          <Card className="hover:border-primary transition-colors cursor-pointer border-primary/40">
+            <Link href="/admin/owl-center/gen2#wl-upload">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ListTodo className="h-5 w-5" />
+                  Gen2 whitelist upload
+                </CardTitle>
+                <CardDescription>
+                  Bulk add collab WL wallets — paste or CSV upload, set slots per wallet and community tag. Audit totals vs
+                  WL cap before mint.
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
+
           <Card className="hover:border-primary transition-colors cursor-pointer">
             <Link href="/admin/owl-center">
               <CardHeader>

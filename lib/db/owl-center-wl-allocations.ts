@@ -86,7 +86,36 @@ export async function listWlAllocations(limit: number): Promise<WlAllocationRow[
     .limit(cap)
 
   if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => {
+  return mapWlAllocationRows(data ?? [])
+}
+
+export async function listWlAllocationsByCommunity(
+  community: string,
+  limit = 500
+): Promise<WlAllocationRow[]> {
+  const admin = getSupabaseAdmin()
+  const cap = Math.min(2000, Math.max(1, Math.floor(limit)))
+  const slug = community.trim()
+
+  let query = admin
+    .from('owl_center_wl_allocations')
+    .select('wallet,allowed_mints,used_mints,community')
+    .order('wallet', { ascending: true })
+    .limit(cap)
+
+  if (slug === 'unassigned') {
+    query = query.is('community', null)
+  } else {
+    query = query.eq('community', slug)
+  }
+
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  return mapWlAllocationRows(data ?? [])
+}
+
+function mapWlAllocationRows(data: unknown[]): WlAllocationRow[] {
+  return data.map((r) => {
     const row = r as Record<string, unknown>
     return {
       wallet: String(row.wallet),

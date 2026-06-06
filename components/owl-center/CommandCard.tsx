@@ -5,15 +5,19 @@ import { cn } from '@/lib/utils'
 export function CommandCard({
   children,
   className,
+  id,
   label,
 }: {
   children: ReactNode
   className?: string
+  id?: string
   label?: string
 }) {
   return (
     <section
+      id={id}
       className={cn(
+        id ? 'scroll-mt-24' : null,
         'rounded-none border border-[#00FF9C]/25 bg-[#10161C]/90 shadow-[0_0_40px_rgba(0,255,156,0.06)] backdrop-blur-sm',
         'motion-reduce:shadow-none',
         className
