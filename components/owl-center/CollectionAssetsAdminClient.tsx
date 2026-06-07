@@ -5,11 +5,13 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
+import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataUploadStatusBadge } from '@/components/owl-center/MetadataUploadStatusBadge'
-import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
+import { formatValidationErrors, mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
+import { formatSugarBatchScanSummary, type SugarBatchScanResult } from '@/lib/owl-center/scan-sugar-batch'
 import type { OwlCenterAssetPackage, OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
 import { OWL_CENTER_METADATA_UPLOAD_STATUSES, OWL_CENTER_VALIDATION_STATUSES } from '@/lib/owl-center/asset-types'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -20,11 +22,33 @@ type Bundle = {
   marketplaceReadiness: OwlCenterMarketplaceReadiness | null
 }
 
+type ActionZone = 'scan' | 'package' | 'validation' | 'notes' | 'supply'
+type ZoneFeedback = { msg: string | null; err: string | null }
+
+function ActionFeedback({ feedback }: { feedback: ZoneFeedback | undefined }) {
+  if (!feedback?.msg && !feedback?.err) return null
+  return (
+    <div className="mt-2 w-full basis-full space-y-2" role="status" aria-live="polite">
+      {feedback.err ? (
+        <p className="rounded border border-[#FF9C9C]/30 bg-[#FF9C9C]/10 px-3 py-2 font-mono text-sm text-[#FF9C9C]">
+          {feedback.err}
+        </p>
+      ) : null}
+      {feedback.msg ? (
+        <p className="rounded border border-[#00FF9C]/30 bg-[#00FF9C]/10 px-3 py-2 font-mono text-sm text-[#00FF9C]">
+          {feedback.msg}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) {
   const [bundle, setBundle] = useState<Bundle | null>(null)
   const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<Partial<Record<ActionZone, ZoneFeedback>>>({})
+  const [savingZone, setSavingZone] = useState<ActionZone | null>(null)
 
   const [logoUrl, setLogoUrl] = useState('')
   const [bannerUrl, setBannerUrl] = useState('')
@@ -41,9 +65,23 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
   const [adminNotes, setAdminNotes] = useState('')
   const [checklist, setChecklist] = useState(() => mergeValidationChecklist({}))
 
+  const setZoneFeedback = (zone: ActionZone, patch: Partial<ZoneFeedback>) => {
+    setFeedback((prev) => ({
+      ...prev,
+      [zone]: {
+        msg: 'msg' in patch ? (patch.msg ?? null) : (prev[zone]?.msg ?? null),
+        err: 'err' in patch ? (patch.err ?? null) : (prev[zone]?.err ?? null),
+      },
+    }))
+  }
+
+  const clearZoneFeedback = (zone: ActionZone) => {
+    setZoneFeedback(zone, { msg: null, err: null })
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
-    setErr(null)
+    setLoadErr(null)
     try {
       const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets`, {
         credentials: 'include',
@@ -70,7 +108,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
       setChecklist(mergeValidationChecklist(P?.validation_checklist as Record<string, unknown>))
     } catch (e) {
       setBundle(null)
-      setErr(e instanceof Error ? e.message : 'load_failed')
+      setLoadErr(e instanceof Error ? e.message : 'load_failed')
     } finally {
       setLoading(false)
     }
@@ -80,9 +118,9 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
     void load()
   }, [load])
 
-  async function patch(body: Record<string, unknown>) {
-    setMsg(null)
-    setErr(null)
+  async function patch(body: Record<string, unknown>, zone: ActionZone) {
+    setSavingZone(zone)
+    clearZoneFeedback(zone)
     try {
       const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets`, {
         method: 'PATCH',
@@ -90,23 +128,67 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const j = (await res.json()) as Bundle & { error?: string; validation_checklist?: unknown }
-      if (!res.ok) throw new Error(j.error || 'save_failed')
+      const j = (await res.json()) as Bundle & {
+        error?: string
+        validation_errors?: unknown
+        validation_checklist?: unknown
+      }
+      if (!res.ok) {
+        const extra = Array.isArray(j.validation_errors)
+          ? formatValidationErrors(j.validation_errors).join(' ')
+          : ''
+        throw new Error([j.error, extra].filter(Boolean).join(' — ') || 'save_failed')
+      }
       setBundle(j)
-      setMsg('Updated')
+      setZoneFeedback(zone, { msg: 'Saved successfully.', err: null })
       if (j.assetPackage) {
         setChecklist(mergeValidationChecklist(j.assetPackage.validation_checklist as Record<string, unknown>))
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'save_failed')
+      setZoneFeedback(zone, { err: e instanceof Error ? e.message : 'save_failed', msg: null })
+    } finally {
+      setSavingZone(null)
+    }
+  }
+
+  async function alignLaunchSupplyToForm() {
+    const supply = Number(expectedSupply)
+    if (!Number.isInteger(supply) || supply < 1) {
+      setZoneFeedback('supply', { err: 'Set Expected supply to a positive number first.', msg: null })
+      return
+    }
+    setSavingZone('supply')
+    clearZoneFeedback('supply')
+    try {
+      const res = await fetch(`/api/admin/owl-center/launches/${launchId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ total_supply: supply, public_supply: supply }),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || 'launch_update_failed')
+      await load()
+      setChecklist((c) => ({
+        ...c,
+        metadata_count_matches_supply: Number(totalMetadata) === supply,
+      }))
+      setZoneFeedback('supply', {
+        msg: `Launch supply updated to ${supply}. Now click Save asset package.`,
+        err: null,
+      })
+    } catch (e) {
+      setZoneFeedback('supply', { err: e instanceof Error ? e.message : 'launch_update_failed', msg: null })
+    } finally {
+      setSavingZone(null)
     }
   }
 
   if (loading && !bundle) {
     return <p className="font-mono text-sm text-[#5C6773]">Loading assets console…</p>
   }
-  if (err && !bundle) {
-    return <p className="font-mono text-sm text-[#FF9C9C]">{err}</p>
+  if (loadErr && !bundle) {
+    return <p className="font-mono text-sm text-[#FF9C9C]">{loadErr}</p>
   }
   if (!bundle) return null
 
@@ -172,6 +254,29 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           </p>
         </details>
       </header>
+
+      <SugarBatchScanner
+        expectedSupply={Number(expectedSupply) || launch.total_supply}
+        onApply={(scan: SugarBatchScanResult) => {
+          const supply = scan.inferredSupply || scan.metadataCount
+          setExpectedSupply(String(supply))
+          setTotalImages(String(scan.imageCount))
+          setTotalMetadata(String(scan.metadataCount))
+          setChecklist({
+            ...scan.checklist,
+            metadata_count_matches_supply: scan.metadataCount === supply,
+          })
+          const summary = formatSugarBatchScanSummary(scan)
+          setAdminNotes((prev) => (prev.trim() ? `${prev.trim()}\n\n${summary}` : summary))
+          setZoneFeedback('scan', {
+            msg: scan.ok
+              ? `Form filled (${supply} supply). Use Sync launch supply below, then Save asset package.`
+              : null,
+            err: scan.ok ? null : 'Scanned with issues — fix errors, then save.',
+          })
+        }}
+      />
+      <ActionFeedback feedback={feedback.scan} />
 
       {gen2Warn ? (
         <CommandCard label="gen2_supply_gate.sys">
@@ -308,10 +413,22 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           </label>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
+          {Number(expectedSupply) > 0 && Number(expectedSupply) !== launch.total_supply ? (
+            <DeployButton
+              type="button"
+              variant="ghost"
+              disabled={savingZone !== null}
+              onClick={() => void alignLaunchSupplyToForm()}
+            >
+              {savingZone === 'supply' ? 'Saving…' : `Sync launch supply to ${expectedSupply}`}
+            </DeployButton>
+          ) : null}
           <DeployButton
             type="button"
+            disabled={savingZone !== null}
             onClick={() =>
-              void patch({
+              void patch(
+                {
                 logo_url: logoUrl.trim() || null,
                 banner_url: bannerUrl.trim() || null,
                 collection_image_url: collectionImageUrl.trim() || null,
@@ -324,36 +441,62 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
                 metadata_upload_status: metadataUploadStatus,
                 admin_notes: adminNotes,
                 validation_checklist: checklist,
-              })
+              },
+                'package'
+              )
             }
           >
-            Save asset package
+            {savingZone === 'package' ? 'Saving…' : 'Save asset package'}
           </DeployButton>
           <MetadataUploadStatusBadge status={metadataUploadStatus as OwlCenterAssetPackage['metadata_upload_status']} />
+          <ActionFeedback feedback={feedback.supply} />
+          <ActionFeedback feedback={feedback.package} />
         </div>
       </CommandCard>
 
       <CommandCard label="validation_engine.sys · MANUAL_V1">
         <AssetValidationChecklist checklist={checklist} onChange={setChecklist} />
         <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
-          <DeployButton type="button" variant="ghost" onClick={() => void patch({ validation_checklist: checklist })}>
-            Save checklist only
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={savingZone !== null}
+            onClick={() => void patch({ validation_checklist: checklist }, 'validation')}
+          >
+            {savingZone === 'validation' ? 'Saving…' : 'Save checklist only'}
           </DeployButton>
-          <DeployButton type="button" variant="ghost" onClick={() => void patch({ action: 'mark_valid', validation_checklist: checklist })}>
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={savingZone !== null}
+            onClick={() => void patch({ action: 'mark_valid', validation_checklist: checklist }, 'validation')}
+          >
             Mark valid
           </DeployButton>
-          <DeployButton type="button" variant="ghost" onClick={() => void patch({ action: 'mark_needs_review', validation_checklist: checklist })}>
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={savingZone !== null}
+            onClick={() => void patch({ action: 'mark_needs_review', validation_checklist: checklist }, 'validation')}
+          >
             Mark needs review
           </DeployButton>
           <DeployButton
             type="button"
             variant="ghost"
-            onClick={() => void patch({ action: 'mark_ready_cm', validation_checklist: checklist })}
+            disabled={savingZone !== null}
+            onClick={() => void patch({ action: 'mark_ready_cm', validation_checklist: checklist }, 'validation')}
           >
             Mark ready for Candy Machine
           </DeployButton>
+          <ActionFeedback feedback={feedback.validation} />
         </div>
         <p className="mt-3 font-mono text-[10px] text-[#5C6773]">
+          Mark valid / Ready for CM needs <strong className="font-normal text-[#9BA8B4]">12/12</strong> checklist. For a 5-piece
+          test, set Expected supply to <strong className="font-normal text-[#9BA8B4]">5</strong> and use{' '}
+          <strong className="font-normal text-[#9BA8B4]">Sync launch supply</strong> above.
+        </p>
+        <p className="mt-1 font-mono text-[10px] text-[#5C6773]">
           Allowed validation_status values: {OWL_CENTER_VALIDATION_STATUSES.join(', ')}
         </p>
       </CommandCard>
@@ -366,17 +509,23 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           className="w-full border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           placeholder="Problems, blockers, links to CM configs…"
         />
-        <DeployButton type="button" className="mt-3" variant="ghost" onClick={() => void patch({ admin_notes: adminNotes })}>
-          Save notes
-        </DeployButton>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={savingZone !== null}
+            onClick={() => void patch({ admin_notes: adminNotes }, 'notes')}
+          >
+            {savingZone === 'notes' ? 'Saving…' : 'Save notes'}
+          </DeployButton>
+          <ActionFeedback feedback={feedback.notes} />
+        </div>
       </CommandCard>
 
       <AssetPackagePanel pkg={assetPackage} />
 
       <MarketplaceReadinessPanel launchId={launchId} launch={launch} />
 
-      {err ? <p className="font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
     </div>
   )
 }

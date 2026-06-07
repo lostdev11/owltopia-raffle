@@ -214,14 +214,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     }
   }
 
-  const rpcOk = await rpcUpdateAssetPackageStatus(
+  const statusOk = await rpcUpdateAssetPackageStatus(
     id,
     validationStatus,
     metadataUploadStatus,
     validationErrors,
     validationChecklist as unknown as Record<string, unknown>
   )
-  if (!rpcOk) return jsonError('Status sync failed', 500)
+  if (!statusOk) return jsonError('Could not update validation status — try again', 500)
 
   const bundle = await loadBundle(id)
   return NextResponse.json(bundle)

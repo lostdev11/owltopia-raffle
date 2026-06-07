@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { OwlCenterAssetPackage } from '@/lib/owl-center/asset-types'
 import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
+import { updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 
 function mapAssetRow(row: Record<string, unknown>): OwlCenterAssetPackage {
   return {
@@ -72,7 +73,7 @@ export async function upsertAssetPackageForLaunch(
   return mapAssetRow(data as Record<string, unknown>)
 }
 
-export async function rpcUpdateAssetPackageStatus(
+export async function syncAssetPackageStatus(
   launchId: string,
   validationStatus: OwlCenterAssetPackage['validation_status'],
   metadataUploadStatus: OwlCenterAssetPackage['metadata_upload_status'],
@@ -80,16 +81,48 @@ export async function rpcUpdateAssetPackageStatus(
   validationChecklist: Record<string, unknown>
 ): Promise<boolean> {
   const db = getSupabaseAdmin()
-  const { error } = await db.rpc('update_asset_package_status', {
-    p_launch_id: launchId,
-    p_validation_status: validationStatus,
-    p_metadata_upload_status: metadataUploadStatus,
-    p_validation_errors: validationErrors,
-    p_validation_checklist: validationChecklist,
-  })
-  if (error) {
-    console.error('rpcUpdateAssetPackageStatus', error)
+  const { data, error } = await db
+    .from('owl_center_asset_packages')
+    .update({
+      validation_status: validationStatus,
+      metadata_upload_status: metadataUploadStatus,
+      validation_errors: validationErrors,
+      validation_checklist: validationChecklist,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('launch_id', launchId)
+    .select('id')
+    .maybeSingle()
+
+  if (error || !data) {
+    console.error('syncAssetPackageStatus', error)
     return false
   }
+
+  if (validationStatus === 'VALID' && metadataUploadStatus === 'READY_FOR_CANDY_MACHINE') {
+    const launch = await updateOwlCenterLaunchByIdAdmin(launchId, {
+      assets_ready: true,
+      metadata_ready: true,
+    })
+    if (!launch) return false
+  }
+
   return true
+}
+
+/** @deprecated Use syncAssetPackageStatus — RPC may be missing if migration 098 not applied */
+export async function rpcUpdateAssetPackageStatus(
+  launchId: string,
+  validationStatus: OwlCenterAssetPackage['validation_status'],
+  metadataUploadStatus: OwlCenterAssetPackage['metadata_upload_status'],
+  validationErrors: unknown[],
+  validationChecklist: Record<string, unknown>
+): Promise<boolean> {
+  return syncAssetPackageStatus(
+    launchId,
+    validationStatus,
+    metadataUploadStatus,
+    validationErrors,
+    validationChecklist
+  )
 }

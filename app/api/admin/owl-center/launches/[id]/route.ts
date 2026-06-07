@@ -59,6 +59,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (typeof body.status === 'string') patch.status = body.status as OwlCenterStatus
   if (body.public_price_usdc != null) patch.public_price_usdc = Number(body.public_price_usdc)
   if (body.wallet_mint_limit != null) patch.wallet_mint_limit = Number(body.wallet_mint_limit)
+  if (body.total_supply != null) {
+    const n = Number(body.total_supply)
+    if (Number.isInteger(n) && n >= 1 && n <= 50_000) patch.total_supply = n
+  }
+  if (body.public_supply != null) {
+    const n = Number(body.public_supply)
+    if (Number.isInteger(n) && n >= 0 && n <= 50_000) patch.public_supply = n
+  }
+  if (typeof body.mint_mode === 'string') {
+    if (body.mint_mode === 'public_simple' || body.mint_mode === 'gen2_full') {
+      patch.mint_mode = body.mint_mode
+    }
+  }
   if (body.launch_deadline_at === null) patch.launch_deadline_at = null
   else if (typeof body.launch_deadline_at === 'string') {
     const trimmed = body.launch_deadline_at.trim()
