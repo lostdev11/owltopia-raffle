@@ -20,6 +20,7 @@ import {
   CartBatchPaymentTotalMismatchError,
 } from '@/lib/entries/batch-invariants'
 import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
+import { raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
 
 export const dynamic = 'force-dynamic'
 
@@ -111,6 +112,17 @@ export async function POST(request: NextRequest) {
       if (!raffle) return NextResponse.json(ERROR_BODY, { status: 404 })
 
       if (!raffle.is_active) return NextResponse.json(ERROR_BODY, { status: 400 })
+
+      if (raffleAcceptsSolAndBambooTickets(raffle)) {
+        return NextResponse.json(
+          {
+            success: false as const,
+            error:
+              'One raffle accepts SOL or BAMBOO per ticket. Open that raffle and buy there — cart checkout uses one currency per transaction.',
+          },
+          { status: 400 }
+        )
+      }
 
       if (
         raffle.prize_type === 'nft' &&

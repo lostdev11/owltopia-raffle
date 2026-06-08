@@ -419,11 +419,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
               preflightCommitment: 'confirmed',
               maxRetries: 3,
             })
-            await attachPaymentSignaturesBatch({
+            const attached = await attachPaymentSignaturesBatch({
               entryIds,
               transactionSignature: signature,
               walletAddress: publicKey.toBase58(),
             })
+            if (!attached) {
+              console.warn('[cart] attach-tx failed after send; verify-batch may still recover')
+            }
           } catch (err: unknown) {
             const wm = err instanceof Error ? err.message : String(err)
             setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))

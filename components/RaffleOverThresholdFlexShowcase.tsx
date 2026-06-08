@@ -2,10 +2,9 @@
 
 import type { TouchEventHandler } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
 import { TrendingUp, Trophy } from 'lucide-react'
 import type { Raffle } from '@/lib/types'
-import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { RaffleListThumbnail } from '@/components/RaffleListThumbnail'
 import {
   normalizeRaffleTicketCurrency,
   revenueInCurrency,
@@ -84,9 +83,6 @@ export function RaffleOverThresholdFlexShowcase({
                 profitInfo?.floorComparisonCurrency != null
                   ? normalizeRaffleTicketCurrency(profitInfo.floorComparisonCurrency)
                   : thresholdCur
-              const cardImageSrc =
-                getRaffleDisplayImageUrl(raffle.image_url) ??
-                getRaffleDisplayImageUrl(raffle.image_fallback_url)
               const revenueValue =
                 profitInfo != null ? revenueInCurrency(profitInfo.revenue, displayCur) : null
               const displayBar =
@@ -112,22 +108,13 @@ export function RaffleOverThresholdFlexShowcase({
                     onTouchEnd={onFeaturedTouchEnd}
                   >
                     <div className="flex items-start gap-2.5">
-                      <div className="relative mt-0.5 h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-950/50">
-                        {cardImageSrc ? (
-                          <Image
-                            src={cardImageSrc}
-                            alt={raffle.title}
-                            fill
-                            sizes="56px"
-                            className="object-cover"
-                            unoptimized={cardImageSrc.startsWith('/api/proxy-image')}
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-emerald-200/90">
-                            NFT
-                          </div>
-                        )}
-                      </div>
+                      <RaffleListThumbnail
+                        raffle={raffle}
+                        size="sm"
+                        loading="eager"
+                        fallbackLabel="NFT"
+                        className="mt-0.5 border-emerald-500/30 bg-emerald-950/50 text-emerald-200/90"
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <p className="line-clamp-2 min-w-0 text-sm sm:text-base font-semibold text-foreground group-hover:underline">

@@ -109,6 +109,21 @@ export async function POST(request: NextRequest) {
       return r !== 0 ? r : String(a.entry.id).localeCompare(String(b.entry.id))
     })
 
+    const sigTrim = transactionSignatureRaw.trim()
+    if (
+      pairsSorted.length > 0 &&
+      pairsSorted.every(
+        ({ entry }) =>
+          entry.status === 'confirmed' && (entry.transaction_signature || '').trim() === sigTrim
+      )
+    ) {
+      return NextResponse.json({
+        success: true,
+        entryIds: pairsSorted.map(p => p.entry.id),
+        transactionSignature: sigTrim,
+      })
+    }
+
     for (const { entry } of pairsSorted) {
       if (!tryAcquireVerificationLock(entry.id)) {
         releaseVerificationLocks(locksHeld)

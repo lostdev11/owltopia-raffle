@@ -13,72 +13,7 @@ import type { Raffle } from '@/lib/types'
 import { raffleCheckoutBlockedReason } from '@/lib/cart/validate-raffle-checkout'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { useCart } from '@/components/cart/CartProvider'
-import { buildRaffleImageAttemptChain, getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
-
-function cartBrowseImageChain(raffle: Raffle): string[] {
-  const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
-  const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
-  const isLegacyOwltopiaPlaceholder =
-    typeof raffle.image_url === 'string' &&
-    (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
-  const cryptoCurrencyArt =
-    (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
-    (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
-      ? prizeCurrency === 'SOL'
-        ? '/solana-mark.svg'
-        : '/usdc.png'
-      : null
-  if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
-    return [cryptoCurrencyArt]
-  }
-  return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)
-}
-
-function CartBrowseRaffleThumb({ raffle }: { raffle: Raffle }) {
-  const chain = useMemo(() => cartBrowseImageChain(raffle), [raffle])
-  const [idx, setIdx] = useState(0)
-  const [dead, setDead] = useState(false)
-
-  useEffect(() => {
-    setIdx(0)
-    setDead(false)
-  }, [raffle.id, chain])
-
-  const src = chain[idx]
-  const useContain = Boolean(
-    src?.endsWith('.svg') || src === '/solana-mark.svg' || src === '/usdc.png'
-  )
-
-  if (!src || chain.length === 0 || dead) {
-    return (
-      <div
-        className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] text-muted-foreground"
-        aria-hidden
-      >
-        —
-      </div>
-    )
-  }
-
-  return (
-    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
-      {/* eslint-disable-next-line @next/next/no-img-element -- NFT/proxy URLs; matches RaffleCard list thumb */}
-      <img
-        src={src}
-        alt=""
-        width={64}
-        height={64}
-        loading="lazy"
-        decoding="async"
-        className={`h-full w-full ${useContain ? 'object-contain p-2' : 'object-cover object-center'}`}
-        onError={() => {
-          if (idx + 1 < chain.length) setIdx(i => i + 1)
-          else setDead(true)
-        }}
-      />
-    </div>
-  )
-}
+import { RaffleListThumbnail } from '@/components/RaffleListThumbnail'
 
 function sortPurchasable(a: Raffle, b: Raffle): number {
   const endA = new Date(a.end_time).getTime()
@@ -224,7 +159,7 @@ export function CartBrowseRaffles() {
                 className="shrink-0 self-start sm:self-center rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
                 aria-label={`View raffle: ${raffle.title}`}
               >
-                <CartBrowseRaffleThumb raffle={raffle} />
+                <RaffleListThumbnail raffle={raffle} size="md" className="rounded-md" />
               </Link>
               <div className="min-w-0 flex-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1 space-y-1">

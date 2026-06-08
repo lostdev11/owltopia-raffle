@@ -181,10 +181,18 @@ export async function verifyBatchPaidEntries(
         return { valid: false, error: 'Wallet mismatch across batch entries.' }
       }
       const st = entry.status.trim()
+      if (st === 'confirmed') {
+        continue
+      }
       if (st !== 'pending') return { valid: false, error: 'Entry not pending for batch verify.' }
       if (entry.referral_complimentary === true || Number(entry.amount_paid) === 0) {
         return { valid: false, error: 'Complimentary tickets cannot use batch verification.' }
       }
+    }
+
+    const pendingPairs = pairs.filter(p => p.entry.status.trim() === 'pending')
+    if (pendingPairs.length === 0) {
+      return { valid: true }
     }
 
     const currencyNorm = normalizeRaffleTicketCurrency(pairs[0]!.entry.currency)
