@@ -1,3 +1,4 @@
+import { buildDiscordBroadcastContent } from '@/lib/discord-broadcast/allowed-mentions'
 import {
   type BroadcastChannelTarget,
   isDiscordBroadcastConfigured,
@@ -110,6 +111,7 @@ function shouldRunSchedule(schedule: DiscordBroadcastScheduleWithTemplate, now: 
 
 export async function sendDiscordBroadcastBody(opts: {
   body: string
+  mentionEveryone?: boolean
   postToPublic: boolean
   postToHolder: boolean
   scheduleId?: string | null
@@ -130,12 +132,15 @@ export async function sendDiscordBroadcastBody(opts: {
     return { status: 'failed', error: 'No channels selected.', sentTo: [], failedTo: [] }
   }
 
+  const mentionEveryone = opts.mentionEveryone === true
+  const { content: discordContent } = buildDiscordBroadcastContent(opts.body, mentionEveryone)
+
   if (!isDiscordBroadcastConfigured()) {
     const err = 'Discord broadcast is not configured (bot token + channel ids).'
     await insertDiscordBroadcastSendLog({
       schedule_id: opts.scheduleId,
       template_id: opts.templateId,
-      body_snapshot: opts.body,
+      body_snapshot: discordContent,
       post_to_public: opts.postToPublic,
       post_to_holder: opts.postToHolder,
       status: 'failed',
@@ -146,7 +151,7 @@ export async function sendDiscordBroadcastBody(opts: {
     return { status: 'failed', error: err, sentTo: [], failedTo: targets }
   }
 
-  const { results } = await postDiscordBroadcastMessage(opts.body, targets)
+  const { results } = await postDiscordBroadcastMessage(opts.body, targets, mentionEveryone)
   const sentTo = results.filter((r) => r.result.ok).map((r) => r.target)
   const failedTo = results.filter((r) => !r.result.ok).map((r) => r.target)
   const okCount = sentTo.length
@@ -162,7 +167,7 @@ export async function sendDiscordBroadcastBody(opts: {
   await insertDiscordBroadcastSendLog({
     schedule_id: opts.scheduleId,
     template_id: opts.templateId,
-    body_snapshot: opts.body,
+    body_snapshot: discordContent,
     post_to_public: opts.postToPublic,
     post_to_holder: opts.postToHolder,
     status,
@@ -187,6 +192,7 @@ export async function processDueDiscordBroadcastSchedules(): Promise<DiscordBroa
     const body = schedule.template?.body?.trim() ?? ''
     const send = await sendDiscordBroadcastBody({
       body,
+      mentionEveryone: schedule.template?.mention_everyone === true,
       postToPublic: schedule.post_to_public,
       postToHolder: schedule.post_to_holder,
       scheduleId: schedule.id,

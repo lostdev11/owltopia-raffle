@@ -3,9 +3,12 @@ import type { Client } from 'discord.js'
 
 import { postBroadcastViaGateway } from './broadcast.js'
 
+type BroadcastAllowedMentions = { parse: [] } | { parse: ['everyone'] }
+
 type BroadcastRequest = {
   channelId?: string
   content?: string
+  allowedMentions?: BroadcastAllowedMentions
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -72,7 +75,14 @@ export function startHealthServer(
           return
         }
 
-        const result = await postBroadcastViaGateway(client, channelId, content)
+        const allowedMentions =
+          body.allowedMentions &&
+          Array.isArray(body.allowedMentions.parse) &&
+          (body.allowedMentions.parse.length === 0 ||
+            (body.allowedMentions.parse.length === 1 && body.allowedMentions.parse[0] === 'everyone'))
+            ? body.allowedMentions
+            : undefined
+        const result = await postBroadcastViaGateway(client, channelId, content, allowedMentions)
         if (!result.ok) {
           sendJson(res, 502, { ok: false, error: result.message })
           return

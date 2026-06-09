@@ -20,6 +20,7 @@ import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
+import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTerminal'
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
 
 interface DeletedEntry {
@@ -1696,6 +1697,13 @@ export default function AdminDashboardPage() {
           </p>
         </div>
 
+        <AdminActionInboxTerminal
+          wallet={wallet}
+          sessionReady={sessionReady === true}
+          adminRole={adminRole}
+          refreshTick={visibilityTick + autoRefreshTick}
+        />
+
         {adminRole === 'full' && (
           <OwlVisionDisclosure
             className="mb-8"
@@ -1862,16 +1870,16 @@ export default function AdminDashboardPage() {
           }
         >
           <CardDescription className="mb-4">
-            Track creator cancellation requests and jump directly to the raffle queue in Manage Raffles.
+            Track creator cancellation requests, platform cancellation rate, and accepted history on the cancellation queue page.
             <span className="mt-2 block text-foreground/90">
-              Each row below is a pending cancellation — the listing stays live, completed, or refund-available until an
-              admin completes cancellation in Owl Vision. “Listing status” is not cancellation status.
+              Each row below is a pending cancellation — the listing stays live or ready-to-draw until an admin completes
+              cancellation in Owl Vision.
             </span>
           </CardDescription>
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Button asChild className="min-h-11 touch-manipulation">
-                <Link href="/admin/raffles?queue=pending-cancellation#pending-cancellation">
+                <Link href="/admin/cancellations">
                   Open cancellation queue
                 </Link>
               </Button>
@@ -1953,6 +1961,7 @@ export default function AdminDashboardPage() {
         </OwlVisionDisclosure>
 
         {/* Dev tasks — backlog from Discord / support for platform fixes */}
+        <div id="dev-tasks" className="scroll-mt-24">
         <OwlVisionDisclosure
           className="mb-8"
           variant="green"
@@ -2181,6 +2190,7 @@ export default function AdminDashboardPage() {
             />
           </div>
         </OwlVisionDisclosure>
+        </div>
 
         {/* Projected Revenue - confirmed entries only */}
         <OwlVisionDisclosure
@@ -3810,6 +3820,7 @@ export default function AdminDashboardPage() {
           </div>
         </OwlVisionDisclosure>
 
+        <div id="pending-entries-reverify" className="scroll-mt-24">
         <OwlVisionDisclosure
           className="mb-8"
           variant="default"
@@ -3891,6 +3902,7 @@ export default function AdminDashboardPage() {
             )}
           </div>
         </OwlVisionDisclosure>
+        </div>
 
         <OwlVisionDisclosure
           className="mb-8"

@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
     const template = await createDiscordBroadcastTemplate({
       name,
       body: messageBody,
+      mention_everyone: body.mention_everyone === true,
       created_by_wallet: session.wallet,
     })
 

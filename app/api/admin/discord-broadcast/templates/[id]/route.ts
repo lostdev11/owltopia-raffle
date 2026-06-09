@@ -21,7 +21,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const attrs: { name?: string; body?: string } = {}
+    const attrs: { name?: string; body?: string; mention_everyone?: boolean } = {}
 
     if (typeof body.name === 'string') {
       const name = body.name.trim()
@@ -39,6 +39,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: 'Message body must be 2000 characters or less.' }, { status: 400 })
       }
       attrs.body = messageBody
+    }
+    if (typeof body.mention_everyone === 'boolean') {
+      attrs.mention_everyone = body.mention_everyone
     }
 
     if (Object.keys(attrs).length === 0) {

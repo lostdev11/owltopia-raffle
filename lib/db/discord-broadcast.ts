@@ -4,6 +4,7 @@ export type DiscordBroadcastTemplate = {
   id: string
   name: string
   body: string
+  mention_everyone: boolean
   created_by_wallet: string | null
   created_at: string
   updated_at: string
@@ -87,6 +88,7 @@ export async function getDiscordBroadcastTemplate(
 export async function createDiscordBroadcastTemplate(attrs: {
   name: string
   body: string
+  mention_everyone?: boolean
   created_by_wallet?: string | null
 }): Promise<DiscordBroadcastTemplate | null> {
   const { data, error } = await getSupabaseAdmin()
@@ -94,6 +96,7 @@ export async function createDiscordBroadcastTemplate(attrs: {
     .insert({
       name: attrs.name,
       body: attrs.body,
+      mention_everyone: attrs.mention_everyone === true,
       created_by_wallet: attrs.created_by_wallet ?? null,
     })
     .select()
@@ -108,7 +111,7 @@ export async function createDiscordBroadcastTemplate(attrs: {
 
 export async function updateDiscordBroadcastTemplate(
   id: string,
-  attrs: Partial<{ name: string; body: string }>
+  attrs: Partial<{ name: string; body: string; mention_everyone: boolean }>
 ): Promise<DiscordBroadcastTemplate | null> {
   const { data, error } = await getSupabaseAdmin()
     .from('discord_broadcast_templates')

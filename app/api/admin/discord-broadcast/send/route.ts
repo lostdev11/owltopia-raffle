@@ -51,8 +51,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Message body must be 2000 characters or less.' }, { status: 400 })
     }
 
+    let mentionEveryone = false
+    if (typeof body.mention_everyone === 'boolean') {
+      mentionEveryone = body.mention_everyone
+    } else if (templateId) {
+      const template = await getDiscordBroadcastTemplate(templateId)
+      mentionEveryone = template?.mention_everyone === true
+    }
+
     const result = await sendDiscordBroadcastBody({
       body: messageBody,
+      mentionEveryone,
       postToPublic,
       postToHolder,
       templateId: templateId || null,

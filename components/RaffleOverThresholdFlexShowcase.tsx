@@ -39,7 +39,7 @@ export function RaffleOverThresholdFlexShowcase({
   if (items.length === 0) return null
 
   return (
-    <section className="mt-4" aria-labelledby="over-threshold-flex-heading">
+    <section className="mt-4" aria-label="Over-threshold raffles">
       <div className="overflow-hidden rounded-2xl border border-emerald-500/40 bg-gradient-to-b from-emerald-950/50 via-background to-background shadow-[0_0_0_1px_rgba(16,185,129,0.15),0_20px_50px_rgba(0,0,0,0.45)]">
         <OwltopiaOverThresholdBrandBanner
           topLeft={
@@ -55,19 +55,6 @@ export function RaffleOverThresholdFlexShowcase({
           }
         />
         <div className="space-y-3 px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3">
-          <div className="space-y-2">
-            <h2
-              id="over-threshold-flex-heading"
-              className="text-base sm:text-lg font-semibold tracking-tight text-foreground"
-            >
-              Beating the floor on Owltopia
-            </h2>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-              Compared to each raffle&apos;s <span className="font-medium text-foreground">listed floor price</span> (shown
-              on the prize), gross ticket revenue is higher than that floor—or, when only a blended threshold applies, past
-              the full revenue bar. Same flex: discovery with tickets, not only a floor ask.
-            </p>
-          </div>
           <ul
             className="m-0 grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3"
             role="list"

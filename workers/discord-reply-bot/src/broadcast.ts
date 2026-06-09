@@ -2,6 +2,8 @@ import type { Client, TextChannel } from 'discord.js'
 
 const MAX_CONTENT_LENGTH = 2000
 
+type BroadcastAllowedMentions = { parse: [] } | { parse: ['everyone'] }
+
 export type GatewayBroadcastResult =
   | { ok: true; messageId: string }
   | { ok: false; message: string }
@@ -16,7 +18,8 @@ function truncateContent(content: string): string {
 export async function postBroadcastViaGateway(
   client: Client,
   channelId: string,
-  content: string
+  content: string,
+  allowedMentions?: BroadcastAllowedMentions
 ): Promise<GatewayBroadcastResult> {
   const cid = channelId.trim()
   if (!cid) return { ok: false, message: 'Invalid channel id.' }
@@ -32,7 +35,7 @@ export async function postBroadcastViaGateway(
 
     const msg = await (channel as TextChannel).send({
       content: body,
-      allowedMentions: { parse: [] },
+      allowedMentions: allowedMentions ?? { parse: [] },
     })
     return { ok: true, messageId: msg.id }
   } catch (err) {

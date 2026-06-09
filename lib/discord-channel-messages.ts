@@ -1,6 +1,11 @@
 /**
  * Post plain messages to Discord channels via bot token (server-side only).
  */
+import {
+  buildDiscordBroadcastContent,
+  type DiscordBroadcastAllowedMentions,
+} from '@/lib/discord-broadcast/allowed-mentions'
+
 const DISCORD_API = 'https://discord.com/api/v10'
 const MAX_CONTENT_LENGTH = 2000
 const REQUEST_TIMEOUT_MS = 25_000
@@ -147,7 +152,8 @@ function getDiscordBroadcastWorkerConfig(): { url: string; secret: string } | nu
 
 async function postDiscordChannelMessageViaWorker(
   channelId: string,
-  content: string
+  content: string,
+  allowedMentions: DiscordBroadcastAllowedMentions
 ): Promise<DiscordChannelPostResult | null> {
   const worker = getDiscordBroadcastWorkerConfig()
   if (!worker) return null
@@ -162,7 +168,11 @@ async function postDiscordChannelMessageViaWorker(
         Authorization: `Bearer ${worker.secret}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ channelId, content: body }),
+      body: JSON.stringify({
+        channelId,
+        content: body,
+        allowedMentions,
+      }),
       signal: AbortSignal.timeout(WORKER_REQUEST_TIMEOUT_MS),
     })
 
@@ -199,7 +209,8 @@ async function postDiscordChannelMessageViaWorker(
 
 async function postDiscordChannelMessageViaRest(
   channelId: string,
-  content: string
+  content: string,
+  allowedMentions: DiscordBroadcastAllowedMentions
 ): Promise<DiscordChannelPostResult> {
   const token = getDiscordBotToken()
   if (!token) {
@@ -235,7 +246,7 @@ async function postDiscordChannelMessageViaRest(
         },
         body: JSON.stringify({
           content: body,
-          allowed_mentions: { parse: [] },
+          allowed_mentions: allowedMentions,
         }),
         signal: controller.signal,
       })
@@ -294,16 +305,19 @@ async function postDiscordChannelMessageViaRest(
 }
 
 /**
- * POST /channels/{channel.id}/messages — no @mentions allowed.
+ * POST /channels/{channel.id}/messages.
+ * mentionEveryone must be set explicitly by admin (bot needs Mention @everyone permission).
  * Prefers Railway Gateway worker when configured (instant full message).
  */
 export async function postDiscordChannelMessage(
   channelId: string,
-  content: string
+  body: string,
+  mentionEveryone = false
 ): Promise<DiscordChannelPostResult> {
-  const viaWorker = await postDiscordChannelMessageViaWorker(channelId, content)
+  const { content, allowedMentions } = buildDiscordBroadcastContent(body, mentionEveryone)
+  const viaWorker = await postDiscordChannelMessageViaWorker(channelId, content, allowedMentions)
   if (viaWorker) return viaWorker
-  return postDiscordChannelMessageViaRest(channelId, content)
+  return postDiscordChannelMessageViaRest(channelId, content, allowedMentions)
 }
 
 export type BroadcastChannelTarget = 'public' | 'holder'
@@ -318,8 +332,9 @@ function normalizeBroadcastTargets(targets: BroadcastChannelTarget[]): Broadcast
 }
 
 export async function postDiscordBroadcastMessage(
-  content: string,
-  targets: BroadcastChannelTarget[]
+  body: string,
+  targets: BroadcastChannelTarget[],
+  mentionEveryone = false
 ): Promise<{ results: Array<{ target: BroadcastChannelTarget; result: DiscordChannelPostResult }> }> {
   const unique = normalizeBroadcastTargets(targets)
   const jobs = unique.map(async (target) => {
@@ -338,7 +353,7 @@ export async function postDiscordBroadcastMessage(
         },
       }
     }
-    const result = await postDiscordChannelMessage(channelId, content)
+    const result = await postDiscordChannelMessage(channelId, body, mentionEveryone)
     return { target, result }
   })
 

@@ -189,9 +189,13 @@ export default function AdminDiscordBroadcastPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [templateForm, setTemplateForm] = useState({ name: '', body: '' })
+  const [templateForm, setTemplateForm] = useState({ name: '', body: '', mention_everyone: false })
   const [editingTemplate, setEditingTemplate] = useState<DiscordBroadcastTemplate | null>(null)
-  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', body: '' })
+  const [editTemplateForm, setEditTemplateForm] = useState({
+    name: '',
+    body: '',
+    mention_everyone: false,
+  })
 
   const [scheduleForm, setScheduleForm] = useState({
     template_id: '',
@@ -211,6 +215,7 @@ export default function AdminDiscordBroadcastPage() {
 
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewBody, setPreviewBody] = useState('')
+  const [previewMentionEveryone, setPreviewMentionEveryone] = useState(false)
   const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null)
   const [previewTarget, setPreviewTarget] = useState<DiscordBroadcastChannelTarget>('public')
   const [sending, setSending] = useState(false)
@@ -307,6 +312,7 @@ export default function AdminDiscordBroadcastPage() {
         body: JSON.stringify({
           name: templateForm.name.trim(),
           body: templateForm.body.trim(),
+          mention_everyone: templateForm.mention_everyone,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -314,7 +320,7 @@ export default function AdminDiscordBroadcastPage() {
         setError(typeof data.error === 'string' ? data.error : 'Failed to save template')
         return
       }
-      setTemplateForm({ name: '', body: '' })
+      setTemplateForm({ name: '', body: '', mention_everyone: false })
       await fetchData()
     } finally {
       setSaving(false)
@@ -331,6 +337,7 @@ export default function AdminDiscordBroadcastPage() {
         body: JSON.stringify({
           name: editTemplateForm.name.trim(),
           body: editTemplateForm.body.trim(),
+          mention_everyone: editTemplateForm.mention_everyone,
         }),
       })
       if (res.ok) {
@@ -446,6 +453,7 @@ export default function AdminDiscordBroadcastPage() {
   ) => {
     setPreviewTemplateId(template.id)
     setPreviewBody(template.body)
+    setPreviewMentionEveryone(template.mention_everyone === true)
     setPreviewTarget(target)
     setPreviewOpen(true)
   }
@@ -463,6 +471,7 @@ export default function AdminDiscordBroadcastPage() {
         body: JSON.stringify({
           template_id: previewTemplateId,
           body: previewBody,
+          mention_everyone: previewMentionEveryone,
           ...channelFlags,
         }),
       })
@@ -610,8 +619,8 @@ export default function AdminDiscordBroadcastPage() {
           <CardHeader>
             <CardTitle>Add message template</CardTitle>
             <CardDescription>
-              Saved copy for Discord. Supports **bold**, *italic*, and [links](url). No @mentions — posts
-              blend into chat.
+              Saved copy for Discord. Supports **bold**, *italic*, and [links](url). Use the @everyone toggle
+              below when you want to ping the server (bot needs Mention @everyone permission).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -635,6 +644,21 @@ export default function AdminDiscordBroadcastPage() {
                 maxLength={2000}
               />
               <p className="text-xs text-muted-foreground mt-1">{templateForm.body.length}/2000</p>
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium">Ping @everyone</p>
+                <p className="text-xs text-muted-foreground">
+                  Off by default. When on, scheduled and manual posts notify the whole server.
+                </p>
+              </div>
+              <Switch
+                checked={templateForm.mention_everyone}
+                onCheckedChange={(checked) =>
+                  setTemplateForm((f) => ({ ...f, mention_everyone: checked }))
+                }
+                aria-label="Ping @everyone when this template is sent"
+              />
             </div>
             <Button
               onClick={() => void handleCreateTemplate()}
@@ -847,7 +871,12 @@ export default function AdminDiscordBroadcastPage() {
                   {templates.map((t) => (
                     <li key={t.id} className="rounded-lg border p-4 space-y-2">
                       <div className="flex flex-wrap items-start justify-between gap-2">
-                        <p className="font-medium">{t.name}</p>
+                        <div>
+                          <p className="font-medium">{t.name}</p>
+                          {t.mention_everyone ? (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Pings @everyone</p>
+                          ) : null}
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
@@ -864,7 +893,11 @@ export default function AdminDiscordBroadcastPage() {
                             className="min-h-[44px]"
                             onClick={() => {
                               setEditingTemplate(t)
-                              setEditTemplateForm({ name: t.name, body: t.body })
+                              setEditTemplateForm({
+                                name: t.name,
+                                body: t.body,
+                                mention_everyone: t.mention_everyone === true,
+                              })
                             }}
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -994,8 +1027,9 @@ export default function AdminDiscordBroadcastPage() {
           <DialogHeader>
             <DialogTitle>Preview & send</DialogTitle>
             <DialogDescription>
-              This posts the full message at once as Owltopia Bot (no @mentions). First send can take a
-              few seconds on mobile — wait for confirmation before sending again.
+              This posts the full message at once as Owltopia Bot. Turn on @everyone only when you want a
+              server-wide ping. First send can take a few seconds on mobile — wait for confirmation before
+              sending again.
             </DialogDescription>
           </DialogHeader>
           <textarea
@@ -1009,6 +1043,17 @@ export default function AdminDiscordBroadcastPage() {
             value={previewTarget}
             onChange={setPreviewTarget}
           />
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-3">
+            <div>
+              <p className="text-sm font-medium">Ping @everyone</p>
+              <p className="text-xs text-muted-foreground">Overrides the template default for this send only.</p>
+            </div>
+            <Switch
+              checked={previewMentionEveryone}
+              onCheckedChange={setPreviewMentionEveryone}
+              aria-label="Ping @everyone for this send"
+            />
+          </div>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setPreviewOpen(false)} className="min-h-[44px]">
               Cancel
@@ -1040,6 +1085,19 @@ export default function AdminDiscordBroadcastPage() {
             onChange={(e) => setEditTemplateForm((f) => ({ ...f, body: e.target.value }))}
             maxLength={2000}
           />
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-3">
+            <div>
+              <p className="text-sm font-medium">Ping @everyone</p>
+              <p className="text-xs text-muted-foreground">Applies to scheduled posts using this template.</p>
+            </div>
+            <Switch
+              checked={editTemplateForm.mention_everyone}
+              onCheckedChange={(checked) =>
+                setEditTemplateForm((f) => ({ ...f, mention_everyone: checked }))
+              }
+              aria-label="Ping @everyone when this template is sent"
+            />
+          </div>
           <DialogFooter>
             <Button onClick={() => void handleUpdateTemplate()} disabled={saving} className="min-h-[44px]">
               Save
