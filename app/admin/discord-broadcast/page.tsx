@@ -653,11 +653,13 @@ export default function AdminDiscordBroadcastPage() {
                 </p>
               </div>
               <Switch
+                id="template-mention-everyone"
+                name="template_mention_everyone"
+                ariaLabel="Ping @everyone when this template is sent"
                 checked={templateForm.mention_everyone}
                 onCheckedChange={(checked) =>
                   setTemplateForm((f) => ({ ...f, mention_everyone: checked }))
                 }
-                aria-label="Ping @everyone when this template is sent"
               />
             </div>
             <Button
@@ -1049,9 +1051,11 @@ export default function AdminDiscordBroadcastPage() {
               <p className="text-xs text-muted-foreground">Overrides the template default for this send only.</p>
             </div>
             <Switch
+              id="preview-mention-everyone"
+              name="preview_mention_everyone"
+              ariaLabel="Ping @everyone for this send"
               checked={previewMentionEveryone}
               onCheckedChange={setPreviewMentionEveryone}
-              aria-label="Ping @everyone for this send"
             />
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -1091,11 +1095,13 @@ export default function AdminDiscordBroadcastPage() {
               <p className="text-xs text-muted-foreground">Applies to scheduled posts using this template.</p>
             </div>
             <Switch
+              id="edit-template-mention-everyone"
+              name="edit_template_mention_everyone"
+              ariaLabel="Ping @everyone when this template is sent"
               checked={editTemplateForm.mention_everyone}
               onCheckedChange={(checked) =>
                 setEditTemplateForm((f) => ({ ...f, mention_everyone: checked }))
               }
-              aria-label="Ping @everyone when this template is sent"
             />
           </div>
           <DialogFooter>
