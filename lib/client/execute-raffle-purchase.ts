@@ -24,6 +24,10 @@ import { fireGreenConfetti } from '@/lib/confetti'
 import { clearReferralComplimentarySessionCache } from '@/lib/referrals/complimentary-session-client'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { attachPaymentSignature } from '@/lib/client/attach-payment-signature'
+import {
+  recordPendingVerification,
+  clearPendingVerification,
+} from '@/lib/client/pending-verification'
 import { isMobileDevice, isAndroidDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export type ExecuteRafflePurchaseResult =
@@ -674,13 +678,31 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       throw new Error(`Transaction failed: ${errorMessage}. Please try again.`)
     }
 
+    // Persist before anything else can fail: if the tab dies (mobile wallet
+    // redirect / backgrounding), resumePendingVerifications recovers on next load.
+    recordPendingVerification({
+      kind: 'single',
+      entryIds: [entryId],
+      transactionSignature: signature,
+      walletAddress: publicKey.toBase58(),
+    })
+
     await attachPaymentSignature({
       entryId,
       transactionSignature: signature,
       walletAddress: publicKey.toBase58(),
     })
 
-    await confirmSignatureSuccessOnChain(connection, signature)
+    try {
+      await confirmSignatureSuccessOnChain(connection, signature)
+    } catch (confirmErr: unknown) {
+      const msg = confirmErr instanceof Error ? confirmErr.message : String(confirmErr)
+      if (msg.toLowerCase().includes('transaction failed')) {
+        // Definitive on-chain failure — nothing to recover later.
+        clearPendingVerification(signature)
+      }
+      throw confirmErr
+    }
 
     const verifyResponse = await fetch('/api/entries/verify', {
       method: 'POST',
@@ -689,6 +711,7 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
     })
 
     if (verifyResponse.status === 202) {
+      // Keep the pending-verification record: resume passes retry until confirmed.
       if (onVerifyPending) {
         await onVerifyPending({ entryId, transactionSignature: signature })
       } else {
@@ -713,6 +736,8 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
           : errorData.error || 'Failed to verify transaction. Please try again.'
       throw new Error(errorMessage)
     }
+
+    clearPendingVerification(signature)
 
     afterPaymentTxConfirmed?.()
     if (celebrateOnPaymentConfirmed) {

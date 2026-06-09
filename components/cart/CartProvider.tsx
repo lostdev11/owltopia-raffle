@@ -14,13 +14,10 @@ import { useConnection } from '@solana/wallet-adapter-react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
 import type { Raffle } from '@/lib/types'
-import {
-  buildPurchaseTransactionFromPaymentDetails,
-  executeRafflePurchase,
-  formatSplTokenTransferFailure,
-  type PurchasePaymentDetails,
-} from '@/lib/client/execute-raffle-purchase'
-import { attachPaymentSignaturesBatch } from '@/lib/client/attach-payment-signature'
+import { executeRafflePurchase } from '@/lib/client/execute-raffle-purchase'
+import { executeCartBatchCheckout } from '@/lib/client/execute-cart-checkout'
+import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout'
+import { resumePendingVerifications } from '@/lib/client/pending-verification'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import type { CartLine } from '@/lib/cart/types'
@@ -31,10 +28,12 @@ import {
   type CartBatchReceiptState,
 } from '@/components/cart/CartBatchVerifyDialog'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
-import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
-import { parseVerifyBatchFailure, verifyBatchFailureUserMessage } from '@/lib/api/verify-batch-response'
+import {
+  computeCartLinesAfterBatchCheckout,
+  PAID_UNVERIFIED_CART_NOTE,
+} from '@/lib/cart/checkout-restore'
 import { dispatchPurchaseCompleted } from '@/lib/cart/purchase-complete-events'
-import { CART_BATCH_MAX_RAFFLES_PER_TX, CART_CHECKOUT_MAX_RAFFLES } from '@/lib/cart/constants'
+import { CART_CHECKOUT_MAX_RAFFLES } from '@/lib/cart/constants'
 
 type CartContextValue = {
   lines: CartLine[]
@@ -116,44 +115,6 @@ function persistLines(lines: CartLine[]) {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function chunkCartLines<T>(items: T[], chunkSize: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += chunkSize) out.push(items.slice(i, i + chunkSize))
-  return out
-}
-
-/**
- * Retries verification when the server RPC, rate limits, or indexer lag flaps.
- * Response JSON includes a stable `code` for user-facing copy (see verify-batch-response).
- */
-async function fetchVerifyBatchWithRetries(entryIds: string[], transactionSignature: string): Promise<Response> {
-  const backoffMs = [0, 900, 2400, 5200]
-  let last!: Response
-  for (let i = 0; i < backoffMs.length; i++) {
-    if (backoffMs[i] > 0) await sleep(backoffMs[i])
-    last = await fetch('/api/entries/verify-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ entryIds, transactionSignature }),
-    })
-    if (last.ok || last.status === 202) return last
-    const moreAttempts = i < backoffMs.length - 1
-    if (
-      moreAttempts &&
-      (last.status === 429 || last.status >= 500 || last.status === 400)
-    ) {
-      continue
-    }
-    return last
-  }
-  return last
-}
-
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([])
   const [hydrated, setHydrated] = useState(false)
@@ -173,6 +134,39 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setHydrated(true)
   }, [])
 
+  /**
+   * Recover purchases whose tab died between wallet send and verify (mobile wallet
+   * redirect / backgrounding): re-run verify for stored signatures on mount, on tab
+   * foreground, and on bfcache restore. No-op when nothing is stored (desktop unchanged).
+   */
+  useEffect(() => {
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const run = () => {
+      if (timer) clearTimeout(timer)
+      // Short delay so the wallet/in-app browser network stabilizes after return (see MOBILE_FIRST).
+      timer = setTimeout(() => {
+        void resumePendingVerifications({
+          onConfirmed: () => {
+            if (!disposed) router.refresh()
+          },
+        })
+      }, 600)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') run()
+    }
+    run()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', run)
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', run)
+    }
+  }, [router])
+
   useEffect(() => {
     if (!hydrated) return
     persistLines(lines)
@@ -183,6 +177,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   /** Prevents overlapping checkout (double tap / duplicate requests) while batch tx + verify run. */
   const checkoutRunLockRef = useRef(false)
+
+  /**
+   * Cross-tab sync: reload cart when another tab (e.g. a wallet in-app browser
+   * alongside the regular browser) writes it. `storage` only fires in other tabs,
+   * so this cannot loop with the persist effect above.
+   */
+  useEffect(() => {
+    if (!hydrated) return
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== CART_STORAGE_KEY) return
+      // Don't clobber an in-flight checkout's view of the cart; its final
+      // setLines persists and wins (last-writer semantics).
+      if (checkoutRunLockRef.current) return
+      setLines(loadCartLines())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [hydrated])
 
   const lineCount = lines.length
   const ticketCount = useMemo(() => lines.reduce((s, l) => s + l.quantity, 0), [lines])
@@ -284,7 +296,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       for (const line of initialSnapshot) {
         let fresh: Raffle
         try {
-          const raffleRes = await fetch(`/api/raffles/${line.raffleId}`)
+          const raffleRes = await fetchWithTimeout(`/api/raffles/${line.raffleId}`)
           if (!raffleRes.ok) {
             setCheckoutError('One raffle in your cart could not be loaded. It may have been removed.')
             setLines(initialSnapshot)
@@ -292,7 +304,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
           }
           fresh = (await raffleRes.json()) as Raffle
         } catch {
-          setCheckoutError('Network error loading raffle details. Try again.')
+          setCheckoutError(
+            'Network error loading raffle details. Check your connection (WiFi or mobile data) and try again.'
+          )
           setLines(initialSnapshot)
           return
         }
@@ -323,8 +337,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const usePaidBatchCheckout = loaded.length >= 2 || !complimentarySingleTicketEligible
 
       if (usePaidBatchCheckout) {
-        const batches = chunkCartLines(loaded, CART_BATCH_MAX_RAFFLES_PER_TX)
-        const successfulRaffleIds: string[] = []
         const allReceiptLines = loaded.map(({ line }) => ({
           raffleId: line.raffleId,
           title: line.snapshot.title,
@@ -333,168 +345,37 @@ export function CartProvider({ children }: { children: ReactNode }) {
           image_url: line.snapshot.image_url,
           image_fallback_url: line.snapshot.image_fallback_url,
         }))
-        const restoreRemainingLines = () => {
-          if (successfulRaffleIds.length === 0) {
-            setLines(initialSnapshot)
-            return
-          }
-          const done = new Set(successfulRaffleIds)
-          setLines(initialSnapshot.filter(line => !done.has(line.raffleId)))
-        }
         setBatchReceipt({ lines: allReceiptLines, phase: 'verifying' })
 
-        for (let i = 0; i < batches.length; i++) {
-          setCheckoutBatchProgress({ current: i + 1, total: batches.length })
-          const batch = batches[i]!
-          let createResponse: Response
-          try {
-            createResponse = await fetch('/api/entries/create-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                walletAddress: publicKey.toBase58(),
-                items: batch.map(({ line }) => ({
-                  raffleId: line.raffleId,
-                  ticketQuantity: line.quantity,
-                })),
-              }),
-            })
-          } catch {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            setCheckoutError('Network error preparing batch checkout.')
-            restoreRemainingLines()
-            return
-          }
+        const result = await executeCartBatchCheckout({
+          loaded,
+          publicKey,
+          connection,
+          sendTransaction,
+          onBatchProgress: (current, total) => setCheckoutBatchProgress({ current, total }),
+          onReceiptPhase: phase => setBatchReceipt(prev => (prev ? { ...prev, phase } : null)),
+        })
 
-          if (!createResponse.ok) {
-            let msg = 'Batch checkout unavailable. Try again or pay one raffle at a time.'
-            try {
-              const ct = createResponse.headers.get('content-type') || ''
-              if (ct.includes('application/json')) {
-                const errData = (await createResponse.json()) as { error?: string }
-                if (typeof errData?.error === 'string') msg = errData.error
-              }
-            } catch {
-              /* ignore */
-            }
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            setCheckoutError(msg)
-            restoreRemainingLines()
-            return
-          }
+        // Settled lines are done; paid-but-unverified lines must not come back
+        // (double-payment risk) — the pending-verification resume recovers them.
+        setLines(
+          computeCartLinesAfterBatchCheckout(
+            initialSnapshot,
+            result.settledRaffleIds,
+            result.paidUnverifiedRaffleIds
+          )
+        )
 
-          let batchPayload: {
-            entryIds?: string[]
-            paymentDetails?: PurchasePaymentDetails
-          }
-          try {
-            batchPayload = await createResponse.json()
-          } catch {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            setCheckoutError('Invalid response from checkout server.')
-            restoreRemainingLines()
-            return
-          }
-
-          const entryIds = batchPayload.entryIds
-          const pd = batchPayload.paymentDetails
-          if (!entryIds?.length || !pd) {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            setCheckoutError('Invalid batch checkout payload.')
-            restoreRemainingLines()
-            return
-          }
-
-          let signature: string
-          try {
-            const transaction = await buildPurchaseTransactionFromPaymentDetails(
-              connection,
-              publicKey,
-              String(pd.currency || batch[0]!.fresh.currency || 'SOL'),
-              pd
-            )
-            signature = await sendTransaction(transaction, connection, {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed',
-              maxRetries: 3,
-            })
-            const attached = await attachPaymentSignaturesBatch({
-              entryIds,
-              transactionSignature: signature,
-              walletAddress: publicKey.toBase58(),
-            })
-            if (!attached) {
-              console.warn('[cart] attach-tx failed after send; verify-batch may still recover')
-            }
-          } catch (err: unknown) {
-            const wm = err instanceof Error ? err.message : String(err)
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            if (/rejected|cancell?ed/i.test(wm)) {
-              setCheckoutError(
-                `Transaction ${i + 1} of ${batches.length} was cancelled. Previous successful batches (if any) were kept.`
-              )
-            } else {
-              const splHelp = formatSplTokenTransferFailure(wm, String(pd.currency || ''))
-              const friendly = splHelp ?? (wm.includes('Insufficient') ? wm : `Payment failed: ${wm}`)
-              setCheckoutError(friendly)
-            }
-            restoreRemainingLines()
-            return
-          }
-
-          try {
-            await confirmSignatureSuccessOnChain(connection, signature)
-          } catch (confirmErr: unknown) {
-            const wm = confirmErr instanceof Error ? confirmErr.message : String(confirmErr)
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            if (wm.toLowerCase().includes('transaction failed')) {
-              setCheckoutError('On-chain transaction failed.')
-            } else {
-              setCheckoutError(
-                'Transaction confirmation timed out. You can retry verify from your orders if payment went through.'
-              )
-            }
-            restoreRemainingLines()
-            router.refresh()
-            return
-          }
-
-          let verifyRes: Response
-          try {
-            verifyRes = await fetchVerifyBatchWithRetries(entryIds, signature)
-          } catch {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            setCheckoutError('Network error confirming tickets. Your cart was restored.')
-            restoreRemainingLines()
-            router.refresh()
-            return
-          }
-
-          if (verifyRes.status === 202) {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'pending_async' } : null))
-            successfulRaffleIds.push(...batch.map(({ line }) => line.raffleId))
-            continue
-          }
-
-          if (!verifyRes.ok) {
-            setBatchReceipt(prev => (prev ? { ...prev, phase: 'failed' } : null))
-            const { status, code } = await parseVerifyBatchFailure(verifyRes)
-            setCheckoutError(verifyBatchFailureUserMessage(status, code))
-            restoreRemainingLines()
-            router.refresh()
-            return
-          }
-
-          successfulRaffleIds.push(...batch.map(({ line }) => line.raffleId))
+        if (!result.ok) {
+          setCheckoutError(result.error)
+          if (result.refresh) router.refresh()
+          return
         }
 
-        setBatchReceipt(prev => (prev ? { ...prev, phase: 'success' } : null))
         requestAnimationFrame(() => fireGreenConfetti())
-        setLines([])
         dispatchPurchaseCompleted({
           wallet: publicKey.toBase58(),
-          raffleIds: successfulRaffleIds,
+          raffleIds: result.settledRaffleIds,
         })
         router.refresh()
         return
@@ -526,9 +407,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
             remaining.length === initialCount && initialCount > 1
               ? `${result.error} (${line.snapshot.title}). Remaining items are still in your cart.`
               : result.error
-          setCheckoutError(msg)
-          if (result.isUnconfirmedPayment) router.refresh()
-          setLines(remaining)
+          if (result.isUnconfirmedPayment) {
+            // Payment may be on-chain — keep this line out of the cart so a
+            // retry cannot double-pay; pending-verification resume recovers it.
+            setCheckoutError(`${msg} ${PAID_UNVERIFIED_CART_NOTE}`)
+            setLines(remaining.slice(1))
+            router.refresh()
+          } else {
+            setCheckoutError(msg)
+            setLines(remaining)
+          }
           return
         }
 

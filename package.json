@@ -25,6 +25,8 @@
     "normalize:nft-economics": "node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs",
     "check:nft-economics": "node --env-file=.env.local scripts/check-nft-economics-compliance.mjs",
     "test:batch-cart-invariants": "npx --yes tsx scripts/test-batch-cart-invariants.ts",
+    "test:pending-verification-store": "npx --yes tsx scripts/test-pending-verification-store.ts",
+    "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "audit:owl-tiers": "npx --yes tsx scripts/audit-owl-holder-fee-tiers.ts",
