@@ -163,28 +163,14 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
     }
   }
 
+  // GEN1 holder mint is optional — presale/overage open when admin flips the phase, regardless
+  // of how much of the airdrop supply was actually minted. Unminted GEN1 supply simply stays
+  // in the remaining total supply for later phases.
   if (phase === 'PRESALE') {
-    const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
     const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network)
     const bal = await getBalanceByWallet(w)
     const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
     const purchasedAvailable = gen2PresalePurchasedCreditsAvailable(bal)
-    if (airdropMintedGlobal < launch.airdrop_supply) {
-      return {
-        ...base,
-        presale_balance: {
-          purchased_mints: allowance.purchased_mints,
-          gifted_mints: allowance.gifted_mints,
-          used_mints: allowance.used_mints,
-          available_mints: allowance.available_mints,
-          purchased_available_mints: purchasedAvailable,
-          is_paid_participant: isGen2PresalePaidParticipant(bal),
-        },
-        is_eligible: false,
-        max_mintable: 0,
-        reason: 'gen1_phase_pending',
-      }
-    }
     const max = presaleRedemptionMaxMintable({
       purchasedCreditsAvailable: purchasedAvailable,
       presalePoolRemaining: pool.presale_mints_remaining,
@@ -214,30 +200,11 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   }
 
   if (phase === 'PRESALE_OVERAGE') {
-    const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
     const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network)
     const overage = await getPresaleOverageAllocation(w)
     const bal = await getBalanceByWallet(w)
     const availOverage = overage ? Math.max(0, overage.allowed_mints - overage.used_mints) : 0
     const purchasedAvailable = gen2PresalePurchasedCreditsAvailable(bal)
-    if (airdropMintedGlobal < launch.airdrop_supply) {
-      return {
-        ...base,
-        presale_balance: bal
-          ? {
-              purchased_mints: bal.purchased_mints,
-              gifted_mints: bal.gifted_mints,
-              used_mints: bal.used_mints,
-              available_mints: bal.available_mints,
-              purchased_available_mints: purchasedAvailable,
-              is_paid_participant: isGen2PresalePaidParticipant(bal),
-            }
-          : undefined,
-        is_eligible: false,
-        max_mintable: 0,
-        reason: 'gen1_phase_pending',
-      }
-    }
     const max = presaleOverageMaxMintable({
       overageAllocationRemaining: availOverage,
       purchasedCreditsAvailable: purchasedAvailable,

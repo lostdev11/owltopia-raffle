@@ -6,7 +6,11 @@ export type OwlMintNetwork = 'devnet' | 'mainnet'
  * Solana cluster label (explorer / wallet hints). Does not switch RPC by itself — pair with
  * `NEXT_PUBLIC_SOLANA_RPC_URL` and `NEXT_PUBLIC_GEN2_USE_DEVNET_MINT` for devnet proof mints.
  *
- * TODO(mainnet): Set `NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta`, turn off `NEXT_PUBLIC_GEN2_USE_DEVNET_MINT`.
+ * Mainnet launch flip (Vercel Production env — see `.env.example` "Gen2 mainnet launch" block):
+ * - `NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta` (or unset; mainnet-beta is the default)
+ * - `NEXT_PUBLIC_GEN2_USE_DEVNET_MINT` unset/false (devnet CM ids are then ignored)
+ * - `NEXT_PUBLIC_GEN2_CANDY_MACHINE_ID` + `NEXT_PUBLIC_GEN2_COLLECTION_MINT` set to the
+ *   production CM (or filled in `owl_center_launches` via /admin/owl-center — DB wins)
  */
 export function getSolanaCluster(): string {
   return process.env.NEXT_PUBLIC_SOLANA_CLUSTER?.trim() || 'mainnet-beta'

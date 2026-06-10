@@ -195,7 +195,7 @@ export type Gen2MintCheckResponse = {
   is_paused: boolean
   /** False until Candy Machine is configured and mint is not paused/kill-switched. */
   mint_operational?: boolean
-  /** True when the global GEN1 / AIRDROP cap is fully minted. */
+  /** True when the global GEN1 / AIRDROP cap is fully minted (informational — later phases never wait for it). */
   airdrop_phase_complete?: boolean
   presale_purchases_closed: boolean
   /** True when all presale purchase spots are claimed (distinct from admin pause). */

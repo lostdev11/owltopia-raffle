@@ -347,13 +347,6 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#FF9C9C]">You have already minted your GEN1 allocation for this wallet.</p>
           ) : null}
 
-          {launch.active_phase === 'PRESALE' && elig?.reason === 'gen1_phase_pending' ? (
-            <p className="text-sm text-[#9BA8B4]">
-              Presale redemption is not open yet — GEN1 mint runs first. Your paid presale spots stay reserved in Allocation
-              below until admin opens presale redemption.
-            </p>
-          ) : null}
-
           {launch.active_phase === 'PRESALE' &&
           elig?.presale_balance?.is_paid_participant &&
           (elig.presale_balance.purchased_available_mints ?? 0) > 0 &&

@@ -114,6 +114,33 @@ export async function listWlAllocationsByCommunity(
   return mapWlAllocationRows(data ?? [])
 }
 
+/**
+ * Every whitelisted wallet (allowed_mints > 0) — canonical allowlist for the Candy Machine
+ * `wl` guard group (merkle root + proofs). Sorted ascending so the merkle root is deterministic.
+ */
+export async function listWlMerkleWallets(): Promise<string[]> {
+  const admin = getSupabaseAdmin()
+  const page = 1000
+  let from = 0
+  const wallets: string[] = []
+  for (;;) {
+    const { data, error } = await admin
+      .from('owl_center_wl_allocations')
+      .select('wallet')
+      .gt('allowed_mints', 0)
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    for (const r of rows) {
+      wallets.push(String((r as { wallet: string }).wallet))
+    }
+    if (rows.length < page) break
+    from += page
+  }
+  return wallets
+}
+
 function mapWlAllocationRows(data: unknown[]): WlAllocationRow[] {
   return data.map((r) => {
     const row = r as Record<string, unknown>

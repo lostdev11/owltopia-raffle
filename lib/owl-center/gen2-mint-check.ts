@@ -66,8 +66,7 @@ function phaseInactiveNote(
   phase: OwlCenterPhase,
   activePhase: OwlCenterPhase,
   isPaused: boolean,
-  mintOperational: boolean,
-  airdropPhaseComplete: boolean
+  mintOperational: boolean
 ): string | null {
   if (isPaused) return 'Minting is paused by admin'
   const labels: Record<OwlCenterPhase, string> = {
@@ -81,13 +80,6 @@ function phaseInactiveNote(
   }
   if (activePhase === phase && !mintOperational) {
     return `${labels[phase]} phase is not live yet — your allocation below is reserved for when admin opens mint`
-  }
-  if (
-    activePhase === phase &&
-    (phase === 'PRESALE' || phase === 'PRESALE_OVERAGE') &&
-    !airdropPhaseComplete
-  ) {
-    return `${labels[phase]} phase is not live yet — GEN1 mint opens first; your allocation below is reserved for when admin opens this phase`
   }
   if (activePhase === phase) return null
   return `${labels[phase]} phase is not live yet — your allocation below is reserved for when admin opens this phase`
@@ -142,10 +134,9 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
 
   const phaseOrder: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC']
   const phases: Gen2MintCheckPhasePreview[] = []
-  const presaleRedemptionOpen = (p: OwlCenterPhase) =>
-    (p !== 'PRESALE' && p !== 'PRESALE_OVERAGE') || airdrop_phase_complete
-  const isPhaseMintLive = (p: OwlCenterPhase) =>
-    launch.active_phase === p && mint_operational && presaleRedemptionOpen(p)
+  // GEN1 holder mint is optional — the admin phase flip alone opens presale/overage;
+  // unminted airdrop supply just rolls into the remaining total supply.
+  const isPhaseMintLive = (p: OwlCenterPhase) => launch.active_phase === p && mint_operational
 
   for (const phase of phaseOrder) {
     const label = owlCenterPhaseLabel(phase)
@@ -239,7 +230,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
-            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
+            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: gen1Gate.reason,
         gen1: {
@@ -267,11 +258,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         ? 'not_presale_participant'
         : purchasedAvailable <= 0
           ? 'no_paid_presale_credits'
-          : !isActive &&
-              launch.active_phase === phase &&
-              !airdrop_phase_complete &&
-              purchasedAvailable > 0
-            ? 'gen1_phase_pending'
           : max <= 0 && isActive
             ? 'presale_pool_exhausted'
             : null
@@ -294,7 +280,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
-            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
+            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: presaleGate.reason,
         presale: {
@@ -332,11 +318,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? 'not_on_overage_list'
             : purchasedAvailable <= 0
               ? 'no_paid_presale_credits'
-              : !isActive &&
-                  launch.active_phase === phase &&
-                  !airdrop_phase_complete &&
-                  purchasedAvailable > 0
-                ? 'gen1_phase_pending'
               : max <= 0 && isActive
                 ? 'overage_pool_exhausted'
                 : null
@@ -359,7 +340,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
-            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
+            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: overageGate.reason,
         presale: bal
@@ -431,7 +412,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         reserved_mints,
         phase_note:
           reserved_mints > 0 && (!isActive || launch.is_paused)
-            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
+            ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: wlGate.reason,
         wl: {
@@ -473,7 +454,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       reserved_mints,
       phase_note:
         reserved_mints > 0 && (!isActive || launch.is_paused)
-          ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational, airdrop_phase_complete)
+          ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
           : null,
       reason: publicGate.reason,
     })

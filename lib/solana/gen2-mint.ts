@@ -1,13 +1,29 @@
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import bs58 from 'bs58'
-import { publicKey, generateSigner } from '@metaplex-foundation/umi'
+import { publicKey, generateSigner, transactionBuilder } from '@metaplex-foundation/umi'
 import { fetchMetadata, findMetadataPda, findMasterEditionPda } from '@metaplex-foundation/mpl-token-metadata'
 import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
+import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
+import { buildGen2GuardMintPlan, ensureGen2AllowListProof, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
+
+/** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
+const MINT_COMPUTE_UNIT_LIMIT = 800_000
+
+/**
+ * Priority fee (micro-lamports per CU) for mainnet mint txs — at 800k CU the default
+ * 100_000 adds 0.00008 SOL per mint. Set to 0 to disable.
+ */
+function mintPriorityFeeMicroLamports(): number {
+  const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
+  if (!raw) return 100_000
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 100_000
+}
 
 /** Optional DB-backed overrides (see `owl_center_launches` devnet columns). */
 export type Gen2MintLaunchRefs = {
@@ -41,14 +57,17 @@ export type MintGen2Result =
 /**
  * Prepare + sign + confirm Candy Machine `mintV2` txs via Phantom / Solflare (wallet-standard adapter).
  *
+ * Guard-aware: fetches the candy guard, selects the guard group for the active phase
+ * (`gen1` / `pre` / `wl` / `pub` — see `lib/solana/gen2-guards.ts`), builds `mintArgs`
+ * (solPayment destination, mintLimit id, allowList merkle root) and sends the allowList
+ * `route` proof instruction first when the phase is merkle-gated.
+ *
  * Required packages: see `lib/solana/umi.ts` / `candy-machine-v3.ts` header comments.
  *
- * TODO(mainnet): mintArgs per guard (solPayment, merkle WL); optional multi-mint single tx when guards allow.
  * TODO: Collection authority / delegate flows if CM uses a separate update authority.
  */
 export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<MintGen2Result> {
-  void params.phase
-  const { walletAdapter, candyMachineId, collectionMint, quantity, launch, mintNetwork } = params
+  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
   }
@@ -89,6 +108,10 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     return { ok: false, error: 'Missing Collection Mint — set env or Owl Center admin devnet fields.' }
   }
 
+  if (!isGen2MintablePhase(phase)) {
+    return { ok: false, error: `Mint not available in phase ${phase}` }
+  }
+
   try {
     const umi = createOwlCenterUmi(walletAdapter, getLaunchSolanaRpcUrl(network))
     const candyMachine = publicKey(cmId)
@@ -98,20 +121,51 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     const collectionUpdateAuthority = md.updateAuthority
     const collectionMasterEdition = findMasterEditionPda(umi, { mint: collectionMintPk })
 
+    // Resolve guard group + mintArgs before asking the wallet for any signature.
+    const planRes = await buildGen2GuardMintPlan(umi, candyMachine, phase)
+    if (!planRes.ok) {
+      return { ok: false, error: planRes.error }
+    }
+    const plan = planRes.plan
+
+    // Merkle-gated phase: create the allowList proof PDA once (route ix) before minting.
+    if (plan.allowListMerkleRoot && plan.candyGuard) {
+      const proofRes = await ensureGen2AllowListProof(umi, {
+        candyMachine,
+        candyGuard: plan.candyGuard.publicKey,
+        groupLabel: plan.groupLabel,
+        merkleRoot: plan.allowListMerkleRoot,
+        phase,
+      })
+      if (!proofRes.ok) {
+        return { ok: false, error: proofRes.error }
+      }
+    }
+
+    const priorityFee = mintPriorityFeeMicroLamports()
+
     const txSignatures: string[] = []
     const mintedNftMints: string[] = []
 
     for (let i = 0; i < quantity; i++) {
       const nftMint = generateSigner(umi)
-      const builder = mintV2(umi, {
-        candyMachine,
-        nftMint,
-        collectionMint: collectionMintPk,
-        collectionUpdateAuthority,
-        collectionMetadata,
-        collectionMasterEdition,
-        mintArgs: {},
-      })
+      let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: MINT_COMPUTE_UNIT_LIMIT }))
+      if (priorityFee > 0) {
+        builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
+      }
+      builder = builder.add(
+        mintV2(umi, {
+          candyMachine,
+          candyGuard: plan.candyGuard?.publicKey,
+          nftMint,
+          collectionMint: collectionMintPk,
+          collectionUpdateAuthority,
+          collectionMetadata,
+          collectionMasterEdition,
+          mintArgs: plan.mintArgs,
+          group: plan.groupLabel,
+        })
+      )
       const res = await builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
       const sig = res.signature as string | Uint8Array
       const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
@@ -128,6 +182,12 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     if (low.includes('user rejected') || low.includes('cancel')) {
       return { ok: false, error: 'Mint transaction rejected in wallet' }
+    }
+    if (low.includes('notenoughsol') || low.includes('not enough sol')) {
+      return { ok: false, error: 'Not enough SOL to pay the mint price + network fees.' }
+    }
+    if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
+      return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }
     }
     return { ok: false, error: msg.includes('Simulation failed') ? 'Mint transaction failed on-chain (simulation)' : msg }
   }

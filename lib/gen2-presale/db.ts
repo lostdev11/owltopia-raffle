@@ -213,6 +213,38 @@ export async function getGen2PresalePurchaseRowsBySignatures(
   return out
 }
 
+/**
+ * Every wallet with paid presale spots — canonical allowlist for the Candy Machine `pre`
+ * guard group (merkle root + proofs). Sorted ascending so the merkle root is deterministic.
+ */
+export async function listGen2PresaleMerkleWallets(): Promise<string[]> {
+  const db = getSupabaseAdmin()
+  const page = 1000
+  let from = 0
+  const wallets: string[] = []
+  for (;;) {
+    const { data, error } = await db
+      .from('gen2_presale_balances')
+      .select('wallet')
+      .gt('purchased_mints', 0)
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) {
+      if (allowDegradedGen2Read() && isGen2SchemaMissingError(error)) {
+        return []
+      }
+      throw new Error(error.message)
+    }
+    const rows = data ?? []
+    for (const r of rows) {
+      wallets.push(String((r as { wallet: string }).wallet))
+    }
+    if (rows.length < page) break
+    from += page
+  }
+  return wallets
+}
+
 export type Gen2PresaleParticipant = {
   wallet: string
   /** Confirmed presale spots purchased (sum of recorded purchases). */
