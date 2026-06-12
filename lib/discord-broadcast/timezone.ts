@@ -20,15 +20,22 @@ const WEEKDAY_TO_ISO: Record<string, number> = {
   Sun: 7,
 }
 
+const timezoneValidityCache = new Map<string, boolean>()
+
 export function isValidIanaTimezone(tz: string): boolean {
   const trimmed = tz.trim()
   if (!trimmed) return false
+  const cached = timezoneValidityCache.get(trimmed)
+  if (cached !== undefined) return cached
+  let valid: boolean
   try {
     Intl.DateTimeFormat(undefined, { timeZone: trimmed })
-    return true
+    valid = true
   } catch {
-    return false
+    valid = false
   }
+  timezoneValidityCache.set(trimmed, valid)
+  return valid
 }
 
 export function getDefaultBrowserTimezone(): string {
@@ -41,18 +48,29 @@ function parseNumericPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeF
   return p ? Number.parseInt(p.value, 10) : 0
 }
 
+// Intl.DateTimeFormat construction is expensive (~0.1–1ms); cache per timezone.
+const partsFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+function getPartsFormatter(timezone: string): Intl.DateTimeFormat {
+  let fmt = partsFormatterCache.get(timezone)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      weekday: 'short',
+      hour12: false,
+    })
+    partsFormatterCache.set(timezone, fmt)
+  }
+  return fmt
+}
+
 export function getLocalTimeParts(date: Date, timezone: string): LocalTimeParts {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    weekday: 'short',
-    hour12: false,
-  })
-  const parts = fmt.formatToParts(date)
+  const parts = getPartsFormatter(timezone).formatToParts(date)
   const weekdayShort = parts.find((p) => p.type === 'weekday')?.value ?? 'Mon'
   return {
     year: parseNumericPart(parts, 'year'),
@@ -64,25 +82,43 @@ export function getLocalTimeParts(date: Date, timezone: string): LocalTimeParts 
   }
 }
 
+const displayFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
 export function formatDateTimeInTimezone(
   date: Date | string,
   timezone: string,
   opts?: { includeTimezoneLabel?: boolean }
 ): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  const formatted = new Intl.DateTimeFormat(undefined, {
-    timeZone: timezone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(d)
+  let fmt = displayFormatterCache.get(timezone)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone: timezone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+    displayFormatterCache.set(timezone, fmt)
+  }
+  const formatted = fmt.format(d)
   if (opts?.includeTimezoneLabel) {
     return `${formatted} (${timezone})`
   }
   return formatted
 }
 
+/** Offset of `timezone` from UTC (ms) at the given instant. Positive = ahead of UTC. */
+function getTimezoneOffsetMs(utcDate: Date, timezone: string): number {
+  const local = getLocalTimeParts(utcDate, timezone)
+  const localAsUtc = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, 0, 0)
+  const truncatedToMinute = Math.floor(utcDate.getTime() / 60_000) * 60_000
+  return localAsUtc - truncatedToMinute
+}
+
 /**
  * Convert a wall-clock time in `timezone` to UTC Date.
+ *
+ * Uses a two-pass offset lookup (handles DST transitions) instead of scanning
+ * every possible offset, which was slow enough to freeze typing in the admin UI.
  */
 export function zonedLocalDateTimeToUtc(
   year: number,
@@ -92,26 +128,16 @@ export function zonedLocalDateTimeToUtc(
   minute: number,
   timezone: string
 ): Date {
-  if (!isValidIanaTimezone(timezone)) {
-    return new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
-  }
-
   const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
-  for (let offsetMin = -18 * 60; offsetMin <= 18 * 60; offsetMin++) {
-    const candidate = new Date(naiveUtc + offsetMin * 60_000)
-    const local = getLocalTimeParts(candidate, timezone)
-    if (
-      local.year === year &&
-      local.month === month &&
-      local.day === day &&
-      local.hour === hour &&
-      local.minute === minute
-    ) {
-      return candidate
-    }
+  if (!isValidIanaTimezone(timezone)) {
+    return new Date(naiveUtc)
   }
 
-  return new Date(naiveUtc)
+  // First guess: treat the wall clock as UTC, then subtract the offset there.
+  const firstGuess = naiveUtc - getTimezoneOffsetMs(new Date(naiveUtc), timezone)
+  // Second pass corrects guesses that landed across a DST transition.
+  const corrected = naiveUtc - getTimezoneOffsetMs(new Date(firstGuess), timezone)
+  return new Date(corrected)
 }
 
 export function parseDateInputToUtc(

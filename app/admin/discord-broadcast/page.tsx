@@ -293,6 +293,12 @@ export default function AdminDiscordBroadcastPage() {
     [templates]
   )
 
+  // Timezone math is comparatively expensive; don't redo it on every keystroke re-render.
+  const scheduleSummaries = useMemo(
+    () => new Map(schedules.map((s) => [s.id, formatScheduleSummary(s, viewerTz)])),
+    [schedules, viewerTz]
+  )
+
   const authHeaders = useMemo(
     () => ({
       'Content-Type': 'application/json',
@@ -965,7 +971,7 @@ export default function AdminDiscordBroadcastPage() {
                           </Button>
                         </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">{formatScheduleSummary(s, viewerTz)}</p>
+                      <p className="text-sm text-muted-foreground">{scheduleSummaries.get(s.id)}</p>
                       <p className="text-xs text-muted-foreground">
                         {s.post_to_public ? 'Public' : ''}
                         {s.post_to_public && s.post_to_holder ? ' · ' : ''}
