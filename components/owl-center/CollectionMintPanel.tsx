@@ -8,6 +8,7 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import {
@@ -160,6 +161,7 @@ export function CollectionMintPanel({
   const priceLabel = formatPhasePriceSolOrFree(elig?.unit_lamports_estimate ?? null, {
     paid: launch.public_price_usdc != null && launch.public_price_usdc > 0,
   })
+  const platformFeeLabel = formatOwlCenterPlatformMintFeeLabel()
 
   if (trading) {
     return (
@@ -173,7 +175,7 @@ export function CollectionMintPanel({
     <CommandCard label={`MINT // public · ${mintNetwork}`}>
       <div className="space-y-4">
         <p className="font-mono text-xs text-[#9BA8B4]">
-          {priceLabel} · limit {launch.wallet_mint_limit}/wallet · {remaining} remaining
+          {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet · {remaining} remaining
         </p>
 
         {mintControls.env_kill_switch ? (

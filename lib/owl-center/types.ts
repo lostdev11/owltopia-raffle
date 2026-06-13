@@ -86,6 +86,8 @@ export type SimpleMintEligibilityResponse = {
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
   price_usdc: number | null
+  /** Owltopia platform fee per mint (USDC), charged even when creator price is free. */
+  platform_mint_fee_usdc: number
   mint_network: 'devnet' | 'mainnet'
   mint_operational: boolean
 }

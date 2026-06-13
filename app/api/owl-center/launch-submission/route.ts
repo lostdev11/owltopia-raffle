@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   if (!Number.isInteger(supply) || supply < 1 || supply > 1_000_000) {
     return jsonError('Invalid total supply', 400)
   }
-  if (!Number.isFinite(price) || price <= 0) return jsonError('Invalid mint price', 400)
+  if (!Number.isFinite(price) || price < 0) return jsonError('Invalid mint price', 400)
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     return jsonError('Invalid wallet mint limit', 400)
   }

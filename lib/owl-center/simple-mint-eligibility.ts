@@ -1,6 +1,7 @@
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
+import { owlCenterPlatformMintFeeUsdc } from '@/lib/owl-center/platform-mint-fee'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { launchMintInfraConfigured, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -70,6 +71,7 @@ export async function buildSimpleMintEligibility(
     unit_lamports_estimate,
     sol_usd_price: null,
     price_usdc: launch.public_price_usdc,
+    platform_mint_fee_usdc: owlCenterPlatformMintFeeUsdc(),
     mint_network,
     mint_operational,
   }

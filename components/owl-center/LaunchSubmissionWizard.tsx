@@ -13,6 +13,10 @@ import {
   readGeneratorProjectIdFromSession,
   readLaunchDraftFromSession,
 } from '@/lib/owl-center/generator/launch-draft'
+import {
+  formatOwlCenterPlatformMintFeeLabel,
+  formatTotalMintCostHint,
+} from '@/lib/owl-center/platform-mint-fee'
 
 const STEPS = ['Collection info', 'Supply & mint', 'Assets & metadata', 'Review'] as const
 
@@ -242,6 +246,9 @@ export function LaunchSubmissionWizard() {
                   required
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
+                <span className="normal-case tracking-normal text-[#7D8A93]">
+                  Use 0 for a free mint. {formatOwlCenterPlatformMintFeeLabel()} still applies to minters.
+                </span>
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
                 Currency
@@ -343,7 +350,11 @@ export function LaunchSubmissionWizard() {
                 <span className="text-[#5C6773]">Symbol</span> {symbol || '—'}
               </li>
               <li>
-                <span className="text-[#5C6773]">Supply / price</span> {totalSupply} @ {mintPrice} {currency}
+                <span className="text-[#5C6773]">Supply / price</span> {totalSupply} @{' '}
+                {formatTotalMintCostHint(Number(mintPrice) || 0, currency)}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">Platform fee</span> {formatOwlCenterPlatformMintFeeLabel()}
               </li>
               <li>
                 <span className="text-[#5C6773]">Creator</span> {creatorWallet || '—'}
