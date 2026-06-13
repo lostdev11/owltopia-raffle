@@ -32,7 +32,7 @@ export type AssetUploadWorkerResult = {
   reason?: string
 }
 
-async function applyValidationToAssetPackage(
+export async function applyValidationScanToLaunch(
   launchId: string,
   scan: Awaited<ReturnType<typeof scanSugarZipBuffer>>['scan']
 ): Promise<void> {
@@ -72,7 +72,7 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
 
   await updateAssetUploadJob(jobId, { status: 'validating', error_message: null })
 
-  const launch = await getOwlCenterLaunchByIdAdmin(job.launch_id)
+  const launch = job.launch_id ? await getOwlCenterLaunchByIdAdmin(job.launch_id) : null
   const zipBuffer = await downloadStagedSugarZip(job.staged_zip_path)
   if (!zipBuffer) {
     await updateAssetUploadJob(jobId, {
@@ -88,7 +88,9 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
     const progress: AssetUploadProgress = { file_list, uploaded: {}, cursor: 0 }
 
     if (!scan.ok) {
-      await applyValidationToAssetPackage(job.launch_id, scan)
+      if (job.launch_id) {
+        await applyValidationScanToLaunch(job.launch_id, scan)
+      }
       await updateAssetUploadJob(jobId, {
         status: 'failed',
         validation_scan: scan,
@@ -98,7 +100,10 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
       return { ok: false, error: 'validation_failed', job_id: jobId, status: 'failed' }
     }
 
-    await applyValidationToAssetPackage(job.launch_id, scan)
+    if (job.launch_id) {
+      await applyValidationScanToLaunch(job.launch_id, scan)
+    }
+
     await updateAssetUploadJob(jobId, {
       status: 'validated',
       validation_scan: scan,
@@ -106,11 +111,13 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
       error_message: null,
     })
 
-    await getSupabaseAdmin().from('owl_center_activity_logs').insert({
-      launch_id: job.launch_id,
-      message: `Phase B validate OK · ${scan.metadataCount} metadata · job ${jobId.slice(0, 8)}`,
-      event_type: 'system',
-    })
+    if (job.launch_id) {
+      await getSupabaseAdmin().from('owl_center_activity_logs').insert({
+        launch_id: job.launch_id,
+        message: `Phase B validate OK · ${scan.metadataCount} metadata · job ${jobId.slice(0, 8)}`,
+        event_type: 'system',
+      })
+    }
 
     return { ok: true, job_id: jobId, status: 'validated' }
   } catch (e) {
@@ -220,6 +227,10 @@ export async function processArweaveUploadBatch(jobId: string): Promise<AssetUpl
 
     const done = cursor >= progress.file_list.length
     if (done) {
+      if (!job.launch_id) {
+        throw new Error('Arweave upload requires launch_id — submit launch first')
+      }
+      const launchId = job.launch_id
       const imageUris = Object.entries(progress.uploaded)
         .filter(([p]) => p.toLowerCase().endsWith('.png') && !p.toLowerCase().includes('collection'))
         .map(([, u]) => u)
@@ -238,17 +249,17 @@ export async function processArweaveUploadBatch(jobId: string): Promise<AssetUpl
           ? `irys://${metaUris[0]?.replace('https://arweave.net/', '') ?? 'batch'} (${metaUris.length} json)`
           : null
 
-      await upsertAssetPackageForLaunch(job.launch_id, {
+      await upsertAssetPackageForLaunch(launchId, {
         assets_storage_path: assetsPath,
         metadata_storage_path: metadataPath,
         storage_provider: 'irys',
         metadata_upload_status: 'UPLOADED_TO_ARWEAVE',
       })
 
-      const pkg = await upsertAssetPackageForLaunch(job.launch_id, {})
+      const pkg = await upsertAssetPackageForLaunch(launchId, {})
       if (pkg) {
         await syncAssetPackageStatus(
-          job.launch_id,
+          launchId,
           pkg.validation_status === 'VALID' ? 'VALID' : pkg.validation_status,
           'UPLOADED_TO_ARWEAVE',
           pkg.validation_errors,

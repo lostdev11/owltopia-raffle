@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils'
 type Props = {
   expectedSupply?: number
   onApply: (result: SugarBatchScanResult) => void
+  /** When true, omit outer CommandCard (nested in another panel). */
+  embedded?: boolean
 }
 
 const pickBtnClass =
@@ -23,7 +25,7 @@ const pickBtnClass =
 const pickBtnGhostClass =
   'inline-flex min-h-[44px] touch-manipulation cursor-pointer items-center justify-center gap-2 px-6 font-bold uppercase tracking-wide transition border border-[#1A222B] bg-transparent text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#E8EEF2] has-[:disabled]:pointer-events-none has-[:disabled]:opacity-40'
 
-export function SugarBatchScanner({ expectedSupply, onApply }: Props) {
+export function SugarBatchScanner({ expectedSupply, onApply, embedded }: Props) {
   const resultRef = useRef<HTMLDivElement>(null)
   const [scanning, setScanning] = useState(false)
   const [result, setResult] = useState<SugarBatchScanResult | null>(null)
@@ -124,13 +126,20 @@ export function SugarBatchScanner({ expectedSupply, onApply }: Props) {
 
   const score = result ? calculateReadinessScore(result.checklist) : 0
 
-  return (
-    <CommandCard label="auto_scan.sys · Sugar batch">
+  const inner = (
+    <>
       <p className="text-sm text-[#9BA8B4]">
-        Local scan only — files never upload to our servers. In File Explorer open <strong className="font-normal text-[#E8EEF2]">assets</strong>,{' '}
-        <strong className="font-normal text-[#E8EEF2]">Ctrl+A</strong>, then tap{' '}
-        <strong className="font-normal text-[#E8EEF2]">Select all files</strong>. Expect names like{' '}
-        <strong className="font-normal text-[#E8EEF2]">0.png</strong> and <strong className="font-normal text-[#E8EEF2]">0.json</strong>.
+        {embedded
+          ? 'Drop the Sugar ZIP you exported from the generator — local scan only, nothing uploads yet.'
+          : 'Local scan only — files never upload to our servers. In File Explorer open '}
+        {!embedded ? (
+          <>
+            <strong className="font-normal text-[#E8EEF2]">assets</strong>,{' '}
+            <strong className="font-normal text-[#E8EEF2]">Ctrl+A</strong>, then tap{' '}
+            <strong className="font-normal text-[#E8EEF2]">Select all files</strong>. Expect names like{' '}
+            <strong className="font-normal text-[#E8EEF2]">0.png</strong> and <strong className="font-normal text-[#E8EEF2]">0.json</strong>.
+          </>
+        ) : null}
       </p>
 
       <div
@@ -243,13 +252,21 @@ export function SugarBatchScanner({ expectedSupply, onApply }: Props) {
             className={pickBtnClass}
             onClick={() => onApply(result)}
           >
-            Apply counts + checklist to form
+            {embedded ? 'Apply counts to form' : 'Apply counts + checklist to form'}
           </button>
-          <p className="text-[10px] text-[#5C6773]">
-            Then click <span className="text-[#9BA8B4]">Save asset package</span> below.
-          </p>
+          {!embedded ? (
+            <p className="text-[10px] text-[#5C6773]">
+              Then click <span className="text-[#9BA8B4]">Save asset package</span> below.
+            </p>
+          ) : null}
         </div>
       ) : null}
-    </CommandCard>
+    </>
   )
+
+  if (embedded) {
+    return <div className="rounded border border-[#1A222B] bg-[#0B0F12]/60 p-4">{inner}</div>
+  }
+
+  return <CommandCard label="auto_scan.sys · Sugar batch">{inner}</CommandCard>
 }

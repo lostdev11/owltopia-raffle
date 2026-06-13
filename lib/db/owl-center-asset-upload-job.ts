@@ -10,7 +10,10 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 function mapJobRow(row: Record<string, unknown>): OwlCenterAssetUploadJob {
   return {
     id: String(row.id),
-    launch_id: String(row.launch_id),
+    launch_id: row.launch_id != null ? String(row.launch_id) : null,
+    generator_project_id:
+      row.generator_project_id != null ? String(row.generator_project_id) : null,
+    creator_wallet: row.creator_wallet != null ? String(row.creator_wallet) : null,
     staged_zip_path: String(row.staged_zip_path),
     original_filename: row.original_filename != null ? String(row.original_filename) : null,
     status: String(row.status) as OwlCenterAssetUploadJobStatus,
@@ -44,8 +47,26 @@ export async function getLatestAssetUploadJobForLaunch(launchId: string): Promis
   return mapJobRow(data as Record<string, unknown>)
 }
 
+export async function getLatestAssetUploadJobForGeneratorProject(
+  projectId: string
+): Promise<OwlCenterAssetUploadJob | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_asset_upload_jobs')
+    .select('*')
+    .eq('generator_project_id', projectId)
+    .is('launch_id', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return mapJobRow(data as Record<string, unknown>)
+}
+
 export async function insertAssetUploadJob(input: {
-  launch_id: string
+  launch_id?: string | null
+  generator_project_id?: string | null
+  creator_wallet?: string | null
   staged_zip_path: string
   original_filename: string | null
 }): Promise<OwlCenterAssetUploadJob | null> {
@@ -53,7 +74,9 @@ export async function insertAssetUploadJob(input: {
   const { data, error } = await db
     .from('owl_center_asset_upload_jobs')
     .insert({
-      launch_id: input.launch_id,
+      launch_id: input.launch_id ?? null,
+      generator_project_id: input.generator_project_id ?? null,
+      creator_wallet: input.creator_wallet ?? null,
       staged_zip_path: input.staged_zip_path,
       original_filename: input.original_filename,
       status: 'queued',
@@ -64,6 +87,28 @@ export async function insertAssetUploadJob(input: {
     .single()
   if (error || !data) {
     console.error('insertAssetUploadJob', error)
+    return null
+  }
+  return mapJobRow(data as Record<string, unknown>)
+}
+
+export async function attachStagedJobToLaunch(
+  jobId: string,
+  launchId: string
+): Promise<OwlCenterAssetUploadJob | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_asset_upload_jobs')
+    .update({
+      launch_id: launchId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', jobId)
+    .is('launch_id', null)
+    .select('*')
+    .maybeSingle()
+  if (error || !data) {
+    console.error('attachStagedJobToLaunch', error)
     return null
   }
   return mapJobRow(data as Record<string, unknown>)

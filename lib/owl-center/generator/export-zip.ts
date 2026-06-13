@@ -13,11 +13,18 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-export async function exportBatchAsSugarZip(
+function sugarZipFilename(project: GeneratorProject, batchLength: number, filename?: string): string {
+  const safeName = (filename ?? (project.name || 'owl-collection'))
+    .replace(/[^a-z0-9-_]+/gi, '-')
+    .toLowerCase()
+  return `${safeName}-batch-${batchLength}.zip`
+}
+
+export async function buildSugarZipBlob(
   project: GeneratorProject,
   batch: GeneratedNft[],
   filename?: string
-): Promise<void> {
+): Promise<{ blob: Blob; filename: string; count: number }> {
   const zip = new JSZip()
   const assets = zip.folder('assets')
   if (!assets) throw new Error('Zip folder failed')
@@ -84,8 +91,16 @@ export async function exportBatchAsSugarZip(
   )
 
   const blob = await zip.generateAsync({ type: 'blob' })
-  const safeName = (filename ?? (project.name || 'owl-collection'))
-    .replace(/[^a-z0-9-_]+/gi, '-')
-    .toLowerCase()
-  triggerDownload(blob, `${safeName}-batch-${batch.length}.zip`)
+  const outName = sugarZipFilename(project, batch.length, filename)
+  return { blob, filename: outName, count: batch.length }
+}
+
+export async function exportBatchAsSugarZip(
+  project: GeneratorProject,
+  batch: GeneratedNft[],
+  filename?: string
+): Promise<{ blob: Blob; filename: string; count: number }> {
+  const built = await buildSugarZipBlob(project, batch, filename)
+  triggerDownload(built.blob, built.filename)
+  return built
 }

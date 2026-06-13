@@ -23,7 +23,9 @@ export type AssetUploadProgress = {
 
 export type OwlCenterAssetUploadJob = {
   id: string
-  launch_id: string
+  launch_id: string | null
+  generator_project_id: string | null
+  creator_wallet: string | null
   staged_zip_path: string
   original_filename: string | null
   status: OwlCenterAssetUploadJobStatus

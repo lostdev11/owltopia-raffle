@@ -8,7 +8,9 @@ import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import {
+  clearGeneratorHandoffFromSession,
   clearLaunchDraftFromSession,
+  readGeneratorProjectIdFromSession,
   readLaunchDraftFromSession,
 } from '@/lib/owl-center/generator/launch-draft'
 
@@ -30,6 +32,7 @@ export function LaunchSubmissionWizard() {
   const searchParams = useSearchParams()
   const fromGenerator = searchParams.get('from') === 'generator'
   const [generatorPrefill, setGeneratorPrefill] = useState(false)
+  const [generatorProjectId, setGeneratorProjectId] = useState<string | null>(null)
   const [step, setStep] = useState(0)
   const [status, setStatus] = useState<'idle' | 'sending' | 'ok' | 'err'>('idle')
   const [msg, setMsg] = useState<string | null>(null)
@@ -61,8 +64,14 @@ export function LaunchSubmissionWizard() {
     setSymbol(draft.symbol)
     setDescription(draft.description)
     setTotalSupply(draft.total_supply)
-    setAssets((a) => ({ ...a, asset_notes: draft.asset_notes }))
+    setAssets((a) => ({
+      ...a,
+      asset_notes: draft.asset_notes,
+      total_images: draft.total_images || draft.total_supply,
+      total_metadata: draft.total_metadata || draft.total_supply,
+    }))
     setGeneratorPrefill(true)
+    setGeneratorProjectId(draft.project_id || readGeneratorProjectIdFromSession())
     clearLaunchDraftFromSession()
   }, [fromGenerator])
 
@@ -108,6 +117,7 @@ export function LaunchSubmissionWizard() {
       }
       if (assets.total_images.trim()) payload.total_images = Number(assets.total_images)
       if (assets.total_metadata.trim()) payload.total_metadata = Number(assets.total_metadata)
+      if (generatorProjectId) payload.generator_project_id = generatorProjectId
 
       const res = await fetch('/api/owl-center/launch-submission', {
         method: 'POST',
@@ -118,6 +128,7 @@ export function LaunchSubmissionWizard() {
       const j = (await res.json()) as { ok?: boolean; error?: string; id?: string; slug?: string }
       if (!res.ok) throw new Error(j.error || 'submit_failed')
       setStatus('ok')
+      clearGeneratorHandoffFromSession()
       setMsg(`Queued as PENDING_REVIEW — id ${j.id ?? ''} · slug ${j.slug ?? ''}`)
     } catch (e) {
       setStatus('err')
@@ -133,8 +144,9 @@ export function LaunchSubmissionWizard() {
     >
       {generatorPrefill ? (
         <p className="mb-6 rounded border border-[#00FF9C]/30 bg-[#00FF9C]/8 px-4 py-3 text-sm text-[#C5D0D8]">
-          Prefilled from <strong className="font-normal text-[#EAFBF4]">Owl Generator</strong> — confirm supply, export
-          your Sugar ZIP, then add asset package URLs in step 3.
+          Prefilled from <strong className="font-normal text-[#EAFBF4]">Owl Generator</strong> — step 3 includes image/metadata
+          counts. Stage your Sugar ZIP in the generator before submit; validation links automatically on launch intake.
+          Package URLs are added after Phase B Arweave upload in admin.
         </p>
       ) : null}
       <nav className="mb-8 font-mono text-xs uppercase tracking-widest text-[#5C6773]">
@@ -312,7 +324,12 @@ export function LaunchSubmissionWizard() {
 
         {step === 2 ? (
           <CommandCard label="STEP_03 · ASSETS_METADATA">
-            <AssetStepForm values={assets} onChange={setAssets} />
+            <AssetStepForm
+              values={assets}
+              onChange={setAssets}
+              fromGenerator={generatorPrefill}
+              expectedSupply={Number(totalSupply) || undefined}
+            />
           </CommandCard>
         ) : null}
 
@@ -336,6 +353,10 @@ export function LaunchSubmissionWizard() {
               </li>
               <li>
                 <span className="text-[#5C6773]">Metadata path</span> {assets.metadata_package_url || '—'}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">Generator staging</span>{' '}
+                {generatorProjectId ? `project ${generatorProjectId.slice(0, 8)}…` : '—'}
               </li>
             </ul>
             <p className="mt-4 text-xs text-[#5C6773]">Submission saves as PENDING_REVIEW — Owltopia operators approve before any mint infra goes live.</p>

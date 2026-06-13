@@ -22,7 +22,7 @@ export function isAllowedStagedZip(file: { name?: string; size: number }): { ok:
 }
 
 export async function uploadStagedSugarZip(
-  launchId: string,
+  scopePrefix: string,
   jobId: string,
   buffer: Buffer,
   originalFilename: string
@@ -31,7 +31,7 @@ export async function uploadStagedSugarZip(
   if (!check.ok) return { error: check.error }
 
   const safeName = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || `${randomUUID()}.zip`
-  const path = `${launchId}/${jobId}/${safeName}`
+  const path = `${scopePrefix}/${jobId}/${safeName}`
 
   const { error } = await getSupabaseAdmin()
     .storage.from(OWL_CENTER_STAGING_BUCKET)

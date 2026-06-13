@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 
 import { getSessionFromRequest } from '@/lib/auth-server'
 import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
+import { attachGeneratorStagedJobToLaunch } from '@/lib/owl-center/attach-generator-staged-job'
 import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-center/asset-validation'
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
@@ -192,11 +193,26 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  const generatorProjectId =
+    typeof body.generator_project_id === 'string' ? body.generator_project_id.trim() : ''
+  let generatorStaged = false
+  if (generatorProjectId) {
+    const attach = await attachGeneratorStagedJobToLaunch(generatorProjectId, launchId)
+    generatorStaged = attach.attached
+    if (attach.attached) {
+      await db.from('owl_center_activity_logs').insert({
+        launch_id: launchId,
+        message: `Generator ZIP linked · job ${attach.job?.id.slice(0, 8) ?? '—'} · ${attach.job?.status ?? ''}`,
+        event_type: 'system',
+      })
+    }
+  }
+
   await db.from('owl_center_activity_logs').insert({
     launch_id: launchId,
     message: 'Launch submitted for review',
     event_type: 'submission',
   })
 
-  return NextResponse.json({ ok: true, id: launchId, slug })
+  return NextResponse.json({ ok: true, id: launchId, slug, generator_staged: generatorStaged })
 }

@@ -1,10 +1,6 @@
-import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { OWL_CENTER_SYNC_VALIDATE_MAX_BYTES } from '@/lib/owl-center/asset-staging-limits'
-import { uploadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
-import { validateAssetUploadJob } from '@/lib/owl-center/asset-upload-worker'
-import { getAssetUploadJobById, insertAssetUploadJob } from '@/lib/db/owl-center-asset-upload-job'
+import { stageSugarPackageZip } from '@/lib/owl-center/stage-sugar-package'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { readFormDataFileParts } from '@/lib/form-data-file-parts'
@@ -50,27 +46,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const [file] = files
-  const jobId = randomUUID()
-  const staged = await uploadStagedSugarZip(id, jobId, file.buffer, file.name || 'sugar-batch.zip')
-  if ('error' in staged) return jsonError(staged.error, 400)
-
-  const job = await insertAssetUploadJob({
-    launch_id: id,
-    staged_zip_path: staged.path,
-    original_filename: file.name || null,
+  const result = await stageSugarPackageZip({
+    buffer: file.buffer,
+    originalFilename: file.name || 'sugar-batch.zip',
+    scope: { kind: 'launch', launchId: id },
   })
-  if (!job) return jsonError('Could not create upload job', 500)
-
-  let validation = null
-  if (file.buffer.length <= OWL_CENTER_SYNC_VALIDATE_MAX_BYTES) {
-    validation = await validateAssetUploadJob(job.id)
-  }
-
-  const fresh = validation ? await getAssetUploadJobById(job.id) : job
+  if (!result.ok) return jsonError(result.error, 400)
 
   return NextResponse.json({
     ok: true,
-    job: fresh ?? job,
-    validation,
+    job: result.job,
+    validation: result.validation,
   })
 }

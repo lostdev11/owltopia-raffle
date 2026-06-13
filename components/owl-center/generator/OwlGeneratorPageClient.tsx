@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { GeneratorStageUploadPanel } from '@/components/owl-center/generator/GeneratorStageUploadPanel'
 import { GeneratorCloudSavePanel } from '@/components/owl-center/generator/GeneratorCloudSavePanel'
 import { GeneratorRuleLinter } from '@/components/owl-center/generator/GeneratorRuleLinter'
 import { GeneratorSupplySimulator } from '@/components/owl-center/generator/GeneratorSupplySimulator'
@@ -28,7 +29,7 @@ import {
 } from '@/lib/owl-center/generator/demo-project'
 import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
-import { buildLaunchDraft, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
+import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
 import {
   DEFAULT_ONE_OF_ONE_TRAIT_TYPE,
   defaultTraitValueFromFilename,
@@ -92,6 +93,7 @@ export function OwlGeneratorPageClient() {
   const [batchSize, setBatchSize] = useState(5)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportFullBusy, setExportFullBusy] = useState(false)
+  const [lastExportZip, setLastExportZip] = useState<{ blob: Blob; filename: string } | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
   const [cloudUpdatedAt, setCloudUpdatedAt] = useState<string | null>(null)
@@ -547,16 +549,16 @@ export function OwlGeneratorPageClient() {
   )
 
   const exportMergedBatch = useCallback(
-    async (generativeCount: number, label: string) => {
-      if (!project) return
+    async (generativeCount: number, label: string): Promise<number | null> => {
+      if (!project) return null
       if (lintBlocked) {
         setMessage('Fix linter errors before exporting')
-        return
+        return null
       }
       const entries = oneOfOnesForProject(project)
       if (generativeCount > 0 && !project.traits.length) {
         setMessage('Add trait layers before exporting generative pieces')
-        return
+        return null
       }
       const generative =
         generativeCount > 0 ? generateBatch(project, generativeCount, { requireAllCategories: true }) : []
@@ -566,8 +568,10 @@ export function OwlGeneratorPageClient() {
         project.oneOfOnePlacement,
         project.id
       )
-      await exportBatchAsSugarZip(project, batch)
-      setMessage(`Exported ${batch.length} Sugar-ready asset(s) (${label})`)
+      const built = await exportBatchAsSugarZip(project, batch)
+      setLastExportZip({ blob: built.blob, filename: built.filename })
+      setMessage(`Exported ${built.count} Sugar-ready asset(s) (${label})`)
+      return built.count
     },
     [project, lintBlocked]
   )
@@ -599,7 +603,14 @@ export function OwlGeneratorPageClient() {
         setMessage('Set target supply or add 1/1 images before exporting')
         return
       }
-      await exportMergedBatch(generativeCount, `full supply ${targetSupply.toLocaleString()}`)
+      const count = await exportMergedBatch(generativeCount, `full supply ${targetSupply.toLocaleString()}`)
+      if (count != null) {
+        saveExportMetaToSession({
+          exported_count: count,
+          full_supply: true,
+          exported_at: new Date().toISOString(),
+        })
+      }
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Full export failed')
     } finally {
@@ -615,6 +626,7 @@ export function OwlGeneratorPageClient() {
     }
     const draft = buildLaunchDraft(project)
     saveLaunchDraftToSession(draft)
+    saveGeneratorProjectIdToSession(project.id)
     router.push('/owl-center/launch?from=generator')
   }, [project, lintBlocked, router])
 
@@ -1070,6 +1082,12 @@ export function OwlGeneratorPageClient() {
               Submit to Owl Center launch
             </DeployButton>
           </CommandCard>
+
+          <GeneratorStageUploadPanel
+            projectId={project.id}
+            zipBlob={lastExportZip?.blob ?? null}
+            zipFilename={lastExportZip?.filename ?? null}
+          />
         </aside>
       </div>
 
