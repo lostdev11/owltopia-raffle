@@ -4,11 +4,14 @@ import { useState } from 'react'
 import { ImageDown, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
+import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
 
 type RaffleWinnerPngButtonProps = {
   title: string
   slug: string
   imageUrl?: string | null
+  imageAttemptUrls?: string[] | null
+  imageFallbackUrl?: string | null
   winnerWallet: string
   className?: string
   buttonLabel?: string
@@ -29,16 +32,6 @@ function clampText(input: string, max: number): string {
   const normalized = input.trim().replace(/\s+/g, ' ')
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, max - 1).trimEnd()}...`
-}
-
-async function tryLoadImage(src: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new window.Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = () => resolve(null)
-    img.src = src
-  })
 }
 
 function roundRectPath(
@@ -82,6 +75,8 @@ export function RaffleWinnerPngButton({
   title,
   slug,
   imageUrl,
+  imageAttemptUrls,
+  imageFallbackUrl,
   winnerWallet,
   className,
   buttonLabel = 'Winner PNG',
@@ -142,7 +137,7 @@ export function RaffleWinnerPngButton({
 
       // Large centered Owltopia logo in the panel background (gold card stays readable on top).
       {
-        const wm = await tryLoadImage(watermarkIconUrl())
+        const wm = await loadPromoPngSiteAsset(watermarkIconUrl())
         if (wm) {
           ctx.save()
           roundRectPath(ctx, panelX, panelY, panelW, panelH, 30)
@@ -165,11 +160,25 @@ export function RaffleWinnerPngButton({
       ctx.save()
       roundRectPath(ctx, artBox.x, artBox.y, artBox.w, artBox.h, 20)
       ctx.clip()
-      if (imageUrl?.trim()) {
-        const loaded = await tryLoadImage(imageUrl)
-        if (loaded) {
-          const { drawX, drawY, drawW, drawH } = computePromoPngArtDrawRect(loaded, artBox, imageUrl)
-          ctx.drawImage(loaded, drawX, drawY, drawW, drawH)
+      const artCandidates =
+        imageAttemptUrls && imageAttemptUrls.length > 0
+          ? imageAttemptUrls
+          : imageUrl?.trim()
+            ? [imageUrl]
+            : []
+      if (artCandidates.length > 0) {
+        const loadedArt = await loadPromoPngArt(artCandidates, imageUrl, imageFallbackUrl)
+        if (loadedArt) {
+          try {
+            const { drawX, drawY, drawW, drawH } = computePromoPngArtDrawRect(
+              loadedArt.img,
+              artBox,
+              loadedArt.sourceUrl
+            )
+            ctx.drawImage(loadedArt.img, drawX, drawY, drawW, drawH)
+          } finally {
+            loadedArt.revoke()
+          }
         } else {
           ctx.fillStyle = '#2a1f08'
           ctx.fillRect(artBox.x, artBox.y, artBox.w, artBox.h)

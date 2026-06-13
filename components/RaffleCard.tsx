@@ -290,6 +290,12 @@ export function RaffleCard({
     thumbIdx >= imageAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
   const listThumbDead = !listThumbSrc && !listThumbMintLoading
 
+  const promoPngImageAttemptUrls = useMemo(() => {
+    const urls = [...imageAttemptChain]
+    if (listMintThumbSrc && !urls.includes(listMintThumbSrc)) urls.push(listMintThumbSrc)
+    return urls
+  }, [imageAttemptChain, listMintThumbSrc])
+
   useImageAttemptTimeout(
     Boolean(listThumbSrc) && !listThumbMintLoading && !thumbLoaded,
     `${thumbIdx}:${listThumbSrc}`,
@@ -1195,6 +1201,8 @@ export function RaffleCard({
                       currency={raffle.currency}
                       endTime={raffle.end_time}
                       imageUrl={listThumbDead ? null : listThumbSrc}
+                      imageAttemptUrls={listThumbDead ? [] : promoPngImageAttemptUrls}
+                      imageFallbackUrl={raffle.image_fallback_url}
                       buttonLabel="Download PNG for X"
                     />
                     <ReferralComplimentaryHint
@@ -1225,6 +1233,8 @@ export function RaffleCard({
                     currency={raffle.currency}
                     endTime={raffle.end_time}
                     imageUrl={listThumbDead ? null : listThumbSrc}
+                    imageAttemptUrls={listThumbDead ? [] : promoPngImageAttemptUrls}
+                    imageFallbackUrl={raffle.image_fallback_url}
                     metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfo)}
                     promoChipText={revenueFlexPromoChipUppercase(profitInfo)}
                     buttonLabel="Download flex PNG (social)"

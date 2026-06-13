@@ -451,6 +451,12 @@ export function RaffleDetailClient({
     heroIdx >= heroImageChain.length && mintHeroLoading && !mintHeroSrc
   const heroImageDead = !heroImageSrc && !heroImageMintLoading
 
+  const promoPngImageAttemptUrls = useMemo(() => {
+    const urls = [...heroImageChain]
+    if (mintHeroSrc && !urls.includes(mintHeroSrc)) urls.push(mintHeroSrc)
+    return urls
+  }, [heroImageChain, mintHeroSrc])
+
   const onHeroTimeout = useCallback(() => {
     if (heroIdx < heroImageChain.length) {
       tryNextHeroImage()
@@ -2672,6 +2678,8 @@ export function RaffleDetailClient({
             currency={raffle.currency}
             endTime={raffle.end_time}
             imageUrl={heroImageDead ? null : heroImageSrc}
+            imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
+            imageFallbackUrl={raffle.image_fallback_url}
             buttonLabel="PNG for X"
             fullWidth={false}
           />
@@ -2680,6 +2688,8 @@ export function RaffleDetailClient({
               title={raffle.title}
               slug={raffle.slug}
               imageUrl={heroImageDead ? null : heroImageSrc}
+              imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
+              imageFallbackUrl={raffle.image_fallback_url}
               winnerWallet={raffle.winner_wallet}
               buttonLabel="Winner PNG"
               fullWidth={false}
@@ -2693,6 +2703,8 @@ export function RaffleDetailClient({
               currency={raffle.currency}
               endTime={raffle.end_time}
               imageUrl={heroImageDead ? null : heroImageSrc}
+              imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
+              imageFallbackUrl={raffle.image_fallback_url}
               metaLines={buildOverThresholdFlexMetaLines(raffle, profitInfoForSocialFlex)}
               promoChipText={revenueFlexPromoChipUppercase(profitInfoForSocialFlex)}
               buttonLabel="Flex PNG (social)"
@@ -4910,6 +4922,8 @@ export function RaffleDetailClient({
                     title={raffle.title}
                     slug={raffle.slug}
                     imageUrl={heroImageDead ? null : heroImageSrc}
+                    imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
+                    imageFallbackUrl={raffle.image_fallback_url}
                     winnerWallet={raffle.winner_wallet.trim()}
                     buttonLabel="Download winner PNG"
                     fullWidth

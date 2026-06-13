@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ImageDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
+import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
 
 type RafflePromoPngButtonProps = {
   title: string
@@ -12,6 +13,9 @@ type RafflePromoPngButtonProps = {
   currency?: string
   endTime?: string | null
   imageUrl?: string | null
+  /** Same ordered URLs as raffle listing hero/thumb (direct CDN + proxy fallbacks). */
+  imageAttemptUrls?: string[] | null
+  imageFallbackUrl?: string | null
   className?: string
   buttonLabel?: string
   fullWidth?: boolean
@@ -58,16 +62,6 @@ function clampText(input: string, max: number): string {
   const normalized = input.trim().replace(/\s+/g, ' ')
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, max - 1).trimEnd()}...`
-}
-
-async function tryLoadImage(src: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new window.Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = () => resolve(null)
-    img.src = src
-  })
 }
 
 function wrapTextToLines(
@@ -184,6 +178,8 @@ export function RafflePromoPngButton({
   currency,
   endTime,
   imageUrl,
+  imageAttemptUrls,
+  imageFallbackUrl,
   className,
   buttonLabel = 'Download PNG for X',
   fullWidth = true,
@@ -272,7 +268,7 @@ export function RafflePromoPngButton({
 
       // Subtle site icon watermark (partner: more interest on the field — same as favicon)
       {
-        const wm = await tryLoadImage(watermarkIconUrl())
+        const wm = await loadPromoPngSiteAsset(watermarkIconUrl())
         if (wm) {
           ctx.save()
           roundRectPath(ctx, panelX, panelY, panelW, panelH, PROMO.cornerR)
@@ -308,11 +304,25 @@ export function RafflePromoPngButton({
       ctx.save()
       roundRectPath(ctx, imageBox.x, imageBox.y, imageBox.w, imageBox.h, PROMO.imageCornerR)
       ctx.clip()
-      if (imageUrl?.trim()) {
-        const loaded = await tryLoadImage(imageUrl)
-        if (loaded) {
-          const { drawX, drawY, drawW, drawH } = computePromoPngArtDrawRect(loaded, imageBox, imageUrl)
-          ctx.drawImage(loaded, drawX, drawY, drawW, drawH)
+      const artCandidates =
+        imageAttemptUrls && imageAttemptUrls.length > 0
+          ? imageAttemptUrls
+          : imageUrl?.trim()
+            ? [imageUrl]
+            : []
+      if (artCandidates.length > 0) {
+        const loadedArt = await loadPromoPngArt(artCandidates, imageUrl, imageFallbackUrl)
+        if (loadedArt) {
+          try {
+            const { drawX, drawY, drawW, drawH } = computePromoPngArtDrawRect(
+              loadedArt.img,
+              imageBox,
+              loadedArt.sourceUrl
+            )
+            ctx.drawImage(loadedArt.img, drawX, drawY, drawW, drawH)
+          } finally {
+            loadedArt.revoke()
+          }
         } else {
           ctx.fillStyle = 'rgba(6, 20, 12, 0.75)'
           ctx.fillRect(imageBox.x, imageBox.y, imageBox.w, imageBox.h)
