@@ -4,8 +4,12 @@ import { isWalletOnGen2Whitelist } from '@/lib/db/gen2-whitelist'
 import { getGen2ClusterPresaleSummary } from '@/lib/gen2-presale/cluster-balance'
 import { getBalanceByWallet } from '@/lib/gen2-presale/db'
 import {
+  gen2PresalePhaseCreditsAvailable,
+  gen2PresaleOveragePhaseCreditsAvailable,
   gen2PresalePurchasedCreditsAvailable,
+  isGen2PresaleCreditHolder,
   isGen2PresalePaidParticipant,
+  overageReservedGiftedMints,
 } from '@/lib/gen2-presale/presale-participation'
 import { canPurchaseGen2PresaleSpots } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
@@ -244,20 +248,24 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     if (phase === 'PRESALE') {
+      const overage = await getPresaleOverageAllocation(w)
       const bal = await getBalanceByWallet(w)
       const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
-      const purchasedAvailable = gen2PresalePurchasedCreditsAvailable(bal)
+      const presaleCredits = gen2PresalePhaseCreditsAvailable(bal, overage)
       const max = presaleRedemptionMaxMintable({
-        purchasedCreditsAvailable: purchasedAvailable,
+        presaleCreditsAvailable: presaleCredits,
         presalePoolRemaining: pool.presale_mints_remaining,
         supplyRemaining: Math.max(0, launch.total_supply - launch.minted_count),
       })
       const isActive = isPhaseMintLive(phase)
-      const reserved_mints = purchasedAvailable
-      const presaleReason = !bal || !isGen2PresalePaidParticipant(bal)
+      const reserved_mints = presaleCredits
+      const overageReserved = overageReservedGiftedMints(bal, overage)
+      const presaleReason = !bal || !isGen2PresaleCreditHolder(bal)
         ? 'not_presale_participant'
-        : purchasedAvailable <= 0
-          ? 'no_paid_presale_credits'
+        : presaleCredits <= 0
+          ? overageReserved > 0
+            ? 'presale_credits_in_overage_phase'
+            : 'no_presale_credits'
           : max <= 0 && isActive
             ? 'presale_pool_exhausted'
             : null
@@ -288,7 +296,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
           gifted_mints: allowance.gifted_mints,
           used_mints: allowance.used_mints,
           available_mints: allowance.available_mints,
-          purchased_available_mints: purchasedAvailable,
+          purchased_available_mints: gen2PresalePurchasedCreditsAvailable(bal),
           is_paid_participant: isGen2PresalePaidParticipant(bal),
           mint_cap: pool.mint_cap,
           credits_issued: pool.credits_issued,
@@ -302,25 +310,23 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const overage = await getPresaleOverageAllocation(w)
       const bal = await getBalanceByWallet(w)
       const availOverage = overage ? Math.max(0, overage.allowed_mints - overage.used_mints) : 0
-      const purchasedAvailable = gen2PresalePurchasedCreditsAvailable(bal)
+      const overageCredits = gen2PresaleOveragePhaseCreditsAvailable(bal, overage)
       const max = presaleOverageMaxMintable({
         overageAllocationRemaining: availOverage,
-        purchasedCreditsAvailable: purchasedAvailable,
+        overagePhaseCreditsAvailable: overageCredits,
         overagePoolRemaining: pool.overage_mints_remaining,
         supplyRemaining: Math.max(0, launch.total_supply - launch.minted_count),
       })
       const isActive = isPhaseMintLive(phase)
       const reserved_mints = availOverage
       const overageReason =
-        !bal || !isGen2PresalePaidParticipant(bal)
-          ? 'not_presale_participant'
+        !bal || overageCredits <= 0
+          ? 'no_presale_credits'
           : !overage || availOverage <= 0
             ? 'not_on_overage_list'
-            : purchasedAvailable <= 0
-              ? 'no_paid_presale_credits'
-              : max <= 0 && isActive
-                ? 'overage_pool_exhausted'
-                : null
+            : max <= 0 && isActive
+              ? 'overage_pool_exhausted'
+              : null
       const overageGate = applyPhaseScheduleGate(
         isActive,
         scheduleOpen,
@@ -349,8 +355,8 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
               gifted_mints: bal.gifted_mints,
               used_mints: bal.used_mints,
               available_mints: bal.available_mints,
-              purchased_available_mints: purchasedAvailable,
-              is_paid_participant: true,
+              purchased_available_mints: gen2PresalePurchasedCreditsAvailable(bal),
+              is_paid_participant: isGen2PresalePaidParticipant(bal),
               mint_cap: pool.mint_cap,
               credits_issued: pool.credits_issued,
               credits_overshoot: pool.credits_overshoot,

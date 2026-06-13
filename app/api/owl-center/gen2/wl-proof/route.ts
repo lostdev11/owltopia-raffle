@@ -16,7 +16,8 @@ export const dynamic = 'force-dynamic'
  * Sources (must be FROZEN before the corresponding on-chain merkle root is set — see
  * docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md launch checklist):
  * - phase=WHITELIST                  → owl_center_wl_allocations (allowed_mints > 0)
- * - phase=PRESALE | PRESALE_OVERAGE  → gen2_presale_balances (purchased_mints > 0)
+ * - phase=PRESALE | PRESALE_OVERAGE  → gen2_presale_balances (purchased or gifted credits)
+ *                                      plus gen2_presale_overage_allocations (Presale+13)
  * - phase=AIRDROP                    → gen2_gen1_airdrop_snapshot (admin-taken Gen1 holder
  *                                      snapshot; /api/admin/owl-center/gen2/gen1-snapshot)
  *

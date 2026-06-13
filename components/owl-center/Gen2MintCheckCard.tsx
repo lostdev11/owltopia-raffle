@@ -30,7 +30,8 @@ function reasonLabel(reason: string | null): string {
     gen1_mint_limit: 'GEN1 mint limit reached for this wallet',
     not_presale_participant: 'This wallet did not pay during presale',
     no_paid_presale_credits: 'No paid presale credits left to mint',
-    no_presale_credits: 'No presale credits on this wallet',
+    no_presale_credits: 'No presale credits left to mint',
+    presale_credits_in_overage_phase: 'Presale+13 credits — mint when Presale+13 phase is live',
     no_presale_allocation: 'No presale allocation',
     presale_pool_exhausted: '657 presale mint cap reached globally',
     wl_pool_exhausted: '800 WL mint cap reached globally',
@@ -247,7 +248,7 @@ export function Gen2MintCheckCard({
                       eligible
                         ? ` · mint up to ${p.max_mintable} at once (1 per presale spot)`
                         : ''}
-                      {p.presale.gifted_mints > 0 ? ` · ${p.presale.gifted_mints} gifted (not used in presale phase)` : ''}
+                      {p.presale.gifted_mints > 0 ? ` · ${p.presale.gifted_mints} gifted` : ''}
                     </p>
                   ) : null}
 

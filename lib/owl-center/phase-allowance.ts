@@ -3,8 +3,8 @@
  * Each phase uses its own allocation source; `wallet_mint_limit` applies to PUBLIC only.
  *
  * - AIRDROP (343 OG): 1 mint per Gen1 NFT held on the connected wallet
- * - PRESALE: up to paid presale credits on the connected wallet
- * - PRESALE_OVERAGE: min(overage list slots, presale credits)
+ * - PRESALE: paid credits + early gifted (excludes Presale+13 reserved gifts)
+ * - PRESALE_OVERAGE: min(overage list slots, Presale+13 reserved gifted credits)
  * - WHITELIST: up to WL spots assigned in owl_center_wl_allocations
  */
 
@@ -19,12 +19,13 @@ export function gen1AirdropMaxMintable(input: {
 }
 
 export function presaleRedemptionMaxMintable(input: {
-  purchasedCreditsAvailable: number
+  /** Paid + presale-phase gifted credits still available. */
+  presaleCreditsAvailable: number
   presalePoolRemaining: number
   supplyRemaining: number
 }): number {
   return Math.min(
-    Math.max(0, input.purchasedCreditsAvailable),
+    Math.max(0, input.presaleCreditsAvailable),
     Math.max(0, input.presalePoolRemaining),
     Math.max(0, input.supplyRemaining)
   )
@@ -32,13 +33,14 @@ export function presaleRedemptionMaxMintable(input: {
 
 export function presaleOverageMaxMintable(input: {
   overageAllocationRemaining: number
-  purchasedCreditsAvailable: number
+  /** Presale+13 gifted credits still available on the wallet. */
+  overagePhaseCreditsAvailable: number
   overagePoolRemaining: number
   supplyRemaining: number
 }): number {
   return Math.min(
     Math.max(0, input.overageAllocationRemaining),
-    Math.max(0, input.purchasedCreditsAvailable),
+    Math.max(0, input.overagePhaseCreditsAvailable),
     Math.max(0, input.overagePoolRemaining),
     Math.max(0, input.supplyRemaining)
   )

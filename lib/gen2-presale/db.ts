@@ -214,19 +214,18 @@ export async function getGen2PresalePurchaseRowsBySignatures(
 }
 
 /**
- * Every wallet with paid presale spots — canonical allowlist for the Candy Machine `pre`
- * guard group (merkle root + proofs). Sorted ascending so the merkle root is deterministic.
+ * Wallets eligible for the Candy Machine `pre` guard allowList (merkle root + proofs).
+ * Includes paid presale buyers, gifted credit holders, and Presale+13 overage wallets.
  */
 export async function listGen2PresaleMerkleWallets(): Promise<string[]> {
   const db = getSupabaseAdmin()
   const page = 1000
-  let from = 0
-  const wallets: string[] = []
-  for (;;) {
+  const walletSet = new Set<string>()
+  for (let from = 0; ; from += page) {
     const { data, error } = await db
       .from('gen2_presale_balances')
       .select('wallet')
-      .gt('purchased_mints', 0)
+      .or('purchased_mints.gt.0,gifted_mints.gt.0')
       .order('wallet', { ascending: true })
       .range(from, from + page - 1)
     if (error) {
@@ -237,12 +236,32 @@ export async function listGen2PresaleMerkleWallets(): Promise<string[]> {
     }
     const rows = data ?? []
     for (const r of rows) {
-      wallets.push(String((r as { wallet: string }).wallet))
+      walletSet.add(String((r as { wallet: string }).wallet))
     }
     if (rows.length < page) break
-    from += page
   }
-  return wallets
+
+  for (let from = 0; ; from += page) {
+    const { data, error } = await db
+      .from('gen2_presale_overage_allocations')
+      .select('wallet')
+      .gt('allowed_mints', 0)
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) {
+      if (error.message.includes('gen2_presale_overage_allocations')) {
+        break
+      }
+      throw new Error(error.message)
+    }
+    const rows = data ?? []
+    for (const r of rows) {
+      walletSet.add(String((r as { wallet: string }).wallet))
+    }
+    if (rows.length < page) break
+  }
+
+  return [...walletSet].sort()
 }
 
 export type Gen2PresaleParticipant = {

@@ -310,6 +310,10 @@ export async function POST(request: NextRequest) {
 
       no_paid_presale_credits: 'No paid presale credits remaining on this wallet',
 
+      no_presale_credits: 'No presale credits remaining on this wallet',
+
+      presale_credits_in_overage_phase: 'Presale+13 credits — mint when Presale+13 phase is live',
+
       overage_pool_exhausted: 'All Presale+13 spots minted',
 
       insufficient_overage_allocation: 'Not on Presale+13 list or no slots left',
