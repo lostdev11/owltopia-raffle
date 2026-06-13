@@ -5,6 +5,7 @@ import {
   buildOwltopiaRaffleXIntentUrl,
 } from '@/lib/raffles/owltopia-share-text'
 import { openAdminTweetMirrorRequest } from '@/lib/client/admin-tweet-mirror-host'
+import { openRaffleShareCopyRequest } from '@/lib/client/raffle-share-copy-host'
 
 function isMobileNativeSharePreferred(): boolean {
   return (
@@ -144,5 +145,9 @@ export async function shareRaffleFromBrowser(params: {
     }
   }
 
-  window.prompt('Copy raffle link:', shareText)
+  openRaffleShareCopyRequest({
+    title: raffle.title,
+    shareText,
+    onCopied,
+  })
 }

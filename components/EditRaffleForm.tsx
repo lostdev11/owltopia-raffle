@@ -99,6 +99,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
   )
   const [adminRole, setAdminRole] = useState<'full' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteEntryConfirmId, setDeleteEntryConfirmId] = useState<string | null>(null)
   const [adminHardDeleteReason, setAdminHardDeleteReason] = useState('')
   const [entriesList, setEntriesList] = useState<Entry[]>(entries)
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null)
@@ -591,10 +592,6 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       return
     }
 
-    if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
-      return
-    }
-
     setDeletingEntryId(entryId)
 
     try {
@@ -608,6 +605,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       })
 
       if (response.ok) {
+        setDeleteEntryConfirmId(null)
         // Remove entry from local state
         setEntriesList(prev => prev.filter(e => e.id !== entryId))
         // Refresh the page to update owl vision score
@@ -1366,7 +1364,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                         type="button"
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleDeleteEntry(entry.id)}
+                        onClick={() => setDeleteEntryConfirmId(entry.id)}
                         disabled={deletingEntryId === entry.id}
                         className="ml-4 flex-shrink-0"
                       >
@@ -2034,6 +2032,40 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={!!deleteEntryConfirmId}
+        onOpenChange={(open) => !open && !deletingEntryId && setDeleteEntryConfirmId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete entry?</DialogTitle>
+            <DialogDescription>
+              Permanently remove this pending entry. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteEntryConfirmId(null)}
+              disabled={!!deletingEntryId}
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteEntryConfirmId && void handleDeleteEntry(deleteEntryConfirmId)}
+              disabled={!!deletingEntryId}
+              className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+            >
+              {deletingEntryId ? 'Deleting...' : 'Delete entry'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

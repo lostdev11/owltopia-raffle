@@ -20,6 +20,7 @@ import { PageTransition } from '@/components/PageTransition'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 import { AdminTweetMirrorHost } from '@/components/admin/AdminTweetMirrorHost'
+import { RaffleShareCopyHost } from '@/components/RaffleShareCopyHost'
 import { MaintenanceBanner } from '@/components/MaintenanceBanner'
 import { Gen2PresaleBanner } from '@/components/owl-center/Gen2PresaleBanner'
 import { MobileClientUpdateBanner } from '@/components/MobileClientUpdateBanner'
@@ -268,6 +269,7 @@ export default function RootLayout({
                 <ConditionalFooter />
               </div>
               <AdminTweetMirrorHost />
+              <RaffleShareCopyHost />
             </CartProvider>
           </WalletContextProvider>
         </PlatformMusicProvider>

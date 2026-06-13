@@ -11,6 +11,14 @@ import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megap
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
 import { PLATFORM_NAME } from '@/lib/site-config'
@@ -212,6 +220,7 @@ export default function AdminDashboardPage() {
   const [treasurySigningBuyoutRefunds, setTreasurySigningBuyoutRefunds] = useState<boolean | null>(null)
 
   const [bulkReverifyRunning, setBulkReverifyRunning] = useState(false)
+  const [bulkReverifyConfirm, setBulkReverifyConfirm] = useState<'all' | 'USDC' | null>(null)
   const [bulkReverifyResult, setBulkReverifyResult] = useState<{
     message?: string
     verified?: number
@@ -301,6 +310,7 @@ export default function AdminDashboardPage() {
   const [devTaskError, setDevTaskError] = useState<string | null>(null)
   const [devTaskPhotoError, setDevTaskPhotoError] = useState<string | null>(null)
   const [devTaskActionId, setDevTaskActionId] = useState<string | null>(null)
+  const [deleteDevTaskId, setDeleteDevTaskId] = useState<string | null>(null)
   const [devTaskFiles, setDevTaskFiles] = useState<Array<{ file: File; url: string }>>([])
   const devTaskAppendInputRef = useRef<HTMLInputElement | null>(null)
   const devTaskAppendTaskIdRef = useRef<string | null>(null)
@@ -1252,11 +1262,13 @@ export default function AdminDashboardPage() {
   }
 
   const handleDeleteDevTask = async (id: string) => {
-    if (!confirm('Remove this dev task permanently?')) return
     setDevTaskActionId(id)
     try {
       const res = await fetch(`/api/admin/dev-tasks/${id}`, { method: 'DELETE', credentials: 'include' })
-      if (res.ok) await fetchDevTasks()
+      if (res.ok) {
+        setDeleteDevTaskId(null)
+        await fetchDevTasks()
+      }
     } catch (e) {
       console.error('handleDeleteDevTask:', e)
     } finally {
@@ -1266,14 +1278,6 @@ export default function AdminDashboardPage() {
 
   const handleBulkReverifyPending = async (currency?: 'USDC' | 'SOL' | 'OWL') => {
     if (!publicKey) return
-    const label = currency ? `${currency} only` : 'all currencies'
-    if (
-      !confirm(
-        `Re-verify up to 60 pending entries (${label}) that already have a transaction signature? Finds stuck tickets including completed raffles. Safe to run again until the queue is empty.`
-      )
-    ) {
-      return
-    }
     setBulkReverifyRunning(true)
     setBulkReverifyResult(null)
     try {
@@ -1296,6 +1300,7 @@ export default function AdminDashboardPage() {
       setBulkReverifyResult({ message: 'Network error', errors: [] })
     } finally {
       setBulkReverifyRunning(false)
+      setBulkReverifyConfirm(null)
     }
   }
 
@@ -2141,7 +2146,7 @@ export default function AdminDashboardPage() {
                             size="sm"
                             className="min-h-11 flex-1 sm:flex-none text-destructive hover:text-destructive hover:bg-destructive/10 touch-manipulation"
                             disabled={busy}
-                            onClick={() => void handleDeleteDevTask(task.id)}
+                            onClick={() => setDeleteDevTaskId(task.id)}
                           >
                             <Trash2 className="h-4 w-4 mr-1.5 shrink-0" />
                             Delete
@@ -3841,7 +3846,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 className="min-h-11 touch-manipulation"
                 disabled={bulkReverifyRunning}
-                onClick={() => handleBulkReverifyPending()}
+                onClick={() => setBulkReverifyConfirm('all')}
               >
                 {bulkReverifyRunning ? (
                   <>
@@ -3857,7 +3862,7 @@ export default function AdminDashboardPage() {
                 variant="outline"
                 className="min-h-11 touch-manipulation"
                 disabled={bulkReverifyRunning}
-                onClick={() => handleBulkReverifyPending('USDC')}
+                onClick={() => setBulkReverifyConfirm('USDC')}
               >
                 USDC only (up to 60)
               </Button>
@@ -4200,6 +4205,79 @@ export default function AdminDashboardPage() {
           </div>
         </OwlVisionDisclosure>
       </div>
+
+      <Dialog
+        open={!!deleteDevTaskId}
+        onOpenChange={(open) => !open && devTaskActionId !== deleteDevTaskId && setDeleteDevTaskId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove dev task?</DialogTitle>
+            <DialogDescription>This permanently deletes the task and its screenshots.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={devTaskActionId === deleteDevTaskId}
+              onClick={() => setDeleteDevTaskId(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={devTaskActionId === deleteDevTaskId}
+              onClick={() => deleteDevTaskId && void handleDeleteDevTask(deleteDevTaskId)}
+            >
+              {devTaskActionId === deleteDevTaskId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!bulkReverifyConfirm}
+        onOpenChange={(open) => !open && !bulkReverifyRunning && setBulkReverifyConfirm(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Re-verify pending entries?</DialogTitle>
+            <DialogDescription>
+              Re-verify up to 60 pending entries
+              {bulkReverifyConfirm === 'USDC' ? ' (USDC only)' : ' (all currencies)'} that already have a
+              transaction signature. Finds stuck tickets including completed raffles. Safe to run again until the
+              queue is empty.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={bulkReverifyRunning}
+              onClick={() => setBulkReverifyConfirm(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={bulkReverifyRunning}
+              onClick={() =>
+                bulkReverifyConfirm &&
+                void handleBulkReverifyPending(bulkReverifyConfirm === 'USDC' ? 'USDC' : undefined)
+              }
+            >
+              {bulkReverifyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Re-verify
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

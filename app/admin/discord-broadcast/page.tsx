@@ -223,6 +223,10 @@ export default function AdminDiscordBroadcastPage() {
   const [templatesOpen, setTemplatesOpen] = useState(true)
   const [schedulesOpen, setSchedulesOpen] = useState(true)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [deleteTemplateId, setDeleteTemplateId] = useState<string | null>(null)
+  const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null)
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null)
 
   useEffect(() => {
     setViewerTz(getDefaultBrowserTimezone())
@@ -356,12 +360,18 @@ export default function AdminDiscordBroadcastPage() {
   }
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!wallet || !confirm('Delete this template? Linked schedules will also be removed.')) return
-    await fetch(`/api/admin/discord-broadcast/templates/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    })
-    await fetchData()
+    if (!wallet) return
+    setDeletingTemplateId(id)
+    try {
+      await fetch(`/api/admin/discord-broadcast/templates/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      })
+      setDeleteTemplateId(null)
+      await fetchData()
+    } finally {
+      setDeletingTemplateId(null)
+    }
   }
 
   const toggleScheduleDay = (day: number) => {
@@ -445,12 +455,18 @@ export default function AdminDiscordBroadcastPage() {
   }
 
   const handleDeleteSchedule = async (id: string) => {
-    if (!wallet || !confirm('Delete this schedule?')) return
-    await fetch(`/api/admin/discord-broadcast/schedules/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    })
-    await fetchData()
+    if (!wallet) return
+    setDeletingScheduleId(id)
+    try {
+      await fetch(`/api/admin/discord-broadcast/schedules/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      })
+      setDeleteScheduleId(null)
+      await fetchData()
+    } finally {
+      setDeletingScheduleId(null)
+    }
   }
 
   const openPostPreview = (
@@ -914,7 +930,7 @@ export default function AdminDiscordBroadcastPage() {
                             size="sm"
                             variant="ghost"
                             className="min-h-[44px] text-destructive"
-                            onClick={() => void handleDeleteTemplate(t.id)}
+                            onClick={() => setDeleteTemplateId(t.id)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -965,7 +981,7 @@ export default function AdminDiscordBroadcastPage() {
                             size="sm"
                             variant="ghost"
                             className="min-h-[44px] text-destructive"
-                            onClick={() => void handleDeleteSchedule(s.id)}
+                            onClick={() => setDeleteScheduleId(s.id)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -1113,6 +1129,74 @@ export default function AdminDiscordBroadcastPage() {
           <DialogFooter>
             <Button onClick={() => void handleUpdateTemplate()} disabled={saving} className="min-h-[44px]">
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteTemplateId}
+        onOpenChange={(open) => !open && !deletingTemplateId && setDeleteTemplateId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete template?</DialogTitle>
+            <DialogDescription>
+              Linked schedules for this template will also be removed. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingTemplateId}
+              onClick={() => setDeleteTemplateId(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingTemplateId}
+              onClick={() => deleteTemplateId && void handleDeleteTemplate(deleteTemplateId)}
+            >
+              {deletingTemplateId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteScheduleId}
+        onOpenChange={(open) => !open && !deletingScheduleId && setDeleteScheduleId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete schedule?</DialogTitle>
+            <DialogDescription>This removes the scheduled post. This cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingScheduleId}
+              onClick={() => setDeleteScheduleId(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingScheduleId}
+              onClick={() => deleteScheduleId && void handleDeleteSchedule(deleteScheduleId)}
+            >
+              {deletingScheduleId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

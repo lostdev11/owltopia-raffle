@@ -5,6 +5,14 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
@@ -39,6 +47,9 @@ export default function AdminPartnerCreatorsPage() {
   const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deletingWallet, setDeletingWallet] = useState<string | null>(null)
+  const [deleteConfirmWallet, setDeleteConfirmWallet] = useState<string | null>(null)
+  const [labelEditWallet, setLabelEditWallet] = useState<string | null>(null)
+  const [labelEditValue, setLabelEditValue] = useState('')
   const [savingWallet, setSavingWallet] = useState<string | null>(null)
   const [savedWallet, setSavedWallet] = useState<string | null>(null)
   const [tenantEdits, setTenantEdits] = useState<Record<string, string>>({})
@@ -191,7 +202,6 @@ export default function AdminPartnerCreatorsPage() {
   }
 
   const deleteRow = async (creator_wallet: string) => {
-    if (!window.confirm(`Remove partner wallet from the list?\n\n${creator_wallet}`)) return
     setDeletingWallet(creator_wallet)
     try {
       const enc = encodeURIComponent(creator_wallet)
@@ -199,7 +209,10 @@ export default function AdminPartnerCreatorsPage() {
         method: 'DELETE',
         credentials: 'include',
       })
-      if (res.ok) await fetchList()
+      if (res.ok) {
+        setDeleteConfirmWallet(null)
+        await fetchList()
+      }
     } finally {
       setDeletingWallet(null)
     }
@@ -483,11 +496,8 @@ export default function AdminPartnerCreatorsPage() {
                         className="min-h-[44px] touch-manipulation"
                         disabled={savingWallet === r.creator_wallet}
                         onClick={() => {
-                          const raw = window.prompt('Allowlist fallback label (empty to clear)', r.display_label ?? '')
-                          if (raw === null) return
-                          void patchRow(r.creator_wallet, {
-                            display_label: raw.trim() === '' ? null : raw.trim(),
-                          })
+                          setLabelEditWallet(r.creator_wallet)
+                          setLabelEditValue(r.display_label ?? '')
                         }}
                       >
                         Set label
@@ -533,7 +543,7 @@ export default function AdminPartnerCreatorsPage() {
                         size="sm"
                         className="min-h-[44px] touch-manipulation"
                         disabled={deletingWallet === r.creator_wallet}
-                        onClick={() => void deleteRow(r.creator_wallet)}
+                        onClick={() => setDeleteConfirmWallet(r.creator_wallet)}
                       >
                         {deletingWallet === r.creator_wallet ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -557,6 +567,100 @@ export default function AdminPartnerCreatorsPage() {
         Marketing copy for partners: <Link href="/partner-program" className="underline-offset-2 hover:underline">Partner program</Link>{' '}
         (tiers, fees, Partner Pro SPL ticket currency gated per creator wallet).
       </p>
+
+      <Dialog
+        open={!!labelEditWallet}
+        onOpenChange={(open) => {
+          if (!open && savingWallet !== labelEditWallet) {
+            setLabelEditWallet(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set allowlist fallback label</DialogTitle>
+            <DialogDescription>
+              Shown when the partner wallet has no profile display name. Leave empty to clear.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="partner-label-edit">Label</Label>
+            <Input
+              id="partner-label-edit"
+              value={labelEditValue}
+              onChange={(e) => setLabelEditValue(e.target.value)}
+              placeholder="e.g. Necros"
+              className="min-h-[44px] touch-manipulation"
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={savingWallet === labelEditWallet}
+              onClick={() => setLabelEditWallet(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!labelEditWallet || savingWallet === labelEditWallet}
+              onClick={() => {
+                if (!labelEditWallet) return
+                void patchRow(labelEditWallet, {
+                  display_label: labelEditValue.trim() === '' ? null : labelEditValue.trim(),
+                }).then(() => setLabelEditWallet(null))
+              }}
+            >
+              {savingWallet === labelEditWallet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteConfirmWallet}
+        onOpenChange={(open) => !open && !deletingWallet && setDeleteConfirmWallet(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove partner wallet?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <p>This removes the wallet from the partner creators list.</p>
+                {deleteConfirmWallet ? (
+                  <p className="break-all font-mono text-xs text-foreground">{deleteConfirmWallet}</p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingWallet}
+              onClick={() => setDeleteConfirmWallet(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingWallet}
+              onClick={() => deleteConfirmWallet && void deleteRow(deleteConfirmWallet)}
+            >
+              {deletingWallet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
