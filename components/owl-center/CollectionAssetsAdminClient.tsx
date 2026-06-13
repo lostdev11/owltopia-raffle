@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
+import { AssetPackageUploadPanel } from '@/components/owl-center/AssetPackageUploadPanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -250,10 +251,13 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
             </li>
           </ol>
           <p className="mt-3 text-[11px] text-[#5C6773]">
-            In-app bulk zip → Arweave is planned (Phase B); this screen records provenance and readiness after CLI upload.
+            Phase B: use <strong className="font-normal text-[#9BA8B4]">Stage Sugar ZIP</strong> below for in-app validate + Arweave
+            upload, or paste paths after Sugar CLI (Phase A).
           </p>
         </details>
       </header>
+
+      <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
       <SugarBatchScanner
         expectedSupply={Number(expectedSupply) || launch.total_supply}
@@ -339,8 +343,8 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <CommandCard label="asset_package.sys">
         <p className="mb-4 text-xs text-[#9BA8B4]">
-          Phase A (current): after <span className="text-[#E8EEF2]">sugar upload</span>, paste Arweave (or IPFS) bundle paths
-          or HTTPS gateway URLs. Phase B: dashboard staging + background push to permanent storage.
+          After Phase B Arweave upload or Phase A <span className="text-[#E8EEF2]">sugar upload</span>, paste or confirm bundle
+          paths below. Mark <span className="text-[#E8EEF2]">ready for Candy Machine</span> when the checklist is complete.
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">

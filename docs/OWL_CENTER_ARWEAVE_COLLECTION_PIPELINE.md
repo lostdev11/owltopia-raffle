@@ -166,11 +166,17 @@ Decentralized **gateway** staking programs (e.g. AO availability staking announc
 
 ---
 
-## Phase B — In-app uploads (planned shape)
+## Phase B — In-app uploads (implemented)
 
-Goal: admins (later partners) can **stage** assets in the dashboard; a **server-side job** (not a single long browser request) validates pairs, pushes to Arweave-compatible storage (e.g. via Irys), and updates Owl Center asset package rows. Candy Machine deployment may remain CLI or migrate to scripted Umi later.
+Admins stage a **Sugar export ZIP** on `/admin/owl-center/collections/{launch_id}/assets`:
 
-Until Phase B lands, **`/api/upload/image` remains for small admin-only images** (e.g. raffle fallbacks), not bulk collection packages.
+1. **Stage Sugar ZIP** — uploads to private Supabase Storage (`owl-center-asset-staging`), runs validation, auto-fills asset package counts + checklist.
+2. **Push to Arweave** — requires `IRYS_PRIVATE_KEY` (funded Solana wallet). Uploads PNGs then rewritten JSONs via Irys in batches (`OWL_CENTER_ASSET_UPLOAD_BATCH`, cron every 2 min).
+3. **Mark ready for Candy Machine** — same checklist gate as Phase A; then `sugar deploy` with on-chain URIs from Arweave.
+
+Migration: `143_owl_center_asset_upload_jobs.sql`. Cron: `/api/cron/owl-center-asset-upload`.
+
+Until Irys env is set, Phase B still handles **staging + validate**; Arweave push is manual via admin button or cron after env is configured.
 
 ---
 

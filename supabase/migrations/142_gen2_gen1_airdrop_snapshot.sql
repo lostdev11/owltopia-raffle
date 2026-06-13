@@ -22,3 +22,4 @@ CREATE TABLE IF NOT EXISTS gen2_gen1_airdrop_snapshot (
 ALTER TABLE gen2_gen1_airdrop_snapshot ENABLE ROW LEVEL SECURITY;
 
 -- No client policies: reads/writes go through API routes using service_role only.
+GRANT SELECT, INSERT, UPDATE, DELETE ON gen2_gen1_airdrop_snapshot TO service_role;
