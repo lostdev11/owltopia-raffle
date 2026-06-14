@@ -91,6 +91,7 @@ export async function buildCollectionMintState(
 
   return {
     launch,
+    minted_mints: recordedMints,
     mint_controls: buildOwlCenterMintControls(launch.is_paused),
     marketplace: {
       trading_links_active: Boolean(mp?.trading_links_active),

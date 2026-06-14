@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
+import { CollectionMintedGrid } from '@/components/owl-center/CollectionMintedGrid'
 import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel'
 import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOutPanel'
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -74,7 +75,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
 
   if (!state) return null
 
-  const { launch, supply, mint_controls, marketplace, terminal, mint_network, presale_pool } = state
+  const { launch, supply, mint_controls, marketplace, terminal, mint_network, presale_pool, minted_mints } = state
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
   const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
@@ -140,6 +141,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             mintControls={mint_controls}
             onRefresh={load}
           />
+          <CollectionMintedGrid mints={minted_mints} preferMainnet={mint_network === 'mainnet'} />
           {soldOut ? (
             <CollectionSoldOutPanel
               slug={slug}

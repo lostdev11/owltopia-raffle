@@ -4,7 +4,17 @@ import { useMemo, useState } from 'react'
 
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
 
-export function HubCardCoverImage({ imageUrl }: { imageUrl: string | null | undefined }) {
+export function HubCardCoverImage({
+  imageUrl,
+  alt = '',
+  fit = 'contain',
+  className,
+}: {
+  imageUrl: string | null | undefined
+  alt?: string
+  fit?: 'contain' | 'cover'
+  className?: string
+}) {
   const chain = useMemo(() => buildOwlCenterHubCardImageChain(imageUrl), [imageUrl])
   const [idx, setIdx] = useState(0)
   const src = chain[Math.min(idx, chain.length - 1)] ?? chain[0]
@@ -14,8 +24,14 @@ export function HubCardCoverImage({ imageUrl }: { imageUrl: string | null | unde
     <img
       key={`${idx}:${src}`}
       src={src}
-      alt=""
-      className="absolute inset-0 h-full w-full object-contain p-6"
+      alt={alt}
+      className={[
+        'absolute inset-0 h-full w-full',
+        fit === 'cover' ? 'object-cover' : 'object-contain p-6',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       loading="lazy"
       decoding="async"
       onError={() => {

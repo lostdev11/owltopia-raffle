@@ -105,6 +105,8 @@ export type SimpleMintEligibilityResponse = {
 
 export type CollectionMintStateResponse = {
   launch: OwlCenterLaunchPublic
+  /** Recorded NFT mint addresses from confirm-mint / mint events. */
+  minted_mints: string[]
   mint_controls: OwlCenterMintControls
   marketplace: {
     trading_links_active: boolean

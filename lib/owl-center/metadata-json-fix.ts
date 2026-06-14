@@ -1,7 +1,8 @@
 import 'server-only'
 
-import { normalizeOwlCenterArweaveGatewayUri } from '@/lib/owl-center/arweave-gateway-uri'
+import { arweaveTxIdFromHttps, normalizeOwlCenterArweaveGatewayUri, walletSafeArweaveGatewayUri } from '@/lib/owl-center/arweave-gateway-uri'
 import { uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
+import { irysGatewayMirrorHttpsUrls } from '@/lib/nft-media-uri'
 
 export function imageGatewayUriFromUpload(
   uploaded: Record<string, string>,
@@ -10,7 +11,7 @@ export function imageGatewayUriFromUpload(
 ): string | null {
   const raw = uploaded[assetPath]?.trim()
   if (!raw) return null
-  return normalizeOwlCenterArweaveGatewayUri(raw, network)
+  return walletSafeArweaveGatewayUri(raw, network)
 }
 
 function rewriteJsonImageFields(json: Record<string, unknown>, imageUri: string): Record<string, unknown> {
@@ -36,6 +37,25 @@ function rewriteJsonImageFields(json: Record<string, unknown>, imageUri: string)
   return out
 }
 
+function isWalletSafeImageUrl(image: string, network: 'mainnet' | 'devnet'): boolean {
+  if (!/^https?:\/\//i.test(image)) return false
+  if (/arweave\.net/i.test(image)) return false
+  try {
+    const h = new URL(image).hostname.toLowerCase()
+    if (network === 'devnet') {
+      return h === 'arweave.dev' || h.endsWith('.arweave.dev')
+    }
+    return (
+      h === 'ar-io.net' ||
+      h === 'gateway.irys.xyz' ||
+      h === 'uploader.irys.xyz' ||
+      h === 'ardrive.net'
+    )
+  } catch {
+    return false
+  }
+}
+
 /** Wallets fail on arweave.net HTML shells and relative paths like collection.png. */
 export function metadataJsonImageNeedsWalletFix(
   json: Record<string, unknown>,
@@ -43,27 +63,53 @@ export function metadataJsonImageNeedsWalletFix(
 ): boolean {
   const image = typeof json.image === 'string' ? json.image.trim() : ''
   if (!image) return true
-  if (!/^https?:\/\//i.test(image)) return true
-  if (/arweave\.net/i.test(image)) return true
-  const normalized = normalizeOwlCenterArweaveGatewayUri(image, network)
-  return normalized !== image
+  return !isWalletSafeImageUrl(image, network)
 }
 
-export async function fetchMetadataJsonFromUri(uri: string): Promise<Record<string, unknown> | null> {
-  const url = uri.trim()
-  if (!url) return null
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20_000),
-    })
-    if (!res.ok) return null
-    const json = (await res.json()) as Record<string, unknown>
-    return json && typeof json === 'object' ? json : null
-  } catch {
-    return null
+function metadataJsonFetchCandidates(uri: string, network: 'mainnet' | 'devnet'): string[] {
+  const trimmed = uri.trim()
+  if (!trimmed) return []
+  const normalized = normalizeOwlCenterArweaveGatewayUri(trimmed, network)
+  const id = arweaveTxIdFromHttps(normalized)
+  const mirrors = new Set<string>([trimmed, normalized, ...irysGatewayMirrorHttpsUrls(normalized)])
+  if (id) {
+    const host = network === 'devnet' ? 'arweave.dev' : 'ar-io.net'
+    mirrors.add(`https://${host}/${id}`)
+    mirrors.add(`https://gateway.irys.xyz/${id}`)
   }
+  return [...mirrors].filter(Boolean)
+}
+
+export async function fetchMetadataJsonFromUri(
+  uri: string,
+  network: 'mainnet' | 'devnet' = 'mainnet'
+): Promise<Record<string, unknown> | null> {
+  for (const url of metadataJsonFetchCandidates(uri, network)) {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!res.ok) continue
+      const json = (await res.json()) as Record<string, unknown>
+      if (json && typeof json === 'object') return json
+    } catch {
+      /* try next gateway mirror */
+    }
+  }
+  return null
+}
+
+/** Inspect only the on-chain metadata URI — never fall back to the upload job JSON. */
+export async function onChainMetadataJsonNeedsWalletFix(
+  sourceJsonUri: string | null | undefined,
+  network: 'mainnet' | 'devnet'
+): Promise<boolean> {
+  if (!sourceJsonUri?.trim()) return true
+  const json = await fetchMetadataJsonFromUri(sourceJsonUri, network)
+  if (!json) return true
+  return metadataJsonImageNeedsWalletFix(json, network)
 }
 
 async function loadTokenMetadataJson(
@@ -78,8 +124,7 @@ async function loadTokenMetadataJson(
   ].filter((u): u is string => Boolean(u?.trim()))
 
   for (const raw of candidates) {
-    const uri = normalizeOwlCenterArweaveGatewayUri(raw, network)
-    const json = await fetchMetadataJsonFromUri(uri)
+    const json = await fetchMetadataJsonFromUri(raw, network)
     if (json) return json
   }
   return null
@@ -112,7 +157,21 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
     json.name = displayName.trim()
   }
 
-  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri) {
+  const onChainNeedsFix = sourceJsonUri
+    ? await onChainMetadataJsonNeedsWalletFix(sourceJsonUri, network)
+    : true
+  const sourceTxId = sourceJsonUri ? arweaveTxIdFromHttps(sourceJsonUri) : null
+  const jobTxId = normalizedJobUri ? arweaveTxIdFromHttps(normalizedJobUri) : null
+
+  if (
+    !onChainNeedsFix &&
+    normalizedJobUri &&
+    (!sourceTxId || !jobTxId || sourceTxId === jobTxId)
+  ) {
+    return { uri: normalizedJobUri, reuploaded: false }
+  }
+
+  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri && sourceTxId !== jobTxId) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
@@ -139,8 +198,8 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
   const jobJsonUri = uploaded['assets/collection.json']?.trim()
   const normalizedJobUri = jobJsonUri ? normalizeOwlCenterArweaveGatewayUri(jobJsonUri, network) : null
   let json =
-    (sourceJsonUri ? await fetchMetadataJsonFromUri(normalizeOwlCenterArweaveGatewayUri(sourceJsonUri, network)) : null) ??
-    (normalizedJobUri ? await fetchMetadataJsonFromUri(normalizedJobUri) : null) ??
+    (sourceJsonUri ? await fetchMetadataJsonFromUri(sourceJsonUri, network) : null) ??
+    (normalizedJobUri ? await fetchMetadataJsonFromUri(normalizedJobUri, network) : null) ??
     ({
       name: collectionName,
       symbol: '',
@@ -150,7 +209,21 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
 
   json = { ...json, name: collectionName.slice(0, 32) }
 
-  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri) {
+  const onChainNeedsFix = sourceJsonUri
+    ? await onChainMetadataJsonNeedsWalletFix(sourceJsonUri, network)
+    : true
+  const sourceTxId = sourceJsonUri ? arweaveTxIdFromHttps(sourceJsonUri) : null
+  const jobTxId = normalizedJobUri ? arweaveTxIdFromHttps(normalizedJobUri) : null
+
+  if (
+    !onChainNeedsFix &&
+    normalizedJobUri &&
+    (!sourceTxId || !jobTxId || sourceTxId === jobTxId)
+  ) {
+    return { uri: normalizedJobUri, reuploaded: false }
+  }
+
+  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri && sourceTxId !== jobTxId) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
@@ -167,17 +240,7 @@ export async function collectionMetadataJsonNeedsWalletFix(params: {
   network: 'mainnet' | 'devnet'
   sourceJsonUri?: string | null
 }): Promise<boolean> {
-  const { uploaded, network, sourceJsonUri } = params
-  const candidates = [
-    sourceJsonUri,
-    uploaded['assets/collection.json'],
-  ].filter((u): u is string => Boolean(u?.trim()))
-
-  for (const raw of candidates) {
-    const json = await fetchMetadataJsonFromUri(normalizeOwlCenterArweaveGatewayUri(raw, network))
-    if (json) return metadataJsonImageNeedsWalletFix(json, network)
-  }
-  return true
+  return onChainMetadataJsonNeedsWalletFix(params.sourceJsonUri, params.network)
 }
 
 export async function tokenMetadataJsonNeedsWalletFix(params: {
@@ -186,12 +249,5 @@ export async function tokenMetadataJsonNeedsWalletFix(params: {
   network: 'mainnet' | 'devnet'
   sourceJsonUri?: string | null
 }): Promise<boolean> {
-  const json = await loadTokenMetadataJson(
-    params.uploaded,
-    params.tokenIndex,
-    params.network,
-    params.sourceJsonUri
-  )
-  if (!json) return true
-  return metadataJsonImageNeedsWalletFix(json, params.network)
+  return onChainMetadataJsonNeedsWalletFix(params.sourceJsonUri, params.network)
 }
