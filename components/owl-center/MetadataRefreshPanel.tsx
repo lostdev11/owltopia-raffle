@@ -95,8 +95,24 @@ export function MetadataRefreshPanel({
       }
       if (!res.ok || !j.ok) throw new Error(j.error || 'refresh_failed')
       const okCount = j.refreshed?.length ?? 0
-      const skipCount = j.skipped?.length ?? 0
-      setMsg(`Updated ${okCount} mint${okCount === 1 ? '' : 's'} on-chain${skipCount ? ` · ${skipCount} skipped` : ''}.`)
+      const skipped = j.skipped?.filter((s) => s.error) ?? []
+      if (okCount === 0 && skipped.length) {
+        setErr(
+          skipped
+            .map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`)
+            .slice(0, 3)
+            .join(' · ')
+        )
+      } else {
+        setMsg(
+          `Updated ${okCount} mint${okCount === 1 ? '' : 's'} on-chain${
+            skipped.length ? ` · ${skipped.length} skipped` : ''
+          }.`
+        )
+        if (skipped.length && okCount > 0) {
+          setErr(skipped.map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`).slice(0, 2).join(' · '))
+        }
+      }
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'refresh_failed')
@@ -163,7 +179,7 @@ export function MetadataRefreshPanel({
               {m.needs_refresh ? (
                 <span className="text-[#FFD769]"> · needs refresh</span>
               ) : m.skip_reason ? (
-                <span className="text-[#5C6773]"> · {m.skip_reason}</span>
+                <span className="block pt-1 text-[#FF9C9C]">{m.skip_reason}</span>
               ) : (
                 <span className="text-[#00FF9C]"> · ok</span>
               )}

@@ -1,6 +1,7 @@
 import 'server-only'
 
 import bs58 from 'bs58'
+import { fetchCandyMachine } from '@metaplex-foundation/mpl-candy-machine'
 import { fetchMetadata, findMetadataPda, updateV1 } from '@metaplex-foundation/mpl-token-metadata'
 import { percentAmount, publicKey, some } from '@metaplex-foundation/umi'
 
@@ -13,11 +14,12 @@ import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import {
   buildSugarDeployPackageFromJob,
+  sugarConfigLineNameLength,
   sugarConfigLinePrefixName,
   type SugarDeployConfigLine,
 } from '@/lib/owl-center/sugar-deploy-package'
 import { createIrysDeployerUmi } from '@/lib/owl-center/sugar-deploy-onchain'
-import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 
 export type MetadataRefreshMintPreview = {
   mint: string
@@ -66,10 +68,58 @@ function targetNameForIndex(collectionName: string, index: string): string {
   return `${prefix}${index}`.slice(0, 32)
 }
 
+function cleanOnChainName(name: string | null | undefined): string | null {
+  if (!name) return null
+  return name.replace(/\0/g, '').trim() || null
+}
+
+function indexFromOnChainName(
+  name: string | null | undefined,
+  collectionName: string,
+  configLines: SugarDeployConfigLine[]
+): string | null {
+  const n = cleanOnChainName(name)
+  if (!n) return null
+
+  if (configLines.some((line) => line.name === n)) return n
+  if (/^\d+$/.test(n)) return n
+
+  const nameLength = sugarConfigLineNameLength(configLines)
+  const prefix = sugarConfigLinePrefixName(collectionName, nameLength)
+  if (n.startsWith(prefix)) {
+    const rest = n.slice(prefix.length)
+    if (/^\d+$/.test(rest) && configLines.some((line) => line.name === rest)) return rest
+  }
+
+  const hashMatch = /#\s*(\d+)\s*$/.exec(n)
+  if (hashMatch && configLines.some((line) => line.name === hashMatch[1]!)) {
+    return hashMatch[1]!
+  }
+
+  return null
+}
+
+function updateAuthorityMismatchReason(params: {
+  onChainAuthority: string
+  serverSigner: string
+  candyMachineAuthority?: string | null
+}): string {
+  const { onChainAuthority, serverSigner, candyMachineAuthority } = params
+  const cmHint =
+    candyMachineAuthority && candyMachineAuthority !== onChainAuthority
+      ? ` CM authority ${candyMachineAuthority.slice(0, 8)}…`
+      : candyMachineAuthority
+        ? ` (CM deploy wallet ${candyMachineAuthority.slice(0, 8)}…)`
+        : ''
+  return `Update authority is ${onChainAuthority.slice(0, 8)}… — server IRYS signer is ${serverSigner.slice(0, 8)}…. Set IRYS_PRIVATE_KEY to the Candy Machine deploy wallet${cmHint}.`
+}
+
 function resolveTokenIndex(
   currentUri: string | null | undefined,
+  currentName: string | null | undefined,
   idToIndex: Map<string, string>,
-  configLines: SugarDeployConfigLine[]
+  configLines: SugarDeployConfigLine[],
+  collectionName: string
 ): string | null {
   const id = currentUri ? arweaveTxIdFromHttps(currentUri) : null
   if (id && idToIndex.has(id)) return idToIndex.get(id) ?? null
@@ -81,7 +131,7 @@ function resolveTokenIndex(
       if (curId && lineId && curId === lineId) return line.name
     }
   }
-  return null
+  return indexFromOnChainName(currentName, collectionName, configLines)
 }
 
 function buildTargetUri(
@@ -101,37 +151,45 @@ async function previewMintRefresh(params: {
   collectionName: string
   network: 'mainnet' | 'devnet'
   umi: ReturnType<typeof createIrysDeployerUmi>
+  candyMachineAuthority?: string | null
 }): Promise<MetadataRefreshMintPreview> {
-  const { mint, uploaded, configLines, collectionName, network, umi } = params
+  const { mint, uploaded, configLines, collectionName, network, umi, candyMachineAuthority } = params
   const idToIndex = buildArweaveIdToTokenIndex(uploaded)
   let currentName: string | null = null
   let currentUri: string | null = null
   let skipReason: string | null = null
+  const serverSigner = String(umi.identity.publicKey)
 
   try {
     const mintPk = publicKey(mint)
     const md = await fetchMetadata(umi, findMetadataPda(umi, { mint: mintPk }))
-    currentName = md.name
-    currentUri = md.uri
-    if (String(md.updateAuthority) !== String(umi.identity.publicKey)) {
-      skipReason = 'Update authority is not the IRYS deployer wallet'
+    currentName = cleanOnChainName(md.name)
+    currentUri = md.uri?.trim() || null
+    const onChainUa = String(md.updateAuthority)
+    if (onChainUa !== serverSigner) {
+      skipReason = updateAuthorityMismatchReason({
+        onChainAuthority: onChainUa,
+        serverSigner,
+        candyMachineAuthority,
+      })
     }
   } catch {
     skipReason = 'Could not load on-chain metadata'
   }
 
-  const tokenIndex = resolveTokenIndex(currentUri, idToIndex, configLines)
+  const tokenIndex = resolveTokenIndex(currentUri, currentName, idToIndex, configLines, collectionName)
   const targetUri = tokenIndex ? buildTargetUri(uploaded, tokenIndex, network) : null
   const targetName = tokenIndex ? targetNameForIndex(collectionName, tokenIndex) : null
 
-  if (!skipReason && !tokenIndex) skipReason = 'Could not match mint to Arweave metadata index'
+  if (!skipReason && !tokenIndex) skipReason = 'Could not match mint to metadata index (name/URI)'
   if (!skipReason && !targetUri) skipReason = 'Missing metadata URI in upload job'
 
+  const normalizedCurrentUri = normalizeOwlCenterArweaveGatewayUri(currentUri ?? '', network)
   const needsRefresh = Boolean(
     !skipReason &&
       targetName &&
       targetUri &&
-      (currentName !== targetName || normalizeOwlCenterArweaveGatewayUri(currentUri ?? '', network) !== targetUri)
+      (currentName !== targetName || normalizedCurrentUri !== targetUri)
   )
 
   return {
@@ -159,18 +217,21 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
   const enabled = isIrysUploadConfigured()
   const arweaveReady = job?.status === 'completed'
   const collectionMint = marketplace?.collection_mint?.trim() || launch.collection_mint?.trim() || null
-  const eligible =
-    enabled &&
-    launch.mint_mode === 'public_simple' &&
-    arweaveReady &&
-    Boolean(collectionMint) &&
-    mintAddresses.length > 0
-
   let mints: MetadataRefreshMintPreview[] = []
-  if (eligible && job) {
+  if (enabled && arweaveReady && Boolean(collectionMint) && mintAddresses.length > 0 && job) {
     const pkg = buildSugarDeployPackageFromJob(job, launch)
     const network = resolveLaunchMintNetwork(launch)
     const umi = createIrysDeployerUmi(network)
+    let candyMachineAuthority: string | null = null
+    const cmId = getLaunchCandyMachineId(launch, network)
+    if (cmId) {
+      try {
+        const cm = await fetchCandyMachine(umi, publicKey(cmId))
+        candyMachineAuthority = String(cm.authority)
+      } catch {
+        candyMachineAuthority = null
+      }
+    }
     mints = await Promise.all(
       mintAddresses.map((mint) =>
         previewMintRefresh({
@@ -180,10 +241,18 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
           collectionName: launch.name ?? 'Collection',
           network,
           umi,
+          candyMachineAuthority,
         })
       )
     )
   }
+
+  const eligible =
+    enabled &&
+    launch.mint_mode === 'public_simple' &&
+    arweaveReady &&
+    Boolean(collectionMint) &&
+    mintAddresses.length > 0
 
   return {
     enabled,
@@ -244,8 +313,14 @@ export async function runMetadataRefreshForLaunch(
     try {
       const mintPk = publicKey(preview.mint)
       const md = await fetchMetadata(umi, findMetadataPda(umi, { mint: mintPk }))
-      if (String(md.updateAuthority) !== String(umi.identity.publicKey)) {
-        skipped.push({ mint: preview.mint, ok: false, error: 'Update authority is not the IRYS deployer wallet' })
+      const onChainUa = String(md.updateAuthority)
+      const serverSigner = String(umi.identity.publicKey)
+      if (onChainUa !== serverSigner) {
+        skipped.push({
+          mint: preview.mint,
+          ok: false,
+          error: preview.skip_reason ?? updateAuthorityMismatchReason({ onChainAuthority: onChainUa, serverSigner }),
+        })
         continue
       }
 
