@@ -14,7 +14,7 @@ export function imageGatewayUriFromUpload(
 }
 
 function rewriteJsonImageFields(json: Record<string, unknown>, imageUri: string): Record<string, unknown> {
-  const out = { ...json, image: imageUri }
+  const out: Record<string, unknown> = { ...json, image: imageUri }
   if (out.properties && typeof out.properties === 'object') {
     const props = { ...(out.properties as Record<string, unknown>) }
     if (Array.isArray(props.files)) {
