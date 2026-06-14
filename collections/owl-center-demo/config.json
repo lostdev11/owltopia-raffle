@@ -16,5 +16,12 @@
   "hiddenSettings": null,
   "instantSale": false,
   "nftStorage": null,
-  "guard": null
+  "guards": {
+    "default": {
+      "botTax": {
+        "value": 0.001,
+        "lastInstruction": false
+      }
+    }
+  }
 }

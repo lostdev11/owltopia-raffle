@@ -7,7 +7,7 @@
  *   node --env-file=.env.local scripts/prepare-sugar-deploy-from-launch.mjs --list
  *
  * Output: collections/{folder}/assets/*, config.json, cache.json (Arweave links pre-filled)
- * Then: cd collections/{folder} && sugar validate && sugar deploy
+ * Then: npm run sugar:deploy -- collections/{folder}
  */
 
 import crypto from 'node:crypto'
@@ -132,6 +132,18 @@ function rewriteMetadataJson(rawJson, imageUri) {
     )
   }
   return `${JSON.stringify(parsed, null, 2)}\n`
+}
+
+/** Default guards for public_simple Owl Center mints (free on-chain; site enforces wallet limits + USDC platform fee). */
+function publicSimpleSugarGuards() {
+  return {
+    default: {
+      botTax: {
+        value: 0.001,
+        lastInstruction: false,
+      },
+    },
+  }
 }
 
 function buildCacheItems(uploaded, assetsDir) {
@@ -261,7 +273,7 @@ async function main() {
     sdriveApiKey: null,
     pinataConfig: null,
     hiddenSettings: null,
-    guards: null,
+    guards: publicSimpleSugarGuards(),
     maxEditionSupply: null,
   }
   fs.writeFileSync(path.join(outDir, 'config.json'), `${JSON.stringify(config, null, 2)}\n`)
@@ -293,10 +305,10 @@ Prepared from Owl Center upload job \`${jobRow.id}\`.
 4. From this folder (mainnet — run `node --env-file=../../.env.local ../../scripts/configure-solana-mainnet-from-env.mjs` first):
 
 \`\`\`bash
-cd collections/${folderName}
-sugar validate
-sugar deploy
+npm run sugar:deploy -- collections/${folderName}
 \`\`\`
+
+This runs \`sugar validate\`, \`sugar deploy\`, and \`sugar guard add\` (required for Owl Center mint UI).
 
 If deploy asks for collection image upload, set cache \`-1\` \`image_link\` to token \`0\` image URL (collection.png is a copy of 0.png).
 
@@ -315,9 +327,7 @@ Regenerate: \`npm run prepare:sugar-deploy -- --launch-id=${jobRow.launch_id ?? 
   console.log(`  cache.json items: ${Object.keys(cache.items).filter((k) => k !== 'collection').length} tokens`)
   console.log('')
   console.log('Next:')
-  console.log(`  cd collections/${folderName}`)
-  console.log('  sugar validate')
-  console.log('  sugar deploy')
+  console.log(`  npm run sugar:deploy -- collections/${folderName}`)
 }
 
 main().catch((e) => {

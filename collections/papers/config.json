@@ -17,6 +17,13 @@
   "sdriveApiKey": null,
   "pinataConfig": null,
   "hiddenSettings": null,
-  "guards": null,
+  "guards": {
+    "default": {
+      "botTax": {
+        "value": 0.001,
+        "lastInstruction": false
+      }
+    }
+  },
   "maxEditionSupply": null
 }

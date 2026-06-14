@@ -95,6 +95,10 @@ export async function POST(request: NextRequest) {
   if (body.phase_schedule !== undefined) {
     patch.phase_schedule = parsePhaseSchedule(body.phase_schedule) as Record<string, string>
   }
+  if (body.generator_project_id === null) patch.generator_project_id = null
+  else if (typeof body.generator_project_id === 'string') {
+    patch.generator_project_id = body.generator_project_id.trim() || null
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No valid fields' }, { status: 400 })

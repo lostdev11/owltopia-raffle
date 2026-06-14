@@ -3,8 +3,10 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 
+import { Gen2GeneratorLinkPanel } from '@/components/owl-center/Gen2GeneratorLinkPanel'
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
 import { AssetPackageUploadPanel } from '@/components/owl-center/AssetPackageUploadPanel'
+import { SugarDeployPanel } from '@/components/owl-center/SugarDeployPanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -270,6 +272,8 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
+      <SugarDeployPanel launchId={launchId} onApplied={() => void load()} />
+
       <SugarBatchScanner
         expectedSupply={Number(expectedSupply) || launch.total_supply}
         onApply={(scan: SugarBatchScanResult) => {
@@ -292,6 +296,8 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         }}
       />
       <ActionFeedback feedback={feedback.scan} />
+
+      {isGen2 ? <Gen2GeneratorLinkPanel onLinked={() => void load()} /> : null}
 
       {gen2Warn ? (
         <CommandCard label="gen2_supply_gate.sys">

@@ -11,15 +11,20 @@ Prepared from Owl Center upload job `3b748c2b-18fb-4064-b03e-f6c864cc6c9d`.
 1. Edit `config.json` if `creators[0].address` should be your deployer (not creator wallet).
 2. Install [Sugar CLI](https://developers.metaplex.com/candy-machine/sugar).
 3. `solana config set --url` your mainnet RPC; fund deployer keypair.
-4. From this folder:
+4. From repo root (mainnet — config already includes default guards):
+
+```bash
+npm run sugar:deploy -- collections/papers
+```
+
+**Already deployed without a guard?** Run only:
 
 ```bash
 cd collections/papers
-sugar validate
-sugar deploy
+node --env-file=../../.env.local ../../scripts/configure-solana-mainnet-from-env.mjs
+sugar guard add
+sugar guard show
 ```
-
-If deploy asks for collection image upload, run `sugar upload` once (only missing collection.png).
 
 5. Paste **candy_machine_id** + **collection_mint** in Owl Center admin → Marketplace readiness.
 6. Mint test: `/owl-center/collection/sub-feae56d904034b21a2edf92e301c5eae`

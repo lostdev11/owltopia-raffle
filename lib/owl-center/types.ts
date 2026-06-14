@@ -73,6 +73,8 @@ export type OwlCenterLaunchPublic = {
   mint_mode: OwlCenterMintMode
   /** devnet | mainnet — when set, overrides site-wide devnet flag for this launch. */
   mint_network: 'devnet' | 'mainnet' | null
+  /** Linked Owl Generator project id (Gen2 / admin export-and-stage). */
+  generator_project_id: string | null
 }
 
 export type SimpleMintEligibilityResponse = {

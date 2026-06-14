@@ -100,6 +100,10 @@ export default function AdminOwlCenterDemoPage() {
           creator_mint_currency: demo.creator_mint_currency != null ? String(demo.creator_mint_currency) : null,
           creator_launch_date: demo.creator_launch_date != null ? String(demo.creator_launch_date) : null,
           mint_mode: String(demo.mint_mode) === 'public_simple' ? 'public_simple' : 'gen2_full',
+          generator_project_id:
+            demo.generator_project_id != null && String(demo.generator_project_id).trim()
+              ? String(demo.generator_project_id).trim()
+              : null,
           mint_network:
             demo.mint_network === 'devnet' || demo.mint_network === 'mainnet'
               ? demo.mint_network

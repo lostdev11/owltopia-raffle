@@ -117,7 +117,11 @@ export async function buildGen2GuardMintPlan(
   const candyGuard = await safeFetchCandyGuard(umi, candyMachine.mintAuthority)
 
   if (!candyGuard) {
-    return { ok: true, plan: { candyMachine, candyGuard: null, groupLabel: null, mintArgs: {}, allowListMerkleRoot: null } }
+    return {
+      ok: false,
+      error:
+        'Candy Guard not deployed for this Candy Machine. Owl Center mints require a guard — from your Sugar folder run `sugar guard add` (set `guards` in config.json first; `npm run prepare:sugar-deploy` includes defaults).',
+    }
   }
 
   let groupLabel = gen2GuardGroupLabel(phase)

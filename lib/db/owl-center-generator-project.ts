@@ -68,6 +68,32 @@ export async function upsertGeneratorProjectForWallet(
   return { ok: true, updated_at: String((data as { updated_at: string }).updated_at) }
 }
 
+export async function getGeneratorProjectByProjectId(projectId: string): Promise<GeneratorProjectRow | null> {
+  const id = projectId.trim()
+  if (!id) return null
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_generator_projects')
+    .select('wallet,project_id,name,project_json,updated_at')
+    .eq('project_id', id)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as {
+    wallet: string
+    project_id: string
+    name: string
+    project_json: GeneratorProject
+    updated_at: string
+  }
+  return {
+    wallet: row.wallet,
+    project_id: row.project_id,
+    name: row.name,
+    project_json: row.project_json,
+    updated_at: row.updated_at,
+  }
+}
+
 export async function deleteGeneratorProjectForWallet(wallet: string): Promise<boolean> {
   const db = getSupabaseAdmin()
   const { error } = await db.from('owl_center_generator_projects').delete().eq('wallet', wallet)

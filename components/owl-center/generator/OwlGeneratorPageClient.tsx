@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Gen2ExportStagePanel } from '@/components/owl-center/generator/Gen2ExportStagePanel'
 import { GeneratorStageUploadPanel } from '@/components/owl-center/generator/GeneratorStageUploadPanel'
 import { GeneratorCloudSavePanel } from '@/components/owl-center/generator/GeneratorCloudSavePanel'
 import { GeneratorRuleLinter } from '@/components/owl-center/generator/GeneratorRuleLinter'
@@ -28,6 +29,7 @@ import {
   projectMissingDefaultLayers,
 } from '@/lib/owl-center/generator/demo-project'
 import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
+import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
 import {
@@ -82,7 +84,7 @@ function uid() {
   return crypto.randomUUID()
 }
 
-export function OwlGeneratorPageClient() {
+export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolean }) {
   const router = useRouter()
   const { connected } = useWallet()
   const [project, setProject] = useState<GeneratorProject | null>(null)
@@ -161,6 +163,15 @@ export function OwlGeneratorPageClient() {
     }
     if (!connected) setSignedIn(null)
   }, [connected, signedIn, fetchCloudProject])
+
+  useEffect(() => {
+    if (!gen2Mode || loading || !project) return
+    void (async () => {
+      const link = await fetchGen2GeneratorLink()
+      const supply = link?.total_supply ?? 2000
+      setProject((p) => (p && p.targetSupply !== supply ? { ...p, targetSupply: supply } : p))
+    })()
+  }, [gen2Mode, loading, project?.id])
 
   const lintIssues = useMemo(() => (project ? lintGeneratorProject(project) : []), [project])
   const lintBlocked = hasBlockingLintIssues(lintIssues)
@@ -648,22 +659,34 @@ export function OwlGeneratorPageClient() {
 
   return (
     <OwlCenterShell
-      eyebrow="OWL_CENTER // GENERATOR"
-      title="Owl Generator"
-      subtitle="Layers, rarity weights, pairing rules, cloud sync, and launch submission — for Gen3 and partner collections."
+      eyebrow={gen2Mode ? 'GEN2 // GENERATOR' : 'OWL_CENTER // GENERATOR'}
+      title={gen2Mode ? 'Gen2 Owl Generator' : 'Owl Generator'}
+      subtitle={
+        gen2Mode
+          ? 'Build Gen2 art, export the full supply, and stage directly to Gen2 assets — then Arweave + Sugar CLI for CM.'
+          : 'Layers, rarity weights, pairing rules, cloud sync, and launch submission — for Gen3 and partner collections.'
+      }
     >
       <div className="mb-6 flex flex-wrap gap-2">
-        <DeployButton variant="ghost" onClick={() => void loadDemo()} className="gap-2">
-          <Sparkles className="h-4 w-4" aria-hidden />
-          Load demo
-        </DeployButton>
-        <DeployButton variant="ghost" onClick={() => setResetConfirmOpen(true)}>
-          Reset project
-        </DeployButton>
-        <DeployButton className="gap-2" onClick={handleLaunchHandoff} disabled={lintBlocked || !project.traits.length}>
-          <Rocket className="h-4 w-4" aria-hidden />
-          Submit to launch
-        </DeployButton>
+        {!gen2Mode ? (
+          <>
+            <DeployButton variant="ghost" onClick={() => void loadDemo()} className="gap-2">
+              <Sparkles className="h-4 w-4" aria-hidden />
+              Load demo
+            </DeployButton>
+            <DeployButton variant="ghost" onClick={() => setResetConfirmOpen(true)}>
+              Reset project
+            </DeployButton>
+            <DeployButton className="gap-2" onClick={handleLaunchHandoff} disabled={lintBlocked || !project.traits.length}>
+              <Rocket className="h-4 w-4" aria-hidden />
+              Submit to launch
+            </DeployButton>
+          </>
+        ) : (
+          <DeployButton variant="ghost" onClick={() => setResetConfirmOpen(true)}>
+            Reset project
+          </DeployButton>
+        )}
       </div>
 
       {message ? (
@@ -704,7 +727,11 @@ export function OwlGeneratorPageClient() {
                   type="number"
                   min={1}
                   max={1000000}
-                  className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-[#E8EEF2] touch-manipulation"
+                  readOnly={gen2Mode}
+                  className={cn(
+                    'mt-1 w-full min-h-[44px] border border-[#1A222B] px-3 text-[#E8EEF2] touch-manipulation',
+                    gen2Mode ? 'cursor-not-allowed bg-[#0B0F13] text-[#7D8A93]' : 'bg-[#0F1419]'
+                  )}
                   value={project.targetSupply ?? (maxUnique || 1000)}
                   onChange={(e) => updateProject({ targetSupply: Math.max(1, Number(e.target.value) || 1) })}
                 />
@@ -1072,22 +1099,28 @@ export function OwlGeneratorPageClient() {
                 ? `Exporting ${targetSupply.toLocaleString()}…`
                 : `Download full supply (${targetSupply.toLocaleString()})`}
             </DeployButton>
-            <DeployButton
-              variant="ghost"
-              className="mt-3 w-full gap-2"
-              disabled={lintBlocked || (!project.traits.length && !oneOfOnes.length)}
-              onClick={handleLaunchHandoff}
-            >
-              <Rocket className="h-4 w-4" aria-hidden />
-              Submit to Owl Center launch
-            </DeployButton>
+            {!gen2Mode ? (
+              <DeployButton
+                variant="ghost"
+                className="mt-3 w-full gap-2"
+                disabled={lintBlocked || (!project.traits.length && !oneOfOnes.length)}
+                onClick={handleLaunchHandoff}
+              >
+                <Rocket className="h-4 w-4" aria-hidden />
+                Submit to Owl Center launch
+              </DeployButton>
+            ) : null}
           </CommandCard>
 
-          <GeneratorStageUploadPanel
-            projectId={project.id}
-            zipBlob={lastExportZip?.blob ?? null}
-            zipFilename={lastExportZip?.filename ?? null}
-          />
+          {gen2Mode ? (
+            <Gen2ExportStagePanel project={project} onProjectPatch={updateProject} />
+          ) : (
+            <GeneratorStageUploadPanel
+              projectId={project.id}
+              zipBlob={lastExportZip?.blob ?? null}
+              zipFilename={lastExportZip?.filename ?? null}
+            />
+          )}
         </aside>
       </div>
 

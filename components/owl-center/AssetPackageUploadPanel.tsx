@@ -157,8 +157,8 @@ export function AssetPackageUploadPanel({
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Upload a Sugar export ZIP from the generator (or Sugar). The server validates pairs, fills the asset package,
         then pushes to <strong className="font-normal text-[#E8EEF2]">Arweave via Irys</strong> in batches — no long
-        browser request. After Arweave completes, run <code className="text-[#7D8A93]">sugar deploy</code> only (skip{' '}
-        <code className="text-[#7D8A93]">sugar upload</code>).
+        browser request. When Arweave completes, use <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong>{' '}
+        below (or <code className="text-[#7D8A93]">npm run sugar:deploy</code> for large collections).
       </p>
 
       {estimate ? (

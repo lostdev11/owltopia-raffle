@@ -55,6 +55,10 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
       data.mint_network === 'devnet' || data.mint_network === 'mainnet'
         ? (data.mint_network as 'devnet' | 'mainnet')
         : null,
+    generator_project_id:
+      data.generator_project_id != null && String(data.generator_project_id).trim()
+        ? String(data.generator_project_id).trim()
+        : null,
   }
 }
 
@@ -142,6 +146,7 @@ export async function updateOwlCenterLaunchAdmin(
     marketplace_ready: boolean
     launch_deadline_at: string | null
     phase_schedule: Record<string, string>
+    generator_project_id: string | null
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
@@ -196,6 +201,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     creator_mint_price: number | null
     creator_mint_currency: 'SOL' | 'USDC' | null
     creator_launch_date: string | null
+    generator_project_id: string | null
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

@@ -3,7 +3,7 @@ export const PHASE_B_RECOMMENDED_STEPS = [
   'Creator: Generator → export full supply → Stage for launch → Submit launch.',
   'Admin: Stage/validate ZIP here (or use generator-linked job) — do not also run sugar upload on the same files.',
   'Admin: Push to Arweave once via Irys (fund IRYS_PRIVATE_KEY wallet; see estimate below).',
-  'Ops: sugar deploy only — skip sugar upload when metadata URIs are already on Arweave.',
+  'Admin: Deploy CM + Candy Guard (one-click below, or npm run sugar:deploy for large collections).',
   'Smoke mint on devnet, then mainnet.',
 ] as const
 
