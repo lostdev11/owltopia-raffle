@@ -1,7 +1,7 @@
 'use client'
 
-import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
-import { formatArweaveUploadEstimateLine, formatBytesShort } from '@/lib/owl-center/arweave-upload-estimate'
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
+import { formatArweaveUploadEstimateLine, formatBytesShort } from '@/lib/owl-center/arweave-upload-estimate-types'
 
 export function ArweaveUploadEstimateBanner({
   estimate,

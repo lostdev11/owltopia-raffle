@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { formatSugarBatchScanSummary } from '@/lib/owl-center/scan-sugar-batch'
 import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
 import { owlCenterAssetUploadBatchSize } from '@/lib/owl-center/asset-staging-limits'

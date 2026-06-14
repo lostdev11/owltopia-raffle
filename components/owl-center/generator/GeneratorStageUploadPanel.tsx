@@ -7,7 +7,7 @@ import { ArweaveUploadEstimateBanner } from '@/components/owl-center/ArweaveUplo
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecommendedWorkflow'
-import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 
 type JobResponse = {

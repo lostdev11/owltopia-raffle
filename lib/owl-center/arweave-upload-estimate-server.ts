@@ -1,24 +1,13 @@
+import 'server-only'
+
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 
-import { resolveGen2SolUsdPrice } from '@/lib/gen2-presale/sol-usd-price'
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
-import { estimateIrysFolderUploadLamports, isIrysUploadConfigured } from '@/lib/owl-center/irys-uploader'
+import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
+import { estimateIrysFolderUploadLamports } from '@/lib/owl-center/irys-uploader'
 import { lamportsToSolDisplay } from '@/lib/gen2-presale/format-sol'
-
-export type ArweaveUploadEstimate = {
-  /** Bytes that will be uploaded to Arweave (uncompressed file total when known). */
-  total_bytes: number
-  file_count: number
-  /** Estimated cost before wallet buffer. */
-  estimate_lamports: string
-  estimate_sol: string
-  /** Suggested wallet balance (+25% buffer for batch overhead). */
-  fund_lamports: string
-  fund_sol: string
-  sol_usd_price: number | null
-  source: 'irys_quote' | 'heuristic'
-  note: string
-}
+import { resolveGen2SolUsdPrice } from '@/lib/gen2-presale/sol-usd-price'
 
 function arweaveUsdPerGb(): number {
   const raw = process.env.OWL_CENTER_ARWEAVE_USD_PER_GB?.trim()
@@ -37,17 +26,13 @@ export function uploadBytesFromJob(job: OwlCenterAssetUploadJob | null | undefin
 } {
   if (!job) return { totalBytes: 0, fileCount: 0, source: 'unknown' }
 
-  const progress = job.upload_progress as {
-    total_upload_bytes?: number
-    staged_zip_bytes?: number
-  }
+  const progress = job.upload_progress
   const fileCount = job.upload_progress.file_list.length
 
   if (typeof progress.total_upload_bytes === 'number' && progress.total_upload_bytes > 0) {
     return { totalBytes: progress.total_upload_bytes, fileCount: fileCount || 1, source: 'validated' }
   }
   if (typeof progress.staged_zip_bytes === 'number' && progress.staged_zip_bytes > 0) {
-    // ZIP is usually close to PNG total; JSON is tiny — slight headroom before validation.
     return {
       totalBytes: Math.ceil(progress.staged_zip_bytes * 1.05),
       fileCount: fileCount || 1,
@@ -119,15 +104,4 @@ export async function buildArweaveUploadEstimate(
         ? 'Heuristic from validated bytes (set IRYS_PRIVATE_KEY for a live Irys quote).'
         : 'Heuristic from staged ZIP — validate for a tighter number.',
   }
-}
-
-export function formatBytesShort(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
-
-export function formatArweaveUploadEstimateLine(estimate: ArweaveUploadEstimate): string {
-  return `~${estimate.estimate_sol} SOL upload (${formatBytesShort(estimate.total_bytes)}, ${estimate.file_count} files) · fund wallet with ~${estimate.fund_sol} SOL`
 }

@@ -1,8 +1,10 @@
-import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
-import { buildArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
+import 'server-only'
+
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
+import { buildArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-server'
 import { jobProgressSummary } from '@/lib/owl-center/asset-upload-worker'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
-import { isIrysUploadConfigured } from '@/lib/owl-center/irys-uploader'
+import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
 import { PHASE_B_RECOMMENDED_STEPS } from '@/lib/owl-center/phase-b-workflow'
 
 export type UploadJobApiPayload = {

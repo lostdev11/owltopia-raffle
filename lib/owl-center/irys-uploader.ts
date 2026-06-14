@@ -1,17 +1,14 @@
+import 'server-only'
+
 /**
  * Irys / Arweave uploader for Owl Center Phase B.
  * Requires: npm install @irys/upload @irys/upload-solana
  */
 
 import { resolveGen2SolUsdPrice } from '@/lib/gen2-presale/sol-usd-price'
+import { irysNetworkLabel, isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
 
-export function isIrysUploadConfigured(): boolean {
-  return Boolean(process.env.IRYS_PRIVATE_KEY?.trim())
-}
-
-export function irysNetworkLabel(): 'devnet' | 'mainnet' {
-  return process.env.IRYS_NETWORK?.trim().toLowerCase() === 'devnet' ? 'devnet' : 'mainnet'
-}
+export { isIrysUploadConfigured, irysNetworkLabel } from '@/lib/owl-center/irys-config'
 
 async function buildIrysUploader(): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
