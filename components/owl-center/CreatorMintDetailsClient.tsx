@@ -49,7 +49,7 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
       title={launch?.name ?? 'Mint details'}
-      subtitle="Updates the Mint details block on your hub card and drops listing."
+      subtitle="Mint prices, phase schedule, per-wallet caps, and hub card cover."
     >
       <div className="mb-6">
         <Link href="/owl-center/my-launches">

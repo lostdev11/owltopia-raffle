@@ -9,7 +9,10 @@ import type { CollectionMintStateResponse, MintTerminalLine } from '@/lib/owl-ce
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
-export async function buildCollectionMintState(slug: string): Promise<CollectionMintStateResponse | null> {
+export async function buildCollectionMintState(
+  slug: string,
+  opts?: { includeSystemLogs?: boolean }
+): Promise<CollectionMintStateResponse | null> {
   const launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch || launch.mint_mode !== 'public_simple') return null
 
@@ -59,7 +62,9 @@ export async function buildCollectionMintState(slug: string): Promise<Collection
     }
   })
 
-  const terminal = [...mintLines, ...sysLines]
+  const includeSystemLogs = opts?.includeSystemLogs ?? false
+
+  const terminal = (includeSystemLogs ? [...mintLines, ...sysLines] : mintLines)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 50)
 

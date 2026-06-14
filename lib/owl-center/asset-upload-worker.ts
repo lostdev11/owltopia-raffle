@@ -21,6 +21,7 @@ import {
   updateAssetUploadJob,
 } from '@/lib/db/owl-center-asset-upload-job'
 import { syncAssetPackageStatus, upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
+import { autoSetLaunchCoverFromUploadJob } from '@/lib/owl-center/launch-cover-image'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
@@ -296,6 +297,8 @@ export async function processArweaveUploadBatch(jobId: string): Promise<AssetUpl
           pkg.validation_checklist as unknown as Record<string, unknown>
         )
       }
+
+      await autoSetLaunchCoverFromUploadJob(launchId)
 
       await updateAssetUploadJob(jobId, {
         status: 'completed',

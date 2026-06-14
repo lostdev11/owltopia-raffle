@@ -18,6 +18,7 @@ type LaunchRow = {
   active_phase: string
   total_supply: number
   minted_count: number
+  wallet_mint_limit: number
   updated_at: string
 }
 
@@ -94,7 +95,8 @@ export function CreatorLaunchesClient() {
                 <div>
                   <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
                   <p className="mt-1 font-mono text-xs text-[#5C6773]">
-                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · slug {l.slug.slice(0, 12)}…
+                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
+                    · slug {l.slug.slice(0, 12)}…
                   </p>
                 </div>
                 <Link

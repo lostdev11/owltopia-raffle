@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
@@ -16,10 +16,15 @@ import { StatPanel } from '@/components/owl-center/StatPanel'
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
+import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
+import { useSiwsSession } from '@/hooks/use-siws-session'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
 export function CollectionMintPageClient({ slug, launchName }: { slug: string; launchName: string }) {
+  const { isOwlCenterAdmin } = useOwlCenterView()
+  const { sessionWallet } = useSiwsSession()
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
   const { elig } = useCollectionMintEligibility(slug, walletStr, connected)
@@ -73,6 +78,11 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
   const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
+  const canEditMintSettings =
+    isOwlCenterAdmin ||
+    (!!sessionWallet &&
+      !!launch.creator_wallet &&
+      walletsEqualSolana(sessionWallet, launch.creator_wallet))
 
   return (
     <OwlCenterShell
@@ -85,6 +95,17 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
         <PhaseBadge phase={launch.active_phase} />
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>
+
+      {canEditMintSettings ? (
+        <p className="mb-6 rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs text-[#9BA8B4]">
+          Per-wallet cap:{' '}
+          <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max per phase</span>
+          {' · '}
+          <Link href={`/owl-center/my-launches/${launch.id}/mint-details`} className="text-[#00FF9C] hover:underline">
+            Edit mint settings
+          </Link>
+        </p>
+      ) : null}
 
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div className="space-y-8">
@@ -145,7 +166,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
           <StatPanel label="Supply" value={`${supply.minted} / ${supply.total}`} />
           <StatPanel label="Remaining" value={String(supply.remaining)} />
           <StatPanel label="Per wallet" value={String(launch.wallet_mint_limit)} />
-          <ActivityLog lines={terminal} />
+          {isOwlCenterAdmin ? <ActivityLog lines={terminal} /> : null}
         </aside>
       </div>
 

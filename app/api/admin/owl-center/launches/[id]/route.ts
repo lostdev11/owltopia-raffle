@@ -39,6 +39,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {}
 
+  if (typeof body.image_url === 'string') patch.image_url = body.image_url.trim().slice(0, 2000) || null
+  if (typeof body.cover_image_url === 'string') patch.image_url = body.cover_image_url.trim().slice(0, 2000) || null
   if (typeof body.name === 'string') patch.name = body.name.trim().slice(0, 120)
   if (typeof body.description === 'string') patch.description = body.description.slice(0, 4000)
   if (typeof body.is_paused === 'boolean') patch.is_paused = body.is_paused

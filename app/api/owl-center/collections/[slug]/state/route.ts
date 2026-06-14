@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { buildCollectionMintState } from '@/lib/owl-center/collection-mint-state'
+import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -27,7 +28,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     return NextResponse.json({ error: 'This collection does not use the public mint console' }, { status: 400 })
   }
 
-  const state = await buildCollectionMintState(slug)
+  const adminWallet = await getOwlCenterAdminWallet(request)
+  const state = await buildCollectionMintState(slug, { includeSystemLogs: !!adminWallet })
   if (!state) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
 
   return NextResponse.json(state)

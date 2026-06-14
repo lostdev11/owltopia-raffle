@@ -20,6 +20,7 @@ import {
 } from '@/lib/db/owl-center-asset-package'
 import { getMarketplaceReadinessByLaunchId } from '@/lib/db/owl-center-marketplace'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -164,6 +165,15 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (Object.keys(upsertPatch).length > 0 || !existing) {
     const saved = await upsertAssetPackageForLaunch(id, upsertPatch)
     if (!saved) return jsonError('Save failed', 500)
+
+    const coverUrl =
+      upsertPatch.collection_image_url ??
+      (existing?.collection_image_url && !('collection_image_url' in upsertPatch)
+        ? existing.collection_image_url
+        : null)
+    if (coverUrl) {
+      await syncLaunchHubCoverImage(id, coverUrl)
+    }
   }
 
   const fresh = await getAssetPackageByLaunchId(id)

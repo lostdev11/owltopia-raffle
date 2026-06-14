@@ -175,7 +175,9 @@ export function CollectionMintPanel({
     <CommandCard label={`MINT // public · ${mintNetwork}`}>
       <div className="space-y-4">
         <p className="font-mono text-xs text-[#9BA8B4]">
-          {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet · {remaining} remaining
+          {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet/phase
+          {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
+          remaining
         </p>
 
         {mintControls.env_kill_switch ? (

@@ -24,6 +24,27 @@ export function MintDetailsConfigFields({ values, onChange, compact }: Props) {
         </p>
       ) : null}
 
+      <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+          Per-wallet mint limit
+        </p>
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          Max mints per wallet (each phase)
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={values.wallet_mint_limit}
+            onChange={(e) => set('wallet_mint_limit', e.target.value)}
+            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+          />
+        </label>
+        <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+          Each wallet can mint up to this many NFTs during PUBLIC (and presale / WL when those phases are enabled).
+          Enforced on-chain at confirm time.
+        </p>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Public mint price
@@ -46,17 +67,6 @@ export function MintDetailsConfigFields({ values, onChange, compact }: Props) {
             <option value="SOL">SOL</option>
             <option value="USDC">USDC</option>
           </select>
-        </label>
-        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-          Per-wallet mint cap
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={values.wallet_mint_limit}
-            onChange={(e) => set('wallet_mint_limit', e.target.value)}
-            className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-          />
         </label>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Mint opens (kickoff)

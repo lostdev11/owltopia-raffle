@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { LaunchCoverImageFields } from '@/components/owl-center/LaunchCoverImageFields'
 import {
   MintDetailsConfigFields,
 } from '@/components/owl-center/MintDetailsConfigFields'
@@ -61,26 +62,38 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath }
   }
 
   return (
-    <CommandCard label="MINT_DETAILS · CREATOR_CONFIG">
-      <MintDetailsConfigFields
-        values={{ ...values, total_supply: String(launch.total_supply) }}
-        onChange={(next) => setValues({ ...next, total_supply: String(launch.total_supply) })}
-      />
-      <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
-        <DeployButton type="button" disabled={saving} onClick={() => void save()}>
-          {saving ? 'Saving…' : 'Save mint details'}
-        </DeployButton>
-        <DeployButton
-          type="button"
-          variant="ghost"
-          disabled={saving}
-          onClick={() => setValues(mintDetailsFormFromLaunch(launch))}
-        >
-          Reset
-        </DeployButton>
-      </div>
-      {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
-    </CommandCard>
+    <div className="grid gap-6">
+      <CommandCard label="MINT_DETAILS · CREATOR_CONFIG">
+        <MintDetailsConfigFields
+          values={{ ...values, total_supply: String(launch.total_supply) }}
+          onChange={(next) => setValues({ ...next, total_supply: String(launch.total_supply) })}
+        />
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
+          <DeployButton type="button" disabled={saving} onClick={() => void save()}>
+            {saving ? 'Saving…' : 'Save mint details'}
+          </DeployButton>
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={saving}
+            onClick={() => setValues(mintDetailsFormFromLaunch(launch))}
+          >
+            Reset
+          </DeployButton>
+        </div>
+        {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
+        {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      </CommandCard>
+
+      <CommandCard label="HUB_CARD · COVER">
+        <LaunchCoverImageFields
+          launchId={launchId}
+          initialCoverUrl={launch.image_url}
+          coverOptionsPath={`/api/owl-center/launches/${launchId}/cover-options`}
+          coverSavePath={saveApiPath ?? `/api/admin/owl-center/launches/${launchId}`}
+          onSaved={() => onSaved?.()}
+        />
+      </CommandCard>
+    </div>
   )
 }

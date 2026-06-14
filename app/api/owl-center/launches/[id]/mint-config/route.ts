@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
-import { buildMintDetailsPatchFromBody } from '@/lib/owl-center/launch-mint-config-patch'
+import { buildMintDetailsPatchFromBody, bodyHasMintConfigFields } from '@/lib/owl-center/launch-mint-config-patch'
+import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -54,16 +55,37 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     return jsonError('Invalid JSON', 400)
   }
 
-  const patch = buildMintDetailsPatchFromBody(body, launch)
-  if ('error' in patch) return jsonError(patch.error, 400)
+  const coverRaw = body.cover_image_url ?? body.image_url
+  let updated = launch
+  let hasMintFields = false
 
-  const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
+  if (bodyHasMintConfigFields(body)) {
+    const patch = buildMintDetailsPatchFromBody(body, launch)
+    if ('error' in patch) return jsonError(patch.error, 400)
+    hasMintFields = true
+    updated = (await updateOwlCenterLaunchByIdAdmin(id, patch)) ?? launch
+  }
+
+  if (coverRaw !== undefined) {
+    if (coverRaw === null || coverRaw === '') {
+      updated = (await updateOwlCenterLaunchByIdAdmin(id, { image_url: null })) ?? updated
+    } else if (typeof coverRaw === 'string') {
+      updated = (await syncLaunchHubCoverImage(id, coverRaw)) ?? updated
+    }
+  }
+
   if (!updated) return jsonError('Update failed', 500)
+  if (!hasMintFields && coverRaw === undefined) return jsonError('No fields to update', 400)
 
   const db = getSupabaseAdmin()
   await db.from('owl_center_activity_logs').insert({
     launch_id: id,
-    message: editor.isAdmin && !editor.isCreator ? 'Mint details updated (admin)' : 'Mint details updated (creator)',
+    message:
+      coverRaw !== undefined && !hasMintFields
+        ? 'Hub card cover updated'
+        : editor.isAdmin && !editor.isCreator
+          ? 'Mint details updated (admin)'
+          : 'Mint details updated (creator)',
     event_type: 'system',
   })
 

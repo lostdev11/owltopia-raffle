@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
       active_phase: l.active_phase,
       total_supply: l.total_supply,
       minted_count: l.minted_count,
+      wallet_mint_limit: l.wallet_mint_limit,
       updated_at: l.updated_at,
     })),
   })
