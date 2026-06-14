@@ -290,6 +290,37 @@ function accountKeyAtIndexToPublicKey(key: unknown): PublicKey | null {
   return null
 }
 
+/** All account keys referenced by a parsed tx (static + address lookup tables). */
+export function collectParsedTransactionAccountKeys(parsed: ParsedTransactionWithMeta): PublicKey[] {
+  const msg = parsed.transaction.message as unknown as {
+    getAccountKeys?: (o: { accountKeysFromLookups?: unknown }) => {
+      keySegments: () => PublicKey[][]
+    }
+    accountKeys?: unknown[]
+    staticAccountKeys?: PublicKey[]
+  }
+  const keys = msg.getAccountKeys?.({ accountKeysFromLookups: parsed.meta?.loadedAddresses })
+  if (keys) {
+    return keys.keySegments().flat()
+  }
+
+  const flat: PublicKey[] = []
+  const staticKeys = msg.staticAccountKeys ?? msg.accountKeys ?? []
+  for (const raw of staticKeys) {
+    const pk = accountKeyAtIndexToPublicKey(raw)
+    if (pk) flat.push(pk)
+  }
+
+  const loaded = parsed.meta?.loadedAddresses as { writable?: string[]; readonly?: string[] } | undefined
+  if (loaded?.writable?.length) {
+    for (const s of loaded.writable) flat.push(new PublicKey(s))
+  }
+  if (loaded?.readonly?.length) {
+    for (const s of loaded.readonly) flat.push(new PublicKey(s))
+  }
+  return flat
+}
+
 /** Legacy message fee payer (signer index 0). */
 export function getFeePayerPublicKey(parsed: ParsedTransactionWithMeta): PublicKey | null {
   try {

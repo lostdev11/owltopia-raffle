@@ -177,7 +177,8 @@ export async function uploadBufferToArweaveViaIrys(
     })
 
     const id = String(receipt.id)
-    const gatewayHost = irysNetworkLabel() === 'devnet' ? 'arweave.dev' : 'arweave.net'
+    // gateway.irys.xyz serves raw JSON/PNG; arweave.net often returns an HTML app shell in wallets.
+    const gatewayHost = irysNetworkLabel() === 'devnet' ? 'arweave.dev' : 'gateway.irys.xyz'
     return {
       id,
       uri: `https://${gatewayHost}/${id}`,

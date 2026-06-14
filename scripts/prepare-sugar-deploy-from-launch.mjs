@@ -254,6 +254,19 @@ async function main() {
     launch?.total_supply ??
     Object.keys(progress.uploaded).filter((p) => /assets\/\d+\.png$/i.test(p.replace(/\\/g, '/'))).length
 
+  const tokenCount = Object.keys(progress.uploaded).filter((p) =>
+    /assets\/\d+\.png$/i.test(p.replace(/\\/g, '/'))
+  ).length
+  const nameLength = Math.max(1, String(Math.max(0, tokenCount - 1)).length)
+  const collectionLabel = (launch?.name ?? folderName).trim() || 'Collection'
+  const prefixName = `${collectionLabel.slice(0, Math.max(1, 32 - nameLength - 2))} #`
+  const uriLength = Math.max(
+    32,
+    ...Object.values(progress.uploaded)
+      .filter((u) => typeof u === 'string')
+      .map((u) => u.length)
+  )
+
   const config = {
     tokenStandard: 'nft',
     number: supply,
@@ -273,6 +286,13 @@ async function main() {
     sdriveApiKey: null,
     pinataConfig: null,
     hiddenSettings: null,
+    configLineSettings: {
+      prefixName,
+      nameLength,
+      prefixUri: '',
+      uriLength,
+      isSequential: false,
+    },
     guards: publicSimpleSugarGuards(),
     maxEditionSupply: null,
   }

@@ -14,7 +14,7 @@ import {
   getOwlCenterPlatformTreasuryWallet,
   getOwlCenterPlatformTreasuryWalletClient,
 } from '@/lib/owl-center/platform-treasury'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
 import type { OwlMintNetwork } from '@/lib/solana/network'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
 
@@ -88,21 +88,7 @@ function treasurySolIncrease(
   const meta = parsed.meta
   if (!meta?.preBalances?.length || !meta.postBalances?.length) return null
 
-  const msg = parsed.transaction.message as unknown as {
-    getAccountKeys?: (o: { accountKeysFromLookups?: unknown }) => {
-      staticAccountKeys: PublicKey[]
-      keySegments?: () => Iterable<{ readonly: PublicKey[]; writable: PublicKey[] }>
-    }
-  }
-  const keys = msg.getAccountKeys?.({ accountKeysFromLookups: meta.loadedAddresses })
-  const flat: PublicKey[] = []
-  if (keys?.staticAccountKeys?.length) flat.push(...keys.staticAccountKeys)
-  const seg = keys?.keySegments?.()
-  if (seg) {
-    for (const s of seg) {
-      flat.push(...s.readonly, ...s.writable)
-    }
-  }
+  const flat = collectParsedTransactionAccountKeys(parsed)
 
   let treasuryPk: PublicKey
   try {

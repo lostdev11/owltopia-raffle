@@ -26,7 +26,11 @@ import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
 
 import { publicSimpleCandyGuardGuards } from '@/lib/owl-center/sugar-public-simple-guards'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
-import type { SugarDeployConfigLine } from '@/lib/owl-center/sugar-deploy-package'
+import {
+  sugarConfigLineNameLength,
+  sugarConfigLinePrefixName,
+  type SugarDeployConfigLine,
+} from '@/lib/owl-center/sugar-deploy-package'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -90,7 +94,7 @@ function maxUriLength(lines: SugarDeployConfigLine[]): number {
 }
 
 function maxNameLength(lines: SugarDeployConfigLine[]): number {
-  return Math.max(4, ...lines.map((l) => l.name.length))
+  return sugarConfigLineNameLength(lines)
 }
 
 export async function deployPublicSimpleCandyMachineOnchain(
@@ -147,7 +151,7 @@ export async function deployPublicSimpleCandyMachineOnchain(
       isMutable: true,
       creators: [{ address: creatorAddress, percentageShare: 100, verified: false }],
       configLineSettings: some({
-        prefixName: '',
+        prefixName: sugarConfigLinePrefixName(collectionName, maxNameLength(configLines)),
         nameLength: maxNameLength(configLines),
         prefixUri: '',
         uriLength: maxUriLength(configLines),
