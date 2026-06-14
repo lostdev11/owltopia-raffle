@@ -1,7 +1,7 @@
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
+import { collectParsedTransactionAccountKeys, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
 import { getStakingPlatformFeeLamports } from '@/lib/nesting/staking-platform-fee'
 import { getSolanaConnection } from '@/lib/solana/connection'
 
@@ -79,22 +79,8 @@ export async function verifyStakingPlatformFeeTransaction(params: {
     }
   }
 
-  const message = parsed.transaction.message
-  const accountKeys =
-    'staticAccountKeys' in message
-      ? (message as { staticAccountKeys: PublicKey[] }).staticAccountKeys
-      : (message as { accountKeys: PublicKey[] }).accountKeys
-
   const fromPk = new PublicKey(params.fromWallet.trim())
-  const feePayerKey = accountKeys?.[0]
-  if (!feePayerKey) {
-    return { ok: false, error: 'Invalid fee transaction: no fee payer.' }
-  }
-  const feePayerMatches =
-    typeof feePayerKey === 'string'
-      ? feePayerKey === params.fromWallet.trim()
-      : (feePayerKey as PublicKey).equals(fromPk)
-  if (!feePayerMatches) {
+  if (!feePayerMatchesBuyer(parsed, fromPk)) {
     return { ok: false, error: 'Fee transaction was not signed by your connected wallet.' }
   }
 
