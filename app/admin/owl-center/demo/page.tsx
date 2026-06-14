@@ -9,6 +9,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
+import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -49,9 +50,11 @@ export default function AdminOwlCenterDemoPage() {
       const j = (await res.json()) as { launches?: Array<Record<string, unknown>>; error?: string }
       if (!res.ok) throw new Error(j.error || 'load_failed')
       const rows = j.launches ?? []
+      const publicSimple = rows.filter((r) => String(r.mint_mode) === 'public_simple')
       const demo =
         rows.find((r) => String(r.slug) === 'demo') ??
-        rows.find((r) => String(r.mint_mode) === 'public_simple')
+        [...publicSimple].sort((a, b) => Number(b.minted_count ?? 0) - Number(a.minted_count ?? 0))[0] ??
+        publicSimple[0]
       if (demo) {
         setLaunch({
           id: String(demo.id),
@@ -324,6 +327,12 @@ export default function AdminOwlCenterDemoPage() {
                 Open mint page <ExternalLink className="h-4 w-4" aria-hidden />
               </a>
               <Link
+                href={`/admin/owl-center/collections/${launch.id}/assets#metadata-refresh`}
+                className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10"
+              >
+                Fix wallet metadata
+              </Link>
+              <Link
                 href={`/admin/owl-center/collections/${launch.id}/assets`}
                 className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:text-[#00FF9C]"
               >
@@ -331,6 +340,8 @@ export default function AdminOwlCenterDemoPage() {
               </Link>
             </div>
           </CommandCard>
+
+          <MetadataRefreshPanel launchId={launch.id} />
 
           <CommandCard label="HASH_LIST">
             <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">

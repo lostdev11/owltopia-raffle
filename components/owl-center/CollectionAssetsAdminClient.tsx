@@ -271,11 +271,11 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         onPromoted={() => void load()}
       />
 
+      <MetadataRefreshPanel launchId={launchId} />
+
       <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
       <SugarDeployPanel launchId={launchId} onApplied={() => void load()} />
-
-      <MetadataRefreshPanel launchId={launchId} />
 
       <SugarBatchScanner
         expectedSupply={Number(expectedSupply) || launch.total_supply}

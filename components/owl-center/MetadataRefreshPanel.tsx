@@ -87,7 +87,7 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
 
   if (loading) {
     return (
-      <CommandCard label="metadata_refresh.sys">
+      <CommandCard label="metadata_refresh.sys · WALLET DISPLAY" id="metadata-refresh">
         <p className="font-mono text-xs text-[#5C6773]">Loading metadata refresh…</p>
       </CommandCard>
     )
@@ -100,12 +100,18 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
   const needsCount = status?.mints.filter((m) => m.needs_refresh).length ?? 0
 
   return (
-    <CommandCard label="metadata_refresh.sys · WALLET DISPLAY">
+    <CommandCard label="metadata_refresh.sys · WALLET DISPLAY" id="metadata-refresh">
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong> or a blank image in
         Phantom/Solflare. Rewrites on-chain name + metadata URI to the Irys gateway and collection-prefixed title (uses{' '}
         <code className="text-[#7D8A93]">IRYS_PRIVATE_KEY</code> deployer as update authority).
       </p>
+
+      {err && !status ? (
+        <p className="mb-4 rounded border border-[#FF9C9C]/30 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
+          Could not load refresh status — connect an admin wallet, sign in, then retry. ({err})
+        </p>
+      ) : null}
 
       {!status?.enabled ? (
         <p className="rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
