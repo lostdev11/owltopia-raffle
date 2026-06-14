@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       rawAmount: body?.amount,
       rawAssetIdentifier: body?.asset_identifier,
       bypassSelloutGate,
+      platform_fee_signature: body?.platform_fee_signature,
     })
 
     return NextResponse.json({

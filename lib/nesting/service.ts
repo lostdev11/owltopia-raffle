@@ -60,6 +60,7 @@ export async function executeStake(params: {
   rawAssetIdentifier: unknown
   /** Admin-only QA: stake before `NESTING_SELL_OUT_*` gate is cleared. */
   bypassSelloutGate?: boolean
+  platform_fee_signature?: unknown
 }) {
   const pool_id = params.pool_id.trim()
   if (!STAKING_UUID_RE.test(pool_id)) {
@@ -137,6 +138,16 @@ export async function executeStake(params: {
     amount,
     asset_identifier,
   })
+
+  if (result.position.status === 'active') {
+    await requireStakingPlatformFeeLinked({
+      wallet: params.wallet,
+      action: 'stake',
+      feeSignature: params.platform_fee_signature,
+      positionIds: [result.position.id],
+    })
+  }
+
   return { ...result, pool }
 }
 
