@@ -1398,7 +1398,11 @@ export function DashboardNestingClient() {
   )
 
   const sendMplCoreFreezeDelegateApproval = useCallback(
-    async (assetId: string, delegateAddress: string): Promise<string | null> => {
+    async (
+      assetId: string,
+      delegateAddress: string,
+      platformFee?: { treasury: string; lamports: number } | null
+    ): Promise<string | null> => {
       const adapter = wallet?.adapter
       if (!adapter || !publicKey) {
         throw new Error('Connect your wallet first.')
@@ -1408,13 +1412,18 @@ export function DashboardNestingClient() {
         wallet: adapter,
         assetId,
         delegateAddress,
+        platformFee,
       })
     },
     [connection, publicKey, wallet]
   )
 
   const sendBatchMplCoreFreezeDelegateApproval = useCallback(
-    async (assetIds: string[], delegateAddress: string): Promise<string | null> => {
+    async (
+      assetIds: string[],
+      delegateAddress: string,
+      platformFee?: { treasury: string; lamports: number } | null
+    ): Promise<string | null> => {
       const adapter = wallet?.adapter
       if (!adapter || !publicKey) {
         throw new Error('Connect your wallet first.')
@@ -1424,9 +1433,21 @@ export function DashboardNestingClient() {
         wallet: adapter,
         assetIds,
         delegateAddress,
+        platformFee,
       })
     },
     [connection, publicKey, wallet]
+  )
+
+  const chunkNestPlatformFee = useCallback(
+    (nestCount: number): { treasury: string; lamports: number } | null => {
+      if (!platformFeeActive || !platformFeeTxConfig || nestCount <= 0) return null
+      return {
+        treasury: platformFeeTxConfig.treasury,
+        lamports: nestCount * platformFeeTxConfig.unitLamports,
+      }
+    },
+    [platformFeeActive, platformFeeTxConfig]
   )
 
   const cancelOpeningNest = useCallback(() => {
@@ -1470,9 +1491,16 @@ export function DashboardNestingClient() {
         signal,
         onPhase: setStakeTxPhase,
         async execute() {
-          const stakeOne = async (assetId?: string) => {
+          const stakeOne = async (
+            assetId?: string,
+            options?: { deferPlatformFee?: boolean }
+          ) => {
             let platformFeeSig: string | null = null
-            if (pool.adapter_mode !== 'onchain_enabled' && platformFeeActive) {
+            if (
+              !options?.deferPlatformFee &&
+              pool.adapter_mode !== 'onchain_enabled' &&
+              platformFeeActive
+            ) {
               setStakeTxPhase('awaiting_wallet_signature')
               platformFeeSig = await sendStakingPlatformFee(1)
             }
@@ -1596,7 +1624,7 @@ export function DashboardNestingClient() {
           }
 
           const prepareNftNest = async (assetId: string): Promise<PreparedNftNest> => {
-            const json = await stakeOne(assetId)
+            const json = await stakeOne(assetId, { deferPlatformFee: true })
             const positionId = json.position?.id
             const positionAssetId = json.position?.asset_identifier?.trim() || assetId.trim()
             if (!positionId || !positionAssetId) {
@@ -1616,16 +1644,6 @@ export function DashboardNestingClient() {
             }
           }
 
-          const completeNftNestWithoutWallet = async (prep: PreparedNftNest) => {
-            if (!prep.needsWalletFreeze) return
-            let platformFeeSig: string | null = null
-            if (platformFeeActive) {
-              setStakeTxPhase('awaiting_wallet_signature')
-              platformFeeSig = await sendStakingPlatformFee(1)
-            }
-            await confirmNftNestFreezeForPrep(prep, prep.stakeSignature, platformFeeSig)
-          }
-
           const completeNftNestWithWalletSig = async (
             prep: PreparedNftNest,
             walletSig: string | null,
@@ -1637,11 +1655,18 @@ export function DashboardNestingClient() {
 
           const freezeNftChunkInWallet = async (
             preps: PreparedNftNest[],
-            delegateAddress: string
+            delegateAddress: string,
+            platformFee?: { treasury: string; lamports: number } | null
           ): Promise<{ signature: string | null; confirmedInFallback: boolean }> => {
             const assetIds = preps.map((p) => p.assetId)
+            const perNestFeeLamports =
+              platformFee && preps.length > 0 ? Math.floor(platformFee.lamports / preps.length) : 0
             try {
-              const signature = await sendBatchMplCoreFreezeDelegateApproval(assetIds, delegateAddress)
+              const signature = await sendBatchMplCoreFreezeDelegateApproval(
+                assetIds,
+                delegateAddress,
+                platformFee
+              )
               return { signature, confirmedInFallback: false }
             } catch {
               let lastSig: string | null = null
@@ -1653,15 +1678,18 @@ export function DashboardNestingClient() {
                     `Batch tx failed — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${preps.length})…`
                   )
                 }
-                let platformFeeSig: string | null = null
-                if (platformFeeActive) {
-                  setStakeTxPhase('awaiting_wallet_signature')
-                  platformFeeSig = await sendStakingPlatformFee(1)
-                }
                 setStakeTxPhase('awaiting_wallet_signature')
-                lastSig = await sendMplCoreFreezeDelegateApproval(prep.assetId, delegateAddress)
+                const prepFee =
+                  perNestFeeLamports > 0 && platformFee
+                    ? { treasury: platformFee.treasury, lamports: perNestFeeLamports }
+                    : null
+                lastSig = await sendMplCoreFreezeDelegateApproval(
+                  prep.assetId,
+                  delegateAddress,
+                  prepFee
+                )
                 setStakeTxPhase('syncing')
-                await completeNftNestWithWalletSig(prep, lastSig, platformFeeSig)
+                await completeNftNestWithWalletSig(prep, lastSig, lastSig)
               }
               return { signature: lastSig, confirmedInFallback: true }
             }
@@ -1671,11 +1699,12 @@ export function DashboardNestingClient() {
             const totalNests = assetIds.length
             const prepared: PreparedNftNest[] = []
 
+            setStakeTxPhase('preparing')
             for (let idx = 0; idx < assetIds.length; idx++) {
               const assetId = assetIds[idx]!
               throwIfNestingAborted(signal)
               if (totalNests > 1) {
-                setNftStakeBatchHint(`Preparing nest ${idx + 1} of ${totalNests}…`)
+                setNftStakeBatchHint(`Setting up nest ${idx + 1} of ${totalNests}…`)
               }
               try {
                 prepared.push(await prepareNftNest(assetId))
@@ -1697,33 +1726,18 @@ export function DashboardNestingClient() {
               }
             }
 
-            let completed = 0
-            const needsWallet: PreparedNftNest[] = []
+            const freezePreps = prepared.filter((p) => p.needsWalletFreeze)
+            let completed = prepared.length - freezePreps.length
 
-            for (const prep of prepared) {
-              throwIfNestingAborted(signal)
-              if (!prep.needsWalletFreeze) {
-                completed += 1
-                continue
-              }
-              try {
-                await completeNftNestWithoutWallet(prep)
-                completed += 1
-              } catch (e) {
-                if (!(e instanceof NestingStakeFlowError)) throw e
-                needsWallet.push(prep)
-              }
-            }
-
-            if (needsWallet.length === 0) {
+            if (freezePreps.length === 0) {
               return { nestedCount: completed }
             }
 
-            const delegateAddress = needsWallet[0]!.delegateAddress
-            const assetIdChunks = chunkNftFreezeAssetIds(needsWallet.map((p) => p.assetId))
-            const prepByAssetId = new Map(needsWallet.map((p) => [p.assetId, p]))
+            const delegateAddress = freezePreps[0]!.delegateAddress
+            const assetIdChunks = chunkNftFreezeAssetIds(freezePreps.map((p) => p.assetId))
+            const prepByAssetId = new Map(freezePreps.map((p) => [p.assetId, p]))
             const walletApprovals =
-              assetIdChunks.length === 1 && assetIdChunks[0]!.length === needsWallet.length
+              assetIdChunks.length === 1 && assetIdChunks[0]!.length === freezePreps.length
                 ? 1
                 : assetIdChunks.length
 
@@ -1734,47 +1748,34 @@ export function DashboardNestingClient() {
                 .filter((p): p is PreparedNftNest => Boolean(p))
               throwIfNestingAborted(signal)
 
+              const chunkFeeLabel = formatStakingPlatformFeeTotalLabel(chunkPreps.length)
+              setStakeTxPhase('awaiting_wallet_signature')
               if (totalNests > 1) {
                 setNftStakeBatchHint(
                   walletApprovals > 1
-                    ? `Approve wallet batch ${chunkIdx + 1} of ${walletApprovals} — up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per transaction (${chunkPreps.length} in this batch). Stay on this page.`
-                    : `Approve one wallet transaction to lock ${chunkPreps.length} coin${chunkPreps.length === 1 ? '' : 's'}…`
+                    ? `Approve nest batch ${chunkIdx + 1} of ${walletApprovals} in your wallet (${chunkPreps.length} coins${platformFeeActive ? `, ${chunkFeeLabel} included` : ''})…`
+                    : `Approve in your wallet to confirm ${chunkPreps.length} nest${chunkPreps.length === 1 ? '' : 's'}${platformFeeActive ? ` (${chunkFeeLabel} included)` : ''}…`
                 )
+              } else if (platformFeeActive && chunkFeeLabel) {
+                setNftStakeBatchHint(`Approve in your wallet to confirm your nest (${chunkFeeLabel} included)…`)
               }
 
-              let platformFeeSig: string | null = null
-              if (platformFeeActive) {
-                setStakeTxPhase('awaiting_wallet_signature')
-                if (totalNests > 1) {
-                  setNftStakeBatchHint(
-                    `Approve platform fee for ${chunkPreps.length} nest${chunkPreps.length === 1 ? '' : 's'} (${formatStakingPlatformFeeTotalLabel(chunkPreps.length)})…`
-                  )
-                }
-                platformFeeSig = await sendStakingPlatformFee(chunkPreps.length)
-              }
-
-              setStakeTxPhase('awaiting_wallet_signature')
+              const platformFee = chunkNestPlatformFee(chunkPreps.length)
               const { signature: walletSig, confirmedInFallback } = await freezeNftChunkInWallet(
                 chunkPreps,
-                delegateAddress
+                delegateAddress,
+                platformFee
               )
+              const feeSig = platformFee && walletSig ? walletSig : null
+
               if (!confirmedInFallback) {
                 setStakeTxPhase('syncing')
                 for (const prep of chunkPreps) {
                   throwIfNestingAborted(signal)
-                  await completeNftNestWithWalletSig(prep, walletSig, platformFeeSig)
+                  await completeNftNestWithWalletSig(prep, walletSig, feeSig)
                 }
               }
               completed += chunkPreps.length
-
-              if (totalNests > 1) {
-                await loadPositions({ heal: true, silent: true })
-                if (chunkIdx < assetIdChunks.length - 1) {
-                  setNftStakeBatchHint(
-                    `${completed} of ${totalNests} done — next wallet batch opening…`
-                  )
-                }
-              }
             }
 
             return { nestedCount: completed }
@@ -3352,7 +3353,8 @@ export function DashboardNestingClient() {
                 {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length === 1
                   ? 'once'
                   : `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} times`}{' '}
-                (up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per approval). Stay on this page until finished.
+                (up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per approval). Platform fee and nest lock
+                are in the same transaction. Stay on this page until you see the success message.
               </p>
             ) : null}
             <Button

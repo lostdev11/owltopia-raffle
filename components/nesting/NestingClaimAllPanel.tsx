@@ -115,7 +115,7 @@ export function NestingClaimAllPanel({
       )}
       {platformFeeLabel && canClaim && !txInFlight ? (
         <p className="text-xs text-muted-foreground leading-relaxed text-center" role="note">
-          Platform fee: {platformFeeLabel} (one wallet approval before OWL is sent).
+          Platform fee: {platformFeeLabel} (one SOL transaction before OWL is sent).
         </p>
       ) : null}
       {disabledReason && canClaim && !txInFlight ? (

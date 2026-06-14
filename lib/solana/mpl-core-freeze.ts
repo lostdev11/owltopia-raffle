@@ -7,6 +7,10 @@ import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-ad
 import { addPlugin, fetchAsset, updatePlugin } from '@metaplex-foundation/mpl-core'
 import bs58 from 'bs58'
 import {
+  appendStakingPlatformFeeToUmiBuilder,
+  type StakingPlatformFeeUmiTransfer,
+} from '@/lib/nesting/staking-platform-fee-umi'
+import {
   isMplCoreNestingLockHeld,
   mplCoreNestCanServerRefreeze,
   mplCoreNestNeedsWalletRelock,
@@ -76,7 +80,11 @@ export async function batchRelockMplCoreNestAssetsInWallet({
   wallet,
   assetIds,
   delegateAddress,
-}: MplCoreFreezeWalletBase & { assetIds: string[] }): Promise<string | null> {
+  platformFee,
+}: MplCoreFreezeWalletBase & {
+  assetIds: string[]
+  platformFee?: StakingPlatformFeeUmiTransfer | null
+}): Promise<string | null> {
   const pubkey = wallet?.publicKey ?? wallet?.adapter?.publicKey
   if (!pubkey) {
     throw new Error('Wallet adapter not ready for MPL Core freeze lock.')
@@ -142,7 +150,11 @@ export async function batchRelockMplCoreNestAssetsInWallet({
     instructionCount += 1
   }
 
-  if (instructionCount === 0) return null
+  if (instructionCount === 0 && !(platformFee?.lamports > 0)) return null
+
+  if (platformFee?.lamports > 0) {
+    tx = appendStakingPlatformFeeToUmiBuilder(umi, tx, platformFee)
+  }
 
   try {
     const result = await tx.sendAndConfirm(umi as any)
@@ -168,7 +180,8 @@ export async function addMplCoreFreezeDelegate({
   wallet,
   assetId,
   delegateAddress,
-}: AddMplCoreFreezeDelegateArgs): Promise<string | null> {
+  platformFee,
+}: AddMplCoreFreezeDelegateArgs & { platformFee?: StakingPlatformFeeUmiTransfer | null }): Promise<string | null> {
   const pubkey = wallet?.publicKey ?? wallet?.adapter?.publicKey
   if (!pubkey) {
     throw new Error('Wallet adapter not ready for MPL Core freeze lock.')
@@ -185,8 +198,16 @@ export async function addMplCoreFreezeDelegate({
   const delegatePublicKey = publicKey(delegate)
   const assetAccount: any = await fetchAsset(umi as any, asset)
 
+  const sendFeeOnlyIfNeeded = async (): Promise<string | null> => {
+    if (!(platformFee?.lamports > 0)) return null
+    let tx = transactionBuilder()
+    tx = appendStakingPlatformFeeToUmiBuilder(umi, tx, platformFee)
+    const result = await tx.sendAndConfirm(umi as any)
+    return signatureToString(result)
+  }
+
   if (isMplCoreNestingLockHeld({ asset: assetAccount, nestingDelegateAddress: delegate, ownerWallet })) {
-    return null
+    return await sendFeeOnlyIfNeeded()
   }
 
   const maybeCollection: any =
@@ -207,7 +228,7 @@ export async function addMplCoreFreezeDelegate({
   })
 
   if (mplCoreNestCanServerRefreeze({ asset: assetAccount, nestingDelegateAddress: delegate })) {
-    return null
+    return await sendFeeOnlyIfNeeded()
   }
 
   if (existing && !needsRelock) {
@@ -217,7 +238,7 @@ export async function addMplCoreFreezeDelegate({
   }
 
   try {
-    const builder = existing
+    let builder = existing
       ? updatePlugin(umi as any, {
           ...ixBase,
           plugin: { type: 'FreezeDelegate', frozen: true },
@@ -226,6 +247,11 @@ export async function addMplCoreFreezeDelegate({
           ...ixBase,
           plugin: mplCoreFreezeDelegatePlugin(delegatePublicKey),
         } as any)
+
+    if (platformFee?.lamports > 0) {
+      builder = appendStakingPlatformFeeToUmiBuilder(umi, builder, platformFee)
+    }
+
     const result = await builder.sendAndConfirm(umi as any)
     return signatureToString(result)
   } catch (e) {
