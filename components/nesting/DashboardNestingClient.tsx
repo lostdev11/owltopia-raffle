@@ -44,6 +44,12 @@ import {
   isOwlRewardPosition,
   sumOwlPendingAccrualForPositions,
 } from '@/lib/nesting/claim-plan'
+import { sendStakingPlatformFeeTransaction } from '@/lib/nesting/client/staking-platform-fee-tx'
+import {
+  formatStakingPlatformFeePerNestLabel,
+  formatStakingPlatformFeeTotalLabel,
+  isStakingPlatformFeeEnabledClient,
+} from '@/lib/nesting/staking-platform-fee'
 
 const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
 
@@ -1343,6 +1349,21 @@ export function DashboardNestingClient() {
     [connection, publicKey, sendTransaction]
   )
 
+  const sendStakingPlatformFee = useCallback(
+    async (units: number): Promise<string> => {
+      if (!publicKey || !sendTransaction) {
+        throw new Error('Connect your wallet first.')
+      }
+      return sendStakingPlatformFeeTransaction({
+        connection,
+        sendTransaction,
+        publicKey,
+        units,
+      })
+    },
+    [connection, publicKey, sendTransaction]
+  )
+
   const sendMplCoreFreezeDelegateApproval = useCallback(
     async (assetId: string, delegateAddress: string): Promise<string | null> => {
       const adapter = wallet?.adapter
@@ -1464,6 +1485,11 @@ export function DashboardNestingClient() {
               setStakeTxPhase('awaiting_wallet_signature')
               const signature = await sendOnChainTokenStakeTransfer(pool, stakeAmount)
               throwIfNestingAborted(signal)
+              let platformFeeSig: string | null = null
+              if (isStakingPlatformFeeEnabledClient()) {
+                setStakeTxPhase('awaiting_wallet_signature')
+                platformFeeSig = await sendStakingPlatformFee(1)
+              }
               setStakeTxPhase('syncing')
               const syncRes = await fetch(nestingClientApiUrl('/api/me/staking/sync'), {
                 method: 'POST',
@@ -1472,7 +1498,12 @@ export function DashboardNestingClient() {
                   'Content-Type': 'application/json',
                   'X-Connected-Wallet': publicKey.toBase58(),
                 },
-                body: JSON.stringify({ position_id: positionId, signature, kind: 'stake' }),
+                body: JSON.stringify({
+                  position_id: positionId,
+                  signature,
+                  kind: 'stake',
+                  ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+                }),
                 signal,
               })
               const syncJson = (await syncRes.json().catch(() => ({}))) as { error?: string }
@@ -1495,7 +1526,8 @@ export function DashboardNestingClient() {
 
           const confirmNftNestFreezeForPrep = async (
             prep: PreparedNftNest,
-            freezeSignature?: string | null
+            freezeSignature?: string | null,
+            platformFeeSignature?: string | null
           ) => {
             throwIfNestingAborted(signal)
             setStakeTxPhase('syncing')
@@ -1509,6 +1541,9 @@ export function DashboardNestingClient() {
               body: JSON.stringify({
                 position_id: prep.positionId,
                 ...(freezeSignature?.trim() ? { signature: freezeSignature.trim() } : {}),
+                ...(platformFeeSignature?.trim()
+                  ? { platform_fee_signature: platformFeeSignature.trim() }
+                  : {}),
               }),
               signal,
             })
@@ -1543,15 +1578,21 @@ export function DashboardNestingClient() {
 
           const completeNftNestWithoutWallet = async (prep: PreparedNftNest) => {
             if (!prep.needsWalletFreeze) return
-            await confirmNftNestFreezeForPrep(prep, prep.stakeSignature)
+            let platformFeeSig: string | null = null
+            if (isStakingPlatformFeeEnabledClient()) {
+              setStakeTxPhase('awaiting_wallet_signature')
+              platformFeeSig = await sendStakingPlatformFee(1)
+            }
+            await confirmNftNestFreezeForPrep(prep, prep.stakeSignature, platformFeeSig)
           }
 
           const completeNftNestWithWalletSig = async (
             prep: PreparedNftNest,
-            walletSig: string | null
+            walletSig: string | null,
+            platformFeeSignature?: string | null
           ) => {
             if (!prep.needsWalletFreeze) return
-            await confirmNftNestFreezeForPrep(prep, walletSig ?? prep.stakeSignature)
+            await confirmNftNestFreezeForPrep(prep, walletSig ?? prep.stakeSignature, platformFeeSignature)
           }
 
           const freezeNftChunkInWallet = async (
@@ -1572,10 +1613,15 @@ export function DashboardNestingClient() {
                     `Batch tx failed — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${preps.length})…`
                   )
                 }
+                let platformFeeSig: string | null = null
+                if (isStakingPlatformFeeEnabledClient()) {
+                  setStakeTxPhase('awaiting_wallet_signature')
+                  platformFeeSig = await sendStakingPlatformFee(1)
+                }
                 setStakeTxPhase('awaiting_wallet_signature')
                 lastSig = await sendMplCoreFreezeDelegateApproval(prep.assetId, delegateAddress)
                 setStakeTxPhase('syncing')
-                await completeNftNestWithWalletSig(prep, lastSig)
+                await completeNftNestWithWalletSig(prep, lastSig, platformFeeSig)
               }
               return { signature: lastSig, confirmedInFallback: true }
             }
@@ -1656,6 +1702,17 @@ export function DashboardNestingClient() {
                 )
               }
 
+              let platformFeeSig: string | null = null
+              if (isStakingPlatformFeeEnabledClient()) {
+                setStakeTxPhase('awaiting_wallet_signature')
+                if (totalNests > 1) {
+                  setNftStakeBatchHint(
+                    `Approve platform fee for ${chunkPreps.length} nest${chunkPreps.length === 1 ? '' : 's'} (${formatStakingPlatformFeeTotalLabel(chunkPreps.length)})…`
+                  )
+                }
+                platformFeeSig = await sendStakingPlatformFee(chunkPreps.length)
+              }
+
               setStakeTxPhase('awaiting_wallet_signature')
               const { signature: walletSig, confirmedInFallback } = await freezeNftChunkInWallet(
                 chunkPreps,
@@ -1665,7 +1722,7 @@ export function DashboardNestingClient() {
                 setStakeTxPhase('syncing')
                 for (const prep of chunkPreps) {
                   throwIfNestingAborted(signal)
-                  await completeNftNestWithWalletSig(prep, walletSig)
+                  await completeNftNestWithWalletSig(prep, walletSig, platformFeeSig)
                 }
               }
               completed += chunkPreps.length
@@ -1748,6 +1805,11 @@ export function DashboardNestingClient() {
       await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'unstake', p),
         async execute() {
+          let platformFeeSig: string | null = null
+          if (isStakingPlatformFeeEnabledClient()) {
+            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+            platformFeeSig = await sendStakingPlatformFee(1)
+          }
           const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
             method: 'POST',
             credentials: 'include',
@@ -1755,7 +1817,10 @@ export function DashboardNestingClient() {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
-            body: JSON.stringify({ position_id: positionId }),
+            body: JSON.stringify({
+              position_id: positionId,
+              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+            }),
           })
           const json = (await res.json().catch(() => ({}))) as { error?: string }
           if (!res.ok) {
@@ -1792,6 +1857,11 @@ export function DashboardNestingClient() {
         skipPreparing: true,
         onPhase: (p) => setPosSubPhase(positionId, 'claim', p),
         async execute() {
+          let platformFeeSig: string | null = null
+          if (isStakingPlatformFeeEnabledClient()) {
+            setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
+            platformFeeSig = await sendStakingPlatformFee(1)
+          }
           const result = await fetchNestingJson<{
             error?: string
             claimed?: number
@@ -1806,7 +1876,11 @@ export function DashboardNestingClient() {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
-            body: JSON.stringify({ position_id: positionId, amount }),
+            body: JSON.stringify({
+              position_id: positionId,
+              amount,
+              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+            }),
           })
           if (result.status === 0 && !result.ok) {
             setActionError(
@@ -2036,6 +2110,11 @@ export function DashboardNestingClient() {
         skipPreparing: true,
         onPhase: setClaimAllTxPhase,
         async execute() {
+          let platformFeeSig: string | null = null
+          if (isStakingPlatformFeeEnabledClient()) {
+            setClaimAllTxPhase('awaiting_wallet_signature')
+            platformFeeSig = await sendStakingPlatformFee(claimPlans.length)
+          }
           const result = await fetchNestingJson<{
             error?: string
             ledger_sync_failed?: boolean
@@ -2056,6 +2135,9 @@ export function DashboardNestingClient() {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
+            body: JSON.stringify(
+              platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}
+            ),
           })
           if (result.status === 0 && !result.ok) {
             setActionError(

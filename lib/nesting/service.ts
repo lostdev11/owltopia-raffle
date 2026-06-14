@@ -51,6 +51,7 @@ import {
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
 import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
+import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
 
 export async function executeStake(params: {
   wallet: string
@@ -139,7 +140,11 @@ export async function executeStake(params: {
   return { ...result, pool }
 }
 
-export async function executeUnstake(params: { wallet: string; position_id: string }) {
+export async function executeUnstake(params: {
+  wallet: string
+  position_id: string
+  platform_fee_signature?: unknown
+}) {
   const position_id = params.position_id.trim()
   if (!STAKING_UUID_RE.test(position_id)) {
     throw new StakingUserError('Invalid position_id', 400)
@@ -197,6 +202,12 @@ export async function executeUnstake(params: { wallet: string; position_id: stri
   }
 
   const adapter = resolveMutationAdapter(pool)
+  await requireStakingPlatformFeeLinked({
+    wallet: params.wallet,
+    action: 'unstake',
+    feeSignature: params.platform_fee_signature,
+    positionIds: [position_id],
+  })
   return adapter.unstakePosition({
     wallet: params.wallet,
     positionId: position_id,
@@ -243,6 +254,7 @@ export async function executeClaim(params: {
   wallet: string
   position_id: string
   rawAmount: unknown
+  platform_fee_signature?: unknown
 }) {
   assertNestingClaimsAllowed()
   const position_id = params.position_id.trim()
@@ -332,6 +344,12 @@ export async function executeClaim(params: {
   }
 
   const adapter = resolveMutationAdapter(pool)
+  await requireStakingPlatformFeeLinked({
+    wallet: params.wallet,
+    action: 'claim',
+    feeSignature: params.platform_fee_signature,
+    positionIds: [position_id],
+  })
   return adapter.claimPositionRewards({
     wallet: params.wallet,
     positionId: position_id,
@@ -341,7 +359,10 @@ export async function executeClaim(params: {
 }
 
 /** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
-export async function executeClaimAll(params: { wallet: string }) {
+export async function executeClaimAll(params: {
+  wallet: string
+  platform_fee_signature?: unknown
+}) {
   assertNestingClaimsAllowed()
 
   if (isNestingClaimAllDisabled()) {
@@ -386,6 +407,13 @@ export async function executeClaimAll(params: { wallet: string }) {
   }
 
   await verifyActiveNestLocksForClaimAll(rowsToVerify, poolById)
+
+  await requireStakingPlatformFeeLinked({
+    wallet: params.wallet,
+    action: 'claim',
+    feeSignature: params.platform_fee_signature,
+    positionIds: plans.map((p) => p.positionId),
+  })
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {

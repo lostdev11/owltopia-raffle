@@ -1,6 +1,7 @@
 import { isNestingOperationsPausedInDb } from '@/lib/db/nesting-public-settings'
 import { StakingUserError } from '@/lib/nesting/errors'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
+import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 
 /** Canonical Owl Nest staking: 1 OWL per NFT per day (rounded by emission policy validation). */
 const DEFAULT_DAILY_OWL_PER_NFT = 1
@@ -120,6 +121,11 @@ export function getRequiredDailyOwlPerNft(): number {
 
 export function getNestingRewardTreasuryWallet(): string {
   return process.env.NESTING_OWL_REWARD_TREASURY_WALLET?.trim() || ''
+}
+
+/** Treasury for staking platform fees (same wallet as launchpad mint fees). */
+export function getStakingPlatformFeeTreasuryWallet(): string {
+  return getPlatformFeeTreasuryWalletAddress() ?? ''
 }
 
 /** When true, OWL reward claims may succeed with database-only credits (no SPL transfer). Default false. */

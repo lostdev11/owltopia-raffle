@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
+import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
 import { syncStakingPositionBySignature, type StakingSyncKind } from '@/lib/nesting/sync'
 import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -44,6 +45,15 @@ export async function POST(request: NextRequest) {
     }
     if (!isSyncKind(kind)) {
       return NextResponse.json({ error: 'kind must be stake, unstake, or claim' }, { status: 400 })
+    }
+
+    if (kind === 'stake') {
+      await requireStakingPlatformFeeLinked({
+        wallet: session.wallet,
+        action: 'stake',
+        feeSignature: body?.platform_fee_signature,
+        positionIds: [position_id],
+      })
     }
 
     const { position } = await syncStakingPositionBySignature({

@@ -11,6 +11,8 @@ const LEADERBOARD_EXCLUDED_BUILTIN: readonly string[] = [
   'FuknitCEim3gKsYAMnnqGD3MxnhrMecAWFPLjkZRaTHn',
   '7gra2JyY969Lt3BXLb6FMx9DxouXcEpRzpiKnc6wFgrq',
   'qg7pNNZq7qDQuc6Xkd1x4NvS2VM3aHtCqHEzucZxRGA',
+  // Launchpad + staking platform fee treasury
+  '7YxQg8HkwvH1L6iuY28JNWzJ96GWEx4qD8CK4M6nYkAY',
 ]
 
 let excludedWalletSetCache: ReadonlySet<string> | null = null

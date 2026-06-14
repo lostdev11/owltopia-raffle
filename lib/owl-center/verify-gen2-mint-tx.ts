@@ -26,7 +26,7 @@ export async function verifyGen2MintTransaction(params: {
   candyMachineId?: string | null
   /** When set, selects RPC (devnet vs mainnet verification). */
   network?: OwlMintNetwork
-  /** When true, require SOL platform fee credit to RAFFLE_RECIPIENT_WALLET in the same tx. */
+  /** When true, require SOL platform fee credit to OWL_PLATFORM_FEE_TREASURY_WALLET in the same tx. */
   requirePlatformMintFee?: boolean
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'

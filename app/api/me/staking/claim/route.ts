@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
       wallet: session.wallet,
       position_id: typeof body?.position_id === 'string' ? body.position_id.trim() : '',
       rawAmount: body?.amount,
+      platform_fee_signature: body?.platform_fee_signature,
     })
 
     const txSig =

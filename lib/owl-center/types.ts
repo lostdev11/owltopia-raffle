@@ -97,7 +97,7 @@ export type SimpleMintEligibilityResponse = {
   platform_mint_fee_lamports_estimate: string | null
   /** Human-readable platform fee label for mint UI. */
   platform_mint_fee_label: string
-  /** Receives platform USDC fee (RAFFLE_RECIPIENT_WALLET). */
+  /** Receives platform mint fee (OWL_PLATFORM_FEE_TREASURY_WALLET). */
   platform_treasury_wallet: string | null
   mint_network: 'devnet' | 'mainnet'
   mint_operational: boolean

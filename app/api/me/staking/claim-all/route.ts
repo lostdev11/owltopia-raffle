@@ -27,7 +27,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await executeClaimAll({ wallet: session.wallet })
+    const body = await request.json().catch(() => null)
+
+    const result = await executeClaimAll({
+      wallet: session.wallet,
+      platform_fee_signature: body?.platform_fee_signature,
+    })
 
     const txSig =
       typeof result.transaction_signature === 'string' ? result.transaction_signature.trim() : ''

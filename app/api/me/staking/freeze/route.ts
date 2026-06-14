@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth-server'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { getStakingPositionForWallet, patchStakingPosition } from '@/lib/db/staking-positions'
 import { assertWalletNftFrozenForNesting } from '@/lib/nesting/nft-freeze'
+import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
 import { StakingUserError, isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
@@ -51,6 +52,13 @@ export async function POST(request: NextRequest) {
       ownerWallet: session.wallet,
       assetId: position.asset_identifier,
       collectionMint: pool.collection_key,
+    })
+
+    await requireStakingPlatformFeeLinked({
+      wallet: session.wallet,
+      action: 'stake',
+      feeSignature: body?.platform_fee_signature,
+      positionIds: [position.id],
     })
 
     const updated = await patchStakingPosition(position.id, {

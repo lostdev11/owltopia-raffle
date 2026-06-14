@@ -36,7 +36,7 @@ export function appendOwlCenterPlatformMintFeeSol(
   if (!treasury) {
     return {
       ok: false,
-      error: 'Platform treasury not configured — set NEXT_PUBLIC_RAFFLE_RECIPIENT_WALLET',
+      error: 'Platform treasury not configured — set NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET',
     }
   }
 
@@ -116,7 +116,7 @@ export function verifyOwlCenterPlatformMintFeeSol(params: {
 
   const treasury = getOwlCenterPlatformTreasuryWallet()
   if (!treasury) {
-    return { ok: false, error: 'Platform treasury not configured (RAFFLE_RECIPIENT_WALLET)' }
+    return { ok: false, error: 'Platform treasury not configured (OWL_PLATFORM_FEE_TREASURY_WALLET)' }
   }
 
   const meta = params.parsed.meta

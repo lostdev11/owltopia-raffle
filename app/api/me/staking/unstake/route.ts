@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     const { position } = await executeUnstake({
       wallet: session.wallet,
       position_id,
+      platform_fee_signature: body?.platform_fee_signature,
     })
 
     return NextResponse.json({

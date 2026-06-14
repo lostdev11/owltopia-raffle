@@ -3,6 +3,12 @@ import { listActiveStakingPools } from '@/lib/db/staking-pools'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { getNestingNftFreezeDelegateAddress } from '@/lib/nesting/nft-freeze'
 import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
+import {
+  getStakingPlatformFeeLamports,
+  getStakingPlatformFeeSol,
+  isStakingPlatformFeeEnabled,
+} from '@/lib/nesting/staking-platform-fee'
+import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +27,10 @@ export async function GET() {
       nesting_disabled: pause.disabled,
       nesting_paused_by_deploy_env: pause.envKillSwitch,
       nesting_paused_by_admin: pause.adminDbPaused,
+      nesting_platform_fee_sol: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeSol() : 0,
+      nesting_platform_fee_lamports: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeLamports() : 0,
+      nesting_platform_fee_treasury:
+        isStakingPlatformFeeEnabled() ? getPlatformFeeTreasuryWalletAddress() : null,
     })
   } catch (e) {
     console.error('[staking/pools]', e)
