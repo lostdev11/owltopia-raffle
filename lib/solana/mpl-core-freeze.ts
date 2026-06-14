@@ -150,9 +150,9 @@ export async function batchRelockMplCoreNestAssetsInWallet({
     instructionCount += 1
   }
 
-  if (instructionCount === 0 && !(platformFee?.lamports > 0)) return null
+  if (instructionCount === 0 && (platformFee?.lamports ?? 0) <= 0) return null
 
-  if (platformFee?.lamports > 0) {
+  if ((platformFee?.lamports ?? 0) > 0) {
     tx = appendStakingPlatformFeeToUmiBuilder(umi, tx, platformFee)
   }
 
@@ -199,7 +199,7 @@ export async function addMplCoreFreezeDelegate({
   const assetAccount: any = await fetchAsset(umi as any, asset)
 
   const sendFeeOnlyIfNeeded = async (): Promise<string | null> => {
-    if (!(platformFee?.lamports > 0)) return null
+    if ((platformFee?.lamports ?? 0) <= 0) return null
     let tx = transactionBuilder()
     tx = appendStakingPlatformFeeToUmiBuilder(umi, tx, platformFee)
     const result = await tx.sendAndConfirm(umi as any)
@@ -248,7 +248,7 @@ export async function addMplCoreFreezeDelegate({
           plugin: mplCoreFreezeDelegatePlugin(delegatePublicKey),
         } as any)
 
-    if (platformFee?.lamports > 0) {
+    if ((platformFee?.lamports ?? 0) > 0) {
       builder = appendStakingPlatformFeeToUmiBuilder(umi, builder, platformFee)
     }
 
