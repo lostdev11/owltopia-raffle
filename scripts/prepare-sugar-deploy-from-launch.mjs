@@ -101,7 +101,7 @@ async function fetchLaunch(db, launchId) {
   if (!launchId) return null
   const { data, error } = await db
     .from('owl_center_launches')
-    .select('id,slug,name,symbol,total_supply,creator_wallet,description')
+    .select('id,slug,name,symbol,total_supply,creator_wallet,description,seller_fee_basis_points')
     .eq('id', launchId)
     .maybeSingle()
   if (error) throw error
@@ -258,7 +258,7 @@ async function main() {
     tokenStandard: 'nft',
     number: supply,
     symbol: launch?.symbol ?? 'COL',
-    sellerFeeBasisPoints: 500,
+    sellerFeeBasisPoints: Number(launch?.seller_fee_basis_points) >= 0 ? Number(launch.seller_fee_basis_points) : 500,
     isMutable: true,
     isSequential: false,
     creators: [

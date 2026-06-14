@@ -5,6 +5,7 @@ import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { launchHasPresaleProgram, launchShowsPresaleOverage } from '@/lib/owl-center/launch-presale'
 import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
 import { getLaunchMintPriceDisplay } from '@/lib/owl-center/launch-price-quotes'
+import { formatRoyaltyPercentLabel, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 type PhaseRow = { label: string; supply: number; note?: string }
@@ -94,6 +95,10 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
             </dd>
           </div>
         ) : null}
+        <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+          <dt className="text-[#5C6773]">Secondary royalty</dt>
+          <dd className="text-[#E8EEF2]">{formatRoyaltyPercentLabel(launchSellerFeeBasisPoints(launch))}</dd>
+        </div>
       </dl>
     </div>
   )

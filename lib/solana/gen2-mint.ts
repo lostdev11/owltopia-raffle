@@ -9,7 +9,8 @@ import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { buildGen2GuardMintPlan, ensureGen2AllowListProof, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
-import { appendOwlCenterPlatformMintFeeUsdc } from '@/lib/solana/owl-center-platform-mint-fee'
+import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
+import { owlCenterPlatformMintFeeUsd } from '@/lib/owl-center/platform-mint-fee'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
@@ -44,8 +45,8 @@ export type MintGen2Params = {
   launch?: Gen2MintLaunchRefs | null
   /** Override cluster for public_simple collections (independent of Gen2 devnet flag). */
   mintNetwork?: OwlMintNetwork
-  /** When true, transfer OWL_CENTER platform USDC fee to treasury in the same tx as each mint. */
-  collectPlatformMintFeeUsdc?: boolean
+  /** When true, transfer Owltopia platform SOL fee to treasury in the same tx as each mint. */
+  collectPlatformMintFee?: boolean
 }
 
 export type MintGen2Result =
@@ -70,7 +71,7 @@ export type MintGen2Result =
  * TODO: Collection authority / delegate flows if CM uses a separate update authority.
  */
 export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<MintGen2Result> {
-  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork, collectPlatformMintFeeUsdc } =
+  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork, collectPlatformMintFee } =
     params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
@@ -148,6 +149,26 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     const priorityFee = mintPriorityFeeMicroLamports()
 
+    let platformFeeLamports = 0n
+    if (collectPlatformMintFee) {
+      const feeQuote = await resolveOwlCenterPlatformMintFeeLamports()
+      if (!feeQuote.ok) {
+        return { ok: false, error: feeQuote.error }
+      }
+      platformFeeLamports = feeQuote.lamports
+
+      const walletB58 = walletAdapter.publicKey.toBase58()
+      const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
+        walletB58,
+        network,
+        platformFeeLamports,
+        getLaunchSolanaRpcUrl(network)
+      )
+      if (!feeBal.ok) {
+        return { ok: false, error: feeBal.error }
+      }
+    }
+
     const txSignatures: string[] = []
     const mintedNftMints: string[] = []
 
@@ -157,8 +178,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
-      if (collectPlatformMintFeeUsdc) {
-        const feeRes = appendOwlCenterPlatformMintFeeUsdc(umi, network, builder)
+      if (collectPlatformMintFee && platformFeeLamports > 0n) {
+        const feeRes = appendOwlCenterPlatformMintFeeSol(umi, platformFeeLamports, builder)
         if (!feeRes.ok) {
           return { ok: false, error: feeRes.error }
         }
@@ -174,7 +195,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           collectionMetadata,
           collectionMasterEdition,
           mintArgs: plan.mintArgs,
-          group: plan.groupLabel,
+          ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
         })
       )
       const res = await builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
@@ -195,14 +216,20 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       return { ok: false, error: 'Mint transaction rejected in wallet' }
     }
     if (low.includes('notenoughsol') || low.includes('not enough sol')) {
-      return { ok: false, error: 'Not enough SOL to pay the mint price + network fees.' }
+      return { ok: false, error: 'Not enough SOL for the platform fee, NFT rent, and network fees.' }
     }
-    if (low.includes('insufficient') || (low.includes('not enough') && low.includes('token'))) {
-      return { ok: false, error: 'Not enough USDC for the platform mint fee — keep $1 USDC in your wallet.' }
+    if (low.includes('simulation failed') || low.includes('accountnotfound')) {
+      const usd = owlCenterPlatformMintFeeUsd()
+      return {
+        ok: false,
+        error: collectPlatformMintFee
+          ? `Mint simulation failed — keep enough SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee plus NFT rent (~0.02 SOL), then retry.`
+          : 'Mint simulation failed — keep enough SOL for NFT rent and network fees (~0.02 SOL), then retry.',
+      }
     }
     if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
       return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }
     }
-    return { ok: false, error: msg.includes('Simulation failed') ? 'Mint transaction failed on-chain (simulation)' : msg }
+    return { ok: false, error: msg }
   }
 }

@@ -13,6 +13,7 @@ import {
   mintDetailsPayloadFromForm,
   type MintDetailsFormValues,
 } from '@/lib/owl-center/launch-mint-config'
+import { isLaunchRoyaltyLocked } from '@/lib/owl-center/royalty'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 type Props = {
@@ -67,6 +68,7 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath }
         <MintDetailsConfigFields
           values={{ ...values, total_supply: String(launch.total_supply) }}
           onChange={(next) => setValues({ ...next, total_supply: String(launch.total_supply) })}
+          royaltiesLocked={isLaunchRoyaltyLocked(launch)}
         />
         <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
           <DeployButton type="button" disabled={saving} onClick={() => void save()}>

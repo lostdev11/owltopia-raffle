@@ -25,6 +25,7 @@ import { mplCandyMachine } from '@metaplex-foundation/mpl-candy-machine'
 import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
 
 import { publicSimpleCandyGuardGuards } from '@/lib/owl-center/sugar-public-simple-guards'
+import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import type { SugarDeployConfigLine } from '@/lib/owl-center/sugar-deploy-package'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -35,7 +36,10 @@ const CONFIG_LINES_PER_TX = 10
 export const OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY = 250
 
 export type OnchainSugarDeployInput = {
-  launch: Pick<OwlCenterLaunchPublic, 'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'mint_mode' | 'mint_network'>
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'mint_mode' | 'mint_network' | 'seller_fee_basis_points'
+  >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
   collectionName: string
@@ -109,6 +113,7 @@ export async function deployPublicSimpleCandyMachineOnchain(
   const network = resolveLaunchMintNetwork(launch)
   const umi = createIrysDeployerUmi(network)
   const supply = configLines.length
+  const royaltyPercent = launchSellerFeeBasisPoints(launch) / 100
 
   const creatorAddress = launch.creator_wallet?.trim()
     ? publicKey(launch.creator_wallet.trim())
@@ -123,7 +128,7 @@ export async function deployPublicSimpleCandyMachineOnchain(
       mint: collectionMint,
       name: collectionName.slice(0, 32) || 'Collection',
       uri: collectionMetadataUri,
-      sellerFeeBasisPoints: percentAmount(5),
+      sellerFeeBasisPoints: percentAmount(royaltyPercent),
       symbol: (launch.symbol ?? 'COL').slice(0, 10),
       isCollection: true,
       collectionDetails: collectionDetails('V1', { size: supply }),
@@ -137,7 +142,7 @@ export async function deployPublicSimpleCandyMachineOnchain(
       tokenStandard: TokenStandard.NonFungible,
       itemsAvailable: supply,
       symbol: (launch.symbol ?? 'COL').slice(0, 10),
-      sellerFeeBasisPoints: percentAmount(5),
+      sellerFeeBasisPoints: percentAmount(royaltyPercent),
       maxEditionSupply: 0,
       isMutable: true,
       creators: [{ address: creatorAddress, percentageShare: 100, verified: false }],

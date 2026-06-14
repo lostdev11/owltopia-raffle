@@ -1,4 +1,5 @@
 import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
+import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import type { updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 
@@ -22,6 +23,8 @@ export const MINT_CONFIG_BODY_KEYS = new Set([
   'public_start',
   'public_phase_start',
   'phase_schedule',
+  'royalty_percent',
+  'seller_fee_basis_points',
 ])
 
 export function bodyHasMintConfigFields(body: Record<string, unknown>): boolean {
@@ -42,6 +45,16 @@ export function buildMintDetailsPatchFromBody(
   })
   if ('error' in parsed) return parsed
 
+  if (
+    isLaunchRoyaltyLocked(launch) &&
+    parsed.seller_fee_basis_points !== launchSellerFeeBasisPoints(launch)
+  ) {
+    return {
+      error:
+        'Secondary royalty is locked after Candy Machine deploy. Unminted items and already-minted NFTs keep the on-chain rate set at deploy.',
+    }
+  }
+
   return {
     total_supply: parsed.total_supply,
     presale_supply: parsed.presale_supply,
@@ -59,5 +72,6 @@ export function buildMintDetailsPatchFromBody(
     creator_mint_price: parsed.creator_mint_price,
     creator_mint_currency: parsed.creator_mint_currency,
     creator_launch_date: parsed.launch_deadline_at,
+    seller_fee_basis_points: parsed.seller_fee_basis_points,
   }
 }

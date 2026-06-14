@@ -7,9 +7,11 @@ type Props = {
   values: MintDetailsFormValues
   onChange: (next: MintDetailsFormValues) => void
   compact?: boolean
+  /** When true, royalty cannot be changed (Candy Machine already deployed). */
+  royaltiesLocked?: boolean
 }
 
-export function MintDetailsConfigFields({ values, onChange, compact }: Props) {
+export function MintDetailsConfigFields({ values, onChange, compact, royaltiesLocked = false }: Props) {
   const set = <K extends keyof MintDetailsFormValues>(key: K, v: MintDetailsFormValues[K]) =>
     onChange({ ...values, [key]: v })
 
@@ -23,6 +25,30 @@ export function MintDetailsConfigFields({ values, onChange, compact }: Props) {
           (supply split, prices, mint opens, per-wallet cap).
         </p>
       ) : null}
+
+      <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+          Secondary royalty
+        </p>
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          Creator royalty (% of secondary sales)
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.5}
+            disabled={royaltiesLocked}
+            value={values.royalty_percent}
+            onChange={(e) => set('royalty_percent', e.target.value)}
+            className="min-h-[44px] w-28 touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
+          />
+        </label>
+        <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+          {royaltiesLocked
+            ? 'Locked — set at Candy Machine deploy. Already-minted NFTs and remaining supply use this on-chain rate.'
+            : 'Choose before deploy (default 5%). Baked into the Candy Machine and every NFT minted from it. Cannot be changed after deploy.'}
+        </p>
+      </div>
 
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
@@ -202,6 +228,7 @@ export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormVa
     wl_enabled: false,
     wl_supply: '',
     wl_start: '',
+    royalty_percent: '5',
     ...partial,
   }
 }

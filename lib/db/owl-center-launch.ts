@@ -59,6 +59,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
       data.generator_project_id != null && String(data.generator_project_id).trim()
         ? String(data.generator_project_id).trim()
         : null,
+    seller_fee_basis_points: Number(data.seller_fee_basis_points ?? 500),
   }
 }
 
@@ -202,6 +203,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     creator_mint_currency: 'SOL' | 'USDC' | null
     creator_launch_date: string | null
     generator_project_id: string | null
+    seller_fee_basis_points: number
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

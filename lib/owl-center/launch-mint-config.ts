@@ -1,6 +1,12 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { DEFAULT_PRESALE_OVERAGE_SUPPLY } from '@/lib/owl-center/launch-presale'
 import { datetimeLocalToIso } from '@/lib/owl-center/phase-schedule'
+import {
+  DEFAULT_SELLER_FEE_BASIS_POINTS,
+  basisPointsToPercent,
+  launchSellerFeeBasisPoints,
+  percentToBasisPoints,
+} from '@/lib/owl-center/royalty'
 
 export type MintDetailsFormValues = {
   total_supply: string
@@ -17,6 +23,8 @@ export type MintDetailsFormValues = {
   wl_enabled: boolean
   wl_supply: string
   wl_start: string
+  /** Secondary royalty percent (0–100) — locked after Candy Machine deploy. */
+  royalty_percent: string
 }
 
 export type ParsedMintDetailsConfig = {
@@ -38,6 +46,7 @@ export type ParsedMintDetailsConfig = {
   wl_price_usdc: number | null
   creator_mint_price: number
   creator_mint_currency: 'SOL' | 'USDC'
+  seller_fee_basis_points: number
 }
 
 function pickNum(v: unknown, fallback: number): number {
@@ -133,6 +142,23 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   const public_price_usdc = currency === 'USDC' ? public_price : null
   const wl_price_usdc = wl_enabled && wl_price != null ? wl_price : null
 
+  let seller_fee_basis_points = DEFAULT_SELLER_FEE_BASIS_POINTS
+  if (body.seller_fee_basis_points != null && body.seller_fee_basis_points !== '') {
+    seller_fee_basis_points = Math.min(
+      10_000,
+      Math.max(0, Math.floor(Number(body.seller_fee_basis_points)))
+    )
+    if (!Number.isFinite(seller_fee_basis_points)) {
+      return { error: 'Invalid royalty basis points' }
+    }
+  } else if (body.royalty_percent != null && body.royalty_percent !== '') {
+    const pct = Number(body.royalty_percent)
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return { error: 'Royalty must be between 0% and 100%' }
+    }
+    seller_fee_basis_points = percentToBasisPoints(pct)
+  }
+
   return {
     total_supply,
     public_price,
@@ -152,6 +178,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     wl_price_usdc,
     creator_mint_price: public_price,
     creator_mint_currency: currency,
+    seller_fee_basis_points,
   }
 }
 
@@ -177,6 +204,7 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     wl_enabled: launch.creator_wl_enabled || launch.wl_supply > 0,
     wl_supply: String(launch.wl_supply || ''),
     wl_start: launch.phase_schedule?.WHITELIST ? isoToDatetimeLocalShort(launch.phase_schedule.WHITELIST) : '',
+    royalty_percent: String(basisPointsToPercent(launchSellerFeeBasisPoints(launch))),
   }
 }
 
@@ -210,6 +238,7 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     presale_start: values.presale_start.trim() || null,
     wl_start: values.wl_start.trim() || null,
     public_start: values.public_start.trim() || null,
+    royalty_percent: values.royalty_percent.trim() ? Number(values.royalty_percent) : undefined,
   }
 }
 

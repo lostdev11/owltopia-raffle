@@ -1,10 +1,11 @@
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
-import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsdc } from '@/lib/owl-center/platform-mint-fee'
+import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
-import { launchMintInfraConfigured, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { launchMintInfraConfigured, resolveLaunchMintNetwork, getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
+import { assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -41,6 +42,9 @@ export async function buildSimpleMintEligibility(
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
   const unit_lamports_estimate = prices_lamports.public
+  const platformFeeQuote = platformFeeEnabled ? await resolveOwlCenterPlatformMintFeeLamports() : null
+  const platform_mint_fee_lamports_estimate =
+    platformFeeQuote?.ok === true ? platformFeeQuote.lamports.toString() : null
 
   let reason: string | null = null
   let is_eligible = false
@@ -63,7 +67,20 @@ export async function buildSimpleMintEligibility(
   } else {
     max_mintable = Math.min(walletRemaining, remaining, 10)
     is_eligible = max_mintable > 0
-    if (!is_eligible) reason = 'Not eligible'
+    if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
+      const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
+        wallet,
+        mint_network,
+        platformFeeQuote.lamports,
+        getLaunchSolanaRpcUrl(mint_network)
+      )
+      if (!feeBal.ok) {
+        is_eligible = false
+        reason = feeBal.error
+        max_mintable = 0
+      }
+    }
+    if (!is_eligible && !reason) reason = 'Not eligible'
   }
 
   return {
@@ -78,7 +95,11 @@ export async function buildSimpleMintEligibility(
     unit_lamports_estimate,
     sol_usd_price: null,
     price_usdc: launch.public_price_usdc,
-    platform_mint_fee_usdc: owlCenterPlatformMintFeeUsdc(),
+    platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
+    platform_mint_fee_lamports_estimate,
+    platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(
+      platform_mint_fee_lamports_estimate != null ? BigInt(platform_mint_fee_lamports_estimate) : null
+    ),
     platform_treasury_wallet,
     mint_network,
     mint_operational,

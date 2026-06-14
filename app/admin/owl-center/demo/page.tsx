@@ -108,6 +108,7 @@ export default function AdminOwlCenterDemoPage() {
             demo.mint_network === 'devnet' || demo.mint_network === 'mainnet'
               ? demo.mint_network
               : null,
+          seller_fee_basis_points: Number(demo.seller_fee_basis_points ?? 500),
         })
         setCm(demo.candy_machine_id != null ? String(demo.candy_machine_id) : '')
         setCol(demo.collection_mint != null ? String(demo.collection_mint) : '')

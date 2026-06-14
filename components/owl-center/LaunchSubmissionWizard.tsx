@@ -22,6 +22,7 @@ import {
   formatOwlCenterPlatformMintFeeLabel,
   formatTotalMintCostHint,
 } from '@/lib/owl-center/platform-mint-fee'
+import { formatRoyaltyPercentLabel, percentToBasisPoints } from '@/lib/owl-center/royalty'
 
 const STEPS = ['Collection info', 'Supply & mint', 'Assets & metadata', 'Review'] as const
 
@@ -258,6 +259,10 @@ export function LaunchSubmissionWizard() {
               <li>
                 <span className="text-[#5C6773]">Supply / price</span> {totalSupply} @{' '}
                 {formatTotalMintCostHint(Number(mintDetails.public_price) || 0, mintDetails.currency)}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">Secondary royalty</span>{' '}
+                {formatRoyaltyPercentLabel(percentToBasisPoints(Number(mintDetails.royalty_percent) || 5))}
               </li>
               <li>
                 <span className="text-[#5C6773]">Platform fee</span> {formatOwlCenterPlatformMintFeeLabel()}

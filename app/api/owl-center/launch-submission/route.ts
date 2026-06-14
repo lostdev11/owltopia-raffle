@@ -140,6 +140,7 @@ export async function POST(request: NextRequest) {
       creator_launch_date: mintConfig.launch_deadline_at,
       mint_mode: 'public_simple',
       mint_network: 'mainnet',
+      seller_fee_basis_points: mintConfig.seller_fee_basis_points,
     })
     .select('id')
     .single()

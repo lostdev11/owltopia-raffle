@@ -75,6 +75,8 @@ export type OwlCenterLaunchPublic = {
   mint_network: 'devnet' | 'mainnet' | null
   /** Linked Owl Generator project id (Gen2 / admin export-and-stage). */
   generator_project_id: string | null
+  /** Secondary sale royalty in basis points (500 = 5%). Locked after CM deploy. */
+  seller_fee_basis_points: number
 }
 
 export type SimpleMintEligibilityResponse = {
@@ -89,8 +91,12 @@ export type SimpleMintEligibilityResponse = {
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
   price_usdc: number | null
-  /** Owltopia platform fee per mint (USDC), charged even when creator price is free. */
+  /** Owltopia platform fee per mint (USD notional; collected as SOL on-chain). */
   platform_mint_fee_usdc: number
+  /** Live lamports quote for platform fee (SOL/USD). */
+  platform_mint_fee_lamports_estimate: string | null
+  /** Human-readable platform fee label for mint UI. */
+  platform_mint_fee_label: string
   /** Receives platform USDC fee (RAFFLE_RECIPIENT_WALLET). */
   platform_treasury_wallet: string | null
   mint_network: 'devnet' | 'mainnet'

@@ -3,6 +3,7 @@ import 'server-only'
 import type { AssetUploadProgress } from '@/lib/owl-center/asset-upload-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { publicSimpleSugarGuardsConfig } from '@/lib/owl-center/sugar-public-simple-guards'
+import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 export type SugarDeployConfigLine = { name: string; uri: string }
@@ -24,7 +25,7 @@ function tokenIndexFromPath(path: string): string | null {
 /** Build Sugar config + cache items from a completed Phase B upload job. */
 export function buildSugarDeployPackageFromJob(
   job: OwlCenterAssetUploadJob,
-  launch: Pick<OwlCenterLaunchPublic, 'name' | 'symbol' | 'total_supply' | 'creator_wallet'>
+  launch: Pick<OwlCenterLaunchPublic, 'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'seller_fee_basis_points'>
 ): SugarDeployPackage {
   const uploaded = job.upload_progress.uploaded ?? {}
   const configLines: SugarDeployConfigLine[] = []
@@ -62,12 +63,13 @@ export function buildSugarDeployPackageFromJob(
   }
 
   const creator = launch.creator_wallet?.trim() || 'REPLACE_WITH_DEPLOYER_WALLET'
+  const sellerFeeBasisPoints = launchSellerFeeBasisPoints(launch)
 
   const config = {
     tokenStandard: 'nft',
     number: supply,
     symbol: launch.symbol ?? 'COL',
-    sellerFeeBasisPoints: 500,
+    sellerFeeBasisPoints,
     isMutable: true,
     isSequential: false,
     creators: [{ address: creator, share: 100 }],

@@ -86,7 +86,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     wallet,
     candyMachineId,
     network,
-    requirePlatformMintFeeUsdc: isOwlCenterPlatformMintFeeEnabled(),
+    requirePlatformMintFee: isOwlCenterPlatformMintFeeEnabled(),
   })
   if (!verified.ok) {
     const map: Record<string, string> = {
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       failed: 'Mint transaction failed on-chain',
       fee_payer_mismatch: 'Fee payer does not match wallet',
       candy_machine_missing: 'Transaction does not reference the configured Candy Machine',
-      platform_fee_missing: 'Transaction must include the USDC platform mint fee to Owltopia treasury',
+      platform_fee_missing: 'Transaction must include the SOL platform mint fee to Owltopia treasury',
     }
     return NextResponse.json({ error: map[verified.reason] ?? 'Verification failed' }, { status: 400 })
   }

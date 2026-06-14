@@ -9,7 +9,7 @@ import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
-import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
+import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -134,7 +134,7 @@ export function CollectionMintPanel({
           phase: 'PUBLIC',
           launch,
           mintNetwork,
-          collectPlatformMintFeeUsdc: shouldCollectOwlCenterPlatformMintFeeClient(),
+          collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
         })
         if (!minted.ok) {
           throw new Error(minted.error || 'mint_failed')
@@ -165,7 +165,13 @@ export function CollectionMintPanel({
       setStep('success')
       await Promise.all([loadElig(), onRefresh()])
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'mint_failed')
+      const msg = e instanceof Error ? e.message : 'mint_failed'
+      const low = msg.toLowerCase()
+      setErr(
+        low.includes('user rejected') || low.includes('cancel')
+          ? 'Mint transaction rejected in wallet'
+          : msg
+      )
       setStep('error')
     }
   }
@@ -173,7 +179,13 @@ export function CollectionMintPanel({
   const priceLabel = formatPhasePriceSolOrFree(elig?.unit_lamports_estimate ?? null, {
     paid: launch.public_price_usdc != null && launch.public_price_usdc > 0,
   })
-  const platformFeeLabel = formatOwlCenterPlatformMintFeeLabel()
+  const platformFeeLabel =
+    elig?.platform_mint_fee_label ??
+    formatOwlCenterPlatformMintFeeSolLabel(
+      elig?.platform_mint_fee_lamports_estimate != null
+        ? BigInt(elig.platform_mint_fee_lamports_estimate)
+        : null
+    )
 
   if (trading) {
     return (
@@ -199,6 +211,12 @@ export function CollectionMintPanel({
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>
+        {elig?.platform_mint_fee_usdc != null && elig.platform_mint_fee_usdc > 0 ? (
+          <p className="text-xs text-[#9BA8B4]">
+            Works with Phantom, Solflare, Jupiter, and Backpack. Free on-chain mint still needs {platformFeeLabel} plus
+            ~0.02 SOL for NFT account rent.
+          </p>
+        ) : null}
 
         {mintControls.env_kill_switch ? (
           <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
