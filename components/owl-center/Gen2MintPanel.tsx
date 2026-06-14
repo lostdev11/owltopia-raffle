@@ -98,6 +98,7 @@ export function Gen2MintPanel({
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
+  const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
   const [mintedCount, setMintedCount] = useState(0)
 
   const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
@@ -105,6 +106,7 @@ export function Gen2MintPanel({
   const dismissSuccess = useCallback(() => {
     setStep('idle')
     setLastSig(null)
+    setLastMintAddress(null)
     setMintedCount(0)
   }, [])
 
@@ -129,6 +131,7 @@ export function Gen2MintPanel({
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
+    setLastMintAddress(null)
     setMintedCount(0)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
@@ -192,6 +195,7 @@ export function Gen2MintPanel({
           throw new Error(cj.error || 'Confirm route failed')
         }
         setLastSig(sig)
+        if (mintPk) setLastMintAddress(mintPk)
         setMintedCount((c) => c + 1)
       }
       setStep('success')
@@ -251,6 +255,8 @@ export function Gen2MintPanel({
       <MintSuccessOverlay
         open={step === 'success' && Boolean(lastSig)}
         quantity={mintedCount}
+        mintAddress={lastMintAddress}
+        preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
         onClose={dismissSuccess}

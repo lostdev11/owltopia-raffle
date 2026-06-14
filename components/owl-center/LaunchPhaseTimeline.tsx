@@ -1,13 +1,24 @@
 import { cn } from '@/lib/utils'
+import { launchConfiguredTimelinePhases, resolveLaunchTimelineIndex } from '@/lib/owl-center/launch-phases'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import { formatPhaseStartShort, getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
-const ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
+const DEFAULT_ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
 
 type Props = {
   active: OwlCenterPhase
-  launch?: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>
+  launch?: Pick<
+    OwlCenterLaunchPublic,
+    | 'launch_deadline_at'
+    | 'phase_schedule'
+    | 'airdrop_supply'
+    | 'creator_presale_enabled'
+    | 'presale_supply'
+    | 'presale_overage_supply'
+    | 'wl_supply'
+    | 'public_supply'
+  >
   /** Phase where the connected wallet can mint right now. */
   userMintPhase?: OwlCenterPhase | null
   /** Phases with reserved allocation that are not live yet. */
@@ -15,12 +26,13 @@ type Props = {
 }
 
 export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, userReservedPhases = [] }: Props) {
-  const idx = ORDER.indexOf(active === 'SOLD_OUT' ? 'PUBLIC' : active)
+  const phases = launch ? launchConfiguredTimelinePhases(launch) : DEFAULT_ORDER
+  const idx = resolveLaunchTimelineIndex(phases, active)
   const reservedSet = new Set(userReservedPhases)
 
   return (
     <ol className="flex flex-wrap gap-2 md:gap-0 md:divide-x md:divide-[#1A222B]">
-      {ORDER.map((p, i) => {
+      {phases.map((p, i) => {
         const done = idx > i || active === 'SOLD_OUT'
         const current = active === p || (active === 'SOLD_OUT' && p === 'PUBLIC')
         const isUserMint = userMintPhase === p

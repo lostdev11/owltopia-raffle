@@ -75,6 +75,7 @@ export function CollectionMintPanel({
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
+  const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
   const [mintedCount, setMintedCount] = useState(0)
 
   const cmConfigured = Boolean(
@@ -97,12 +98,14 @@ export function CollectionMintPanel({
   const dismissSuccess = useCallback(() => {
     setStep('idle')
     setLastSig(null)
+    setLastMintAddress(null)
     setMintedCount(0)
   }, [])
 
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
+    setLastMintAddress(null)
     setMintedCount(0)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
@@ -160,6 +163,7 @@ export function CollectionMintPanel({
           throw new Error(cj.error || 'confirm_failed')
         }
         setLastSig(sig)
+        if (mintPk) setLastMintAddress(mintPk)
         setMintedCount((c) => c + 1)
       }
       setStep('success')
@@ -200,6 +204,8 @@ export function CollectionMintPanel({
       <MintSuccessOverlay
         open={step === 'success' && Boolean(lastSig)}
         quantity={mintedCount}
+        mintAddress={lastMintAddress}
+        preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
         onClose={dismissSuccess}
@@ -211,13 +217,6 @@ export function CollectionMintPanel({
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>
-        {elig?.platform_mint_fee_usdc != null && elig.platform_mint_fee_usdc > 0 ? (
-          <p className="text-xs text-[#9BA8B4]">
-            Works with Phantom, Solflare, Jupiter, and Backpack. Free on-chain mint still needs {platformFeeLabel} plus
-            ~0.02 SOL for NFT account rent.
-          </p>
-        ) : null}
-
         {mintControls.env_kill_switch ? (
           <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
             Mint kill switch active — contact support.

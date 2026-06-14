@@ -11,6 +11,7 @@ import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { owlCenterPlatformMintFeeUsd } from '@/lib/owl-center/platform-mint-fee'
+import { friendlySolanaRpcErrorMessage, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
@@ -122,12 +123,12 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     const candyMachine = publicKey(cmId)
     const collectionMintPk = publicKey(colMint)
     const collectionMetadata = findMetadataPda(umi, { mint: collectionMintPk })
-    const md = await fetchMetadata(umi, collectionMetadata)
+    const md = await withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata))
     const collectionUpdateAuthority = md.updateAuthority
     const collectionMasterEdition = findMasterEditionPda(umi, { mint: collectionMintPk })
 
     // Resolve guard group + mintArgs before asking the wallet for any signature.
-    const planRes = await buildGen2GuardMintPlan(umi, candyMachine, phase)
+    const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase))
     if (!planRes.ok) {
       return { ok: false, error: planRes.error }
     }
@@ -158,11 +159,13 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       platformFeeLamports = feeQuote.lamports
 
       const walletB58 = walletAdapter.publicKey.toBase58()
-      const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
-        walletB58,
-        network,
-        platformFeeLamports,
-        getLaunchSolanaRpcUrl(network)
+      const feeBal = await withSolanaRpcRetry(() =>
+        assertOwlCenterPlatformMintFeeSolBalance(
+          walletB58,
+          network,
+          platformFeeLamports,
+          getLaunchSolanaRpcUrl(network)
+        )
       )
       if (!feeBal.ok) {
         return { ok: false, error: feeBal.error }
@@ -198,7 +201,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
         })
       )
-      const res = await builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+      const res = await withSolanaRpcRetry(() =>
+        builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+      )
       const sig = res.signature as string | Uint8Array
       const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
       txSignatures.push(sigStr)
@@ -229,6 +234,10 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
       return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }
+    }
+    const rpcHint = friendlySolanaRpcErrorMessage(e)
+    if (rpcHint) {
+      return { ok: false, error: rpcHint }
     }
     return { ok: false, error: msg }
   }

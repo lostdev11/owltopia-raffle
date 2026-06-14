@@ -201,7 +201,6 @@ async function previewMintRefresh(params: {
   if (!skipReason && !tokenIndex) skipReason = 'Could not match mint to metadata index (name/URI)'
   if (!skipReason && !targetUri) skipReason = 'Missing metadata URI in upload job'
 
-  const normalizedCurrentUri = normalizeOwlCenterArweaveGatewayUri(currentUri ?? '', network)
   let jsonNeedsFix = false
   if (!skipReason && tokenIndex) {
     try {
@@ -216,11 +215,9 @@ async function previewMintRefresh(params: {
     }
   }
 
+  // Wallet-safe refresh may re-upload JSON to a new Arweave tx id — compare name + JSON quality, not job URI.
   const needsRefresh = Boolean(
-    !skipReason &&
-      targetName &&
-      targetUri &&
-      (currentName !== targetName || normalizedCurrentUri !== targetUri || jsonNeedsFix)
+    !skipReason && targetName && targetUri && (currentName !== targetName || jsonNeedsFix)
   )
 
   return {
