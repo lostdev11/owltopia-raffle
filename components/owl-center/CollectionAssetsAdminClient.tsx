@@ -208,21 +208,24 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         <Link
           href="/admin/owl-center"
-          className="font-mono text-xs uppercase tracking-widest text-[#00C97A] hover:underline"
+          className="inline-flex min-h-[44px] touch-manipulation items-center font-mono text-xs uppercase tracking-widest text-[#00C97A] hover:underline"
         >
           ← Owl Center admin
         </Link>
-        <Link href={`/owl-center/collection/${launch.slug}`} className="font-mono text-xs text-[#5C6773] hover:text-[#00FF9C]">
+        <Link
+          href={`/owl-center/collection/${launch.slug}`}
+          className="inline-flex min-h-[44px] touch-manipulation items-center font-mono text-xs text-[#5C6773] hover:text-[#00FF9C]"
+        >
           Open collection
         </Link>
       </div>
 
       <header>
-        <h1 className="font-display text-3xl text-[#F4FBF8]">Assets & metadata</h1>
-        <p className="mt-2 font-mono text-xs text-[#5C6773]">
+        <h1 className="font-display text-2xl text-[#F4FBF8] sm:text-3xl">Assets & metadata</h1>
+        <p className="mt-2 break-all font-mono text-xs leading-relaxed text-[#5C6773]">
           launch_id={launch.id} · slug={launch.slug} · assets_ready={String(launch.assets_ready)} · metadata_ready=
           {String(launch.metadata_ready)}
         </p>
@@ -436,11 +439,12 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
             </select>
           </label>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-2">
           {Number(expectedSupply) > 0 && Number(expectedSupply) !== launch.total_supply ? (
             <DeployButton
               type="button"
               variant="ghost"
+              className="w-full sm:w-auto"
               disabled={savingZone !== null}
               onClick={() => void alignLaunchSupplyToForm()}
             >
@@ -449,6 +453,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           ) : null}
           <DeployButton
             type="button"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() =>
               void patch(
@@ -480,10 +485,11 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <CommandCard label="validation_engine.sys · MANUAL_V1">
         <AssetValidationChecklist checklist={checklist} onChange={setChecklist} />
-        <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
+        <div className="mt-6 flex flex-col gap-3 border-t border-[#1A222B] pt-4 sm:flex-row sm:flex-wrap sm:gap-2">
           <DeployButton
             type="button"
             variant="ghost"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() => void patch({ validation_checklist: checklist }, 'validation')}
           >
@@ -492,6 +498,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           <DeployButton
             type="button"
             variant="ghost"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() => void patch({ action: 'mark_valid', validation_checklist: checklist }, 'validation')}
           >
@@ -500,6 +507,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           <DeployButton
             type="button"
             variant="ghost"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() => void patch({ action: 'mark_needs_review', validation_checklist: checklist }, 'validation')}
           >
@@ -507,7 +515,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           </DeployButton>
           <DeployButton
             type="button"
-            variant="ghost"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() => void patch({ action: 'mark_ready_cm', validation_checklist: checklist }, 'validation')}
           >
@@ -533,10 +541,11 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           className="w-full border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           placeholder="Problems, blockers, links to CM configs…"
         />
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-2">
           <DeployButton
             type="button"
             variant="ghost"
+            className="w-full sm:w-auto"
             disabled={savingZone !== null}
             onClick={() => void patch({ admin_notes: adminNotes }, 'notes')}
           >

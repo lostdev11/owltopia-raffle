@@ -207,7 +207,7 @@ export default function AdminOwlCenterDemoPage() {
 
   if (!connected) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+      <div className="mx-auto max-w-lg px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] text-center">
         <p className="text-[#9BA8B4]">Connect admin wallet to manage demo mint.</p>
         <div className="mt-6 flex justify-center">
           <WalletConnectButton />
@@ -226,13 +226,16 @@ export default function AdminOwlCenterDemoPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-10">
-      <Link href="/admin/owl-center" className="mb-6 inline-flex min-h-[44px] touch-manipulation items-center gap-2 text-sm text-[#9BA8B4] hover:text-[#00FF9C]">
-        <ArrowLeft className="h-4 w-4" aria-hidden />
+    <div className="mx-auto max-w-4xl px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] sm:py-10">
+      <Link
+        href="/admin/owl-center"
+        className="mb-6 inline-flex min-h-[44px] w-full touch-manipulation items-center gap-2 text-sm text-[#9BA8B4] hover:text-[#00FF9C] sm:w-auto"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
         Launchpad hub
       </Link>
 
-      <h1 className="font-display text-3xl text-[#F4FBF8]">Demo mint launchpad</h1>
+      <h1 className="font-display text-2xl text-[#F4FBF8] sm:text-3xl">Demo mint launchpad</h1>
       <p className="mt-2 text-sm text-[#9BA8B4]">
         Pre-rendered art lives in <code className="text-[#00FF9C]">collections/owl-center-demo/</code> (5 owls). Run{' '}
         <code className="text-[#00FF9C]">npm run prepare:owl-center-demo</code>, then Sugar upload/deploy. Mint here until
@@ -250,33 +253,33 @@ export default function AdminOwlCenterDemoPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
               Slug
-              <input value={slug} onChange={(e) => setSlug(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
+              <input value={slug} onChange={(e) => setSlug(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
             </label>
             <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
               Symbol
-              <input value={symbol} onChange={(e) => setSymbol(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
+              <input value={symbol} onChange={(e) => setSymbol(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
             </label>
             <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773] sm:col-span-2">
               Name
-              <input value={name} onChange={(e) => setName(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
+              <input value={name} onChange={(e) => setName(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
             </label>
             <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
               Supply
-              <input value={supply} onChange={(e) => setSupply(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
+              <input value={supply} onChange={(e) => setSupply(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm" />
             </label>
             <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
               Network
               <select
                 value={mintNetwork}
                 onChange={(e) => setMintNetwork(e.target.value as 'mainnet' | 'devnet')}
-                className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
+                className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
               >
                 <option value="mainnet">mainnet (ME + Tensor)</option>
                 <option value="devnet">devnet (smoke test)</option>
               </select>
             </label>
           </div>
-          <DeployButton className="mt-6" onClick={() => void createDemo()}>
+          <DeployButton className="mt-6 w-full sm:w-auto" onClick={() => void createDemo()}>
             Create demo launch
           </DeployButton>
         </CommandCard>
@@ -286,19 +289,19 @@ export default function AdminOwlCenterDemoPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
                 Mainnet CM
-                <input value={cm} onChange={(e) => setCm(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
+                <input value={cm} onChange={(e) => setCm(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
               </label>
               <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
                 Mainnet collection mint
-                <input value={col} onChange={(e) => setCol(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
+                <input value={col} onChange={(e) => setCol(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
               </label>
               <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
                 Devnet CM
-                <input value={devnetCm} onChange={(e) => setDevnetCm(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
+                <input value={devnetCm} onChange={(e) => setDevnetCm(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
               </label>
               <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
                 Devnet collection mint
-                <input value={devnetCol} onChange={(e) => setDevnetCol(e.target.value)} className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
+                <input value={devnetCol} onChange={(e) => setDevnetCol(e.target.value)} className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-xs" />
               </label>
               <label className="flex items-center gap-2 text-sm text-[#C5D0D8]">
                 <input type="checkbox" checked={paused} onChange={(e) => setPaused(e.target.checked)} className="h-[18px] w-[18px] accent-[#00FF9C]" />
@@ -309,32 +312,34 @@ export default function AdminOwlCenterDemoPage() {
                 <select
                   value={mintNetwork}
                   onChange={(e) => setMintNetwork(e.target.value as 'mainnet' | 'devnet')}
-                  className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
                 >
                   <option value="mainnet">mainnet</option>
                   <option value="devnet">devnet</option>
                 </select>
               </label>
             </div>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <DeployButton onClick={() => void saveLaunch()}>Save CM config</DeployButton>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <DeployButton className="w-full sm:w-auto" onClick={() => void saveLaunch()}>
+                Save CM config
+              </DeployButton>
               <a
                 href={`/owl-center/collection/${launch.slug}`}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-h-[44px] items-center gap-2 border border-[#1A222B] px-4 text-sm font-bold text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 border border-[#1A222B] px-4 text-sm font-bold text-[#9BA8B4] hover:border-[#00FF9C]/35 sm:w-auto sm:justify-start"
               >
-                Open mint page <ExternalLink className="h-4 w-4" aria-hidden />
+                Open mint page <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
               </a>
               <Link
                 href={`/admin/owl-center/collections/${launch.id}/assets#metadata-refresh`}
-                className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10"
+                className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#00FF9C]/35 px-4 text-center text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10 sm:w-auto"
               >
                 Fix wallet metadata
               </Link>
               <Link
                 href={`/admin/owl-center/collections/${launch.id}/assets`}
-                className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:text-[#00FF9C]"
+                className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:text-[#00FF9C] sm:w-auto"
               >
                 Assets admin
               </Link>
@@ -347,11 +352,13 @@ export default function AdminOwlCenterDemoPage() {
             <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
               For Magic Eden + Tensor submission after mints
             </p>
-            <DeployButton variant="ghost" onClick={() => void loadHashList()}>
-              Generate from mint events
-            </DeployButton>
-            <DeployButton
-              variant="ghost"
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <DeployButton variant="ghost" className="w-full sm:w-auto" onClick={() => void loadHashList()}>
+                Generate from mint events
+              </DeployButton>
+              <DeployButton
+                variant="ghost"
+                className="w-full sm:w-auto"
               onClick={async () => {
                 if (!launch) return
                 setMsg(null)
@@ -367,7 +374,8 @@ export default function AdminOwlCenterDemoPage() {
               }}
             >
               Run sell-out prep
-            </DeployButton>
+              </DeployButton>
+            </div>
             {hashList ? (
               <div className="mt-4 space-y-3 text-sm text-[#C5D0D8]">
                 <p>
@@ -389,7 +397,7 @@ export default function AdminOwlCenterDemoPage() {
                 />
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 text-xs text-[#00FF9C]"
+                  className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 text-xs text-[#00FF9C] sm:w-auto sm:justify-start"
                   onClick={() => void navigator.clipboard.writeText(hashList.hash_list_text)}
                 >
                   <Copy className="h-3.5 w-3.5" aria-hidden />

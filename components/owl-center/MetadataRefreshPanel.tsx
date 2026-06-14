@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -28,6 +28,18 @@ type RefreshStatus = {
   mints: MintPreview[]
 }
 
+const PANEL_LABEL = 'metadata_refresh.sys · WALLET DISPLAY'
+
+function AlertBox({ children, tone }: { children: ReactNode; tone: 'warn' | 'error' }) {
+  const styles =
+    tone === 'error'
+      ? 'border-[#FF9C9C]/30 bg-[#FF9C9C]/10 text-[#FF9C9C]'
+      : 'border-[#FFD769]/30 bg-[#FFD769]/10 text-[#FFD769]'
+  return (
+    <p className={`rounded border px-3 py-2.5 text-sm leading-relaxed ${styles}`}>{children}</p>
+  )
+}
+
 export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
   const [status, setStatus] = useState<RefreshStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -36,6 +48,8 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
   const [msg, setMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    setLoading(true)
+    setErr(null)
     try {
       const res = await fetch(`/api/admin/owl-center/collections/${launchId}/metadata-refresh`, {
         credentials: 'include',
@@ -87,7 +101,7 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
 
   if (loading) {
     return (
-      <CommandCard label="metadata_refresh.sys · WALLET DISPLAY" id="metadata-refresh">
+      <CommandCard label={PANEL_LABEL} id="metadata-refresh">
         <p className="font-mono text-xs text-[#5C6773]">Loading metadata refresh…</p>
       </CommandCard>
     )
@@ -100,42 +114,43 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
   const needsCount = status?.mints.filter((m) => m.needs_refresh).length ?? 0
 
   return (
-    <CommandCard label="metadata_refresh.sys · WALLET DISPLAY" id="metadata-refresh">
-      <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
+    <CommandCard label={PANEL_LABEL} id="metadata-refresh">
+      <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong> or a blank image in
-        Phantom/Solflare. Rewrites on-chain name + metadata URI to the Irys gateway and collection-prefixed title (uses{' '}
-        <code className="text-[#7D8A93]">IRYS_PRIVATE_KEY</code> deployer as update authority).
+        Phantom/Solflare on mobile. Updates on-chain name + metadata URI (Irys gateway + collection title).
       </p>
 
-      {err && !status ? (
-        <p className="mb-4 rounded border border-[#FF9C9C]/30 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
-          Could not load refresh status — connect an admin wallet, sign in, then retry. ({err})
-        </p>
-      ) : null}
+      <div className="mb-4 space-y-3">
+        {err && !status ? (
+          <AlertBox tone="error">
+            Connect an admin wallet, tap Sign in, then retry. ({err})
+          </AlertBox>
+        ) : null}
 
-      {!status?.enabled ? (
-        <p className="rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
-          Set <code className="text-[#C5D0D8]">IRYS_PRIVATE_KEY</code> on the server to enable metadata refresh.
-        </p>
-      ) : null}
+        {!status?.enabled ? (
+          <AlertBox tone="warn">
+            Set <code className="break-all text-[#C5D0D8]">IRYS_PRIVATE_KEY</code> on the server to enable refresh.
+          </AlertBox>
+        ) : null}
 
-      {!status?.collection_mint ? (
-        <p className="rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
-          Deploy the Candy Machine first — refresh needs a live collection mint.
-        </p>
-      ) : null}
+        {!status?.collection_mint ? (
+          <AlertBox tone="warn">Deploy the Candy Machine first — refresh needs a live collection mint.</AlertBox>
+        ) : null}
+      </div>
 
       {status?.minted_count === 0 ? (
-        <p className="text-sm text-[#9BA8B4]">No recorded mints yet — refresh appears after confirm-mint saves wallet mints.</p>
+        <p className="text-sm leading-relaxed text-[#9BA8B4]">
+          No recorded mints yet — refresh appears after confirm-mint saves wallet mints.
+        </p>
       ) : (
-        <p className="mb-3 font-mono text-xs text-[#9BA8B4]">
+        <p className="mb-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
           {status?.minted_count} recorded mint{status?.minted_count === 1 ? '' : 's'}
           {needsCount > 0 ? ` · ${needsCount} need refresh` : ' · all look current'}
         </p>
       )}
 
       {status?.mints?.length ? (
-        <ul className="mb-4 max-h-48 space-y-2 overflow-y-auto rounded border border-[#1A222B] bg-[#0B0F13] p-3 font-mono text-[11px] text-[#9BA8B4]">
+        <ul className="mb-4 max-h-56 space-y-2 overflow-y-auto overscroll-y-contain rounded border border-[#1A222B] bg-[#0B0F13] p-3 font-mono text-xs leading-relaxed text-[#9BA8B4] sm:max-h-48 sm:text-[11px]">
           {status.mints.map((m) => (
             <li key={m.mint} className="break-all">
               <span className="text-[#C5D0D8]">{m.target_name ?? m.current_name ?? m.mint.slice(0, 8)}</span>
@@ -151,24 +166,35 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
         </ul>
       ) : null}
 
-      <DeployButton
-        type="button"
-        className="min-h-[44px] w-full touch-manipulation sm:w-auto"
-        disabled={busy || !status?.eligible || needsCount === 0}
-        onClick={() => void refreshAll()}
-      >
-        {busy ? (
-          <>
-            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-            Refreshing…
-          </>
-        ) : (
-          `Refresh wallet metadata${needsCount ? ` (${needsCount})` : ''}`
-        )}
-      </DeployButton>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+        <DeployButton
+          type="button"
+          className="w-full px-4 text-sm sm:w-auto sm:px-6"
+          disabled={busy || !status?.eligible || needsCount === 0}
+          onClick={() => void refreshAll()}
+        >
+          {busy ? (
+            <>
+              <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+              Refreshing…
+            </>
+          ) : (
+            <>
+              <span className="sm:hidden">Refresh metadata{needsCount ? ` (${needsCount})` : ''}</span>
+              <span className="hidden sm:inline">Refresh wallet metadata{needsCount ? ` (${needsCount})` : ''}</span>
+            </>
+          )}
+        </DeployButton>
 
-      {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+        {err && !status ? (
+          <DeployButton type="button" variant="ghost" className="w-full sm:w-auto" onClick={() => void load()}>
+            Retry status
+          </DeployButton>
+        ) : null}
+      </div>
+
+      {err && status ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#FF9C9C]">{err}</p> : null}
+      {msg ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#00FF9C]">{msg}</p> : null}
     </CommandCard>
   )
 }
