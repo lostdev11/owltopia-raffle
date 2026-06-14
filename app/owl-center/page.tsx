@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 
 import { CollectionCard } from '@/components/owl-center/CollectionCard'
 import { Gen2FeaturedLaunch } from '@/components/owl-center/Gen2FeaturedLaunch'
-import { OwlCenterHomeGate } from '@/components/owl-center/OwlCenterHomeGate'
 import { OwlCenterHubQuickLinks, OwlCenterSubmitHint } from '@/components/owl-center/OwlCenterHubSections'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { listOwlCenterLaunchesPublic } from '@/lib/db/owl-center-launch'
@@ -30,7 +29,6 @@ export default async function OwlCenterHomePage() {
   const trading = launches.filter((l) => l.active_phase === 'TRADING_ACTIVE')
 
   return (
-    <OwlCenterHomeGate>
     <OwlCenterShell>
       <section className="mb-16 border-b border-[#1A222B] pb-14">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.4em] text-[#00C97A]">Owltopia // Command</p>
@@ -92,6 +90,5 @@ export default async function OwlCenterHomePage() {
         </div>
       </section>
     </OwlCenterShell>
-    </OwlCenterHomeGate>
   )
 }

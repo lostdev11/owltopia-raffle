@@ -13,8 +13,8 @@ export function OwlCenterHubQuickLinks() {
     <>
       <p className="mt-3 max-w-2xl text-sm text-[#5C6773]">
         {showAdminFeatures
-          ? 'Jump between Gen2 mint, presale, generator, and live drops below. Phantom / Solflare on mobile.'
-          : 'Gen2 mint, presale, and live drops. Phantom / Solflare on mobile.'}
+          ? 'Jump between live drops, Gen2 mint, presale, generator, and partner mints. Phantom / Solflare on mobile.'
+          : 'Browse live drops and mint partner collections. Connect Phantom or Solflare on mobile.'}
       </p>
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {items.map((item) => {

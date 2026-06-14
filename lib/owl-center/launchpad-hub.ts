@@ -46,7 +46,6 @@ export type LaunchpadHubPayload = {
 
 function adminHrefForLaunch(launch: OwlCenterLaunchPublic): string {
   if (launch.slug === 'gen2') return '/admin/owl-center/gen2'
-  if (launch.mint_mode === 'public_simple') return '/admin/owl-center/demo'
   return `/admin/owl-center/collections/${launch.id}/assets`
 }
 
