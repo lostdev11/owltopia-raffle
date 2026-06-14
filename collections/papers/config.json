@@ -1,0 +1,22 @@
+{
+  "tokenStandard": "nft",
+  "number": 5,
+  "symbol": "Paper",
+  "sellerFeeBasisPoints": 500,
+  "isMutable": true,
+  "isSequential": false,
+  "creators": [
+    {
+      "address": "qg7pNNZq7qDQuc6Xkd1x4NvS2VM3aHtCqHEzucZxRGA",
+      "share": 100
+    }
+  ],
+  "uploadMethod": "bundlr",
+  "ruleSet": null,
+  "awsConfig": null,
+  "sdriveApiKey": null,
+  "pinataConfig": null,
+  "hiddenSettings": null,
+  "guards": null,
+  "maxEditionSupply": null
+}

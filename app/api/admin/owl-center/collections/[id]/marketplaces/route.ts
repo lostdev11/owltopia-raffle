@@ -9,6 +9,7 @@ import {
   upsertMarketplaceReadinessForLaunch,
 } from '@/lib/db/owl-center-marketplace'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { promoteLaunchToLive } from '@/lib/owl-center/launch-go-live'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -119,6 +120,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   let row = updated
   await syncLaunchMarketplaceFieldsFromRow(id, row)
 
+  let go_live: Awaited<ReturnType<typeof promoteLaunchToLive>> | null = null
+  const autoGoLive = body.auto_go_live !== false
+  if (autoGoLive && (patch.candy_machine_id || patch.collection_mint || action)) {
+    go_live = await promoteLaunchToLive(id, { auto: true })
+  }
+
   const confirmTrading =
     body.confirm_trading_transition === true || body.confirm_trading_transition === 'true'
   const forceTrading = body.force_trading_transition === true || body.force_trading_transition === 'true'
@@ -138,7 +145,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const launchFresh = await getOwlCenterLaunchByIdAdmin(id)
   row = (await getMarketplaceReadinessByLaunchId(id)) ?? row
 
-  return NextResponse.json({ launch: launchFresh, marketplaceReadiness: row })
+  return NextResponse.json({ launch: launchFresh, marketplaceReadiness: row, go_live })
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {

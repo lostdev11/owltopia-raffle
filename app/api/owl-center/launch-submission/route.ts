@@ -152,6 +152,8 @@ export async function POST(request: NextRequest) {
       creator_mint_price: price,
       creator_mint_currency: currency,
       creator_launch_date: launchDeadline,
+      mint_mode: 'public_simple',
+      mint_network: 'mainnet',
     })
     .select('id')
     .single()

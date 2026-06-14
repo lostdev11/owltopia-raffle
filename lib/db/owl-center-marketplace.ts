@@ -97,11 +97,11 @@ export async function syncLaunchMarketplaceFieldsFromRow(
     marketplace_ready,
     updated_at: new Date().toISOString(),
   }
+  if (row.collection_mint?.trim()) launchPatch.collection_mint = row.collection_mint.trim()
+  if (row.candy_machine_id?.trim()) launchPatch.candy_machine_id = row.candy_machine_id.trim()
   if (shouldMirrorUrls) {
     launchPatch.magic_eden_url = me
     launchPatch.tensor_url = te
-    if (row.collection_mint?.trim()) launchPatch.collection_mint = row.collection_mint.trim()
-    if (row.candy_machine_id?.trim()) launchPatch.candy_machine_id = row.candy_machine_id.trim()
   }
 
   await db.from('owl_center_launches').update(launchPatch).eq('id', launchId)

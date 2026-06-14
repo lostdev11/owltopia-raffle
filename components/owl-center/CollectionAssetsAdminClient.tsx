@@ -9,6 +9,7 @@ import { AssetValidationChecklist } from '@/components/owl-center/AssetValidatio
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { LaunchGoLivePanel } from '@/components/owl-center/LaunchGoLivePanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataUploadStatusBadge } from '@/components/owl-center/MetadataUploadStatusBadge'
 import { formatValidationErrors, mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
@@ -256,6 +257,14 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
           </p>
         </details>
       </header>
+
+      <LaunchGoLivePanel
+        launchId={launchId}
+        launch={launch}
+        assetPackage={assetPackage}
+        marketplaceReadiness={bundle.marketplaceReadiness}
+        onPromoted={() => void load()}
+      />
 
       <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
@@ -528,7 +537,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <AssetPackagePanel pkg={assetPackage} />
 
-      <MarketplaceReadinessPanel launchId={launchId} launch={launch} />
+      <MarketplaceReadinessPanel launchId={launchId} launch={launch} onSaved={() => void load()} />
 
     </div>
   )

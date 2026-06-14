@@ -1,0 +1,37 @@
+{
+  "name": "Papers  #4",
+  "symbol": "Paper ",
+  "description": "Test  Project with OWL Center Token 4.",
+  "image": "https://arweave.net/8NBVaefmWPEhn3ZBPkHceJ5cJqquWQF8ZG3HiDNRMdCj",
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "light green"
+    },
+    {
+      "trait_type": "Base",
+      "value": "green"
+    },
+    {
+      "trait_type": "Eyes",
+      "value": "3"
+    },
+    {
+      "trait_type": "Mouth",
+      "value": "2"
+    },
+    {
+      "trait_type": "Nose",
+      "value": "3"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://arweave.net/8NBVaefmWPEhn3ZBPkHceJ5cJqquWQF8ZG3HiDNRMdCj",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

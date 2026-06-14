@@ -14,9 +14,10 @@ type Props = {
   launchId: string
   launch?: OwlCenterLaunchPublic | null
   compact?: boolean
+  onSaved?: () => void
 }
 
-export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compact }: Props) {
+export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compact, onSaved }: Props) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -95,10 +96,21 @@ export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compac
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-      const j = (await res.json()) as { marketplaceReadiness?: OwlCenterMarketplaceReadiness; error?: string }
+      const j = (await res.json()) as {
+        marketplaceReadiness?: OwlCenterMarketplaceReadiness
+        go_live?: { ok?: boolean; already_live?: boolean; launch?: { slug?: string } }
+        error?: string
+      }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       if (j.marketplaceReadiness) applyRow(j.marketplaceReadiness)
-      setMsg('Saved')
+      if (j.go_live?.ok && !j.go_live.already_live) {
+        setMsg('Saved — launch auto-approved and is live on the public mint console.')
+      } else if (j.go_live?.ok && j.go_live.already_live) {
+        setMsg('Saved — launch was already live.')
+      } else {
+        setMsg('Saved')
+      }
+      onSaved?.()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')
     }
