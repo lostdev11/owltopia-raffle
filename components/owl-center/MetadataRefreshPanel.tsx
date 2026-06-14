@@ -40,7 +40,13 @@ function AlertBox({ children, tone }: { children: ReactNode; tone: 'warn' | 'err
   )
 }
 
-export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
+export function MetadataRefreshPanel({
+  launchId,
+  anchorId = 'metadata-refresh',
+}: {
+  launchId: string
+  anchorId?: string
+}) {
   const [status, setStatus] = useState<RefreshStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -101,7 +107,7 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
 
   if (loading) {
     return (
-      <CommandCard label={PANEL_LABEL} id="metadata-refresh">
+      <CommandCard label={PANEL_LABEL} id={anchorId}>
         <p className="font-mono text-xs text-[#5C6773]">Loading metadata refresh…</p>
       </CommandCard>
     )
@@ -114,7 +120,7 @@ export function MetadataRefreshPanel({ launchId }: { launchId: string }) {
   const needsCount = status?.mints.filter((m) => m.needs_refresh).length ?? 0
 
   return (
-    <CommandCard label={PANEL_LABEL} id="metadata-refresh">
+    <CommandCard label={PANEL_LABEL} id={anchorId}>
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong> or a blank image in
         Phantom/Solflare on mobile. Updates on-chain name + metadata URI (Irys gateway + collection title).

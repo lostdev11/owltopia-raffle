@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
+import { OWL_CENTER_PAGE_GUTTER } from '@/lib/owl-center/layout'
 import { isOwlCenterNavActive, owlCenterNavItemsForView } from '@/lib/owl-center/nav'
 import { cn } from '@/lib/utils'
 
@@ -14,7 +15,7 @@ export function OwlCenterNav() {
 
   return (
     <div className="sticky top-0 z-40 border-b border-[#1A222B] bg-[#0F1419]/95 backdrop-blur-md supports-[backdrop-filter]:bg-[#0F1419]/88">
-      <div className="mx-auto max-w-6xl px-4 py-2 sm:py-2.5">
+      <div className={cn(OWL_CENTER_PAGE_GUTTER, 'py-2 sm:py-2.5')}>
         <div className="flex items-center gap-2">
           <nav
             aria-label="Owl Center"

@@ -56,7 +56,7 @@ export function OwlCenterSectionNav({
     <nav
       aria-label="On this page"
       className={cn(
-        'sticky top-[52px] z-30 -mx-4 border-b border-[#1A222B] bg-[#0B0F14]/92 px-4 py-2 backdrop-blur-md sm:top-[56px] md:static md:mx-0 md:mb-8 md:rounded-lg md:border md:bg-[#10161C]/80 md:px-3 md:py-3',
+        'sticky top-[52px] z-30 -mx-3 border-b border-[#1A222B] bg-[#0B0F14]/92 px-3 py-2 backdrop-blur-md sm:top-[56px] sm:-mx-4 sm:px-4 md:static md:mx-0 md:mb-8 md:rounded-lg md:border md:bg-[#10161C]/80 md:px-3 md:py-3',
         className
       )}
     >

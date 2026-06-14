@@ -18,7 +18,7 @@ export function CommandCard({
       id={id}
       className={cn(
         id ? 'scroll-mt-[max(6rem,calc(4rem+env(safe-area-inset-top)))]' : null,
-        'rounded-none border border-[#00FF9C]/25 bg-[#10161C]/90 shadow-[0_0_40px_rgba(0,255,156,0.06)] backdrop-blur-sm',
+        'w-full min-w-0 rounded-none border border-[#00FF9C]/25 bg-[#10161C]/90 shadow-[0_0_40px_rgba(0,255,156,0.06)] backdrop-blur-sm',
         'motion-reduce:shadow-none',
         className
       )}

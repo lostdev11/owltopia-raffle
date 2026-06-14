@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
+import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { useSiwsSession } from '@/hooks/use-siws-session'
@@ -80,12 +81,17 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
       ) : err ? (
         <p className="font-mono text-sm text-[#FF9C9C]">{err}</p>
       ) : launch ? (
-        <LaunchMintConfigPanel
-          launchId={launchId}
-          launch={launch}
-          saveApiPath={`/api/owl-center/launches/${launchId}/mint-config`}
-          onSaved={() => void load()}
-        />
+        <div className="space-y-8">
+          <LaunchMintConfigPanel
+            launchId={launchId}
+            launch={launch}
+            saveApiPath={`/api/owl-center/launches/${launchId}/mint-config`}
+            onSaved={() => void load()}
+          />
+          {launch.minted_count > 0 ? (
+            <MetadataRefreshPanel launchId={launchId} anchorId="metadata-refresh" />
+          ) : null}
+        </div>
       ) : null}
     </OwlCenterShell>
   )

@@ -7,7 +7,7 @@ import { OwlCenterViewProvider } from '@/components/owl-center/OwlCenterViewProv
 
 function OwlCenterChromeInner({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-[100dvh] bg-[#0F1419] text-[#E8EEF2]">
+    <div className="min-h-[100dvh] w-full min-w-0 overflow-x-hidden bg-[#0F1419] text-[#E8EEF2]">
       <OwlCenterNav />
       {children}
     </div>
