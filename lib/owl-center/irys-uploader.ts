@@ -8,6 +8,7 @@ import 'server-only'
 import { resolveGen2SolUsdPrice } from '@/lib/gen2-presale/sol-usd-price'
 import { lamportsToSolDisplay } from '@/lib/gen2-presale/format-sol'
 import { irysNetworkLabel, isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
+import { normalizeOwlCenterArweaveGatewayUri } from '@/lib/owl-center/arweave-gateway-uri'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export { isIrysUploadConfigured, irysNetworkLabel } from '@/lib/owl-center/irys-config'
@@ -177,10 +178,10 @@ export async function uploadBufferToArweaveViaIrys(
     })
 
     const id = String(receipt.id)
-    const gatewayHost = irysNetworkLabel() === 'devnet' ? 'arweave.dev' : 'arweave.net'
+    const network = irysNetworkLabel()
     return {
       id,
-      uri: `https://${gatewayHost}/${id}`,
+      uri: normalizeOwlCenterArweaveGatewayUri(`https://arweave.net/${id}`, network),
     }
   } catch (e) {
     throw new Error(formatIrysUploadError(e, payerAddress))

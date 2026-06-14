@@ -22,6 +22,20 @@ function tokenIndexFromPath(path: string): string | null {
   return m ? m[1] : null
 }
 
+/** On-chain NFT name = prefixName + config line name (e.g. "Papers #" + "2" → "Papers #2"). */
+export function sugarConfigLinePrefixName(collectionName: string, indexDigitLength: number): string {
+  const base = (collectionName || 'Collection').trim() || 'Collection'
+  const suffix = ' #'
+  const maxTotal = 32
+  const maxPrefix = Math.max(1, maxTotal - Math.max(1, indexDigitLength))
+  const trimmed = base.slice(0, Math.max(1, maxPrefix - suffix.length))
+  return `${trimmed}${suffix}`
+}
+
+export function sugarConfigLineNameLength(configLines: SugarDeployConfigLine[]): number {
+  return Math.max(1, ...configLines.map((l) => l.name.length))
+}
+
 /** Build Sugar config + cache items from a completed Phase B upload job. */
 export function buildSugarDeployPackageFromJob(
   job: OwlCenterAssetUploadJob,
@@ -65,6 +79,10 @@ export function buildSugarDeployPackageFromJob(
   const creator = launch.creator_wallet?.trim() || 'REPLACE_WITH_DEPLOYER_WALLET'
   const sellerFeeBasisPoints = launchSellerFeeBasisPoints(launch)
 
+  const nameLength = sugarConfigLineNameLength(configLines)
+  const prefixName = sugarConfigLinePrefixName(launch.name ?? 'Collection', nameLength)
+  const uriLength = Math.max(32, ...configLines.map((l) => l.uri.length))
+
   const config = {
     tokenStandard: 'nft',
     number: supply,
@@ -79,6 +97,13 @@ export function buildSugarDeployPackageFromJob(
     sdriveApiKey: null,
     pinataConfig: null,
     hiddenSettings: null,
+    configLineSettings: {
+      prefixName,
+      nameLength,
+      prefixUri: '',
+      uriLength,
+      isSequential: false,
+    },
     guards: publicSimpleSugarGuardsConfig(),
     maxEditionSupply: null,
   }

@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { fetchParsedTransactionConfirmed, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
+import { fetchParsedTransactionConfirmed, feePayerMatchesBuyer, collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
 import {
   owlCenterPlatformMintFeeVerifyBand,
   resolveOwlCenterPlatformMintFeeLamports,
@@ -44,30 +44,7 @@ export async function verifyGen2MintTransaction(params: {
   if (cm) {
     try {
       const cmPk = new PublicKey(cm)
-      const msg = parsed.transaction.message as unknown as {
-        getAccountKeys?: (o: { accountKeysFromLookups?: unknown }) => {
-          staticAccountKeys: PublicKey[]
-          keySegments?: () => Iterable<{ readonly: PublicKey[]; writable: PublicKey[] }>
-        }
-      }
-      const keys = msg.getAccountKeys?.({
-        accountKeysFromLookups: parsed.meta?.loadedAddresses,
-      })
-      const flat: PublicKey[] = []
-      if (keys?.staticAccountKeys?.length) flat.push(...keys.staticAccountKeys)
-      const seg = keys?.keySegments?.()
-      if (seg) {
-        for (const s of seg) {
-          flat.push(...s.readonly, ...s.writable)
-        }
-      }
-      const loaded = parsed.meta?.loadedAddresses as { writable?: string[]; readonly?: string[] } | undefined
-      if (loaded?.writable?.length) {
-        for (const s of loaded.writable) flat.push(new PublicKey(s))
-      }
-      if (loaded?.readonly?.length) {
-        for (const s of loaded.readonly) flat.push(new PublicKey(s))
-      }
+      const flat = collectParsedTransactionAccountKeys(parsed)
       const hit = flat.some((k) => k.equals(cmPk))
       if (!hit) {
         return { ok: false, reason: 'candy_machine_missing' }

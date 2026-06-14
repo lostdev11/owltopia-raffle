@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Gen2GeneratorLinkPanel } from '@/components/owl-center/Gen2GeneratorLinkPanel'
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
 import { AssetPackageUploadPanel } from '@/components/owl-center/AssetPackageUploadPanel'
+import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { SugarDeployPanel } from '@/components/owl-center/SugarDeployPanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
@@ -273,6 +274,8 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
       <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
       <SugarDeployPanel launchId={launchId} onApplied={() => void load()} />
+
+      <MetadataRefreshPanel launchId={launchId} />
 
       <SugarBatchScanner
         expectedSupply={Number(expectedSupply) || launch.total_supply}
