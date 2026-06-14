@@ -8,6 +8,7 @@ import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSi
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { useSiwsSession } from '@/hooks/use-siws-session'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 type Props = {
@@ -16,22 +17,10 @@ type Props = {
 
 export function CreatorMintDetailsClient({ launchId }: Props) {
   const { connected } = useWallet()
-  const [signedIn, setSignedIn] = useState<boolean | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { signedIn, checking, checkSession } = useSiwsSession()
+  const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [launch, setLaunch] = useState<OwlCenterLaunchPublic | null>(null)
-
-  const checkSession = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/wallet-session', { credentials: 'include', cache: 'no-store' })
-      const j = (await res.json()) as { signedIn?: boolean }
-      setSignedIn(Boolean(j.signedIn))
-      return Boolean(j.signedIn)
-    } catch {
-      setSignedIn(false)
-      return false
-    }
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -51,10 +40,6 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
       setLoading(false)
     }
   }, [launchId])
-
-  useEffect(() => {
-    void checkSession()
-  }, [checkSession])
 
   useEffect(() => {
     if (signedIn) void load()
@@ -78,13 +63,15 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
         <p className="font-mono text-sm text-[#9BA8B4]">
           Connect your Solana wallet in the header, then sign in to edit mint details.
         </p>
-      ) : signedIn === false ? (
+      ) : checking ? (
+        <p className="font-mono text-sm text-[#5C6773]">Checking sign-in…</p>
+      ) : !signedIn ? (
         <Gen2PresaleSignInPrompt
           title="Sign in with your creator wallet"
           message="Use the same wallet you submitted with. On mobile, stay in your wallet browser after signing."
           onSignedIn={() => {
-            void checkSession().then((ok) => {
-              if (ok) void load()
+            void checkSession().then((wallet) => {
+              if (wallet) void load()
             })
           }}
         />

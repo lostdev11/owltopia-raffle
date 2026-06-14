@@ -7,6 +7,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
+import { useSiwsSession } from '@/hooks/use-siws-session'
 
 type LaunchRow = {
   id: string
@@ -22,30 +23,20 @@ type LaunchRow = {
 
 export function CreatorLaunchesClient() {
   const { connected } = useWallet()
-  const [signedIn, setSignedIn] = useState<boolean | null>(null)
+  const { signedIn, checking, checkSession } = useSiwsSession()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [launches, setLaunches] = useState<LaunchRow[]>([])
-
-  const checkSession = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/wallet-session', { credentials: 'include', cache: 'no-store' })
-      const j = (await res.json()) as { signedIn?: boolean }
-      setSignedIn(Boolean(j.signedIn))
-      return Boolean(j.signedIn)
-    } catch {
-      setSignedIn(false)
-      return false
-    }
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
     try {
       const res = await fetch('/api/owl-center/my-launches', { credentials: 'include', cache: 'no-store' })
-      const j = (await res.json()) as { error?: string; launches?: LaunchRow[] }
+      const j = (await res.json()) as { error?: string; launches?: LaunchRow[]; isAdmin?: boolean }
       if (!res.ok) throw new Error(j.error || 'load_failed')
+      setIsAdmin(Boolean(j.isAdmin))
       setLaunches(j.launches ?? [])
     } catch (e) {
       setLaunches([])
@@ -54,10 +45,6 @@ export function CreatorLaunchesClient() {
       setLoading(false)
     }
   }, [])
-
-  useEffect(() => {
-    void checkSession()
-  }, [checkSession])
 
   useEffect(() => {
     if (signedIn) void load()
@@ -73,18 +60,26 @@ export function CreatorLaunchesClient() {
         <p className="font-mono text-sm text-[#9BA8B4]">
           Connect your Solana wallet in the header (Phantom / Solflare on mobile), then sign in below.
         </p>
-      ) : signedIn === false ? (
+      ) : checking ? (
+        <p className="font-mono text-sm text-[#5C6773]">Checking sign-in…</p>
+      ) : !signedIn ? (
         <Gen2PresaleSignInPrompt
           title="Sign in with your creator wallet"
           message="One-time wallet signature — same as presale. Required so we can match you to your submitted collections on mobile."
           onSignedIn={() => {
-            void checkSession().then((ok) => {
-              if (ok) void load()
+            void checkSession().then((wallet) => {
+              if (wallet) void load()
             })
           }}
         />
       ) : (
         <div className="grid max-w-2xl gap-6">
+          {isAdmin ? (
+            <p className="font-mono text-xs text-[#5C6773]">
+              Admin view — showing all creator launches (not only rows where you are{' '}
+              <span className="text-[#9BA8B4]">creator_wallet</span>).
+            </p>
+          ) : null}
           {loading ? <p className="font-mono text-sm text-[#5C6773]">Loading your launches…</p> : null}
           {err ? <p className="font-mono text-sm text-[#FF9C9C]">{err}</p> : null}
           {!loading && !err && launches.length === 0 ? (

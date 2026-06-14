@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isOwlVisionAdmin } from '@/lib/admin/access'
 import { requireSession } from '@/lib/auth-server'
-import { listOwlCenterLaunchesByCreatorWallet } from '@/lib/db/owl-center-launch'
+import { listOwlCenterLaunchesAdmin, listOwlCenterLaunchesByCreatorWallet } from '@/lib/db/owl-center-launch'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -21,12 +22,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
   }
 
-  const launches = await listOwlCenterLaunchesByCreatorWallet(wallet)
+  const isAdmin = await isOwlVisionAdmin(wallet)
+  const rows = isAdmin
+    ? (await listOwlCenterLaunchesAdmin()).filter((l) => l.slug !== 'gen2')
+    : await listOwlCenterLaunchesByCreatorWallet(wallet)
 
   return NextResponse.json({
     ok: true,
     wallet,
-    launches: launches.map((l) => ({
+    isAdmin,
+    launches: rows.map((l) => ({
       id: l.id,
       slug: l.slug,
       name: l.name,
