@@ -62,7 +62,8 @@ export function resolveOwlCenterMintRpcUrl(): string {
   }
   const direct = process.env.NEXT_PUBLIC_MINT_SOLANA_RPC_URL?.trim()
   if (direct) return sanitizeRpcUrl(direct)
-  return '/api/solana/rpc'
+  // Umi / web3.js Connection reject relative paths ("Endpoint URL must start with http: or https:").
+  return `${window.location.origin}/api/solana/rpc`
 }
 
 /** Browser/server RPC for a specific launch mint (respects per-launch network). */

@@ -578,6 +578,11 @@ export function DashboardNestingClient() {
   const claimableNestCount = claimAllPreview.count
   const claimAllReady = claimAllPreview.ready
 
+  const claimAllPlatformFeeLabel = useMemo(() => {
+    if (!platformFeeActive || !claimAllReady || claimableNestCount < 1) return null
+    return formatStakingPlatformFeeTotalLabel(claimableNestCount)
+  }, [platformFeeActive, claimAllReady, claimableNestCount])
+
   const claimAllBusy = claimAllTxPhase !== 'idle'
 
   /** Deploy kill switch only — admin “pause holder actions” still allows claims. */
@@ -2447,6 +2452,7 @@ export function DashboardNestingClient() {
         activeOwlNestCount={activeOwlNestCount}
         claimableNestCount={claimableNestCount}
         totalOwl={claimAllPreview.totalOwl}
+        platformFeeLabel={claimAllPlatformFeeLabel}
         busy={claimAllBusy}
         disabled={claimAllButtonDisabled}
         disabledReason={claimAllDisabledReason}
@@ -3393,6 +3399,7 @@ export function DashboardNestingClient() {
           activeOwlNestCount={activeOwlNestCount}
           claimableNestCount={claimableNestCount}
           totalOwl={claimAllPreview.totalOwl}
+          platformFeeLabel={claimAllPlatformFeeLabel}
           busy={claimAllBusy}
           disabled={claimAllButtonDisabled}
           disabledReason={claimAllDisabledReason}

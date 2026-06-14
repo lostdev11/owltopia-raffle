@@ -49,7 +49,7 @@ export async function requireStakingPlatformFeeLinked(params: {
 
   if (!feeSignature) {
     throw new StakingUserError(
-      `Platform fee required: ${feeLabel} for each nest ${params.action}. Approve the fee in your wallet and try again.`,
+      `Platform fee required: ${feeLabel} for each nested NFT ${params.action}. Approve the fee in your wallet and try again.`,
       400
     )
   }

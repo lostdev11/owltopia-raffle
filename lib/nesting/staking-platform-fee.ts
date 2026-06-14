@@ -60,12 +60,15 @@ export function formatStakingPlatformFeePerNestLabel(): string {
   const sol = getStakingPlatformFeeSol()
   if (sol <= 0) return 'No platform fee'
   const str = sol >= 0.01 ? sol.toFixed(3) : sol.toFixed(4)
-  return `${str} SOL per nest`
+  return `${str} SOL per nested NFT`
 }
 
 export function formatStakingPlatformFeeTotalLabel(units: number): string {
-  if (!isStakingPlatformFeeEnabledClient() || units <= 0) return ''
-  const total = getStakingPlatformFeeSol() * units
-  const str = total >= 0.01 ? total.toFixed(3) : total.toFixed(4)
-  return `${str} SOL platform fee (${units} nest${units === 1 ? '' : 's'} × ${getStakingPlatformFeeSol()} SOL)`
+  if (units <= 0) return ''
+  const unitSol = getStakingPlatformFeeSol()
+  if (unitSol <= 0) return ''
+  const total = unitSol * units
+  const totalStr = total >= 0.01 ? total.toFixed(3) : total.toFixed(4)
+  const unitStr = unitSol >= 0.01 ? unitSol.toFixed(3) : unitSol.toFixed(4)
+  return `${totalStr} SOL platform fee (${units} NFT${units === 1 ? '' : 's'} × ${unitStr} SOL)`
 }

@@ -16,6 +16,8 @@ type Props = {
   activeOwlNestCount: number
   claimableNestCount: number
   totalOwl: number
+  /** e.g. "0.003 SOL platform fee (3 NFTs × 0.001 SOL)" when fees apply. */
+  platformFeeLabel?: string | null
   busy: boolean
   disabled: boolean
   disabledReason: string | null
@@ -29,6 +31,7 @@ export function NestingClaimAllPanel({
   activeOwlNestCount,
   claimableNestCount,
   totalOwl,
+  platformFeeLabel,
   busy,
   disabled,
   disabledReason,
@@ -110,6 +113,11 @@ export function NestingClaimAllPanel({
             : 'Claim all — accruing OWL'}
         </Button>
       )}
+      {platformFeeLabel && canClaim && !txInFlight ? (
+        <p className="text-xs text-muted-foreground leading-relaxed text-center" role="note">
+          Platform fee: {platformFeeLabel} (one wallet approval before OWL is sent).
+        </p>
+      ) : null}
       {disabledReason && canClaim && !txInFlight ? (
         <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
           {disabledReason}
