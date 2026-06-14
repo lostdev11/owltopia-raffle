@@ -6,6 +6,17 @@ export function owlCenterPlatformMintFeeUsdc(): number {
   return Number.isFinite(n) && n >= 0 ? n : 1
 }
 
+const USDC_DECIMALS = 6
+
+export function isOwlCenterPlatformMintFeeEnabled(): boolean {
+  return owlCenterPlatformMintFeeUsdc() > 0
+}
+
+/** Raw USDC atoms (6 decimals) for on-chain transfer instructions. */
+export function owlCenterPlatformMintFeeUsdcRaw(): bigint {
+  return BigInt(Math.round(owlCenterPlatformMintFeeUsdc() * 10 ** USDC_DECIMALS))
+}
+
 export function formatOwlCenterPlatformMintFeeLabel(): string {
   const fee = owlCenterPlatformMintFeeUsdc()
   if (fee <= 0) return 'No platform mint fee'

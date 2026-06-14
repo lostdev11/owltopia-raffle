@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
+import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 
@@ -25,6 +26,7 @@ type LaunchRow = {
 export function CreatorLaunchesClient() {
   const { connected } = useWallet()
   const { signedIn, checking, checkSession } = useSiwsSession()
+  const { isOwlCenterAdmin, adminLoading } = useOwlCenterView()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -57,7 +59,19 @@ export function CreatorLaunchesClient() {
       title="My launches"
       subtitle="Edit mint details shown on your collection card — prices, phases, dates, and per-wallet caps."
     >
-      {!connected ? (
+      {!adminLoading && !isOwlCenterAdmin ? (
+        <div className="max-w-lg space-y-4">
+          <p className="font-mono text-sm text-[#9BA8B4]">
+            Launchpad creator tools are for Owl Vision admins only. Partner collections will appear here when announced.
+          </p>
+          <Link
+            href="/owl-center/collection/gen2"
+            className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16"
+          >
+            Go to Gen2 mint
+          </Link>
+        </div>
+      ) : !connected ? (
         <p className="font-mono text-sm text-[#9BA8B4]">
           Connect your Solana wallet in the header (Phantom / Solflare on mobile), then sign in below.
         </p>

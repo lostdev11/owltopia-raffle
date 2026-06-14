@@ -9,6 +9,7 @@ import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { buildGen2GuardMintPlan, ensureGen2AllowListProof, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
+import { appendOwlCenterPlatformMintFeeUsdc } from '@/lib/solana/owl-center-platform-mint-fee'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
@@ -43,6 +44,8 @@ export type MintGen2Params = {
   launch?: Gen2MintLaunchRefs | null
   /** Override cluster for public_simple collections (independent of Gen2 devnet flag). */
   mintNetwork?: OwlMintNetwork
+  /** When true, transfer OWL_CENTER platform USDC fee to treasury in the same tx as each mint. */
+  collectPlatformMintFeeUsdc?: boolean
 }
 
 export type MintGen2Result =
@@ -67,7 +70,8 @@ export type MintGen2Result =
  * TODO: Collection authority / delegate flows if CM uses a separate update authority.
  */
 export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<MintGen2Result> {
-  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork } = params
+  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork, collectPlatformMintFeeUsdc } =
+    params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
   }
@@ -153,6 +157,13 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
+      if (collectPlatformMintFeeUsdc) {
+        const feeRes = appendOwlCenterPlatformMintFeeUsdc(umi, network, builder)
+        if (!feeRes.ok) {
+          return { ok: false, error: feeRes.error }
+        }
+        builder = feeRes.builder
+      }
       builder = builder.add(
         mintV2(umi, {
           candyMachine,
@@ -185,6 +196,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     if (low.includes('notenoughsol') || low.includes('not enough sol')) {
       return { ok: false, error: 'Not enough SOL to pay the mint price + network fees.' }
+    }
+    if (low.includes('insufficient') || (low.includes('not enough') && low.includes('token'))) {
+      return { ok: false, error: 'Not enough USDC for the platform mint fee — keep $1 USDC in your wallet.' }
     }
     if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
       return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }

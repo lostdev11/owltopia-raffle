@@ -9,6 +9,7 @@ import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
+import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import {
@@ -124,6 +125,7 @@ export function CollectionMintPanel({
           phase: 'PUBLIC',
           launch,
           mintNetwork,
+          collectPlatformMintFeeUsdc: shouldCollectOwlCenterPlatformMintFeeClient(),
         })
         if (!minted.ok) {
           throw new Error(minted.error || 'mint_failed')

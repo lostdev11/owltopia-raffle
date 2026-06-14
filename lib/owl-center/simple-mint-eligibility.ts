@@ -1,7 +1,8 @@
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
-import { owlCenterPlatformMintFeeUsdc } from '@/lib/owl-center/platform-mint-fee'
+import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsdc } from '@/lib/owl-center/platform-mint-fee'
+import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { launchMintInfraConfigured, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -26,8 +27,12 @@ export async function buildSimpleMintEligibility(
   if (!launch || launch.mint_mode !== 'public_simple') return null
 
   const mint_network = resolveLaunchMintNetwork(launch)
+  const platform_treasury_wallet = getOwlCenterPlatformTreasuryWallet()
+  const platformFeeEnabled = isOwlCenterPlatformMintFeeEnabled()
   const mint_operational =
-    !isOwlCenterMintGloballyDisabled(launch.is_paused) && launchMintInfraConfigured(launch)
+    !isOwlCenterMintGloballyDisabled(launch.is_paused) &&
+    launchMintInfraConfigured(launch) &&
+    (!platformFeeEnabled || !!platform_treasury_wallet)
 
   const remaining = Math.max(0, launch.total_supply - launch.minted_count)
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
@@ -44,7 +49,9 @@ export async function buildSimpleMintEligibility(
   if (buildOwlCenterMintControls(launch.is_paused).disabled) {
     reason = 'Mint is paused'
   } else if (!mint_operational) {
-    reason = 'Candy Machine not configured — admin must set CM + collection mint'
+    reason = platformFeeEnabled && !platform_treasury_wallet
+      ? 'Platform treasury not configured — contact support'
+      : 'Candy Machine not configured — admin must set CM + collection mint'
   } else if (launch.active_phase === 'SOLD_OUT' || launch.active_phase === 'TRADING_ACTIVE' || remaining <= 0) {
     reason = 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
@@ -72,6 +79,7 @@ export async function buildSimpleMintEligibility(
     sol_usd_price: null,
     price_usdc: launch.public_price_usdc,
     platform_mint_fee_usdc: owlCenterPlatformMintFeeUsdc(),
+    platform_treasury_wallet,
     mint_network,
     mint_operational,
   }

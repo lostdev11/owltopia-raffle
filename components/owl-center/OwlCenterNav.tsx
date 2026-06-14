@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 
 export function OwlCenterNav() {
   const pathname = usePathname() ?? ''
-  const { showAdminFeatures } = useOwlCenterView()
+  const { showAdminFeatures, isOwlCenterAdmin, adminLoading } = useOwlCenterView()
   const items = owlCenterNavItemsForView(showAdminFeatures)
 
   return (
@@ -23,6 +23,25 @@ export function OwlCenterNav() {
             {items.map((item) => {
               const active = isOwlCenterNavActive(pathname, item)
               const Icon = item.icon
+              const disabled = item.adminOnly && (adminLoading || !isOwlCenterAdmin)
+
+              if (disabled) {
+                return (
+                  <span
+                    key={item.href}
+                    title={`${item.description} (admin only)`}
+                    aria-disabled="true"
+                    className={cn(
+                      'inline-flex min-h-[44px] shrink-0 cursor-not-allowed touch-manipulation items-center gap-1.5 rounded-md border border-transparent px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773] opacity-55 sm:px-3.5 sm:text-[11px]'
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                    <span className="hidden sm:inline">{item.label}</span>
+                    <span className="sm:hidden">{item.shortLabel ?? item.label}</span>
+                  </span>
+                )
+              }
+
               return (
                 <Link
                   key={item.href}

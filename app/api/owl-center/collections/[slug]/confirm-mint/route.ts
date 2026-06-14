@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
+import { isOwlCenterPlatformMintFeeEnabled } from '@/lib/owl-center/platform-mint-fee'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
@@ -80,13 +81,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     )
   }
 
-  const verified = await verifyGen2MintTransaction({ txSignature: txSig, wallet, candyMachineId, network })
+  const verified = await verifyGen2MintTransaction({
+    txSignature: txSig,
+    wallet,
+    candyMachineId,
+    network,
+    requirePlatformMintFeeUsdc: isOwlCenterPlatformMintFeeEnabled(),
+  })
   if (!verified.ok) {
     const map: Record<string, string> = {
       not_found: 'Transaction not found on the selected network RPC',
       failed: 'Mint transaction failed on-chain',
       fee_payer_mismatch: 'Fee payer does not match wallet',
       candy_machine_missing: 'Transaction does not reference the configured Candy Machine',
+      platform_fee_missing: 'Transaction must include the USDC platform mint fee to Owltopia treasury',
     }
     return NextResponse.json({ error: map[verified.reason] ?? 'Verification failed' }, { status: 400 })
   }

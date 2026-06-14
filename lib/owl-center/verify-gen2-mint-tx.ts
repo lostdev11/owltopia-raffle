@@ -1,12 +1,13 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { fetchParsedTransactionConfirmed, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
+import { verifyOwlCenterPlatformMintFeeUsdc } from '@/lib/solana/owl-center-platform-mint-fee'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { resolveOwlCenterMintVerifyRpcUrl, type OwlMintNetwork } from '@/lib/solana/network'
 
 export type VerifyGen2MintTxResult =
   | { ok: true }
-  | { ok: false; reason: 'not_found' | 'failed' | 'fee_payer_mismatch' | 'candy_machine_missing' }
+  | { ok: false; reason: 'not_found' | 'failed' | 'fee_payer_mismatch' | 'candy_machine_missing' | 'platform_fee_missing' }
 
 /**
  * Confirms the signature exists, succeeded, and fee payer matches minter.
@@ -21,6 +22,8 @@ export async function verifyGen2MintTransaction(params: {
   candyMachineId?: string | null
   /** When set, selects RPC (devnet vs mainnet verification). */
   network?: OwlMintNetwork
+  /** When true, require USDC platform fee credit to RAFFLE_RECIPIENT_WALLET in the same tx. */
+  requirePlatformMintFeeUsdc?: boolean
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'
   const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(net), 'confirmed')
@@ -67,6 +70,13 @@ export async function verifyGen2MintTransaction(params: {
       }
     } catch {
       return { ok: false, reason: 'candy_machine_missing' }
+    }
+  }
+
+  if (params.requirePlatformMintFeeUsdc) {
+    const feeCheck = verifyOwlCenterPlatformMintFeeUsdc({ parsed, network: net })
+    if (!feeCheck.ok) {
+      return { ok: false, reason: 'platform_fee_missing' }
     }
   }
 

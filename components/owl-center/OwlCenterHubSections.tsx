@@ -6,7 +6,7 @@ import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { owlCenterNavItemsForView } from '@/lib/owl-center/nav'
 
 export function OwlCenterHubQuickLinks() {
-  const { showAdminFeatures } = useOwlCenterView()
+  const { showAdminFeatures, isOwlCenterAdmin, adminLoading } = useOwlCenterView()
   const items = owlCenterNavItemsForView(showAdminFeatures).filter((item) => item.href !== '/owl-center')
 
   return (
@@ -20,6 +20,25 @@ export function OwlCenterHubQuickLinks() {
         {items.map((item) => {
           const Icon = item.icon
           const primary = item.href.includes('collection/gen2')
+          const disabled = item.adminOnly && (adminLoading || !isOwlCenterAdmin)
+
+          if (disabled) {
+            return (
+              <div
+                key={item.href}
+                title={`${item.description} (admin only)`}
+                aria-disabled="true"
+                className="flex min-h-[88px] cursor-not-allowed touch-manipulation flex-col justify-between border border-[#1A222B] bg-[#0F1419]/70 p-4 opacity-55"
+              >
+                <Icon className="h-5 w-5 text-[#5C6773]" aria-hidden />
+                <div>
+                  <p className="font-bold text-[#7D8A93]">{item.label}</p>
+                  <p className="mt-1 text-xs text-[#5C6773]">Admin only</p>
+                </div>
+              </div>
+            )
+          }
+
           return (
             <Link
               key={item.href}

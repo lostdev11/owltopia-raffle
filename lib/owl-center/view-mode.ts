@@ -8,6 +8,7 @@ export const OWL_CENTER_HOLDER_HOME = '/owl-center'
 export const OWL_CENTER_ADMIN_ONLY_PATH_PREFIXES = [
   '/owl-center/generator',
   '/owl-center/launch',
+  '/owl-center/my-launches',
 ] as const
 
 export function isOwlCenterAdminOnlyPath(pathname: string): boolean {

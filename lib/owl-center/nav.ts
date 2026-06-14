@@ -49,9 +49,10 @@ export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
     href: '/owl-center/my-launches',
     label: 'My Launches',
     shortLabel: 'Mine',
-    description: 'Edit mint details for collections you created',
+    description: 'Launchpad creator tools — Owl Vision admins only',
     icon: PenLine,
     matchPrefix: '/owl-center/my-launches',
+    adminOnly: true,
   },
 ]
 export const OWL_CENTER_ADMIN_NAV_ITEMS: OwlCenterNavItem[] = [

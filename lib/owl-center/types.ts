@@ -89,6 +89,8 @@ export type SimpleMintEligibilityResponse = {
   price_usdc: number | null
   /** Owltopia platform fee per mint (USDC), charged even when creator price is free. */
   platform_mint_fee_usdc: number
+  /** Receives platform USDC fee (RAFFLE_RECIPIENT_WALLET). */
+  platform_treasury_wallet: string | null
   mint_network: 'devnet' | 'mainnet'
   mint_operational: boolean
 }
