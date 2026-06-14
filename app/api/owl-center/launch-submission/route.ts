@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { getSessionFromRequest } from '@/lib/auth-server'
 import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
 import { attachGeneratorStagedJobToLaunch } from '@/lib/owl-center/attach-generator-staged-job'
+import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
 import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-center/asset-validation'
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
-import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -58,32 +58,15 @@ export async function POST(request: NextRequest) {
   }
 
   const supply = Number(body.total_supply)
-  const price = Number(body.mint_price)
-  const currency = body.currency === 'USDC' ? 'USDC' : 'SOL'
-  const limit = Number(body.wallet_mint_limit)
-  const presaleEnabled = Boolean(body.presale_enabled)
-  const wlEnabled = Boolean(body.wl_enabled)
 
   if (!name || name.length > 120) return jsonError('Invalid collection name', 400)
   if (!symbol || symbol.length > 16) return jsonError('Invalid symbol', 400)
   if (!Number.isInteger(supply) || supply < 1 || supply > 1_000_000) {
     return jsonError('Invalid total supply', 400)
   }
-  if (!Number.isFinite(price) || price < 0) return jsonError('Invalid mint price', 400)
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-    return jsonError('Invalid wallet mint limit', 400)
-  }
 
-  let launchDeadline: string | null = null
-  if (typeof body.launch_date === 'string' && body.launch_date.trim()) {
-    launchDeadline = datetimeLocalToIso(body.launch_date.trim()) ?? new Date(body.launch_date).toISOString()
-  }
-  const phaseSchedule = parsePhaseSchedule(body.phase_schedule)
-  if (launchDeadline && !phaseSchedule.AIRDROP) {
-    phaseSchedule.AIRDROP = launchDeadline
-  }
-
-  const slug = `sub-${randomUUID().replace(/-/g, '')}`
+  const mintConfig = parseMintDetailsConfig({ ...body, total_supply: supply })
+  if ('error' in mintConfig) return jsonError(mintConfig.error, 400)
 
   const logoUrl = typeof body.logo_url === 'string' ? body.logo_url.trim().slice(0, 2000) : null
   const bannerUrl = typeof body.banner_url === 'string' ? body.banner_url.trim().slice(0, 2000) : null
@@ -115,6 +98,8 @@ export async function POST(request: NextRequest) {
     if (!v.ok) return jsonError(v.errors.join('; '), 400)
   }
 
+  const slug = `sub-${randomUUID().replace(/-/g, '')}`
+
   const db = getSupabaseAdmin()
   const imageUrl = collectionImageUrl || logoUrl || null
 
@@ -129,29 +114,30 @@ export async function POST(request: NextRequest) {
       creator_wallet: creator,
       treasury_wallet: treasury,
       mint_standard: 'token_metadata',
-      total_supply: supply,
+      total_supply: mintConfig.total_supply,
       minted_count: 0,
       active_phase: 'PRESALE',
       status: 'PENDING_REVIEW',
-      presale_supply: 0,
-      wl_supply: 0,
-      public_supply: supply,
-      airdrop_supply: 0,
+      presale_supply: mintConfig.presale_supply,
+      wl_supply: mintConfig.wl_supply,
+      public_supply: mintConfig.public_supply,
+      airdrop_supply: mintConfig.airdrop_supply,
+      presale_overage_supply: mintConfig.presale_overage_supply,
       presale_price_usdc: null,
-      wl_price_usdc: null,
-      public_price_usdc: currency === 'USDC' ? price : null,
-      wallet_mint_limit: limit,
+      wl_price_usdc: mintConfig.wl_price_usdc,
+      public_price_usdc: mintConfig.public_price_usdc,
+      wallet_mint_limit: mintConfig.wallet_mint_limit,
       magic_eden_url: null,
       tensor_url: null,
       is_featured: false,
       is_paused: true,
-      launch_deadline_at: launchDeadline,
-      phase_schedule: phaseSchedule,
-      creator_presale_enabled: presaleEnabled,
-      creator_wl_enabled: wlEnabled,
-      creator_mint_price: price,
-      creator_mint_currency: currency,
-      creator_launch_date: launchDeadline,
+      launch_deadline_at: mintConfig.launch_deadline_at,
+      phase_schedule: mintConfig.phase_schedule,
+      creator_presale_enabled: mintConfig.creator_presale_enabled,
+      creator_wl_enabled: mintConfig.creator_wl_enabled,
+      creator_mint_price: mintConfig.creator_mint_price,
+      creator_mint_currency: mintConfig.creator_mint_currency,
+      creator_launch_date: mintConfig.launch_deadline_at,
       mint_mode: 'public_simple',
       mint_network: 'mainnet',
     })

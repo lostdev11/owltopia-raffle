@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Coins, Home, Layers, Rocket, Sparkles, Upload } from 'lucide-react'
+import { Coins, Home, Layers, PenLine, Rocket, Sparkles, Upload } from 'lucide-react'
 
 export type OwlCenterNavItem = {
   href: string
@@ -45,9 +45,15 @@ export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
     icon: Coins,
     matchPrefix: '/owl-center/drops',
   },
+  {
+    href: '/owl-center/my-launches',
+    label: 'My Launches',
+    shortLabel: 'Mine',
+    description: 'Edit mint details for collections you created',
+    icon: PenLine,
+    matchPrefix: '/owl-center/my-launches',
+  },
 ]
-
-/** Launchpad tools — visible when an admin toggles Admin view. */
 export const OWL_CENTER_ADMIN_NAV_ITEMS: OwlCenterNavItem[] = [
   {
     href: '/owl-center/generator',
@@ -102,6 +108,7 @@ export function isOwlCenterNavActive(pathname: string, item: OwlCenterNavItem): 
       (pathname.startsWith('/owl-center/') &&
         !pathname.startsWith('/owl-center/collection') &&
         !pathname.startsWith('/owl-center/drops') &&
+        !pathname.startsWith('/owl-center/my-launches') &&
         !pathname.startsWith('/owl-center/generator') &&
         !pathname.startsWith('/owl-center/launch'))
     )

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { bodyHasMintConfigFields, buildMintDetailsPatchFromBody } from '@/lib/owl-center/launch-mint-config-patch'
 import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -85,6 +86,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
   if (body.phase_schedule !== undefined) {
     patch.phase_schedule = parsePhaseSchedule(body.phase_schedule) as Record<string, string>
+  }
+
+  if (bodyHasMintConfigFields(body)) {
+    const mintPatch = buildMintDetailsPatchFromBody(body, launch)
+    if ('error' in mintPatch) return jsonError(mintPatch.error, 400)
+    Object.assign(patch, mintPatch)
   }
 
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)

@@ -171,7 +171,9 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   // of how much of the airdrop supply was actually minted. Unminted GEN1 supply simply stays
   // in the remaining total supply for later phases.
   if (phase === 'PRESALE') {
-    const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network)
+    const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network, {
+      slug: launch.slug,
+    })
     const overage = await getPresaleOverageAllocation(w)
     const bal = await getBalanceByWallet(w)
     const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
@@ -208,7 +210,9 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   }
 
   if (phase === 'PRESALE_OVERAGE') {
-    const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network)
+    const pool = await getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network, {
+      slug: launch.slug,
+    })
     const overage = await getPresaleOverageAllocation(w)
     const bal = await getBalanceByWallet(w)
     const availOverage = overage ? Math.max(0, overage.allowed_mints - overage.used_mints) : 0

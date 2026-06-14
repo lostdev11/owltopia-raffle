@@ -110,6 +110,20 @@ export async function getOwlCenterLaunchByIdAdmin(id: string): Promise<OwlCenter
   return mapRow(data as Record<string, unknown>)
 }
 
+/** Creator dashboard — launches owned by wallet (includes pending review). */
+export async function listOwlCenterLaunchesByCreatorWallet(
+  creatorWallet: string
+): Promise<OwlCenterLaunchPublic[]> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_launches')
+    .select('*')
+    .eq('creator_wallet', creatorWallet)
+    .order('updated_at', { ascending: false })
+  if (error || !data) return []
+  return (data as Record<string, unknown>[]).map(mapRow)
+}
+
 export async function updateOwlCenterLaunchAdmin(
   slug: string,
   patch: Partial<{
@@ -172,6 +186,16 @@ export async function updateOwlCenterLaunchByIdAdmin(
     phase_schedule: Record<string, string>
     total_supply: number
     public_supply: number
+    presale_supply: number
+    wl_supply: number
+    airdrop_supply: number
+    presale_overage_supply: number
+    wl_price_usdc: number | null
+    creator_presale_enabled: boolean
+    creator_wl_enabled: boolean
+    creator_mint_price: number | null
+    creator_mint_currency: 'SOL' | 'USDC' | null
+    creator_launch_date: string | null
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

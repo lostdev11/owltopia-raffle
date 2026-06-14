@@ -49,6 +49,42 @@ async function sumPresaleCreditsIssuedPaginated(): Promise<number> {
   return sum
 }
 
+async function sumOwlCenterPresaleCreditsForLaunch(launchId: string): Promise<number> {
+  const db = getSupabaseAdmin()
+  const { data: tenant, error: tenantErr } = await db
+    .from('owl_center_presale_tenants')
+    .select('id')
+    .eq('launch_id', launchId)
+    .maybeSingle()
+  if (tenantErr) {
+    if (tenantErr.message.includes('launch_id')) return 0
+    throw new Error(tenantErr.message)
+  }
+  if (!tenant) return 0
+
+  const tenantId = String((tenant as { id: string }).id)
+  const page = 1000
+  let from = 0
+  let sum = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('owl_center_presale_balances')
+      .select('purchased_mints,gifted_mints')
+      .eq('tenant_id', tenantId)
+      .order('wallet', { ascending: true })
+      .range(from, from + page - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    for (const r of rows) {
+      const row = r as { purchased_mints?: number; gifted_mints?: number }
+      sum += Number(row.purchased_mints ?? 0) + Number(row.gifted_mints ?? 0)
+    }
+    if (rows.length < page) break
+    from += page
+  }
+  return sum
+}
+
 export async function sumOwlCenterPhaseMinted(
   launchId: string,
   phase: OwlCenterPhase,
@@ -77,12 +113,17 @@ export async function getPresaleMintPoolSnapshot(
   launchId: string,
   mintCap: number,
   overageSupply: number,
-  network: 'mainnet' | 'devnet'
+  network: 'mainnet' | 'devnet',
+  options?: { slug?: string }
 ): Promise<PresaleMintPoolSnapshot> {
   const cap = Math.max(1, Math.floor(mintCap))
   const overageCap = Math.max(0, Math.floor(overageSupply))
+  const creditsSource =
+    options?.slug === 'gen2'
+      ? sumPresaleCreditsIssuedPaginated()
+      : sumOwlCenterPresaleCreditsForLaunch(launchId)
   const [credits_issued, presale_mints_recorded, overage_mints_recorded] = await Promise.all([
-    sumPresaleCreditsIssuedPaginated(),
+    creditsSource,
     sumPresalePhaseMinted(launchId, 'PRESALE', network),
     sumPresalePhaseMinted(launchId, 'PRESALE_OVERAGE', network),
   ])

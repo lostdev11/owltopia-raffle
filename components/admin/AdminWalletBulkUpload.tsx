@@ -9,10 +9,19 @@ import { cn } from '@/lib/utils'
 type Props = {
   connected: boolean
   className?: string
+  apiPath?: string
+  description?: string
+  submitLabel?: string
 }
 
-/** Bulk upload for Presale+13 overage wallets (spots 658–670). */
-export function AdminWalletBulkUpload({ connected, className }: Props) {
+/** Bulk upload for Presale+ overage wallets. */
+export function AdminWalletBulkUpload({
+  connected,
+  className,
+  apiPath = '/api/admin/owl-center/gen2/presale-overage/bulk',
+  description = 'One wallet per line, or wallet, allowed_mints. Max 50 per upload. For spots 658–670 (paid presale buyers).',
+  submitLabel = 'Upload Presale+13 wallets',
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [defaultAllowed, setDefaultAllowed] = useState(1)
@@ -39,7 +48,7 @@ export function AdminWalletBulkUpload({ connected, className }: Props) {
     setFailures([])
     setResultErr(false)
     try {
-      const res = await fetch('/api/admin/owl-center/gen2/presale-overage/bulk', {
+      const res = await fetch(apiPath, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -77,13 +86,11 @@ export function AdminWalletBulkUpload({ connected, className }: Props) {
     } finally {
       setUploading(false)
     }
-  }, [text, defaultAllowed])
+  }, [text, defaultAllowed, apiPath])
 
   return (
     <div className={cn('space-y-3', className)}>
-      <p className="text-xs leading-relaxed text-[#9BA8B4]">
-        One wallet per line, or wallet, allowed_mints. Max 50 per upload. For spots 658–670 (paid presale buyers).
-      </p>
+      <p className="text-xs leading-relaxed text-[#9BA8B4]">{description}</p>
 
       <textarea
         value={text}
@@ -134,7 +141,7 @@ export function AdminWalletBulkUpload({ connected, className }: Props) {
               Uploading…
             </>
           ) : (
-            'Upload Presale+13 wallets'
+            submitLabel
           )}
         </DeployButton>
       </div>

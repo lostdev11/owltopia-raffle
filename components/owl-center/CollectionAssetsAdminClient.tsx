@@ -10,6 +10,8 @@ import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { LaunchGoLivePanel } from '@/components/owl-center/LaunchGoLivePanel'
+import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
+import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataUploadStatusBadge } from '@/components/owl-center/MetadataUploadStatusBadge'
 import { formatValidationErrors, mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
@@ -538,6 +540,10 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
       <AssetPackagePanel pkg={assetPackage} />
 
       <MarketplaceReadinessPanel launchId={launchId} launch={launch} onSaved={() => void load()} />
+
+      <LaunchMintConfigPanel launchId={launchId} launch={launch} onSaved={() => void load()} />
+
+      <LaunchPresaleOveragePanel launchId={launchId} launch={launch} />
 
     </div>
   )

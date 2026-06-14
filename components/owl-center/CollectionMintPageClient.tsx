@@ -9,6 +9,7 @@ import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel
 import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOutPanel'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
+import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatPanel } from '@/components/owl-center/StatPanel'
@@ -68,7 +69,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
 
   if (!state) return null
 
-  const { launch, supply, mint_controls, marketplace, terminal, mint_network } = state
+  const { launch, supply, mint_controls, marketplace, terminal, mint_network, presale_pool } = state
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
   const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
@@ -88,7 +89,29 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div className="space-y-8">
           <SupplyProgress minted={supply.minted} total={supply.total} />
-          <LaunchPhaseTimeline active={launch.active_phase} userMintPhase={userMintPhase} />
+          {presale_pool ? (
+            <div className="space-y-4 border border-[#1A222B] bg-[#0F1419]/70 p-4">
+              <MintAllocationBar
+                label="Presale mints redeemed"
+                minted={presale_pool.presale_mints_recorded}
+                total={presale_pool.mint_cap}
+                hint={
+                  presale_pool.credits_overshoot > 0
+                    ? `${presale_pool.credits_issued} credits · ${presale_pool.credits_overshoot} in Presale+ overage`
+                    : `${presale_pool.credits_issued} presale credits issued`
+                }
+              />
+              {launch.presale_overage_supply > 0 ? (
+                <MintAllocationBar
+                  label="Presale+ overage"
+                  minted={presale_pool.overage_mints_recorded}
+                  total={presale_pool.overage_supply}
+                  hint="Overshoot spots mint in PRESALE_OVERAGE when admin assigns wallets"
+                />
+              ) : null}
+            </div>
+          ) : null}
+          <LaunchPhaseTimeline active={launch.active_phase} launch={launch} userMintPhase={userMintPhase} />
           <CollectionMintPanel
             slug={slug}
             launch={launch}

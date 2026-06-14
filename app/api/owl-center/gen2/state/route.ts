@@ -82,7 +82,9 @@ export async function GET(request: NextRequest) {
 
   const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const [presale_pool, presale_participants, presaleStats, prices_lamports] = await Promise.all([
-    getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, launch.presale_overage_supply ?? 13, network),
+    getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, launch.presale_overage_supply ?? 13, network, {
+      slug: 'gen2',
+    }),
     listGen2PresaleParticipants(500),
     buildGen2PresalePublicStats().catch(() => null),
     getLaunchPriceLamportsQuotes(launch),

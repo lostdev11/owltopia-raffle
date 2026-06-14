@@ -1,4 +1,7 @@
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
+import type { PresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import { getPresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import { launchHasPresaleProgram } from '@/lib/owl-center/launch-presale'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -70,6 +73,17 @@ export async function buildCollectionMintState(slug: string): Promise<Collection
     sellout_prepared_at?: string | null
   } | null
 
+  const mint_network = resolveLaunchMintNetwork(launch)
+  const presale_pool: PresaleMintPoolSnapshot | null = launchHasPresaleProgram(launch)
+    ? await getPresaleMintPoolSnapshot(
+        launch.id,
+        Math.max(1, launch.presale_supply),
+        launch.presale_overage_supply ?? 0,
+        mint_network,
+        { slug: launch.slug }
+      )
+    : null
+
   return {
     launch,
     mint_controls: buildOwlCenterMintControls(launch.is_paused),
@@ -89,7 +103,8 @@ export async function buildCollectionMintState(slug: string): Promise<Collection
     },
     prices_usdc: { public: launch.public_price_usdc },
     prices_lamports: { public: prices_lamports.public },
-    mint_network: resolveLaunchMintNetwork(launch),
+    mint_network,
+    presale_pool,
     terminal,
   }
 }

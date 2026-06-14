@@ -115,7 +115,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   const overageSupply = launch.presale_overage_supply ?? 13
 
   const [pool, presaleStats, current, wallet_cluster, priceLamports] = await Promise.all([
-    getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network),
+    getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network, { slug: launch.slug }),
     buildGen2PresalePublicStats().catch(() => null),
     buildGen2Eligibility(w),
     w ? getGen2ClusterPresaleSummary(w, w) : Promise.resolve(null),

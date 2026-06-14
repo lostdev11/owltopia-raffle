@@ -1,5 +1,6 @@
 import type { Gen2ClusterPresaleSummary } from '@/lib/gen2-presale/cluster-balance'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
+import type { PresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
 
 export type { Gen2ClusterPresaleSummary }
 
@@ -107,6 +108,7 @@ export type CollectionMintStateResponse = {
   prices_usdc: { public: number | null }
   prices_lamports: { public: string | null }
   mint_network: 'devnet' | 'mainnet'
+  presale_pool?: PresaleMintPoolSnapshot | null
   terminal: MintTerminalLine[]
 }
 

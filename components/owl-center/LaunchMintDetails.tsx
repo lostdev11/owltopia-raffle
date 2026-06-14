@@ -2,8 +2,9 @@ import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
-import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
-import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
+import { launchHasPresaleProgram, launchShowsPresaleOverage } from '@/lib/owl-center/launch-presale'
+import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
+import { getLaunchMintPriceDisplay } from '@/lib/owl-center/launch-price-quotes'
 import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 type PhaseRow = { label: string; supply: number; note?: string }
@@ -17,10 +18,10 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
       note: 'free',
     })
   }
-  if (launch.presale_supply > 0) {
+  if (launchHasPresaleProgram(launch) && launch.presale_supply > 0) {
     rows.push({ label: 'Presale', supply: launch.presale_supply, note: 'prepaid · free mint' })
   }
-  if (launch.presale_overage_supply > 0) {
+  if (launchShowsPresaleOverage(launch)) {
     rows.push({
       label: 'Presale+',
       supply: launch.presale_overage_supply,
@@ -38,8 +39,9 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
 
 export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPublic }) {
   const phases = phaseRows(launch)
-  const priceLamports = await getLaunchPriceLamportsQuotes(launch)
+  const prices = await getLaunchMintPriceDisplay(launch)
   const countdown = getMintCountdownInfo(launch)
+  const mintOpensAt = resolveMintOpensAt(launch)
 
   return (
     <div className="space-y-3 border-t border-[#1A222B] pt-3">
@@ -62,21 +64,27 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
         </dl>
       ) : null}
       <dl className="space-y-1.5 font-mono text-xs text-[#9BA8B4]">
-        <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-          <dt className="text-[#5C6773]">Presale mint</dt>
-          <dd className="text-[#00FF9C]">{formatPhasePriceSolOrFree(priceLamports.presale, { paid: false })}</dd>
-        </div>
-        <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-          <dt className="text-[#5C6773]">Whitelist</dt>
-          <dd className="text-[#E8EEF2]">{formatPhasePriceSolOrFree(priceLamports.whitelist)}</dd>
-        </div>
-        <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-          <dt className="text-[#5C6773]">Public</dt>
-          <dd className="text-[#E8EEF2]">{formatPhasePriceSolOrFree(priceLamports.public)}</dd>
-        </div>
+        {prices.presale ? (
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+            <dt className="text-[#5C6773]">Presale mint</dt>
+            <dd className="text-[#00FF9C]">{prices.presale}</dd>
+          </div>
+        ) : null}
+        {prices.whitelist ? (
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+            <dt className="text-[#5C6773]">Whitelist</dt>
+            <dd className="text-[#E8EEF2]">{prices.whitelist}</dd>
+          </div>
+        ) : null}
+        {prices.public ? (
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+            <dt className="text-[#5C6773]">Public</dt>
+            <dd className="text-[#E8EEF2]">{prices.public}</dd>
+          </div>
+        ) : null}
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 border-t border-[#1A222B]/80 pt-1.5">
           <dt className="text-[#5C6773]">Mint opens</dt>
-          <dd className="text-[#E8EEF2]">{formatMintDate(launch.launch_deadline_at)}</dd>
+          <dd className="text-[#E8EEF2]">{formatMintDate(mintOpensAt)}</dd>
         </div>
         {launch.wallet_mint_limit > 0 ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

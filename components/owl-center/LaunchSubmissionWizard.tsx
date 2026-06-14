@@ -6,6 +6,10 @@ import { useSearchParams } from 'next/navigation'
 import { AssetStepForm, type AssetStepValues } from '@/components/owl-center/AssetStepForm'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import {
+  defaultMintDetailsFormValues,
+  MintDetailsConfigFields,
+} from '@/components/owl-center/MintDetailsConfigFields'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import {
   clearGeneratorHandoffFromSession,
@@ -13,6 +17,7 @@ import {
   readGeneratorProjectIdFromSession,
   readLaunchDraftFromSession,
 } from '@/lib/owl-center/generator/launch-draft'
+import { mintDetailsPayloadFromForm } from '@/lib/owl-center/launch-mint-config'
 import {
   formatOwlCenterPlatformMintFeeLabel,
   formatTotalMintCostHint,
@@ -48,15 +53,7 @@ export function LaunchSubmissionWizard() {
   const [treasuryWallet, setTreasuryWallet] = useState('')
 
   const [totalSupply, setTotalSupply] = useState('1000')
-  const [mintPrice, setMintPrice] = useState('1')
-  const [currency, setCurrency] = useState<'SOL' | 'USDC'>('SOL')
-  const [walletMintLimit, setWalletMintLimit] = useState('5')
-  const [launchDate, setLaunchDate] = useState('')
-  const [presaleStart, setPresaleStart] = useState('')
-  const [wlStart, setWlStart] = useState('')
-  const [publicStart, setPublicStart] = useState('')
-  const [presaleEnabled, setPresaleEnabled] = useState(false)
-  const [wlEnabled, setWlEnabled] = useState(false)
+  const [mintDetails, setMintDetails] = useState(() => defaultMintDetailsFormValues())
 
   const [assets, setAssets] = useState<AssetStepValues>(emptyAssets)
 
@@ -68,6 +65,7 @@ export function LaunchSubmissionWizard() {
     setSymbol(draft.symbol)
     setDescription(draft.description)
     setTotalSupply(draft.total_supply)
+    setMintDetails((m) => ({ ...m, total_supply: draft.total_supply }))
     setAssets((a) => ({
       ...a,
       asset_notes: draft.asset_notes,
@@ -98,19 +96,7 @@ export function LaunchSubmissionWizard() {
         description: description.trim() || null,
         creator_wallet: creatorWallet.trim(),
         treasury_wallet: treasuryWallet.trim() || null,
-        total_supply: Number(totalSupply),
-        mint_price: Number(mintPrice),
-        currency,
-        wallet_mint_limit: Number(walletMintLimit),
-        launch_date: launchDate.trim() || null,
-        phase_schedule: {
-          ...(launchDate.trim() ? { AIRDROP: launchDate.trim() } : {}),
-          ...(presaleEnabled && presaleStart.trim() ? { PRESALE: presaleStart.trim() } : {}),
-          ...(wlEnabled && wlStart.trim() ? { WHITELIST: wlStart.trim() } : {}),
-          ...(publicStart.trim() ? { PUBLIC: publicStart.trim() } : {}),
-        },
-        presale_enabled: presaleEnabled,
-        wl_enabled: wlEnabled,
+        ...mintDetailsPayloadFromForm({ ...mintDetails, total_supply: totalSupply }),
         logo_url: assets.logo_url.trim() || null,
         banner_url: assets.banner_url.trim() || null,
         collection_image_url: assets.collection_image_url.trim() || null,
@@ -230,101 +216,21 @@ export function LaunchSubmissionWizard() {
                   type="number"
                   min={1}
                   value={totalSupply}
-                  onChange={(e) => setTotalSupply(e.target.value)}
+                  onChange={(e) => {
+                    setTotalSupply(e.target.value)
+                    setMintDetails((m) => ({ ...m, total_supply: e.target.value }))
+                  }}
                   required
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
               </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Mint price
-                <input
-                  type="number"
-                  step="any"
-                  min={0}
-                  value={mintPrice}
-                  onChange={(e) => setMintPrice(e.target.value)}
-                  required
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                />
-                <span className="normal-case tracking-normal text-[#7D8A93]">
-                  Use 0 for a free mint. {formatOwlCenterPlatformMintFeeLabel()} still applies to minters.
-                </span>
-              </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Currency
-                <select
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value as 'SOL' | 'USDC')}
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
-                >
-                  <option value="SOL">SOL</option>
-                  <option value="USDC">USDC</option>
-                </select>
-              </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Wallet mint limit
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={walletMintLimit}
-                  onChange={(e) => setWalletMintLimit(e.target.value)}
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                />
-              </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Mint opens (kickoff)
-                <input
-                  type="datetime-local"
-                  value={launchDate}
-                  onChange={(e) => setLaunchDate(e.target.value)}
-                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                />
-              </label>
-              {presaleEnabled ? (
-                <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                  Presale redemption starts (optional)
-                  <input
-                    type="datetime-local"
-                    value={presaleStart}
-                    onChange={(e) => setPresaleStart(e.target.value)}
-                    className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                  />
-                </label>
-              ) : null}
-              {wlEnabled ? (
-                <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                  Whitelist phase starts (optional)
-                  <input
-                    type="datetime-local"
-                    value={wlStart}
-                    onChange={(e) => setWlStart(e.target.value)}
-                    className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                  />
-                </label>
-              ) : null}
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Public phase starts (optional)
-                <input
-                  type="datetime-local"
-                  value={publicStart}
-                  onChange={(e) => setPublicStart(e.target.value)}
-                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                />
-              </label>
-              <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                <input
-                  type="checkbox"
-                  checked={presaleEnabled}
-                  onChange={(e) => setPresaleEnabled(e.target.checked)}
-                  className="h-4 w-4 accent-[#00FF9C]"
-                />
-                Presale enabled (intent)
-              </label>
-              <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                <input type="checkbox" checked={wlEnabled} onChange={(e) => setWlEnabled(e.target.checked)} className="h-4 w-4 accent-[#00FF9C]" />
-                Whitelist enabled (intent)
-              </label>
+              <MintDetailsConfigFields
+                values={{ ...mintDetails, total_supply: totalSupply }}
+                onChange={(next) => {
+                  setMintDetails(next)
+                  setTotalSupply(next.total_supply)
+                }}
+              />
             </div>
           </CommandCard>
         ) : null}
@@ -351,7 +257,7 @@ export function LaunchSubmissionWizard() {
               </li>
               <li>
                 <span className="text-[#5C6773]">Supply / price</span> {totalSupply} @{' '}
-                {formatTotalMintCostHint(Number(mintPrice) || 0, currency)}
+                {formatTotalMintCostHint(Number(mintDetails.public_price) || 0, mintDetails.currency)}
               </li>
               <li>
                 <span className="text-[#5C6773]">Platform fee</span> {formatOwlCenterPlatformMintFeeLabel()}
