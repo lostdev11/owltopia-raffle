@@ -180,6 +180,7 @@ export async function collectionMetadataJsonNeedsWalletFix(params: {
   return true
 }
 
+export async function tokenMetadataJsonNeedsWalletFix(params: {
   uploaded: Record<string, string>
   tokenIndex: string
   network: 'mainnet' | 'devnet'
