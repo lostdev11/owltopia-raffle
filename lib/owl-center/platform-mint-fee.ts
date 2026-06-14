@@ -1,6 +1,7 @@
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
+import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 
 /** USD notional for the Owltopia platform fee per NFT mint (collected as SOL on-chain). */
 export function owlCenterPlatformMintFeeUsd(): number {
@@ -20,6 +21,11 @@ export const OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS = 20_000_000n
 
 export function isOwlCenterPlatformMintFeeEnabled(): boolean {
   return owlCenterPlatformMintFeeUsd() > 0
+}
+
+/** Server confirm-mint — only enforce on-chain fee when treasury is configured. */
+export function shouldRequireOwlCenterPlatformMintFeeServer(): boolean {
+  return isOwlCenterPlatformMintFeeEnabled() && !!getOwlCenterPlatformTreasuryWallet()
 }
 
 /** Live SOL lamports for the platform fee (~$1 notional via Jupiter SOL/USD). */

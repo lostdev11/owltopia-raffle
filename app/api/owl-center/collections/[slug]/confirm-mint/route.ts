@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
-import { isOwlCenterPlatformMintFeeEnabled } from '@/lib/owl-center/platform-mint-fee'
+import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     wallet,
     candyMachineId,
     network,
-    requirePlatformMintFee: isOwlCenterPlatformMintFeeEnabled(),
+    requirePlatformMintFee: shouldRequireOwlCenterPlatformMintFeeServer(),
   })
   if (!verified.ok) {
     const map: Record<string, string> = {

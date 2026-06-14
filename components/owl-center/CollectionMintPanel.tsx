@@ -172,7 +172,9 @@ export function CollectionMintPanel({
       setErr(
         low.includes('user rejected') || low.includes('cancel')
           ? 'Mint transaction rejected in wallet'
-          : msg
+          : low.includes('platform mint fee') || low.includes('confirm_failed') || low.includes('database record failed')
+            ? `${msg} — your NFT may still have minted on-chain. Refresh the page; if the counter is still wrong, contact support with your wallet signature.`
+            : msg
       )
       setStep('error')
     }

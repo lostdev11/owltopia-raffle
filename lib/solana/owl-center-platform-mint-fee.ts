@@ -151,6 +151,21 @@ export function owlCenterPlatformMintFeeVerifyBand(unitLamports: bigint): {
   return { minLamports, maxLamports }
 }
 
+/**
+ * Wide fallback band when Jupiter pricing is unavailable at confirm time.
+ * Covers ~$0.40–$2.50 notional at SOL/USD between ~40 and ~250.
+ */
+export function owlCenterPlatformMintFeeVerifyFallbackBand(): {
+  minLamports: bigint
+  maxLamports: bigint
+} {
+  const usd = owlCenterPlatformMintFeeUsd()
+  if (usd <= 0) return { minLamports: 0n, maxLamports: 0n }
+  const minLamports = BigInt(Math.max(2_000_000, Math.floor((usd * 0.4 / 250) * LAMPORTS_PER_SOL)))
+  const maxLamports = BigInt(Math.ceil((usd * 2.5 / 40) * LAMPORTS_PER_SOL))
+  return { minLamports, maxLamports }
+}
+
 /** Resolve live platform fee lamports for mint / verify flows. */
 export async function resolveOwlCenterPlatformMintFeeLamports(): Promise<
   { ok: true; lamports: bigint; solUsdPrice: number } | { ok: false; error: string }

@@ -3,6 +3,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import { fetchParsedTransactionConfirmed, feePayerMatchesBuyer, collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
 import {
   owlCenterPlatformMintFeeVerifyBand,
+  owlCenterPlatformMintFeeVerifyFallbackBand,
   resolveOwlCenterPlatformMintFeeLamports,
   verifyOwlCenterPlatformMintFeeSol,
 } from '@/lib/solana/owl-center-platform-mint-fee'
@@ -56,10 +57,9 @@ export async function verifyGen2MintTransaction(params: {
 
   if (params.requirePlatformMintFee) {
     const feeQuote = await resolveOwlCenterPlatformMintFeeLamports()
-    if (!feeQuote.ok) {
-      return { ok: false, reason: 'platform_fee_missing' }
-    }
-    const band = owlCenterPlatformMintFeeVerifyBand(feeQuote.lamports)
+    const band = feeQuote.ok
+      ? owlCenterPlatformMintFeeVerifyBand(feeQuote.lamports)
+      : owlCenterPlatformMintFeeVerifyFallbackBand()
     const feeCheck = verifyOwlCenterPlatformMintFeeSol({
       parsed,
       minLamports: band.minLamports,
