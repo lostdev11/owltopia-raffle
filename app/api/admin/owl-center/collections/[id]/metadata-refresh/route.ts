@@ -68,5 +68,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     ok: true,
     refreshed: result.refreshed,
     skipped: result.skipped,
+    collection: result.collection,
   })
 }

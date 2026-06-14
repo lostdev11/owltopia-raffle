@@ -9,6 +9,12 @@ import { getLatestAssetUploadJobForLaunch } from '@/lib/db/owl-center-asset-uplo
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { ensureMarketplaceRow } from '@/lib/db/owl-center-marketplace'
 import { arweaveTxIdFromHttps, normalizeOwlCenterArweaveGatewayUri } from '@/lib/owl-center/arweave-gateway-uri'
+import {
+  collectionMetadataJsonNeedsWalletFix,
+  ensureWalletSafeCollectionMetadataJsonUri,
+  ensureWalletSafeTokenMetadataJsonUri,
+  tokenMetadataJsonNeedsWalletFix,
+} from '@/lib/owl-center/metadata-json-fix'
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
@@ -41,6 +47,12 @@ export type MetadataRefreshStatus = {
   minted_count: number
   mint_addresses: string[]
   mints: MetadataRefreshMintPreview[]
+  collection?: {
+    current_name: string | null
+    target_name: string
+    needs_refresh: boolean
+    skip_reason: string | null
+  }
 }
 
 export type MetadataRefreshMintResult =
@@ -48,7 +60,12 @@ export type MetadataRefreshMintResult =
   | { mint: string; ok: false; error: string }
 
 export type MetadataRefreshRunResult =
-  | { ok: true; refreshed: MetadataRefreshMintResult[]; skipped: MetadataRefreshMintResult[] }
+  | {
+      ok: true
+      refreshed: MetadataRefreshMintResult[]
+      skipped: MetadataRefreshMintResult[]
+      collection?: { ok: true; signature: string; name: string; uri: string } | { ok: false; error: string }
+    }
   | { ok: false; error: string; code?: string }
 
 function buildArweaveIdToTokenIndex(uploaded: Record<string, string>): Map<string, string> {
@@ -185,11 +202,25 @@ async function previewMintRefresh(params: {
   if (!skipReason && !targetUri) skipReason = 'Missing metadata URI in upload job'
 
   const normalizedCurrentUri = normalizeOwlCenterArweaveGatewayUri(currentUri ?? '', network)
+  let jsonNeedsFix = false
+  if (!skipReason && tokenIndex) {
+    try {
+      jsonNeedsFix = await tokenMetadataJsonNeedsWalletFix({
+        uploaded,
+        tokenIndex,
+        network,
+        sourceJsonUri: currentUri,
+      })
+    } catch {
+      jsonNeedsFix = true
+    }
+  }
+
   const needsRefresh = Boolean(
     !skipReason &&
       targetName &&
       targetUri &&
-      (currentName !== targetName || normalizedCurrentUri !== targetUri)
+      (currentName !== targetName || normalizedCurrentUri !== targetUri || jsonNeedsFix)
   )
 
   return {
@@ -199,6 +230,62 @@ async function previewMintRefresh(params: {
     current_uri: currentUri,
     target_name: targetName,
     target_uri: targetUri,
+    needs_refresh: needsRefresh,
+    skip_reason: skipReason,
+  }
+}
+
+async function previewCollectionRefresh(params: {
+  collectionMint: string
+  collectionName: string
+  uploaded: Record<string, string>
+  network: 'mainnet' | 'devnet'
+  umi: ReturnType<typeof createIrysDeployerUmi>
+  candyMachineAuthority?: string | null
+}): Promise<MetadataRefreshStatus['collection']> {
+  const { collectionMint, collectionName, uploaded, network, umi, candyMachineAuthority } = params
+  const targetName = collectionName.slice(0, 32) || 'Collection'
+  const serverSigner = String(umi.identity.publicKey)
+  let currentName: string | null = null
+  let currentUri: string | null = null
+  let skipReason: string | null = null
+
+  try {
+    const md = await fetchMetadata(umi, findMetadataPda(umi, { mint: publicKey(collectionMint) }))
+    currentName = cleanOnChainName(md.name)
+    currentUri = md.uri?.trim() || null
+    const onChainUa = String(md.updateAuthority)
+    if (onChainUa !== serverSigner) {
+      skipReason = updateAuthorityMismatchReason({
+        onChainAuthority: onChainUa,
+        serverSigner,
+        candyMachineAuthority,
+      })
+    }
+  } catch {
+    skipReason = 'Could not load collection metadata'
+  }
+
+  let jsonNeedsFix = false
+  if (!skipReason) {
+    try {
+      jsonNeedsFix = await collectionMetadataJsonNeedsWalletFix({
+        uploaded,
+        network,
+        sourceJsonUri: currentUri,
+      })
+    } catch {
+      jsonNeedsFix = true
+    }
+  }
+
+  const needsRefresh = Boolean(
+    !skipReason && (currentName !== targetName || jsonNeedsFix || !currentUri?.trim())
+  )
+
+  return {
+    current_name: currentName,
+    target_name: targetName,
     needs_refresh: needsRefresh,
     skip_reason: skipReason,
   }
@@ -218,6 +305,7 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
   const arweaveReady = job?.status === 'completed'
   const collectionMint = marketplace?.collection_mint?.trim() || launch.collection_mint?.trim() || null
   let mints: MetadataRefreshMintPreview[] = []
+  let collectionPreview: MetadataRefreshStatus['collection'] | undefined
   if (enabled && arweaveReady && Boolean(collectionMint) && mintAddresses.length > 0 && job) {
     const pkg = buildSugarDeployPackageFromJob(job, launch)
     const network = resolveLaunchMintNetwork(launch)
@@ -245,6 +333,16 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
         })
       )
     )
+    if (collectionMint) {
+      collectionPreview = await previewCollectionRefresh({
+        collectionMint,
+        collectionName: launch.name ?? 'Collection',
+        uploaded: job.upload_progress.uploaded ?? {},
+        network,
+        umi,
+        candyMachineAuthority,
+      })
+    }
   }
 
   const eligible =
@@ -263,6 +361,7 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
     minted_count: mintAddresses.length,
     mint_addresses: mintAddresses,
     mints,
+    collection: collectionPreview,
   }
 }
 
@@ -297,15 +396,37 @@ export async function runMetadataRefreshForLaunch(
   const network = resolveLaunchMintNetwork(launch)
   const umi = createIrysDeployerUmi(network)
   const royaltyPercent = launchSellerFeeBasisPoints(launch) / 100
+  const uploaded = job.upload_progress.uploaded ?? {}
   const refreshed: MetadataRefreshMintResult[] = []
   const skipped: MetadataRefreshMintResult[] = []
 
   for (const preview of previews) {
-    if (!preview.needs_refresh || preview.skip_reason || !preview.target_name || !preview.target_uri) {
+    if (preview.skip_reason || !preview.target_name || !preview.token_index) {
       skipped.push({
         mint: preview.mint,
         ok: false,
         error: preview.skip_reason ?? 'Already up to date',
+      })
+      continue
+    }
+
+    let jsonNeedsFix = false
+    try {
+      jsonNeedsFix = await tokenMetadataJsonNeedsWalletFix({
+        uploaded,
+        tokenIndex: preview.token_index,
+        network,
+        sourceJsonUri: preview.current_uri,
+      })
+    } catch {
+      jsonNeedsFix = true
+    }
+
+    if (!preview.needs_refresh && !jsonNeedsFix) {
+      skipped.push({
+        mint: preview.mint,
+        ok: false,
+        error: 'Already up to date',
       })
       continue
     }
@@ -324,13 +445,25 @@ export async function runMetadataRefreshForLaunch(
         continue
       }
 
+      const safeJson = await ensureWalletSafeTokenMetadataJsonUri({
+        uploaded,
+        tokenIndex: preview.token_index,
+        network,
+        sourceJsonUri: preview.current_uri,
+        displayName: preview.target_name,
+      })
+      if (!safeJson?.uri) {
+        skipped.push({ mint: preview.mint, ok: false, error: 'Could not build wallet-safe metadata JSON' })
+        continue
+      }
+
       const res = await updateV1(umi, {
         mint: mintPk,
         authority: umi.identity,
         data: some({
           name: preview.target_name,
           symbol: md.symbol || (launch.symbol ?? 'COL').slice(0, 10),
-          uri: preview.target_uri,
+          uri: safeJson.uri,
           sellerFeeBasisPoints: md.sellerFeeBasisPoints ?? percentAmount(royaltyPercent),
           creators: md.creators,
         }),
@@ -343,7 +476,7 @@ export async function runMetadataRefreshForLaunch(
         ok: true,
         signature: sigStr,
         name: preview.target_name,
-        uri: preview.target_uri,
+        uri: safeJson.uri,
       })
     } catch (e) {
       skipped.push({
@@ -354,5 +487,54 @@ export async function runMetadataRefreshForLaunch(
     }
   }
 
-  return { ok: true, refreshed, skipped }
+  let collection:
+    | { ok: true; signature: string; name: string; uri: string }
+    | { ok: false; error: string }
+    | undefined
+
+  const collectionMint = status.collection_mint?.trim()
+  if (collectionMint && status.collection?.needs_refresh && !status.collection.skip_reason) {
+    try {
+      const colPk = publicKey(collectionMint)
+      const colMd = await fetchMetadata(umi, findMetadataPda(umi, { mint: colPk }))
+      const onChainUa = String(colMd.updateAuthority)
+      const serverSigner = String(umi.identity.publicKey)
+      if (onChainUa !== serverSigner) {
+        collection = {
+          ok: false,
+          error: updateAuthorityMismatchReason({ onChainAuthority: onChainUa, serverSigner }),
+        }
+      } else {
+        const targetName = status.collection.target_name
+        const safeCol = await ensureWalletSafeCollectionMetadataJsonUri({
+          uploaded,
+          collectionName: targetName,
+          network,
+          sourceJsonUri: colMd.uri,
+        })
+        if (!safeCol?.uri) {
+          collection = { ok: false, error: 'Could not build wallet-safe collection metadata JSON' }
+        } else {
+          const res = await updateV1(umi, {
+            mint: colPk,
+            authority: umi.identity,
+            data: some({
+              name: targetName,
+              symbol: colMd.symbol || (launch.symbol ?? 'COL').slice(0, 10),
+              uri: safeCol.uri,
+              sellerFeeBasisPoints: colMd.sellerFeeBasisPoints ?? percentAmount(royaltyPercent),
+              creators: colMd.creators,
+            }),
+          }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+          const sig = res.signature
+          const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
+          collection = { ok: true, signature: sigStr, name: targetName, uri: safeCol.uri }
+        }
+      }
+    } catch (e) {
+      collection = { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  return { ok: true, refreshed, skipped, collection }
 }

@@ -26,6 +26,12 @@ type RefreshStatus = {
   minted_count: number
   mint_addresses: string[]
   mints: MintPreview[]
+  collection?: {
+    current_name: string | null
+    target_name: string
+    needs_refresh: boolean
+    skip_reason: string | null
+  }
 }
 
 const PANEL_LABEL = 'metadata_refresh.sys · WALLET DISPLAY'
@@ -92,25 +98,31 @@ export function MetadataRefreshPanel({
         error?: string
         refreshed?: { mint: string; signature?: string }[]
         skipped?: { mint: string; error?: string }[]
+        collection?: { ok: boolean; error?: string; name?: string }
       }
       if (!res.ok || !j.ok) throw new Error(j.error || 'refresh_failed')
       const okCount = j.refreshed?.length ?? 0
       const skipped = j.skipped?.filter((s) => s.error) ?? []
-      if (okCount === 0 && skipped.length) {
-        setErr(
-          skipped
-            .map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`)
-            .slice(0, 3)
-            .join(' · ')
-        )
+      const colOk = j.collection?.ok === true
+      const colErr = j.collection?.ok === false ? j.collection.error : null
+      if (okCount === 0 && !colOk && (skipped.length || colErr)) {
+        const parts = [
+          ...skipped.map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`).slice(0, 2),
+          colErr ? `Collection: ${colErr}` : null,
+        ].filter(Boolean)
+        setErr(parts.join(' · '))
       } else {
         setMsg(
           `Updated ${okCount} mint${okCount === 1 ? '' : 's'} on-chain${
-            skipped.length ? ` · ${skipped.length} skipped` : ''
-          }.`
+            colOk ? ` · collection → ${j.collection?.name ?? 'Papers'}` : ''
+          }${skipped.length ? ` · ${skipped.length} skipped` : ''}.`
         )
-        if (skipped.length && okCount > 0) {
-          setErr(skipped.map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`).slice(0, 2).join(' · '))
+        if ((skipped.length && okCount > 0) || colErr) {
+          const parts = [
+            ...skipped.map((s) => `${s.mint.slice(0, 8)}…: ${s.error}`).slice(0, 2),
+            colErr ? `Collection: ${colErr}` : null,
+          ].filter(Boolean)
+          if (parts.length) setErr(parts.join(' · '))
         }
       }
       await load()
@@ -133,13 +145,16 @@ export function MetadataRefreshPanel({
     return null
   }
 
-  const needsCount = status?.mints.filter((m) => m.needs_refresh).length ?? 0
+  const mintNeedsCount = status?.mints.filter((m) => m.needs_refresh).length ?? 0
+  const collectionNeeds = status?.collection?.needs_refresh ? 1 : 0
+  const needsCount = mintNeedsCount + collectionNeeds
 
   return (
     <CommandCard label={PANEL_LABEL} id={anchorId}>
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
-        Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong> or a blank image in
-        Phantom/Solflare on mobile. Updates on-chain name + metadata URI (Irys gateway + collection title).
+        Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong>, a blank image, or
+        <strong className="font-normal text-[#C5D0D8]"> Collection: collection</strong> in Phantom/Solflare. Re-uploads
+        metadata JSON with Irys image URLs, then updates on-chain name + URI.
       </p>
 
       <div className="mb-4 space-y-3">
@@ -170,6 +185,22 @@ export function MetadataRefreshPanel({
           {needsCount > 0 ? ` · ${needsCount} need refresh` : ' · all look current'}
         </p>
       )}
+
+      {status?.collection ? (
+        <p className="mb-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
+          Collection label:{' '}
+          <span className="text-[#C5D0D8]">{status.collection.current_name ?? '—'}</span>
+          {' → '}
+          <span className="text-[#C5D0D8]">{status.collection.target_name}</span>
+          {status.collection.needs_refresh ? (
+            <span className="text-[#FFD769]"> · needs refresh</span>
+          ) : status.collection.skip_reason ? (
+            <span className="block pt-1 text-[#FF9C9C]">{status.collection.skip_reason}</span>
+          ) : (
+            <span className="text-[#00FF9C]"> · ok</span>
+          )}
+        </p>
+      ) : null}
 
       {status?.mints?.length ? (
         <ul className="mb-4 max-h-56 space-y-2 overflow-y-auto overscroll-y-contain rounded border border-[#1A222B] bg-[#0B0F13] p-3 font-mono text-xs leading-relaxed text-[#9BA8B4] sm:max-h-48 sm:text-[11px]">
