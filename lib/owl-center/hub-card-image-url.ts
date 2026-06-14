@@ -27,7 +27,7 @@ function arweaveMirrorUrls(url: string): string[] {
     const u = new URL(url)
     const txPath = u.pathname.replace(/^\//, '') + u.search + u.hash
     if (!txPath || txPath === '/') return []
-    const bases = ['gateway.irys.xyz', 'uploader.irys.xyz', 'arweave.dev', 'arweave.net']
+    const bases = ['ar-io.net', 'gateway.irys.xyz', 'uploader.irys.xyz', 'arweave.dev', 'arweave.net']
     return bases.map((host) => `https://${host}/${txPath}`)
   } catch {
     return []
@@ -38,19 +38,23 @@ function arweaveMirrorUrls(url: string): string[] {
  * Hub cards load creator Arweave art. The default gateway often returns an HTML app shell in-browser;
  * try our image proxy first (sniffs PNG + races gateways), then direct mirrors, then the Gen2 mark.
  */
-export function buildOwlCenterHubCardImageChain(imageUrl: string | null | undefined): string[] {
-  if (!imageUrl?.trim()) return [HUB_CARD_FALLBACK]
+export function buildOwlCenterHubCardImageChain(
+  imageUrl: string | null | undefined,
+  options?: { includeFallback?: boolean }
+): string[] {
+  const includeFallback = options?.includeFallback !== false
+  if (!imageUrl?.trim()) return includeFallback ? [HUB_CARD_FALLBACK] : []
 
   let url = imageUrl.trim()
   const arHttps = arweaveUriToHttps(url)
   if (arHttps) url = arHttps
 
   if (url.startsWith('/') && !url.startsWith('//')) {
-    return dedupeUrls([url, HUB_CARD_FALLBACK])
+    return dedupeUrls(includeFallback ? [url, HUB_CARD_FALLBACK] : [url])
   }
 
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    return [HUB_CARD_FALLBACK]
+    return includeFallback ? [HUB_CARD_FALLBACK] : []
   }
 
   const chain: string[] = [`/api/proxy-image?url=${encodeURIComponent(url)}`]
@@ -61,7 +65,8 @@ export function buildOwlCenterHubCardImageChain(imageUrl: string | null | undefi
     }
   }
 
-  chain.push(url, HUB_CARD_FALLBACK)
+  chain.push(url)
+  if (includeFallback) chain.push(HUB_CARD_FALLBACK)
   return dedupeUrls(chain)
 }
 

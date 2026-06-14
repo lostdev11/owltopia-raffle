@@ -8,6 +8,8 @@ export function isTransientSolanaRpcError(error: unknown): boolean {
 
   return (
     code === 19 ||
+    code === -32002 ||
+    code === -32005 ||
     code === -32504 ||
     low.includes('504') ||
     low.includes('503') ||
@@ -47,7 +49,10 @@ export async function withSolanaRpcRetry<T>(
   throw lastError
 }
 
+/** Heavier retry budget for candy-machine mint prep + confirm (mobile RPC is flaky). */
+export const MINT_SOLANA_RPC_RETRY = { retries: 6, baseDelayMs: 1500 } as const
+
 export function friendlySolanaRpcErrorMessage(error: unknown): string | null {
   if (!isTransientSolanaRpcError(error)) return null
-  return 'Solana RPC timed out — wait a few seconds and tap Mint again. On mobile, try WiFi or refresh the page if it keeps failing.'
+  return 'Could not reach Solana while preparing your mint — refresh the page, wait a few seconds, and tap Mint again. On mobile, try WiFi or switch to mobile data, then retry.'
 }

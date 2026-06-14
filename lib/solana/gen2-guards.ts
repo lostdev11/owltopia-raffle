@@ -12,6 +12,7 @@ import {
 } from '@metaplex-foundation/mpl-candy-machine'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
+import { MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 
 /**
  * Candy Machine V3 guard-group wiring for the Gen2 mainnet mint.
@@ -200,7 +201,10 @@ export async function ensureGen2AllowListProof(
   const { candyMachine, candyGuard, groupLabel, merkleRoot, phase } = args
   const user = umi.identity.publicKey
 
-  const existing = await safeFetchAllowListProofFromSeeds(umi, { merkleRoot, user, candyGuard, candyMachine })
+  const existing = await withSolanaRpcRetry(
+    () => safeFetchAllowListProofFromSeeds(umi, { merkleRoot, user, candyGuard, candyMachine }),
+    MINT_SOLANA_RPC_RETRY
+  )
   if (existing) return { ok: true }
 
   let body: WlProofResponse
@@ -227,13 +231,25 @@ export async function ensureGen2AllowListProof(
   }
 
   const merkleProof = body.proof.map((p) => bs58.decode(p))
-  await route(umi, {
-    candyMachine,
-    candyGuard,
-    guard: 'allowList',
-    group: groupLabel,
-    routeArgs: { path: 'proof', merkleRoot, merkleProof },
-  }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+  try {
+    await withSolanaRpcRetry(
+      () =>
+        route(umi, {
+          candyMachine,
+          candyGuard,
+          guard: 'allowList',
+          group: groupLabel,
+          routeArgs: { path: 'proof', merkleRoot, merkleProof },
+        }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
+      MINT_SOLANA_RPC_RETRY
+    )
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/user rejected|cancel/i.test(msg)) {
+      return { ok: false, error: 'Allowlist proof transaction rejected in wallet' }
+    }
+    return { ok: false, error: 'Could not submit allowlist proof — refresh and retry mint.' }
+  }
 
   return { ok: true }
 }

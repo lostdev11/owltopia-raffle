@@ -161,8 +161,6 @@ export function Gen2MintPanel({
     try {
       for (let i = 0; i < n; i++) {
         setStep('preparing_mint')
-        setStep('awaiting_signature')
-        setStep('sending_transaction')
         const minted = await mintGen2FromCandyMachine({
           walletAdapter: adapter,
           candyMachineId: getGen2CandyMachineId(launch),

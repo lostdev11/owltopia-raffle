@@ -55,11 +55,21 @@ export function launchMintInfraConfigured(launch: LaunchCmFields): boolean {
   return Boolean(getLaunchCandyMachineId(launch, net) && getLaunchCollectionMint(launch, net))
 }
 
+/** Browser RPC for Owl Center candy-machine mints (same-origin proxy on production). */
+export function resolveOwlCenterMintRpcUrl(): string {
+  if (typeof window === 'undefined') {
+    return resolvePublicSolanaRpcUrl()
+  }
+  const direct = process.env.NEXT_PUBLIC_MINT_SOLANA_RPC_URL?.trim()
+  if (direct) return sanitizeRpcUrl(direct)
+  return '/api/solana/rpc'
+}
+
 /** Browser/server RPC for a specific launch mint (respects per-launch network). */
 export function getLaunchSolanaRpcUrl(network: OwlMintNetwork): string {
   if (network === 'devnet') {
     const u = process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() || process.env.SOLANA_RPC_DEVNET_URL?.trim()
     return u ? sanitizeRpcUrl(u) : 'https://api.devnet.solana.com'
   }
-  return resolvePublicSolanaRpcUrl()
+  return resolveOwlCenterMintRpcUrl()
 }

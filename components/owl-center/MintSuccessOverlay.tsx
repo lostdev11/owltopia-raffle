@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
-import { buildRaffleImageAttemptChain, getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
 
 export type MintSuccessOverlayProps = {
   open: boolean
@@ -79,7 +79,7 @@ export function MintSuccessOverlay({
           setImageAttemptChain([])
           return
         }
-        setImageAttemptChain(buildRaffleImageAttemptChain(raw, null))
+        setImageAttemptChain(buildOwlCenterHubCardImageChain(raw, { includeFallback: false }))
       })
       .catch(() => {
         if (!cancelled) setImageAttemptChain([])
@@ -93,11 +93,7 @@ export function MintSuccessOverlay({
     }
   }, [open, mint, preferMainnet])
 
-  const currentImageSrc = useMemo(() => {
-    const src = imageAttemptChain[imageAttemptIdx]
-    if (!src) return null
-    return getRaffleDisplayImageUrl(src) ?? src
-  }, [imageAttemptChain, imageAttemptIdx])
+  const currentImageSrc = imageAttemptChain[imageAttemptIdx] ?? null
 
   const imageSrcKey = `${imageAttemptIdx}:${imageAttemptChain[imageAttemptIdx] ?? ''}`
 
@@ -194,7 +190,9 @@ export function MintSuccessOverlay({
                       }
                     }}
                     onLoad={() => setArtworkLoaded(true)}
-                    onError={() => setImageAttemptIdx((idx) => idx + 1)}
+                    onError={() =>
+                      setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))
+                    }
                   />
                   {!artworkLoaded ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">

@@ -65,16 +65,39 @@ export function irysGatewayMirrorHttpsUrls(urlStr: string): string[] {
   }
 }
 
+function arweaveTxIdFromHttpsUrl(urlStr: string): string | null {
+  try {
+    const u = new URL(urlStr.trim())
+    const id = u.pathname.replace(/^\//, '').split('/')[0]?.trim()
+    return id || null
+  } catch {
+    return null
+  }
+}
+
 /** Best browser-facing HTTPS URL for on-chain NFT artwork metadata. */
 export function preferredNftImageHttpsUrl(urlStr: string): string {
   const trimmed = urlStr.trim()
   if (!trimmed) return trimmed
   if (isIrysGatewayHttpsUrl(trimmed)) {
+    const id = arweaveTxIdFromHttpsUrl(trimmed)
+    if (id) return `https://ar-io.net/${id}`
     return irysGatewayMirrorHttpsUrls(trimmed)[0] ?? trimmed
   }
   if (isIrysUploaderHttpsUrl(trimmed)) {
+    const id = arweaveTxIdFromHttpsUrl(trimmed)
+    if (id) return `https://ar-io.net/${id}`
     const mirrors = irysUploaderMirrorHttpsUrls(trimmed)
-    return mirrors.find((m) => m.startsWith('https://arweave.net')) ?? mirrors[0] ?? trimmed
+    return mirrors.find((m) => m.startsWith('https://ar-io.net')) ?? mirrors[0] ?? trimmed
+  }
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase()
+    if (host === 'arweave.net' || host.endsWith('.arweave.net')) {
+      const id = arweaveTxIdFromHttpsUrl(trimmed)
+      if (id) return `https://ar-io.net/${id}`
+    }
+  } catch {
+    /* keep trimmed */
   }
   return trimmed
 }

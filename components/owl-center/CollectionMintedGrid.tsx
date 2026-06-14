@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
-import { buildRaffleImageAttemptChain, getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
 
 function MintedPieceCard({
   mint,
@@ -35,7 +35,7 @@ function MintedPieceCard({
         const raw = json?.image?.trim()
         const n = json?.name?.trim()
         if (n) setName(n)
-        if (raw) setImageAttemptChain(buildRaffleImageAttemptChain(raw, null))
+        if (raw) setImageAttemptChain(buildOwlCenterHubCardImageChain(raw, { includeFallback: false }))
       })
       .catch(() => {
         if (!cancelled) setImageAttemptChain([])
@@ -49,11 +49,7 @@ function MintedPieceCard({
     }
   }, [mint, preferMainnet])
 
-  const imageSrc = useMemo(() => {
-    const src = imageAttemptChain[imageAttemptIdx]
-    if (!src) return null
-    return getRaffleDisplayImageUrl(src) ?? src
-  }, [imageAttemptChain, imageAttemptIdx])
+  const imageSrc = imageAttemptChain[imageAttemptIdx] ?? null
 
   const explorer = preferMainnet
     ? `https://solscan.io/token/${mint}`
@@ -74,7 +70,7 @@ function MintedPieceCard({
             className="h-full w-full object-cover"
             loading="lazy"
             decoding="async"
-            onError={() => setImageAttemptIdx((idx) => idx + 1)}
+            onError={() => setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">

@@ -33,6 +33,7 @@ export function isBrowserDirectRaffleImageHost(hostname: string): boolean {
   if (isDirectRaffleImageHost(h)) return true
   if (/^[^.]+\.ipfs\.(w3s|nftstorage|dweb|storacha)\.link$/.test(h)) return true
   return (
+    h === 'ar-io.net' ||
     h === 'arweave.net' ||
     h === 'arweave.dev' ||
     h.endsWith('.arweave.net') ||

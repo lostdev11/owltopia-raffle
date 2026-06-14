@@ -1,7 +1,13 @@
 /**
  * Resolve NFT artwork URL via Helius DAS getAsset (server-side).
  */
+import {
+  arweaveTxIdFromHttps,
+  normalizeOwlCenterArweaveGatewayUri,
+  walletSafeArweaveGatewayUri,
+} from '@/lib/owl-center/arweave-gateway-uri'
 import { getHeliusMainnetRpcUrl, getHeliusRpcUrl } from '@/lib/helius-rpc-url'
+import { irysGatewayMirrorHttpsUrls, isIrysGatewayHttpsUrl } from '@/lib/nft-media-uri'
 
 export function pickImageFromHeliusAsset(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null
@@ -65,6 +71,22 @@ function extractJsonUriFromDasAsset(result: unknown): string | null {
   return typeof ju === 'string' && ju.trim() ? ju.trim() : null
 }
 
+/** Try multiple Arweave/Irys gateways when fetching off-chain metadata JSON. */
+function metadataJsonFetchCandidates(uri: string): string[] {
+  const trimmed = uri.trim()
+  if (!trimmed) return []
+  const mirrors = new Set<string>([trimmed])
+  if (isIrysGatewayHttpsUrl(trimmed)) {
+    for (const m of irysGatewayMirrorHttpsUrls(trimmed)) mirrors.add(m)
+  }
+  const id = arweaveTxIdFromHttps(trimmed)
+  if (id) {
+    mirrors.add(walletSafeArweaveGatewayUri(trimmed))
+    mirrors.add(normalizeOwlCenterArweaveGatewayUri(trimmed))
+  }
+  return [...mirrors]
+}
+
 const METADATA_JSON_TIMEOUT_MS = 3_500
 
 /** Resolve `image.png` / `./x` against the metadata JSON URL (common on Arweave / IPFS). */
@@ -80,34 +102,34 @@ function normalizeMediaUri(uri: string | null, baseJsonUri: string | null): stri
   }
 }
 
-/** Off-chain TM / Core metadata JSON (`json_uri`) often holds `image` / `name` when DAS omits inline fields. */
 async function fetchMintFieldsFromMetadataJson(
   jsonUri: string
-): Promise<{ image: string | null; name: string | null }> {
-  const u = jsonUri.trim()
-  if (!u) return { image: null, name: null }
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), METADATA_JSON_TIMEOUT_MS)
-  try {
-    const res = await fetch(u, {
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: { Accept: 'application/json, text/plain;q=0.9,*/*;q=0.8' },
-    })
-    if (!res.ok) return { image: null, name: null }
-    const data: unknown = await res.json().catch(() => null)
-    if (!data || typeof data !== 'object') return { image: null, name: null }
-    const rec = data as { image?: unknown; name?: unknown }
-    const img = rec.image
-    const image = typeof img === 'string' && img.trim() ? img.trim() : null
-    const nm = rec.name
-    const name = typeof nm === 'string' && nm.trim() ? nm.trim() : null
-    return { image, name }
-  } catch {
-    return { image: null, name: null }
-  } finally {
-    clearTimeout(timer)
+): Promise<{ image: string | null; name: string | null; baseUri: string | null }> {
+  for (const url of metadataJsonFetchCandidates(jsonUri)) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), METADATA_JSON_TIMEOUT_MS)
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: { Accept: 'application/json, text/plain;q=0.9,*/*;q=0.8' },
+      })
+      if (!res.ok) continue
+      const data: unknown = await res.json().catch(() => null)
+      if (!data || typeof data !== 'object') continue
+      const rec = data as { image?: unknown; name?: unknown }
+      const img = rec.image
+      const image = typeof img === 'string' && img.trim() ? img.trim() : null
+      const nm = rec.name
+      const name = typeof nm === 'string' && nm.trim() ? nm.trim() : null
+      if (image || name) return { image, name, baseUri: url }
+    } catch {
+      /* try next gateway mirror */
+    } finally {
+      clearTimeout(timer)
+    }
   }
+  return { image: null, name: null, baseUri: null }
 }
 
 /**
@@ -124,7 +146,7 @@ export async function resolveMintMetaFromDasAssetPayload(
 
   if (jsonUri) {
     const j = await fetchMintFieldsFromMetadataJson(jsonUri)
-    if (!image && j.image) image = j.image
+    if (!image && j.image) image = normalizeMediaUri(j.image, j.baseUri ?? jsonUri)
     if (!name && j.name) name = j.name
   }
 
