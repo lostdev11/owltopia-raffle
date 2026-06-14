@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import {
   owlCenterMintPhaseStatusLabel,
@@ -97,6 +98,15 @@ export function Gen2MintPanel({
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
+  const [mintedCount, setMintedCount] = useState(0)
+
+  const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+
+  const dismissSuccess = useCallback(() => {
+    setStep('idle')
+    setLastSig(null)
+    setMintedCount(0)
+  }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
 
@@ -119,6 +129,7 @@ export function Gen2MintPanel({
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
+    setMintedCount(0)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
       setStep('error')
@@ -181,6 +192,7 @@ export function Gen2MintPanel({
           throw new Error(cj.error || 'Confirm route failed')
         }
         setLastSig(sig)
+        setMintedCount((c) => c + 1)
       }
       setStep('success')
       onRefresh()
@@ -235,7 +247,15 @@ export function Gen2MintPanel({
       : null
 
   return (
-    <MintPanelShell embedded={embedded} label="mint_console">
+    <>
+      <MintSuccessOverlay
+        open={step === 'success' && Boolean(lastSig)}
+        quantity={mintedCount}
+        transactionSignature={lastSig ?? ''}
+        explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        onClose={dismissSuccess}
+      />
+      <MintPanelShell embedded={embedded} label="mint_console">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A222B] pb-4">
           <div className="font-mono text-xs text-[#9BA8B4]">
@@ -408,16 +428,6 @@ export function Gen2MintPanel({
               state=<span className="text-[#00FF9C]">{stepLabel(step)}</span>
             </p>
             {err ? <p className="mt-1 text-[#FF9C9C]">{err}</p> : null}
-            {lastSig && step === 'success' ? (
-              <a
-                href={owlCenterSolanaExplorerTxUrl(lastSig, isDevnetMintEnabled() ? 'devnet' : 'mainnet')}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 inline-block min-h-[44px] touch-manipulation text-[#00FF9C] underline"
-              >
-                View last transaction (Solana Explorer)
-              </a>
-            ) : null}
           </div>
 
           <p className="text-xs text-[#5C6773]">
@@ -426,5 +436,6 @@ export function Gen2MintPanel({
           </p>
         </div>
     </MintPanelShell>
+    </>
   )
 }

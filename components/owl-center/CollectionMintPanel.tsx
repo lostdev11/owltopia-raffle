@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
@@ -74,6 +75,7 @@ export function CollectionMintPanel({
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
+  const [mintedCount, setMintedCount] = useState(0)
 
   const cmConfigured = Boolean(
     getLaunchCandyMachineId(launch, mintNetwork)?.trim() && getLaunchCollectionMint(launch, mintNetwork)?.trim()
@@ -92,9 +94,16 @@ export function CollectionMintPanel({
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
   const mintClosed = trading || soldOut || mintControls.disabled
 
+  const dismissSuccess = useCallback(() => {
+    setStep('idle')
+    setLastSig(null)
+    setMintedCount(0)
+  }, [])
+
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
+    setMintedCount(0)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
       setStep('error')
@@ -151,6 +160,7 @@ export function CollectionMintPanel({
           throw new Error(cj.error || 'confirm_failed')
         }
         setLastSig(sig)
+        setMintedCount((c) => c + 1)
       }
       setStep('success')
       await Promise.all([loadElig(), onRefresh()])
@@ -174,7 +184,15 @@ export function CollectionMintPanel({
   }
 
   return (
-    <CommandCard label={`MINT // public · ${mintNetwork}`}>
+    <>
+      <MintSuccessOverlay
+        open={step === 'success' && Boolean(lastSig)}
+        quantity={mintedCount}
+        transactionSignature={lastSig ?? ''}
+        explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        onClose={dismissSuccess}
+      />
+      <CommandCard label={`MINT // public · ${mintNetwork}`}>
       <div className="space-y-4">
         <p className="font-mono text-xs text-[#9BA8B4]">
           {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet/phase
@@ -226,22 +244,9 @@ export function CollectionMintPanel({
           </>
         )}
 
-        {step === 'success' && lastSig ? (
-          <p className="font-mono text-xs text-[#00FF9C]">
-            Mint recorded ·{' '}
-            <a
-              href={owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork)}
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
-            >
-              View tx
-            </a>
-          </p>
-        ) : null}
-
         {err ? <p className="text-sm text-red-400">{err}</p> : null}
       </div>
     </CommandCard>
+    </>
   )
 }
