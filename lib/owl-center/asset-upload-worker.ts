@@ -2,6 +2,7 @@ import 'server-only'
 
 import { formatSugarBatchScanSummary } from '@/lib/owl-center/scan-sugar-batch'
 import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
+import { uploadBytesFromJob } from '@/lib/owl-center/arweave-upload-estimate-server'
 import { owlCenterAssetUploadBatchSize } from '@/lib/owl-center/asset-staging-limits'
 import { downloadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
 import type { AssetUploadProgress, OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
@@ -13,7 +14,7 @@ import {
   rewriteMetadataJson,
   scanSugarZipBuffer,
 } from '@/lib/owl-center/asset-upload-zip'
-import { isIrysUploadConfigured, uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
+import { ensureIrysFundedForUpload, isIrysUploadConfigured, uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
 import {
   getAssetUploadJobById,
   listAssetUploadJobsForWorker,
@@ -143,14 +144,30 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
 export async function startArweaveUploadForJob(jobId: string): Promise<AssetUploadWorkerResult> {
   const job = await getAssetUploadJobById(jobId)
   if (!job) return { ok: false, error: 'job_not_found' }
-  if (job.status !== 'validated') {
+  if (job.status !== 'validated' && job.status !== 'failed') {
     return { ok: false, error: `Job must be validated (current: ${job.status})` }
+  }
+  if (job.status === 'failed' && !job.upload_progress.file_list.length) {
+    return { ok: false, error: 'Re-validate the ZIP before retrying Arweave upload.' }
   }
   if (!isIrysUploadConfigured()) {
     return {
       ok: false,
       error: 'IRYS_PRIVATE_KEY not configured — set env and redeploy to push to Arweave.',
     }
+  }
+
+  const { totalBytes, fileCount } = uploadBytesFromJob(job)
+  if (totalBytes < 1) {
+    return { ok: false, error: 'No upload bytes — re-validate the staged ZIP.' }
+  }
+
+  try {
+    await ensureIrysFundedForUpload(totalBytes, Math.max(1, fileCount))
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await updateAssetUploadJob(jobId, { status: 'failed', error_message: msg })
+    return { ok: false, error: msg, job_id: jobId }
   }
 
   await updateAssetUploadJob(jobId, {

@@ -57,12 +57,17 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (action === 'validate') {
     result = await validateAssetUploadJob(jobId)
   } else if (action === 'start_arweave') {
+    if (job.status !== 'validated' && job.status !== 'failed') {
+      return jsonError(`Job status ${job.status} — cannot start Arweave upload`, 400)
+    }
     result = await startArweaveUploadForJob(jobId)
   } else if (action === 'process_batch') {
     if (job.status === 'validated') {
       result = await startArweaveUploadForJob(jobId)
     } else if (job.status === 'uploading') {
       result = await processArweaveUploadBatch(jobId)
+    } else if (job.status === 'failed') {
+      result = await startArweaveUploadForJob(jobId)
     } else if (job.status === 'queued') {
       result = await validateAssetUploadJob(jobId)
     } else {

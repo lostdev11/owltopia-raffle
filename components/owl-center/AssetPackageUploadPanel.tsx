@@ -204,6 +204,12 @@ export function AssetPackageUploadPanel({
           </DeployButton>
         ) : null}
 
+        {job?.status === 'failed' && irysOk && (job.upload_progress?.file_list?.length ?? 0) > 0 ? (
+          <DeployButton type="button" disabled={busy} onClick={() => void runAction('start_arweave')}>
+            Retry Push to Arweave
+          </DeployButton>
+        ) : null}
+
         {job?.status === 'uploading' ? (
           <DeployButton type="button" variant="ghost" disabled={busy} onClick={() => void runAction('process_batch')}>
             Process next batch

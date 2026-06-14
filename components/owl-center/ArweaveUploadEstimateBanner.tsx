@@ -28,8 +28,9 @@ export function ArweaveUploadEstimateBanner({
         </p>
       ) : (
         <p className="mt-2 text-xs text-[#9BA8B4]">
-          Fund the Irys payer wallet with ~{estimate.fund_sol} SOL (+ buffer) before Push to Arweave. Upload once — skip{' '}
-          <code className="text-[#7D8A93]">sugar upload</code> if using this path.
+          Keep ~{estimate.fund_sol} SOL (+ buffer) in the Irys payer wallet — Push to Arweave auto-deposits it to
+          Irys (wallet SOL alone is not enough). Upload once, then skip duplicate{' '}
+          <code className="text-[#7D8A93]">sugar upload</code>.
         </p>
       )}
       <p className="mt-1 text-[10px] text-[#5C6773]">{estimate.note}</p>
