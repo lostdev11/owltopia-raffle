@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
 import type { LaunchCoverCandidate } from '@/lib/owl-center/launch-cover-image'
 
 type Props = {
@@ -73,7 +74,7 @@ export function LaunchCoverImageFields({
   }
 
   const preview =
-    coverUrl.trim().startsWith('http://') || coverUrl.trim().startsWith('https://')
+    coverUrl.trim().startsWith('http://') || coverUrl.trim().startsWith('https://') || coverUrl.trim().startsWith('/')
       ? coverUrl.trim()
       : null
 
@@ -118,8 +119,7 @@ export function LaunchCoverImageFields({
 
       {preview ? (
         <div className="relative aspect-[4/3] border border-[#1A222B] bg-[#0F1419]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="" className="absolute inset-0 m-auto max-h-full max-w-full object-contain p-4" />
+          <HubCardCoverImage imageUrl={preview} />
         </div>
       ) : null}
 

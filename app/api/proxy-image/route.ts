@@ -5,6 +5,7 @@ import {
   ipfsGatewayCandidateUrls,
   rewriteDeadIpfsGatewayHttpsUrl,
 } from '@/lib/ipfs-gateways'
+import { appendArweaveMirrorHttpsUrls } from '@/lib/arweave-proxy-mirrors'
 import {
   arweaveUriToHttps,
   fullyDecodeURIComponentSafe,
@@ -187,6 +188,7 @@ function getArweaveUrls(normalizedUrl: string): string[] {
         break
       }
     }
+    appendArweaveMirrorHttpsUrls(urls, path)
   } catch {
     // keep single url
   }

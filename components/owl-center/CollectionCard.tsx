@@ -1,8 +1,8 @@
-import Image from 'next/image'
 import Link from 'next/link'
 
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
+import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
 import { LaunchMintDetails } from '@/components/owl-center/LaunchMintDetails'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
@@ -46,12 +46,6 @@ export function CollectionCard({
   launch: OwlCenterLaunchPublic
   presaleSoldOut?: boolean
 }) {
-  const img =
-    launch.image_url?.startsWith('http://') || launch.image_url?.startsWith('https://')
-      ? launch.image_url
-      : launch.image_url?.startsWith('/')
-        ? launch.image_url
-        : '/images/gen2-logo-mark.png'
   const href = ctaHref(launch)
   const internal = href.startsWith('/')
   const presaleDisabled = isPresaleCtaDisabled(launch, presaleSoldOut)
@@ -60,12 +54,7 @@ export function CollectionCard({
   return (
     <article className="flex flex-col border border-[#1A222B] bg-[#10161C]/85">
       <div className="relative aspect-[4/3] border-b border-[#1A222B] bg-[#0F1419]">
-        {img.startsWith('http') ? (
-          // eslint-disable-next-line @next/next/no-img-element -- remote creator URLs not in next/image domains
-          <img src={img} alt="" className="absolute inset-0 m-auto max-h-full max-w-full object-contain p-6" />
-        ) : (
-          <Image src={img} alt="" fill className="object-contain p-6" sizes="(max-width:768px) 100vw, 360px" />
-        )}
+        <HubCardCoverImage imageUrl={launch.image_url} />
         <span className="absolute left-2 top-2 rounded-none border border-[#00FF9C]/30 bg-[#0F1419]/90 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-[#00FF9C]">
           Solana
         </span>

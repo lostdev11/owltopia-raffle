@@ -177,9 +177,10 @@ export async function uploadBufferToArweaveViaIrys(
     })
 
     const id = String(receipt.id)
+    const gatewayHost = irysNetworkLabel() === 'devnet' ? 'arweave.dev' : 'arweave.net'
     return {
       id,
-      uri: `https://arweave.net/${id}`,
+      uri: `https://${gatewayHost}/${id}`,
     }
   } catch (e) {
     throw new Error(formatIrysUploadError(e, payerAddress))
