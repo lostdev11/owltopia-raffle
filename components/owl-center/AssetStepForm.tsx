@@ -34,8 +34,9 @@ export function AssetStepForm({
         <p className="rounded border border-[#00FF9C]/30 bg-[#00FF9C]/8 px-3 py-2 text-xs leading-relaxed text-[#C5D0D8]">
           <strong className="font-normal text-[#EAFBF4]">Total images / metadata</strong> are prefilled from your generator
           supply. Drop the Sugar ZIP you exported below to confirm counts.{' '}
-          <strong className="font-normal text-[#EAFBF4]">Package URLs</strong> stay empty until Arweave upload (Phase B in
-          admin after approval, or Sugar CLI).
+          <strong className="font-normal text-[#EAFBF4]">Package URLs</strong> stay empty until one in-app Arweave push
+          in admin (then <code className="text-[#7D8A93]">sugar deploy</code> only — skip{' '}
+          <code className="text-[#7D8A93]">sugar upload</code>).
         </p>
       ) : (
         <p className="border border-[#C9A227]/35 bg-[#C9A227]/10 px-3 py-2 font-mono text-xs text-[#E8D089]">

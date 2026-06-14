@@ -83,9 +83,20 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
   }
 
   try {
-    const { scan, paths } = await scanSugarZipBuffer(zipBuffer, launch?.total_supply)
+    const { scan, paths, zip } = await scanSugarZipBuffer(zipBuffer, launch?.total_supply)
     const file_list = buildUploadFileList(paths)
-    const progress: AssetUploadProgress = { file_list, uploaded: {}, cursor: 0 }
+    let total_upload_bytes = 0
+    for (const path of paths) {
+      const buf = await readZipFileBuffer(zip, path)
+      if (buf) total_upload_bytes += buf.length
+    }
+    const progress: AssetUploadProgress = {
+      file_list,
+      uploaded: {},
+      cursor: 0,
+      staged_zip_bytes: job.upload_progress.staged_zip_bytes,
+      total_upload_bytes,
+    }
 
     if (!scan.ok) {
       if (job.launch_id) {

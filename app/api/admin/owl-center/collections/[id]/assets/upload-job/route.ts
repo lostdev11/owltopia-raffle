@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { jobProgressSummary } from '@/lib/owl-center/asset-upload-worker'
-import { isIrysUploadConfigured } from '@/lib/owl-center/irys-uploader'
+import { buildUploadJobApiPayload } from '@/lib/owl-center/upload-job-api-payload'
 import { getLatestAssetUploadJobForLaunch } from '@/lib/db/owl-center-asset-upload-job'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
@@ -27,9 +26,5 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   if (!launch) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
 
   const job = await getLatestAssetUploadJobForLaunch(id)
-  return NextResponse.json({
-    job,
-    progress: job ? jobProgressSummary(job) : null,
-    irys_configured: isIrysUploadConfigured(),
-  })
+  return NextResponse.json(await buildUploadJobApiPayload(job))
 }

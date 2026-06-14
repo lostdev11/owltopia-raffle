@@ -7,6 +7,7 @@ import { validateAssetUploadJob, type AssetUploadWorkerResult } from '@/lib/owl-
 import {
   getAssetUploadJobById,
   insertAssetUploadJob,
+  updateAssetUploadJob,
 } from '@/lib/db/owl-center-asset-upload-job'
 
 export type StageSugarPackageScope =
@@ -43,11 +44,18 @@ export async function stageSugarPackageZip(input: {
   })
   if (!job) return { ok: false, error: 'Could not create upload job' }
 
+  await updateAssetUploadJob(job.id, {
+    upload_progress: {
+      ...job.upload_progress,
+      staged_zip_bytes: input.buffer.length,
+    },
+  })
+
   let validation: AssetUploadWorkerResult | null = null
   if (input.buffer.length <= OWL_CENTER_SYNC_VALIDATE_MAX_BYTES) {
     validation = await validateAssetUploadJob(job.id)
   }
 
-  const fresh = validation ? await getAssetUploadJobById(job.id) : job
+  const fresh = await getAssetUploadJobById(job.id)
   return { ok: true, job: fresh ?? job, validation }
 }

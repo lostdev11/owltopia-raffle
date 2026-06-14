@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { jobProgressSummary, validateAssetUploadJob } from '@/lib/owl-center/asset-upload-worker'
 import { requireGeneratorStageSession } from '@/lib/owl-center/generator-stage-auth'
-import { isIrysUploadConfigured } from '@/lib/owl-center/irys-uploader'
 import { stageSugarPackageZip } from '@/lib/owl-center/stage-sugar-package'
-import { getAssetUploadJobById, getLatestAssetUploadJobForGeneratorProject } from '@/lib/db/owl-center-asset-upload-job'
+import { buildUploadJobApiPayload } from '@/lib/owl-center/upload-job-api-payload'
+import { getLatestAssetUploadJobForGeneratorProject } from '@/lib/db/owl-center-asset-upload-job'
 import { readFormDataFileParts } from '@/lib/form-data-file-parts'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -29,11 +28,7 @@ export async function GET(request: NextRequest) {
   if (!projectId) return jsonError('project_id required', 400)
 
   const job = await getLatestAssetUploadJobForGeneratorProject(projectId)
-  return NextResponse.json({
-    job,
-    progress: job ? jobProgressSummary(job) : null,
-    irys_configured: isIrysUploadConfigured(),
-  })
+  return NextResponse.json(await buildUploadJobApiPayload(job))
 }
 
 /**

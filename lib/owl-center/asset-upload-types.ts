@@ -19,6 +19,10 @@ export type AssetUploadProgress = {
   uploaded: Record<string, string>
   cursor: number
   manifest_base_url?: string
+  /** Staged Sugar ZIP size in Supabase storage. */
+  staged_zip_bytes?: number
+  /** Sum of uncompressed files to upload (set after validation). */
+  total_upload_bytes?: number
 }
 
 export type OwlCenterAssetUploadJob = {
@@ -57,5 +61,9 @@ export function parseUploadProgress(raw: unknown): AssetUploadProgress {
     typeof o.manifest_base_url === 'string' && o.manifest_base_url.trim()
       ? o.manifest_base_url.trim()
       : undefined
-  return { file_list, uploaded, cursor, manifest_base_url }
+  const staged_zip_bytes =
+    typeof o.staged_zip_bytes === 'number' && o.staged_zip_bytes > 0 ? o.staged_zip_bytes : undefined
+  const total_upload_bytes =
+    typeof o.total_upload_bytes === 'number' && o.total_upload_bytes > 0 ? o.total_upload_bytes : undefined
+  return { file_list, uploaded, cursor, manifest_base_url, staged_zip_bytes, total_upload_bytes }
 }

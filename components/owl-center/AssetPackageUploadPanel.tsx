@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Upload } from 'lucide-react'
 
+import { ArweaveUploadEstimateBanner } from '@/components/owl-center/ArweaveUploadEstimateBanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecommendedWorkflow'
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
   progress: { total_files: number; uploaded_files: number; percent: number } | null
   irys_configured: boolean
+  arweave_estimate: ArweaveUploadEstimate | null
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -34,6 +38,7 @@ export function AssetPackageUploadPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [pendingEstimateBytes, setPendingEstimateBytes] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -73,6 +78,7 @@ export function AssetPackageUploadPanel({
     setBusy(true)
     setErr(null)
     setMsg(null)
+    setPendingEstimateBytes(file.size)
     try {
       const fd = new FormData()
       fd.append('zip', file)
@@ -142,14 +148,26 @@ export function AssetPackageUploadPanel({
   const job = jobState?.job
   const progress = jobState?.progress
   const irysOk = jobState?.irys_configured === true
+  const estimate = jobState?.arweave_estimate
 
   return (
     <CommandCard label="phase_b.sys · STAGE → ARWEAVE">
+      <PhaseBRecommendedWorkflow />
+
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Upload a Sugar export ZIP from the generator (or Sugar). The server validates pairs, fills the asset package,
         then pushes to <strong className="font-normal text-[#E8EEF2]">Arweave via Irys</strong> in batches — no long
-        browser request. Candy Machine deploy still uses Sugar CLI after metadata is on Arweave.
+        browser request. After Arweave completes, run <code className="text-[#7D8A93]">sugar deploy</code> only (skip{' '}
+        <code className="text-[#7D8A93]">sugar upload</code>).
       </p>
+
+      {estimate ? (
+        <ArweaveUploadEstimateBanner estimate={estimate} irysConfigured={irysOk} />
+      ) : pendingEstimateBytes ? (
+        <p className="mb-4 font-mono text-xs text-[#5C6773]">
+          Staged {(pendingEstimateBytes / (1024 * 1024)).toFixed(1)} MB — estimate appears after job loads.
+        </p>
+      ) : null}
 
       {!irysOk ? (
         <p className="mb-4 rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 font-mono text-xs text-[#FFD769]">

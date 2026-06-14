@@ -170,9 +170,9 @@ Decentralized **gateway** staking programs (e.g. AO availability staking announc
 
 Admins stage a **Sugar export ZIP** on `/admin/owl-center/collections/{launch_id}/assets`:
 
-1. **Stage Sugar ZIP** — uploads to private Supabase Storage (`owl-center-asset-staging`), runs validation, auto-fills asset package counts + checklist.
-2. **Push to Arweave** — requires `IRYS_PRIVATE_KEY` (funded Solana wallet). Uploads PNGs then rewritten JSONs via Irys in batches (`OWL_CENTER_ASSET_UPLOAD_BATCH`, cron every 2 min).
-3. **Mark ready for Candy Machine** — same checklist gate as Phase A; then `sugar deploy` with on-chain URIs from Arweave.
+1. **Stage Sugar ZIP** — uploads to private Supabase Storage (`owl-center-asset-staging`), runs validation, auto-fills asset package counts + checklist. UI shows **recommended workflow** (one Arweave upload; skip duplicate `sugar upload`) and **estimated SOL** to fund `IRYS_PRIVATE_KEY`.
+2. **Push to Arweave** — requires `IRYS_PRIVATE_KEY` (funded Solana wallet). Uploads PNGs then rewritten JSONs via Irys in batches (`OWL_CENTER_ASSET_UPLOAD_BATCH`, cron every 2 min). Live cost uses Irys `estimateFolderPrice` when configured; otherwise heuristic from validated bytes + Jupiter SOL/USD.
+3. **Mark ready for Candy Machine** — same checklist gate as Phase A; then **`sugar deploy` only** (skip `sugar upload` when URIs are already on Arweave).
 
 Migration: `143_owl_center_asset_upload_jobs.sql`. Cron: `/api/cron/owl-center-asset-upload`.
 

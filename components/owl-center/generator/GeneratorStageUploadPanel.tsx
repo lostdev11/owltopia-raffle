@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Loader2, Upload } from 'lucide-react'
 
+import { ArweaveUploadEstimateBanner } from '@/components/owl-center/ArweaveUploadEstimateBanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecommendedWorkflow'
+import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
   progress: { total_files: number; uploaded_files: number; percent: number } | null
+  irys_configured: boolean
+  arweave_estimate: ArweaveUploadEstimate | null
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -127,13 +132,27 @@ export function GeneratorStageUploadPanel({
 
   const job = jobState?.job
   const validated = job?.status === 'validated'
+  const estimate = jobState?.arweave_estimate
+  const irysOk = jobState?.irys_configured === true
 
   return (
     <CommandCard label="STAGE // Pre-launch upload">
-      <p className="text-sm text-[#9BA8B4]">
+      <PhaseBRecommendedWorkflow compact />
+      <p className="mt-3 text-sm text-[#9BA8B4]">
         Stage your Sugar ZIP by project ID before launch submit. After you submit the launch form, admin links this
-        job and validation to the collection assets page.
+        job and validation to the collection assets page — then one Arweave push (no duplicate{' '}
+        <code className="text-[#7D8A93]">sugar upload</code>).
       </p>
+
+      {estimate ? (
+        <div className="mt-4">
+          <ArweaveUploadEstimateBanner estimate={estimate} irysConfigured={irysOk} />
+        </div>
+      ) : zipBlob ? (
+        <p className="mt-4 font-mono text-xs text-[#5C6773]">
+          After staging, an estimated SOL cost for Arweave will appear here.
+        </p>
+      ) : null}
 
       {loading ? (
         <p className="mt-4 flex items-center gap-2 font-mono text-xs text-[#5C6773]">
