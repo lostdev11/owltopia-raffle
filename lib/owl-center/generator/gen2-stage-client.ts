@@ -1,4 +1,5 @@
 import { buildSugarZipBlob } from '@/lib/owl-center/generator/export-zip'
+import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
 import {
   generativeCountForSupply,
@@ -33,18 +34,17 @@ export async function stageSugarZipToLaunch(
   blob: Blob,
   filename: string
 ): Promise<{ ok: true; job_id: string } | { ok: false; error: string }> {
-  const fd = new FormData()
-  fd.append('zip', blob, filename || 'gen2-supply.zip')
-  const res = await fetch(`/api/admin/owl-center/collections/${encodeURIComponent(launchId)}/assets/stage`, {
-    method: 'POST',
-    credentials: 'include',
-    body: fd,
+  const base = `/api/admin/owl-center/collections/${encodeURIComponent(launchId)}/assets/stage`
+  const result = await stageSugarZipViaDirectUpload({
+    blob,
+    filename: filename || 'gen2-supply.zip',
+    prepareUrl: `${base}/prepare`,
+    prepareBody: {},
+    completeUrl: `${base}/complete`,
+    completeBody: {},
   })
-  const j = (await res.json()) as { ok?: boolean; error?: string; job?: { id?: string } }
-  if (!res.ok || !j.ok) {
-    return { ok: false, error: j.error || 'stage_failed' }
-  }
-  const jobId = j.job?.id?.trim()
+  if (!result.ok) return { ok: false, error: result.error || 'stage_failed' }
+  const jobId = result.job.id?.trim()
   if (!jobId) return { ok: false, error: 'Stage succeeded but job id missing' }
   return { ok: true, job_id: jobId }
 }

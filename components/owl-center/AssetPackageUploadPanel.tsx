@@ -9,6 +9,8 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecommendedWorkflow'
 import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
+import { readApiJsonResponse } from '@/lib/fetch-api-json'
+import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
@@ -48,7 +50,7 @@ export function AssetPackageUploadPanel({
         credentials: 'include',
         cache: 'no-store',
       })
-      const j = (await res.json()) as JobResponse & { error?: string }
+      const j = await readApiJsonResponse<JobResponse & { error?: string }>(res)
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setJobState(j)
     } catch (e) {
@@ -80,22 +82,18 @@ export function AssetPackageUploadPanel({
     setMsg(null)
     setPendingEstimateBytes(file.size)
     try {
-      const fd = new FormData()
-      fd.append('zip', file)
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets/stage`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
+      const base = `/api/admin/owl-center/collections/${launchId}/assets/stage`
+      const result = await stageSugarZipViaDirectUpload({
+        blob: file,
+        filename: file.name || 'sugar-batch.zip',
+        prepareUrl: `${base}/prepare`,
+        prepareBody: {},
+        completeUrl: `${base}/complete`,
+        completeBody: {},
       })
-      const j = (await res.json()) as {
-        ok?: boolean
-        error?: string
-        job?: OwlCenterAssetUploadJob
-        validation?: { ok?: boolean; error?: string; status?: string }
-      }
-      if (!res.ok) throw new Error(j.error || 'stage_failed')
+      if (!result.ok) throw new Error(result.error || 'stage_failed')
       setMsg('ZIP staged — validation applied to asset package when complete.')
-      if (j.validation?.ok) {
+      if (result.validation?.ok) {
         onApplied()
       }
       await load()

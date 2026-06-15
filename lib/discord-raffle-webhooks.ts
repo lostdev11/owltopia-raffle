@@ -6,8 +6,8 @@
  * DISCORD_WEBHOOK_COMMUNITY_GIVEAWAY_OPEN (optional; when a pool giveaway is opened for entries; falls back to LIVE_RAFFLES URL),
  * or DISCORD_WEBHOOK_URL as fallback where noted.
  * Partner communities: per-tenant `raffle_webhook_url_*` (see `discord_giveaway_partner_tenants`) when
- * a raffle is stamped with `discord_partner_tenant_id`. If that tenant exists and is entitled (active sub),
- * platform DISCORD_WEBHOOK_* raffle feeds are skipped so only the partner server’s webhooks receive create/draw pings.
+ * a raffle is stamped with `discord_partner_tenant_id`. Entitled partners also receive create/draw pings on
+ * their server; platform DISCORD_WEBHOOK_* feeds still run when configured (both servers get the post).
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
@@ -338,8 +338,7 @@ async function postDiscordWebhookContent(
 export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   const mainUrl = webhookUrlCreated()
   const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
-  const skipPlatformDiscord = entitledPartner != null
-  const postToPlatformFeed = !!(mainUrl && !skipPlatformDiscord)
+  const postToPlatformFeed = !!mainUrl
   const partnerCreatedWebhook = entitledPartner?.raffle_webhook_url_created?.trim() || null
   const postToPartnerDiscord = !!(partnerCreatedWebhook && partnerCreatedWebhook.length > 0)
 
@@ -437,8 +436,7 @@ export async function notifyRaffleWinnerDrawn(
 ): Promise<void> {
   const mainUrl = webhookUrlWinner()
   const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
-  const skipPlatformDiscord = entitledPartner != null
-  const postToPlatformFeed = !!(mainUrl && !skipPlatformDiscord)
+  const postToPlatformFeed = !!mainUrl
   const partnerWinnerWebhook = entitledPartner?.raffle_webhook_url_winner?.trim() || null
   const postToPartnerDiscord = !!(partnerWinnerWebhook && partnerWinnerWebhook.length > 0)
 

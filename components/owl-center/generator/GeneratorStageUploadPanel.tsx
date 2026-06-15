@@ -9,6 +9,8 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecommendedWorkflow'
 import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
+import { readApiJsonResponse } from '@/lib/fetch-api-json'
+import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
@@ -48,7 +50,7 @@ export function GeneratorStageUploadPanel({
         `/api/owl-center/generator/stage?project_id=${encodeURIComponent(projectId)}`,
         { credentials: 'include', cache: 'no-store' }
       )
-      const j = (await res.json()) as JobResponse & { error?: string }
+      const j = await readApiJsonResponse<JobResponse & { error?: string }>(res)
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setJobState(j)
       setErr(null)
@@ -80,23 +82,17 @@ export function GeneratorStageUploadPanel({
     setErr(null)
     setMsg(null)
     try {
-      const fd = new FormData()
-      fd.append('project_id', projectId)
-      fd.append('zip', source, filename)
-      const res = await fetch('/api/owl-center/generator/stage', {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
+      const result = await stageSugarZipViaDirectUpload({
+        blob: source,
+        filename,
+        prepareUrl: '/api/owl-center/generator/stage/prepare',
+        prepareBody: { project_id: projectId },
+        completeUrl: '/api/owl-center/generator/stage/complete',
+        completeBody: { project_id: projectId },
       })
-      const j = (await res.json()) as {
-        ok?: boolean
-        error?: string
-        job?: OwlCenterAssetUploadJob
-        validation?: { ok?: boolean; status?: string }
-      }
-      if (!res.ok) throw new Error(j.error || 'stage_failed')
+      if (!result.ok) throw new Error(result.error || 'stage_failed')
       setMsg(
-        j.validation?.ok === false
+        result.validation?.ok === false
           ? 'ZIP staged — validation reported issues (review after launch submit).'
           : 'ZIP staged — validation runs automatically. Submit to launch to link it.'
       )
@@ -120,7 +116,7 @@ export function GeneratorStageUploadPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: jobId }),
       })
-      const j = (await res.json()) as { error?: string }
+      const j = await readApiJsonResponse<{ error?: string }>(res)
       if (!res.ok) throw new Error(j.error || 'validate_failed')
       await load()
     } catch (e) {
