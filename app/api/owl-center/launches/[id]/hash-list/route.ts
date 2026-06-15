@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
+import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
 import { buildHashListPayloadForLaunch } from '@/lib/owl-center/hash-list-payload'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,16 +13,21 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
 }
 
-/** Generate hash list + suggested ME/Tensor URLs from recorded mint events. */
+/** Creator-scoped hash list for Magic Eden / Tensor submission. */
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const session = await requireGen2PresaleAdminSession(request)
-  if (session instanceof NextResponse) return session
+  const ip = getClientIp(request)
+  if (!rateLimit(`owl-creator-hash-list:${ip}`, 30, 60_000).allowed) {
+    return jsonError('Too many requests', 429)
+  }
 
   const { id } = await context.params
-  if (!UUID_RE.test(id)) return jsonError('Invalid collection id', 400)
+  if (!UUID_RE.test(id)) return jsonError('Invalid launch id', 400)
 
   const launch = await getOwlCenterLaunchByIdAdmin(id)
   if (!launch) return jsonError('Launch not found', 404)
+
+  const editor = await requireLaunchMintEditorSession(request, launch)
+  if (editor instanceof NextResponse) return editor
 
   const payload = await buildHashListPayloadForLaunch(id)
   if (!payload) return jsonError('Launch not found', 404)

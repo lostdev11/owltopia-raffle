@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
 import { ReadinessChecklist, type ReadinessChecklistItem } from '@/components/owl-center/ReadinessChecklist'
 import type { OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
@@ -150,6 +151,18 @@ export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compac
           </p>
         </div>
       ) : null}
+
+      <div className="mb-6">
+        <MagicEdenHashListPanel
+          launchId={launchId}
+          slug={launchProp?.slug}
+          hashListApiPath={`/api/admin/owl-center/collections/${launchId}/hash-list`}
+          onSuggestedUrls={({ collectionMint: cm, magicEdenUrl }) => {
+            if (cm && !collectionMint.trim()) setCollectionMint(cm)
+            if (magicEdenUrl && !meUrl.trim()) setMeUrl(magicEdenUrl)
+          }}
+        />
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">

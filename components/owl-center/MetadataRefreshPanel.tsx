@@ -49,10 +49,16 @@ function AlertBox({ children, tone }: { children: ReactNode; tone: 'warn' | 'err
 export function MetadataRefreshPanel({
   launchId,
   anchorId = 'metadata-refresh',
+  apiPath,
 }: {
   launchId: string
   anchorId?: string
+  /** Defaults to admin API; creator pages pass creatorMetadataRefreshApiPath(launchId). */
+  apiPath?: string
 }) {
+  const refreshApi =
+    apiPath ?? `/api/admin/owl-center/collections/${launchId}/metadata-refresh`
+  const isCreatorApi = refreshApi.includes('/owl-center/launches/')
   const [status, setStatus] = useState<RefreshStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -63,7 +69,7 @@ export function MetadataRefreshPanel({
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/metadata-refresh`, {
+      const res = await fetch(refreshApi, {
         credentials: 'include',
         cache: 'no-store',
       })
@@ -76,7 +82,7 @@ export function MetadataRefreshPanel({
     } finally {
       setLoading(false)
     }
-  }, [launchId])
+  }, [refreshApi])
 
   useEffect(() => {
     void load()
@@ -87,7 +93,7 @@ export function MetadataRefreshPanel({
     setErr(null)
     setMsg(null)
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/metadata-refresh`, {
+      const res = await fetch(refreshApi, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -154,19 +160,28 @@ export function MetadataRefreshPanel({
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong>, a blank image, or
         <strong className="font-normal text-[#C5D0D8]"> Collection: collection</strong> in Phantom/Solflare. Re-uploads
-        metadata JSON with Irys image URLs, then updates on-chain name + URI.
+        metadata JSON with Irys image URLs, then updates on-chain name + URI. After deploying a gateway fix, run refresh
+        once more so wallets pick up working image URLs.
       </p>
 
       <div className="mb-4 space-y-3">
         {err && !status ? (
           <AlertBox tone="error">
-            Connect an admin wallet, tap Sign in, then retry. ({err})
+            {isCreatorApi
+              ? `Sign in with your creator wallet, then retry. (${err})`
+              : `Connect an admin wallet, tap Sign in, then retry. (${err})`}
           </AlertBox>
         ) : null}
 
         {!status?.enabled ? (
           <AlertBox tone="warn">
-            Set <code className="break-all text-[#C5D0D8]">IRYS_PRIVATE_KEY</code> on the server to enable refresh.
+            {isCreatorApi
+              ? 'Metadata refresh is not enabled on the server — contact Owltopia support.'
+              : (
+                <>
+                  Set <code className="break-all text-[#C5D0D8]">IRYS_PRIVATE_KEY</code> on the server to enable refresh.
+                </>
+              )}
           </AlertBox>
         ) : null}
 

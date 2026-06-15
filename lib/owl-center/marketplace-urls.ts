@@ -1,5 +1,10 @@
 import type { OwlMintNetwork } from '@/lib/solana/network'
 
+/** Magic Eden Creator Hub — US users are redirected to .us from .io. */
+export function magicEdenCreatorHubUrl(): string {
+  return 'https://creators.magiceden.us/'
+}
+
 /** Suggested Magic Eden collection URL (Solana). */
 export function suggestMagicEdenCollectionUrl(collectionMint: string, network: OwlMintNetwork = 'mainnet'): string {
   const mint = collectionMint.trim()

@@ -45,12 +45,7 @@ function isWalletSafeImageUrl(image: string, network: 'mainnet' | 'devnet'): boo
     if (network === 'devnet') {
       return h === 'arweave.dev' || h.endsWith('.arweave.dev')
     }
-    return (
-      h === 'ar-io.net' ||
-      h === 'gateway.irys.xyz' ||
-      h === 'uploader.irys.xyz' ||
-      h === 'ardrive.net'
-    )
+    return h === 'gateway.irys.xyz' || h === 'uploader.irys.xyz' || h === 'ardrive.net'
   } catch {
     return false
   }

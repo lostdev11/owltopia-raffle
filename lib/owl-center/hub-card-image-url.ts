@@ -27,7 +27,7 @@ function arweaveMirrorUrls(url: string): string[] {
     const u = new URL(url)
     const txPath = u.pathname.replace(/^\//, '') + u.search + u.hash
     if (!txPath || txPath === '/') return []
-    const bases = ['ar-io.net', 'gateway.irys.xyz', 'uploader.irys.xyz', 'arweave.dev', 'arweave.net']
+    const bases = ['gateway.irys.xyz', 'uploader.irys.xyz', 'arweave.dev', 'arweave.net', 'ar-io.net']
     return bases.map((host) => `https://${host}/${txPath}`)
   } catch {
     return []

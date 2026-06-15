@@ -49,10 +49,9 @@ export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
     href: '/owl-center/my-launches',
     label: 'My Launches',
     shortLabel: 'Mine',
-    description: 'Launchpad creator tools — Owl Vision admins only',
+    description: 'Partner creator portal — mint settings, metadata, Magic Eden prep',
     icon: PenLine,
     matchPrefix: '/owl-center/my-launches',
-    adminOnly: true,
   },
 ]
 export const OWL_CENTER_ADMIN_NAV_ITEMS: OwlCenterNavItem[] = [

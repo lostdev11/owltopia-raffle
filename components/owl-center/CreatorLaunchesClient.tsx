@@ -6,10 +6,11 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
-import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
+import { creatorMetadataRefreshApiPath } from '@/lib/owl-center/creator-api-paths'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 
 type LaunchRow = {
@@ -28,7 +29,6 @@ type LaunchRow = {
 export function CreatorLaunchesClient() {
   const { connected } = useWallet()
   const { signedIn, checking, checkSession } = useSiwsSession()
-  const { isOwlCenterAdmin, adminLoading } = useOwlCenterView()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -73,21 +73,9 @@ export function CreatorLaunchesClient() {
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
       title="My launches"
-      subtitle="Edit mint details, fix wallet metadata (#N / blank image in Phantom or Solflare), and manage your collections."
+      subtitle="Edit mint details, fix wallet metadata, and prepare Magic Eden listing for collections tied to your wallet."
     >
-      {!adminLoading && !isOwlCenterAdmin ? (
-        <div className="max-w-lg space-y-4">
-          <p className="font-mono text-sm text-[#9BA8B4]">
-            Launchpad creator tools are for Owl Vision admins only. Partner collections will appear here when announced.
-          </p>
-          <Link
-            href="/owl-center/collection/gen2"
-            className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16"
-          >
-            Go to Gen2 mint
-          </Link>
-        </div>
-      ) : !connected ? (
+      {!connected ? (
         <p className="font-mono text-sm text-[#9BA8B4]">
           Connect your Solana wallet in the header (Phantom / Solflare on mobile), then sign in below.
         </p>
@@ -114,10 +102,18 @@ export function CreatorLaunchesClient() {
           {loading ? <p className="font-mono text-sm text-[#5C6773]">Loading your launches…</p> : null}
           {err ? <p className="font-mono text-sm text-[#FF9C9C]">{err}</p> : null}
           {!loading && !err && launches.length === 0 ? (
-            <p className="font-mono text-sm text-[#9BA8B4]">
-              No collections found for this wallet. If you submitted under a different address, sign in with that wallet
-              instead.
-            </p>
+            <div className="space-y-4">
+              <p className="font-mono text-sm leading-relaxed text-[#9BA8B4]">
+                No collections found for this wallet. If you submitted under a different address, sign in with that
+                wallet instead.
+              </p>
+              <Link
+                href="/partner-program"
+                className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-5 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#00FF9C]"
+              >
+                Apply to partner program
+              </Link>
+            </div>
           ) : null}
           {launches.map((l) => (
             <div key={l.id} className="space-y-4">
@@ -135,7 +131,7 @@ export function CreatorLaunchesClient() {
                       href={`/owl-center/my-launches/${l.id}/mint-details`}
                       className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-6 text-center font-bold uppercase tracking-wide text-[#E8FDF4] shadow-[0_0_24px_rgba(0,255,156,0.18)] hover:bg-[#00FF9C]/18 sm:w-auto"
                     >
-                      Edit mint details
+                      Manage collection
                     </Link>
                     <DeployButton
                       type="button"
@@ -150,7 +146,16 @@ export function CreatorLaunchesClient() {
               </CommandCard>
 
               {refreshLaunchId === l.id ? (
-                <MetadataRefreshPanel launchId={l.id} anchorId={`metadata-refresh-${l.id}`} />
+                <>
+                  <MetadataRefreshPanel
+                    launchId={l.id}
+                    anchorId={`metadata-refresh-${l.id}`}
+                    apiPath={creatorMetadataRefreshApiPath(l.id)}
+                  />
+                  {l.minted_count > 0 ? (
+                    <MagicEdenHashListPanel launchId={l.id} slug={l.slug} compact />
+                  ) : null}
+                </>
               ) : null}
             </div>
           ))}

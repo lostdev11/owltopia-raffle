@@ -215,12 +215,9 @@ async function previewMintRefresh(params: {
     }
   }
 
-  // Wallet-safe refresh may re-upload JSON to a new Arweave tx id — compare name + on-chain JSON quality.
-  const onChainTxId = arweaveTxIdFromHttps(currentUri ?? '')
-  const jobTxId = tokenIndex ? arweaveTxIdFromHttps(uploaded[`assets/${tokenIndex}.json`] ?? '') : null
-  const uriTxMismatch = Boolean(onChainTxId && jobTxId && onChainTxId !== jobTxId)
+  // Wallet-safe refresh re-uploads JSON to a new Arweave tx id — only name + on-chain JSON quality matter.
   const needsRefresh = Boolean(
-    !skipReason && targetName && targetUri && (currentName !== targetName || jsonNeedsFix || uriTxMismatch)
+    !skipReason && targetName && targetUri && (currentName !== targetName || jsonNeedsFix)
   )
 
   return {

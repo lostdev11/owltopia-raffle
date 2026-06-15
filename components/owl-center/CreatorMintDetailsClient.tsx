@@ -6,9 +6,14 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
+import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import {
+  creatorMetadataRefreshApiPath,
+  creatorMintConfigApiPath,
+} from '@/lib/owl-center/creator-api-paths'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -50,7 +55,7 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
       title={launch?.name ?? 'Mint details'}
-      subtitle="Mint prices, phase schedule, per-wallet caps, and hub card cover."
+      subtitle="Mint prices, phase schedule, per-wallet caps, hub card cover, metadata, and Magic Eden listing prep."
     >
       <div className="mb-6">
         <Link href="/owl-center/my-launches">
@@ -85,11 +90,18 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
           <LaunchMintConfigPanel
             launchId={launchId}
             launch={launch}
-            saveApiPath={`/api/owl-center/launches/${launchId}/mint-config`}
+            saveApiPath={creatorMintConfigApiPath(launchId)}
             onSaved={() => void load()}
           />
           {launch.minted_count > 0 ? (
-            <MetadataRefreshPanel launchId={launchId} anchorId="metadata-refresh" />
+            <>
+              <MetadataRefreshPanel
+                launchId={launchId}
+                anchorId="metadata-refresh"
+                apiPath={creatorMetadataRefreshApiPath(launchId)}
+              />
+              <MagicEdenHashListPanel launchId={launchId} slug={launch.slug} />
+            </>
           ) : null}
         </div>
       ) : null}

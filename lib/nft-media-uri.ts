@@ -79,25 +79,29 @@ function arweaveTxIdFromHttpsUrl(urlStr: string): string | null {
 export function preferredNftImageHttpsUrl(urlStr: string): string {
   const trimmed = urlStr.trim()
   if (!trimmed) return trimmed
+  const id = arweaveTxIdFromHttpsUrl(trimmed)
+  if (id) {
+    try {
+      const host = new URL(trimmed).hostname.toLowerCase()
+      if (
+        host === 'ar-io.net' ||
+        host.endsWith('.arweave.net') ||
+        host === 'arweave.net' ||
+        isIrysGatewayHttpsUrl(trimmed) ||
+        isIrysUploaderHttpsUrl(trimmed)
+      ) {
+        return `https://gateway.irys.xyz/${id}`
+      }
+    } catch {
+      return `https://gateway.irys.xyz/${id}`
+    }
+  }
   if (isIrysGatewayHttpsUrl(trimmed)) {
-    const id = arweaveTxIdFromHttpsUrl(trimmed)
-    if (id) return `https://ar-io.net/${id}`
-    return irysGatewayMirrorHttpsUrls(trimmed)[0] ?? trimmed
+    return irysGatewayMirrorHttpsUrls(trimmed).find((u) => u.includes('gateway.irys.xyz')) ?? trimmed
   }
   if (isIrysUploaderHttpsUrl(trimmed)) {
-    const id = arweaveTxIdFromHttpsUrl(trimmed)
-    if (id) return `https://ar-io.net/${id}`
     const mirrors = irysUploaderMirrorHttpsUrls(trimmed)
-    return mirrors.find((m) => m.startsWith('https://ar-io.net')) ?? mirrors[0] ?? trimmed
-  }
-  try {
-    const host = new URL(trimmed).hostname.toLowerCase()
-    if (host === 'arweave.net' || host.endsWith('.arweave.net')) {
-      const id = arweaveTxIdFromHttpsUrl(trimmed)
-      if (id) return `https://ar-io.net/${id}`
-    }
-  } catch {
-    /* keep trimmed */
+    return mirrors.find((m) => m.includes('gateway.irys.xyz')) ?? mirrors[0] ?? trimmed
   }
   return trimmed
 }
