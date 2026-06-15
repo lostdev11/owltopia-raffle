@@ -11,6 +11,10 @@ import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-esti
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { readApiJsonResponse } from '@/lib/fetch-api-json'
 import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
+import {
+  saveStagedAssetsHandoffToSession,
+  type GeneratorStagedAssetsHandoff,
+} from '@/lib/owl-center/generator/staged-assets-handoff'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
@@ -22,7 +26,7 @@ type JobResponse = {
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued — validation pending',
   validating: 'Validating Sugar batch…',
-  validated: 'Validated — links on launch submit',
+  validated: 'Validated — step 3 auto-filled on launch submit',
   uploading: 'Uploading to Arweave…',
   completed: 'Upload complete',
   failed: 'Validation failed — fix ZIP and re-stage',
@@ -44,6 +48,21 @@ export function GeneratorStageUploadPanel({
   const [msg, setMsg] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const persistStagedHandoff = useCallback(
+    (job: OwlCenterAssetUploadJob) => {
+      const handoff: GeneratorStagedAssetsHandoff = {
+        project_id: projectId,
+        job_id: job.id,
+        filename: job.original_filename,
+        status: job.status,
+        validation_scan: job.validation_scan,
+        updated_at: job.updated_at || new Date().toISOString(),
+      }
+      saveStagedAssetsHandoffToSession(handoff)
+    },
+    [projectId]
+  )
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(
@@ -53,6 +72,7 @@ export function GeneratorStageUploadPanel({
       const j = await readApiJsonResponse<JobResponse & { error?: string }>(res)
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setJobState(j)
+      if (j.job?.validation_scan) persistStagedHandoff(j.job)
       setErr(null)
     } catch (e) {
       setJobState(null)
@@ -60,7 +80,7 @@ export function GeneratorStageUploadPanel({
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, persistStagedHandoff])
 
   useEffect(() => {
     void load()
@@ -91,10 +111,11 @@ export function GeneratorStageUploadPanel({
         completeBody: { project_id: projectId },
       })
       if (!result.ok) throw new Error(result.error || 'stage_failed')
+      persistStagedHandoff(result.job)
       setMsg(
         result.validation?.ok === false
-          ? 'ZIP staged — validation reported issues (review after launch submit).'
-          : 'ZIP staged — validation runs automatically. Submit to launch to link it.'
+          ? 'ZIP staged — validation reported issues. Step 3 will still pick up counts when you submit.'
+          : 'ZIP staged — step 3 on launch submit auto-fills image/metadata counts from validation.'
       )
       await load()
     } catch (e) {
@@ -135,8 +156,8 @@ export function GeneratorStageUploadPanel({
     <CommandCard label="STAGE // Pre-launch upload">
       <PhaseBRecommendedWorkflow compact />
       <p className="mt-3 text-sm text-[#9BA8B4]">
-        Stage your Sugar ZIP by project ID before launch submit. After you submit the launch form, admin links this
-        job and validation to the collection assets page — then one Arweave push (no duplicate{' '}
+        Stage your Sugar ZIP here before launch submit. Step 3 on the launch form auto-fills image/metadata counts and
+        JSON notes from validation — admin links this job on submit for Phase B Arweave upload (no duplicate{' '}
         <code className="text-[#7D8A93]">sugar upload</code>).
       </p>
 

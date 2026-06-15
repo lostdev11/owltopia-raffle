@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-import { AssetStepForm, type AssetStepValues } from '@/components/owl-center/AssetStepForm'
+import { AssetStepForm } from '@/components/owl-center/AssetStepForm'
+import { emptyAssetStepValues, type AssetStepValues } from '@/lib/owl-center/asset-step-values'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import {
@@ -17,6 +18,8 @@ import {
   readGeneratorProjectIdFromSession,
   readLaunchDraftFromSession,
 } from '@/lib/owl-center/generator/launch-draft'
+import { clearStagedAssetsHandoffFromSession } from '@/lib/owl-center/generator/staged-assets-handoff'
+import { useStagedAssetsPrefill } from '@/lib/owl-center/generator/use-staged-assets-prefill'
 import { mintDetailsPayloadFromForm } from '@/lib/owl-center/launch-mint-config'
 import {
   formatOwlCenterPlatformMintFeeLabel,
@@ -26,17 +29,7 @@ import { formatRoyaltyPercentLabel, percentToBasisPoints } from '@/lib/owl-cente
 
 const STEPS = ['Collection info', 'Supply & mint', 'Assets & metadata', 'Review'] as const
 
-const emptyAssets: AssetStepValues = {
-  logo_url: '',
-  banner_url: '',
-  collection_image_url: '',
-  assets_package_url: '',
-  metadata_package_url: '',
-  traits_csv_url: '',
-  asset_notes: '',
-  total_images: '',
-  total_metadata: '',
-}
+const emptyAssets = emptyAssetStepValues()
 
 export function LaunchSubmissionWizard() {
   const searchParams = useSearchParams()
@@ -58,8 +51,14 @@ export function LaunchSubmissionWizard() {
 
   const [assets, setAssets] = useState<AssetStepValues>(emptyAssets)
 
+  const stagedPrefill = useStagedAssetsPrefill(generatorProjectId, assets, setAssets)
+
   useEffect(() => {
-    if (!fromGenerator) return
+    if (!fromGenerator) {
+      const sessionProjectId = readGeneratorProjectIdFromSession()
+      if (sessionProjectId) setGeneratorProjectId(sessionProjectId)
+      return
+    }
     const draft = readLaunchDraftFromSession()
     if (!draft) return
     setCollectionName(draft.collection_name)
@@ -120,6 +119,7 @@ export function LaunchSubmissionWizard() {
       if (!res.ok) throw new Error(j.error || 'submit_failed')
       setStatus('ok')
       clearGeneratorHandoffFromSession()
+      clearStagedAssetsHandoffFromSession()
       setMsg(`Queued as PENDING_REVIEW — id ${j.id ?? ''} · slug ${j.slug ?? ''}`)
     } catch (e) {
       setStatus('err')
@@ -135,9 +135,9 @@ export function LaunchSubmissionWizard() {
     >
       {generatorPrefill ? (
         <p className="mb-6 rounded border border-[#00FF9C]/30 bg-[#00FF9C]/8 px-4 py-3 text-sm text-[#C5D0D8]">
-          Prefilled from <strong className="font-normal text-[#EAFBF4]">Owl Generator</strong> — step 3 includes image/metadata
-          counts. Stage your Sugar ZIP in the generator before submit; validation links automatically on launch intake.
-          Package URLs are added after Phase B Arweave upload in admin.
+          Prefilled from <strong className="font-normal text-[#EAFBF4]">Owl Generator</strong> — step 3 auto-fills image
+          and metadata counts when you stage your Sugar ZIP in the generator. Upload logo and banner below (URLs are
+          created automatically). Package paths are added after Phase B Arweave upload in admin.
         </p>
       ) : null}
       <nav className="mb-8 font-mono text-xs uppercase tracking-widest text-[#5C6773]">
@@ -243,6 +243,10 @@ export function LaunchSubmissionWizard() {
               onChange={setAssets}
               fromGenerator={generatorPrefill}
               expectedSupply={Number(totalSupply) || undefined}
+              generatorProjectId={generatorProjectId}
+              stagedJob={stagedPrefill.job}
+              stagedLoading={stagedPrefill.loading}
+              onRefreshStaged={() => void stagedPrefill.refresh()}
             />
           </CommandCard>
         ) : null}

@@ -7,8 +7,11 @@ export const OWL_CENTER_STAGED_ZIP_MAX_BYTES = 512 * 1024 * 1024
 /** Validate synchronously on upload when ZIP is below this (80 MB). */
 export const OWL_CENTER_SYNC_VALIDATE_MAX_BYTES = 80 * 1024 * 1024
 
-/** Files uploaded to Irys per worker tick (cron or manual process). */
-export function owlCenterAssetUploadBatchSize(): number {
+export type ArweaveUploadBatchMode = 'tick' | 'full'
+
+/** Files uploaded to Irys per cron tick. Interactive pushes use `full` (all remaining). */
+export function owlCenterAssetUploadBatchSize(mode: ArweaveUploadBatchMode = 'tick'): number {
+  if (mode === 'full') return Number.MAX_SAFE_INTEGER
   const raw = process.env.OWL_CENTER_ASSET_UPLOAD_BATCH
   const n = raw ? Number.parseInt(raw, 10) : 15
   if (!Number.isFinite(n) || n < 1) return 15

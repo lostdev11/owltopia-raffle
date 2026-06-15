@@ -1,18 +1,24 @@
 'use client'
 
+import { CheckCircle2, Loader2, RefreshCw } from 'lucide-react'
+
+import { BrandImageUploadField } from '@/components/owl-center/BrandImageUploadField'
+import { DeployButton } from '@/components/owl-center/DeployButton'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
+import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { formatSugarBatchScanSummary } from '@/lib/owl-center/scan-sugar-batch'
 
-export type AssetStepValues = {
-  logo_url: string
-  banner_url: string
-  collection_image_url: string
-  assets_package_url: string
-  metadata_package_url: string
-  traits_csv_url: string
-  asset_notes: string
-  total_images: string
-  total_metadata: string
+import type { AssetStepValues } from '@/lib/owl-center/asset-step-values'
+
+export type { AssetStepValues } from '@/lib/owl-center/asset-step-values'
+
+const STAGED_STATUS_LABEL: Record<string, string> = {
+  queued: 'ZIP staged — validation queued',
+  validating: 'Validating staged ZIP…',
+  validated: 'Staged ZIP validated — counts applied below',
+  uploading: 'Arweave upload in progress (admin)',
+  completed: 'Arweave upload complete',
+  failed: 'Staged ZIP validation failed — re-stage in generator or scan locally',
 }
 
 export function AssetStepForm({
@@ -20,23 +26,33 @@ export function AssetStepForm({
   onChange,
   fromGenerator = false,
   expectedSupply,
+  generatorProjectId = null,
+  stagedJob = null,
+  stagedLoading = false,
+  onRefreshStaged,
 }: {
   values: AssetStepValues
   onChange: (next: AssetStepValues) => void
   fromGenerator?: boolean
   expectedSupply?: number
+  generatorProjectId?: string | null
+  stagedJob?: OwlCenterAssetUploadJob | null
+  stagedLoading?: boolean
+  onRefreshStaged?: () => void
 }) {
   const set = (key: keyof AssetStepValues, v: string) => onChange({ ...values, [key]: v })
+  const hasStagedScan = Boolean(stagedJob?.validation_scan)
+  const showLocalScanner = !hasStagedScan || stagedJob?.status === 'failed'
 
   return (
     <div className="grid gap-4">
       {fromGenerator ? (
         <p className="rounded border border-[#00FF9C]/30 bg-[#00FF9C]/8 px-3 py-2 text-xs leading-relaxed text-[#C5D0D8]">
-          <strong className="font-normal text-[#EAFBF4]">Total images / metadata</strong> are prefilled from your generator
-          supply. Drop the Sugar ZIP you exported below to confirm counts.{' '}
-          <strong className="font-normal text-[#EAFBF4]">Package URLs</strong> stay empty until one in-app Arweave push
-          in admin (then <code className="text-[#7D8A93]">sugar deploy</code> only — skip{' '}
-          <code className="text-[#7D8A93]">sugar upload</code>).
+          <strong className="font-normal text-[#EAFBF4]">Stage your Sugar ZIP in the generator first</strong> — image and
+          metadata counts, collection.json, and traits.csv notes flow here automatically. Upload logo and banner below;
+          URLs are created for you.{' '}
+          <strong className="font-normal text-[#EAFBF4]">Package URLs</strong> stay empty until Phase B Arweave upload
+          in admin.
         </p>
       ) : (
         <p className="border border-[#C9A227]/35 bg-[#C9A227]/10 px-3 py-2 font-mono text-xs text-[#E8D089]">
@@ -44,13 +60,61 @@ export function AssetStepForm({
           validate/upload/deploy (Arweave), then paste bundle URLs here.
         </p>
       )}
+
+      {generatorProjectId ? (
+        <div className="rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Generator staged ZIP</p>
+              {stagedLoading ? (
+                <p className="mt-2 flex items-center gap-2 font-mono text-xs text-[#7D8A93]">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Loading staged job…
+                </p>
+              ) : stagedJob ? (
+                <p className="mt-2 flex items-center gap-2 font-mono text-xs text-[#C5D0D8]">
+                  {stagedJob.status === 'validated' ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-[#00FF9C]" aria-hidden />
+                  ) : stagedJob.status === 'failed' ? null : (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#7D8A93]" aria-hidden />
+                  )}
+                  {STAGED_STATUS_LABEL[stagedJob.status] ?? stagedJob.status}
+                  {stagedJob.original_filename ? (
+                    <span className="text-[#5C6773]">· {stagedJob.original_filename}</span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="mt-2 font-mono text-xs text-[#FFD769]">
+                  No staged ZIP yet — go back to the generator and tap Stage latest export.
+                </p>
+              )}
+              {stagedJob?.error_message ? (
+                <p className="mt-2 text-xs text-[#FF9C9C]">{stagedJob.error_message}</p>
+              ) : null}
+            </div>
+            {onRefreshStaged ? (
+              <DeployButton
+                type="button"
+                variant="ghost"
+                className="min-h-[44px] touch-manipulation gap-2"
+                disabled={stagedLoading}
+                onClick={onRefreshStaged}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                Refresh
+              </DeployButton>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <p className="font-mono text-xs text-[#9BA8B4]">
         Each NFT should have a matching image and metadata JSON file. Recommended naming:{' '}
         <span className="text-[#00FF9C]">0.png + 0.json</span>,{' '}
-        <span className="text-[#00FF9C]">1.png + 1.json</span>, etc. See{' '}
-        <span className="break-all text-[#7D8A93]">docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md</span> for the full workflow.
+        <span className="text-[#00FF9C]">1.png + 1.json</span>, etc.
       </p>
-      {fromGenerator ? (
+
+      {showLocalScanner ? (
         <SugarBatchScanner
           embedded
           expectedSupply={expectedSupply}
@@ -64,33 +128,26 @@ export function AssetStepForm({
           }}
         />
       ) : null}
-      <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-        Logo URL
-        <input
-          value={values.logo_url}
-          onChange={(e) => set('logo_url', e.target.value)}
-          type="url"
-          className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-        />
-      </label>
-      <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-        Banner URL
-        <input
-          value={values.banner_url}
-          onChange={(e) => set('banner_url', e.target.value)}
-          type="url"
-          className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-        />
-      </label>
-      <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-        Collection image URL
-        <input
-          value={values.collection_image_url}
-          onChange={(e) => set('collection_image_url', e.target.value)}
-          type="url"
-          className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-        />
-      </label>
+
+      <BrandImageUploadField
+        label="Logo"
+        value={values.logo_url}
+        onChange={(url) => set('logo_url', url)}
+        hint="Square logo for listings and hub cards."
+      />
+      <BrandImageUploadField
+        label="Banner"
+        value={values.banner_url}
+        onChange={(url) => set('banner_url', url)}
+        hint="Wide banner for collection page header."
+      />
+      <BrandImageUploadField
+        label="Collection image"
+        value={values.collection_image_url}
+        onChange={(url) => set('collection_image_url', url)}
+        hint="Optional cover if different from logo."
+      />
+
       <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         Assets package URL / path
         <input
@@ -116,6 +173,7 @@ export function AssetStepForm({
           onChange={(e) => set('traits_csv_url', e.target.value)}
           type="url"
           className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+          placeholder={hasStagedScan && stagedJob?.validation_scan?.hasTraitsCsv ? 'Included in staged ZIP' : undefined}
         />
       </label>
       <div className="grid gap-4 sm:grid-cols-2">

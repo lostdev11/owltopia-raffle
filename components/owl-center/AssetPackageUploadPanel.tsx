@@ -105,39 +105,75 @@ export function AssetPackageUploadPanel({
     }
   }
 
-  async function runAction(action: 'validate' | 'start_arweave' | 'process_batch') {
+  async function runAction(action: 'validate' | 'start_arweave' | 'process_batch' | 'process_all') {
     const jobId = jobState?.job?.id
-    if (!jobId) return
+    if (!jobId) return null
+    const res = await fetch(
+      `/api/admin/owl-center/collections/${launchId}/assets/upload-job/process`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId, action }),
+      }
+    )
+    const j = (await res.json()) as {
+      error?: string
+      result?: { ok?: boolean; error?: string; status?: string; remaining_files?: number }
+      job?: OwlCenterAssetUploadJob
+      progress?: { total_files: number; uploaded_files: number; percent: number }
+    }
+    if (!res.ok) throw new Error(j.error || j.result?.error || 'process_failed')
+    return j
+  }
+
+  async function runValidate() {
     setBusy(true)
     setErr(null)
     setMsg(null)
     try {
-      const res = await fetch(
-        `/api/admin/owl-center/collections/${launchId}/assets/upload-job/process`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ job_id: jobId, action }),
-        }
-      )
-      const j = (await res.json()) as {
-        error?: string
-        result?: { ok?: boolean; error?: string; status?: string; remaining_files?: number }
-        job?: OwlCenterAssetUploadJob
-      }
-      if (!res.ok) throw new Error(j.error || j.result?.error || 'process_failed')
-      if (j.result?.status === 'completed' || j.job?.status === 'validated') {
-        onApplied()
-      }
-      setMsg(
-        j.result?.remaining_files != null && j.result.remaining_files > 0
-          ? `Batch processed — ${j.result.remaining_files} file(s) remaining (cron continues).`
-          : 'Job updated.'
-      )
+      const j = await runAction('validate')
+      if (j?.job?.status === 'validated') onApplied()
+      setMsg('Validation complete.')
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'process_failed')
+      setErr(e instanceof Error ? e.message : 'validate_failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function pushAllToArweave() {
+    const jobId = jobState?.job?.id
+    if (!jobId) return
+    setBusy(true)
+    setErr(null)
+    setMsg('Uploading entire collection to Arweave — this may take several minutes for large sets.')
+    try {
+      let action: 'start_arweave' | 'process_all' =
+        jobState?.job?.status === 'uploading' ? 'process_all' : 'start_arweave'
+      let guard = 0
+      while (guard < 200) {
+        guard += 1
+        const j = await runAction(action)
+        if (!j) throw new Error('upload_failed')
+        await load()
+        if (j.job?.status === 'completed') {
+          onApplied()
+          setMsg(`Arweave upload complete — ${j.progress?.uploaded_files ?? j.progress?.total_files ?? 'all'} files.`)
+          break
+        }
+        if (j.job?.status === 'failed') {
+          throw new Error(j.job.error_message || j.result?.error || 'upload_failed')
+        }
+        if (j.job?.status !== 'uploading') break
+        const remaining = j.result?.remaining_files ?? 0
+        if (remaining <= 0) break
+        setMsg(`Uploaded ${j.progress?.uploaded_files ?? '—'} / ${j.progress?.total_files ?? '—'} — continuing…`)
+        action = 'process_all'
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'upload_failed')
     } finally {
       setBusy(false)
     }
@@ -154,9 +190,10 @@ export function AssetPackageUploadPanel({
 
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Upload a Sugar export ZIP from the generator (or Sugar). The server validates pairs, fills the asset package,
-        then pushes to <strong className="font-normal text-[#E8EEF2]">Arweave via Irys</strong> in batches — no long
-        browser request. When Arweave completes, use <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong>{' '}
-        below (or <code className="text-[#7D8A93]">npm run sugar:deploy</code> for large collections).
+        then pushes the <strong className="font-normal text-[#E8EEF2]">entire batch to Arweave via Irys</strong> in one
+        run when you tap Push — large collections may take several minutes. When Arweave completes, use{' '}
+        <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong> below (or{' '}
+        <code className="text-[#7D8A93]">npm run sugar:deploy</code> for very large collections).
       </p>
 
       {estimate ? (
@@ -191,26 +228,26 @@ export function AssetPackageUploadPanel({
         </label>
 
         {job?.status === 'queued' ? (
-          <DeployButton type="button" variant="ghost" disabled={busy} onClick={() => void runAction('validate')}>
+          <DeployButton type="button" variant="ghost" disabled={busy} onClick={() => void runValidate()}>
             Run validation
           </DeployButton>
         ) : null}
 
         {job?.status === 'validated' && irysOk ? (
-          <DeployButton type="button" disabled={busy} onClick={() => void runAction('start_arweave')}>
-            Push to Arweave
+          <DeployButton type="button" disabled={busy} onClick={() => void pushAllToArweave()}>
+            {busy ? 'Uploading all…' : 'Push all to Arweave'}
           </DeployButton>
         ) : null}
 
         {job?.status === 'failed' && irysOk && (job.upload_progress?.file_list?.length ?? 0) > 0 ? (
-          <DeployButton type="button" disabled={busy} onClick={() => void runAction('start_arweave')}>
-            Retry Push to Arweave
+          <DeployButton type="button" disabled={busy} onClick={() => void pushAllToArweave()}>
+            {busy ? 'Retrying…' : 'Retry push all to Arweave'}
           </DeployButton>
         ) : null}
 
         {job?.status === 'uploading' ? (
-          <DeployButton type="button" variant="ghost" disabled={busy} onClick={() => void runAction('process_batch')}>
-            Process next batch
+          <DeployButton type="button" variant="ghost" disabled={busy} onClick={() => void pushAllToArweave()}>
+            {busy ? 'Uploading all…' : 'Continue full upload'}
           </DeployButton>
         ) : null}
       </div>

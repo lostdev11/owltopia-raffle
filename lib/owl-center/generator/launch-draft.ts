@@ -93,8 +93,8 @@ export function buildLaunchDraft(project: GeneratorProject): GeneratorLaunchDraf
       categories ? `Categories: ${categories}.` : '',
       `${traitCount} trait layer(s), ${ruleCount} compatibility rule(s).`,
       exportMeta?.full_supply
-        ? `Full Sugar ZIP exported (${exportMeta.exported_count} files) — drop the same ZIP in step 3 to verify counts, or Stage ZIP in admin after approval (Phase B).`
-        : 'Export full-supply Sugar ZIP from Generator, scan in step 3, then Sugar upload or Phase B staging in admin.',
+        ? `Full Sugar ZIP exported (${exportMeta.exported_count} files) — Stage ZIP in the generator, then step 3 auto-fills counts from validation.`
+        : 'Export full-supply Sugar ZIP from Generator, stage it, then submit — step 3 picks up validation automatically.',
     ]
       .filter(Boolean)
       .join(' '),
@@ -131,4 +131,5 @@ export function clearLaunchDraftFromSession(): void {
 export function clearGeneratorHandoffFromSession(): void {
   clearLaunchDraftFromSession()
   clearGeneratorProjectIdFromSession()
+  // staged-assets handoff cleared separately on successful launch submit
 }

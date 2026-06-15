@@ -3,7 +3,10 @@ import 'server-only'
 import { formatSugarBatchScanSummary } from '@/lib/owl-center/scan-sugar-batch'
 import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
 import { uploadBytesFromJob } from '@/lib/owl-center/arweave-upload-estimate-server'
-import { owlCenterAssetUploadBatchSize } from '@/lib/owl-center/asset-staging-limits'
+import {
+  owlCenterAssetUploadBatchSize,
+  type ArweaveUploadBatchMode,
+} from '@/lib/owl-center/asset-staging-limits'
 import { downloadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
 import type { AssetUploadProgress, OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import {
@@ -176,10 +179,29 @@ export async function startArweaveUploadForJob(jobId: string): Promise<AssetUplo
     error_message: null,
   })
 
-  return processArweaveUploadBatch(jobId)
+  return processArweaveUploadUntilComplete(jobId)
 }
 
-export async function processArweaveUploadBatch(jobId: string): Promise<AssetUploadWorkerResult> {
+/** Process every remaining file in one run (admin Push to Arweave). Retries if a platform time limit stops mid-job. */
+export async function processArweaveUploadUntilComplete(jobId: string): Promise<AssetUploadWorkerResult> {
+  let result = await processArweaveUploadBatch(jobId, { mode: 'full' })
+  let guard = 0
+  while (
+    result.ok &&
+    result.status === 'uploading' &&
+    (result.remaining_files ?? 0) > 0 &&
+    guard < 500
+  ) {
+    guard += 1
+    result = await processArweaveUploadBatch(jobId, { mode: 'full' })
+  }
+  return result
+}
+
+export async function processArweaveUploadBatch(
+  jobId: string,
+  options?: { mode?: ArweaveUploadBatchMode }
+): Promise<AssetUploadWorkerResult> {
   const job = await getAssetUploadJobById(jobId)
   if (!job) return { ok: false, error: 'job_not_found' }
   if (job.status !== 'uploading' && job.status !== 'validated') {
@@ -213,7 +235,7 @@ export async function processArweaveUploadBatch(jobId: string): Promise<AssetUpl
   }
 
   const { zip } = await scanSugarZipBuffer(zipBuffer)
-  const batchSize = owlCenterAssetUploadBatchSize()
+  const batchSize = owlCenterAssetUploadBatchSize(options?.mode ?? 'tick')
   let processed = 0
   let cursor = progress.cursor
 
@@ -359,7 +381,7 @@ export async function runAssetUploadWorkerTick(): Promise<{
       continue
     }
     if (job.status === 'uploading') {
-      results.push(await processArweaveUploadBatch(job.id))
+      results.push(await processArweaveUploadBatch(job.id, { mode: 'tick' }))
     }
   }
 
