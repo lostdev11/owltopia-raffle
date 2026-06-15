@@ -424,21 +424,19 @@ export function MarketplaceReadinessPanel({
         </DeployButton>
         {!creatorMode ? (
           <>
-        <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_ready_indexing' })}>
-          Mark ready for indexing
-        </DeployButton>
+            <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_ready_indexing' })}>
+              Mark ready for indexing
+            </DeployButton>
+            <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_me_listed' })}>
+              Mark ME listed
+            </DeployButton>
+            <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_tensor_listed' })}>
+              Mark Tensor listed
+            </DeployButton>
+            <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'activate_trading_links' })}>
+              Activate trading links
+            </DeployButton>
           </>
-        ) : null}
-        {!creatorMode ? (
-        <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_me_listed' })}>
-          Mark ME listed
-        </DeployButton>
-        <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_tensor_listed' })}>
-          Mark Tensor listed
-        </DeployButton>
-        <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'activate_trading_links' })}>
-          Activate trading links
-        </DeployButton>
         ) : null}
         {meUrl.trim() ? (
           <a
