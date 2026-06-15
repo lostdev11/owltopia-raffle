@@ -26,7 +26,6 @@ import {
   createDemoProject,
   createEmptyProject,
   ensureDefaultCategories,
-  projectMissingDefaultLayers,
 } from '@/lib/owl-center/generator/demo-project'
 import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
 import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
@@ -49,6 +48,7 @@ import {
   addCategoryToProject,
   MAX_TRAIT_CATEGORIES,
   removeCategoryFromProject,
+  removeTraitFromProject,
   renameCategoryInProject,
   setCategoryAllowMultiple,
 } from '@/lib/owl-center/generator/categories'
@@ -139,12 +139,6 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
       setLoading(false)
     })()
   }, [fetchCloudProject])
-
-  useEffect(() => {
-    if (!project || loading) return
-    if (!projectMissingDefaultLayers(project)) return
-    setProject(ensureDefaultCategories(project))
-  }, [project, loading])
 
   useEffect(() => {
     if (!project || loading) return
@@ -354,60 +348,29 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     setMessage(`Added layer "${result.categories[result.categories.length - 1]?.name}"`)
   }, [project, newLayerName, updateProject])
 
-  const handleRemoveCategory = useCallback(
-    (categoryId: string) => {
-      if (!project) return
-      const result = removeCategoryFromProject(project, categoryId)
+  const handleRemoveCategory = useCallback((categoryId: string) => {
+    setProject((p) => {
+      if (!p) return p
+      const result = removeCategoryFromProject(p, categoryId)
       if ('error' in result) {
         setMessage(result.error)
-        return
+        return p
       }
-      updateProject(result)
-      setSelection((s) => {
-        const next = { ...s }
-        delete next[categoryId]
-        return next
-      })
-    },
-    [project, updateProject]
-  )
+      return { ...result, updatedAt: new Date().toISOString() }
+    })
+    setSelection((s) => {
+      const next = { ...s }
+      delete next[categoryId]
+      return next
+    })
+  }, [])
 
-  const removeTrait = useCallback(
-    (traitId: string) => {
-      if (!project) return
-      updateProject({
-        traits: project.traits.filter((t) => t.id !== traitId),
-        rules: project.rules.reduce<CompatibilityRule[]>((acc, r) => {
-          if (r.type === 'if_pool') {
-            if (r.whenTraitId === traitId) return acc
-            const allowed = (r.allowedTraitIds ?? []).filter((id) => id !== traitId)
-            if (!allowed.length) return acc
-            acc.push({ ...r, allowedTraitIds: allowed })
-            return acc
-          }
-          if (r.type === 'if_chain') {
-            const steps = normalizeIfChainSteps(r)
-              .map((s) => ({ traitIds: s.traitIds.filter((id) => id !== traitId) }))
-              .filter((s) => s.traitIds.length)
-            const total = steps.reduce((n, s) => n + s.traitIds.length, 0)
-            if (steps.length >= 2 && total >= 2) {
-              acc.push({ ...r, chainSteps: steps, chainTraitIds: undefined })
-            }
-            return acc
-          }
-          const traitIds = (r.traitIds ?? []).filter((id) => id !== traitId)
-          if (traitIds.length >= 2) acc.push({ ...r, traitIds })
-          return acc
-        }, []),
-      })
-      setSelection((s) => {
-        const removed = project.traits.find((t) => t.id === traitId)
-        if (!removed) return s
-        return clearTraitFromSelection(s, traitId, removed.categoryId)
-      })
-    },
-    [project, updateProject]
-  )
+  const removeTrait = useCallback((traitId: string, categoryId: string) => {
+    setProject((p) =>
+      p ? { ...removeTraitFromProject(p, traitId), updatedAt: new Date().toISOString() } : p
+    )
+    setSelection((s) => clearTraitFromSelection(s, traitId, categoryId))
+  }, [])
 
   const randomizePreview = useCallback(() => {
     if (!project) return
@@ -876,16 +839,18 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                           />
                           Multi stack
                         </label>
-                        {!traits.length ? (
-                          <button
-                            type="button"
-                            aria-label={`Remove empty layer ${cat.name}`}
-                            className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
-                            onClick={() => handleRemoveCategory(cat.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          aria-label={
+                            traits.length
+                              ? `Remove layer ${cat.name} and all ${traits.length} trait(s)`
+                              : `Remove empty layer ${cat.name}`
+                          }
+                          className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                          onClick={() => handleRemoveCategory(cat.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                       <label className="inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center gap-2 border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-4 text-xs font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16">
                         <Upload className="h-4 w-4" aria-hidden />
@@ -939,7 +904,10 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                                   type="button"
                                   aria-label={`Remove ${t.name}`}
                                   className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
-                                  onClick={() => removeTrait(t.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    removeTrait(t.id, t.categoryId)
+                                  }}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>

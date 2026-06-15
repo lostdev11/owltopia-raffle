@@ -198,14 +198,6 @@ export async function POST(request: NextRequest) {
 
   }
 
-  const absQtyCap = 50
-
-  if (qty > absQtyCap) {
-
-    return NextResponse.json({ error: `Quantity cannot exceed ${absQtyCap} per transaction` }, { status: 400 })
-
-  }
-
   if (!eligibilityPre.is_eligible || qty > eligibilityPre.max_mintable) {
 
     return NextResponse.json(

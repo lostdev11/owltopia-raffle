@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { fireMintConfetti, preloadConfetti } from '@/lib/confetti'
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
 
 export type MintSuccessOverlayProps = {
@@ -104,6 +105,7 @@ export function MintSuccessOverlay({
 
   useEffect(() => {
     if (!open) return
+    preloadConfetti()
     if (!mint) {
       setRevealComplete(true)
       return
@@ -117,6 +119,12 @@ export function MintSuccessOverlay({
       return () => window.clearTimeout(timer)
     }
   }, [open, mint, artworkLoaded, imageLoading, currentImageSrc])
+
+  useEffect(() => {
+    if (open && revealComplete) {
+      fireMintConfetti()
+    }
+  }, [open, revealComplete])
 
   if (!open) return null
 

@@ -59,12 +59,3 @@ export function whitelistMaxMintable(input: {
   )
 }
 
-/** Phases where quantity selector uses full allocation (not capped at 10). */
-export function owlCenterAllowsHighQuantityMint(phase: string): boolean {
-  return (
-    phase === 'AIRDROP' ||
-    phase === 'PRESALE' ||
-    phase === 'PRESALE_OVERAGE' ||
-    phase === 'WHITELIST'
-  )
-}

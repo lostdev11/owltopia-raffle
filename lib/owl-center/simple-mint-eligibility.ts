@@ -83,7 +83,7 @@ export async function buildSimpleMintEligibility(
   } else if (walletRemaining <= 0) {
     reason = `Wallet limit reached (${launch.wallet_mint_limit} per wallet)`
   } else {
-    max_mintable = Math.min(walletRemaining, remaining, 10)
+    max_mintable = Math.min(walletRemaining, remaining)
     is_eligible = max_mintable > 0
     if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
       const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(

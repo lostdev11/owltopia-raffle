@@ -61,6 +61,8 @@ export type GeneratorProject = {
   oneOfOnes?: OneOfOneEntry[]
   /** Where 1/1 token indices land relative to generative pieces. */
   oneOfOnePlacement?: OneOfOnePlacement
+  /** Default layer slots the creator removed (e.g. Eyes) — do not auto-restore. */
+  removedDefaultSlots?: string[]
   updatedAt: string
 }
 

@@ -11,8 +11,8 @@ import {
   owlCenterMintPhaseStatusLabel,
   owlCenterMintWrongPhaseHint,
 } from '@/lib/owl-center/phase-display'
-import { owlCenterAllowsHighQuantityMint } from '@/lib/owl-center/phase-allowance'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
+import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
@@ -114,10 +114,7 @@ export function Gen2MintPanel({
 
   const maxQ = useMemo(() => {
     if (!elig) return 1
-    const phaseCap = owlCenterAllowsHighQuantityMint(elig.active_phase)
-      ? elig.max_mintable
-      : Math.min(elig.max_mintable, 10)
-    return Math.max(1, Math.min(phaseCap, remaining))
+    return Math.max(1, Math.min(elig.max_mintable, remaining))
   }, [elig, remaining])
 
   useEffect(() => {
@@ -420,7 +417,10 @@ export function Gen2MintPanel({
                 step === 'sending_transaction' ||
                 step === 'awaiting_signature'
               }
-              onClick={() => void runMint()}
+              onClick={() => {
+                preloadConfetti()
+                void runMint()
+              }}
               className="flex-1 sm:flex-none"
             >
               Mint

@@ -20,6 +20,7 @@ import {
   resolveLaunchMintNetwork,
 } from '@/lib/solana/launch-cm'
 import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
+import { preloadConfetti } from '@/lib/confetti'
 import { owlCenterSolanaExplorerTxUrl } from '@/lib/solana/network'
 
 type MintUiStep =
@@ -85,7 +86,7 @@ export function CollectionMintPanel({
 
   const maxQ = useMemo(() => {
     if (!elig) return 1
-    return Math.max(1, Math.min(elig.max_mintable, remaining, 10))
+    return Math.max(1, Math.min(elig.max_mintable, remaining))
   }, [elig, remaining])
 
   useEffect(() => {
@@ -247,7 +248,10 @@ export function CollectionMintPanel({
             <DeployButton
               className="w-full sm:w-auto"
               disabled={!connected || !elig?.is_eligible || step === 'recording_mint' || !cmConfigured}
-              onClick={() => void runMint()}
+              onClick={() => {
+                preloadConfetti()
+                void runMint()
+              }}
             >
               {step !== 'idle' && step !== 'success' && step !== 'error' ? stepLabel(step) : 'Mint now'}
             </DeployButton>

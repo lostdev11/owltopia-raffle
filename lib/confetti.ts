@@ -6,6 +6,14 @@ const GREEN_OPTS = {
   colors: ['#22c55e', '#16a34a', '#15803d', '#166534', '#14532d', '#4ade80', '#86efac'],
 }
 
+const MINT_OPTS = {
+  particleCount: 120,
+  spread: 90,
+  origin: { y: 0.55 } as const,
+  zIndex: 99999,
+  colors: ['#00FF9C', '#00C97A', '#7DFFB8', '#00E58B', '#E8FDF4', '#4ade80'],
+}
+
 type ConfettiFn = typeof import('canvas-confetti')
 let confettiPromise: Promise<ConfettiFn | null> | null = null
 
@@ -34,17 +42,17 @@ export function preloadConfetti(): void {
  * Safe to call from SSR; no-op if window is undefined.
  * Uses high z-index so it appears above dialogs/modals.
  */
-export function fireGreenConfetti(): void {
+function fireConfettiBursts(opts: typeof GREEN_OPTS): void {
   if (typeof window === 'undefined') return
   getConfetti()
     .then((confetti) => {
       if (!confetti) return
-      confetti(GREEN_OPTS)
+      confetti(opts)
       setTimeout(() => {
-        confetti({ ...GREEN_OPTS, particleCount: 60, origin: { x: 0.3, y: 0.6 } })
+        confetti({ ...opts, particleCount: 60, origin: { x: 0.3, y: 0.6 } })
       }, 150)
       setTimeout(() => {
-        confetti({ ...GREEN_OPTS, particleCount: 60, origin: { x: 0.7, y: 0.6 } })
+        confetti({ ...opts, particleCount: 60, origin: { x: 0.7, y: 0.6 } })
       }, 300)
     })
     .catch((err) => {
@@ -52,4 +60,13 @@ export function fireGreenConfetti(): void {
         console.warn('Confetti failed to load:', err)
       }
     })
+}
+
+export function fireGreenConfetti(): void {
+  fireConfettiBursts(GREEN_OPTS)
+}
+
+/** Owl Center mint success — full-screen burst above the reveal overlay. */
+export function fireMintConfetti(): void {
+  fireConfettiBursts(MINT_OPTS)
 }

@@ -1,4 +1,5 @@
 import type { GeneratorProject } from '@/lib/owl-center/generator/types'
+import { DEFAULT_CATEGORIES } from '@/lib/owl-center/generator/types'
 
 export const MAX_GENERATOR_TRAITS = 120
 export const MAX_GENERATOR_PROJECT_BYTES = 6 * 1024 * 1024
@@ -37,6 +38,13 @@ export function validateGeneratorProjectPayload(raw: unknown): { ok: true; proje
       p.oneOfOnePlacement === 'start' || p.oneOfOnePlacement === 'end' || p.oneOfOnePlacement === 'random'
         ? p.oneOfOnePlacement
         : undefined,
+    removedDefaultSlots: Array.isArray(p.removedDefaultSlots)
+      ? p.removedDefaultSlots
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, DEFAULT_CATEGORIES.length)
+      : undefined,
   }
   return { ok: true, project }
 }

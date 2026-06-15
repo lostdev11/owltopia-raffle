@@ -108,10 +108,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   if (eligibilityPre.active_phase !== phase) {
     return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
   }
-  const absQtyCap = 10
-  if (qty > absQtyCap) {
-    return NextResponse.json({ error: `Quantity cannot exceed ${absQtyCap} per transaction` }, { status: 400 })
-  }
   if (!eligibilityPre.is_eligible || qty > eligibilityPre.max_mintable) {
     return NextResponse.json(
       { error: 'Not eligible for this mint quantity — refresh your allocation' },

@@ -30,10 +30,22 @@ export function defaultSlotIsFilled(categories: TraitCategory[], slotName: strin
   return categories.some((c) => categoryMatchesDefaultSlot(c.name, slotName))
 }
 
+export function defaultSlotNameForCategory(categoryName: string): string | null {
+  for (const d of DEFAULT_CATEGORIES) {
+    if (categoryMatchesDefaultSlot(categoryName, d.name)) return d.name
+  }
+  return null
+}
+
 export function missingDefaultSlots(
-  categories: TraitCategory[]
+  categories: TraitCategory[],
+  removedDefaultSlots: readonly string[] = []
 ): Omit<TraitCategory, 'id'>[] {
-  return DEFAULT_CATEGORIES.filter((d) => !defaultSlotIsFilled(categories, d.name))
+  const removed = new Set(removedDefaultSlots.map((s) => s.toLowerCase()))
+  return DEFAULT_CATEGORIES.filter((d) => {
+    if (removed.has(d.name.toLowerCase())) return false
+    return !defaultSlotIsFilled(categories, d.name)
+  })
 }
 
 /** Drop empty Body/Hat/etc. when the user already renamed that slot (e.g. Base, Headwear). */
@@ -161,6 +173,14 @@ export function addCategoryToProject(
   }
 }
 
+export function removeTraitFromProject(project: GeneratorProject, traitId: string): GeneratorProject {
+  return {
+    ...project,
+    traits: project.traits.filter((t) => t.id !== traitId),
+    rules: pruneRulesForRemovedTraits(project.rules, new Set([traitId])),
+  }
+}
+
 export function removeCategoryFromProject(
   project: GeneratorProject,
   categoryId: string
@@ -168,16 +188,22 @@ export function removeCategoryFromProject(
   if (project.categories.length <= MIN_TRAIT_CATEGORIES) {
     return { error: 'Keep at least one layer' }
   }
-  const traitsInCat = project.traits.filter((t) => t.categoryId === categoryId)
-  if (traitsInCat.length) {
-    return { error: 'Remove all PNGs from this layer first' }
-  }
 
+  const category = project.categories.find((c) => c.id === categoryId)
+  if (!category) return { error: 'Layer not found' }
+
+  const traitsInCat = project.traits.filter((t) => t.categoryId === categoryId)
   const removedIds = new Set(traitsInCat.map((t) => t.id))
+  const slotName = defaultSlotNameForCategory(category.name)
+  const removedDefaultSlots = slotName
+    ? [...new Set([...(project.removedDefaultSlots ?? []), slotName])]
+    : project.removedDefaultSlots
+
   return {
     ...project,
     categories: project.categories.filter((c) => c.id !== categoryId),
     traits: project.traits.filter((t) => t.categoryId !== categoryId),
     rules: pruneRulesForRemovedTraits(project.rules, removedIds),
+    removedDefaultSlots,
   }
 }

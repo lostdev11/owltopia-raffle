@@ -82,13 +82,13 @@ function traitFromDataUrl(
 }
 
 export function projectMissingDefaultLayers(project: GeneratorProject): boolean {
-  return missingDefaultSlots(project.categories).length > 0
+  return missingDefaultSlots(project.categories, project.removedDefaultSlots ?? []).length > 0
 }
 
 /** Add missing default layers, remove ghost duplicates, sync flags (e.g. Eyes, Eyewear multi-select). */
 export function ensureDefaultCategories(project: GeneratorProject): GeneratorProject {
   const deduped = removeGhostDefaultLayers(project.categories, project.traits)
-  const missing = missingDefaultSlots(deduped)
+  const missing = missingDefaultSlots(deduped, project.removedDefaultSlots ?? [])
   const categories = applyLegacyCategoryRenames([
     ...deduped.map((c) => ({ ...c, ...flagsForCategoryName(c.name) })),
     ...missing.map((c) => ({
@@ -97,12 +97,16 @@ export function ensureDefaultCategories(project: GeneratorProject): GeneratorPro
     })),
   ]).sort((a, b) => a.zIndex - b.zIndex)
 
+  const categoryIds = new Set(categories.map((c) => c.id))
+  const traits = project.traits.filter((t) => categoryIds.has(t.categoryId))
+
   const snapshot = (cats: GeneratorProject['categories']) =>
     JSON.stringify(cats.map((c) => ({ id: c.id, name: c.name, zIndex: c.zIndex, allowMultiple: c.allowMultiple })))
   const prevSnapshot = snapshot(project.categories)
   const nextSnapshot = snapshot(categories)
-  if (nextSnapshot === prevSnapshot) return project
-  return { ...project, categories }
+  const traitsChanged = traits.length !== project.traits.length
+  if (nextSnapshot === prevSnapshot && !traitsChanged) return project
+  return { ...project, categories, traits }
 }
 
 export function createEmptyProject(): GeneratorProject {
