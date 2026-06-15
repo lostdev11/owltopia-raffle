@@ -1,15 +1,23 @@
-const GREEN_OPTS = {
+type ConfettiBurstOpts = {
+  particleCount: number
+  spread: number
+  origin: { y: number }
+  zIndex: number
+  colors: string[]
+}
+
+const GREEN_OPTS: ConfettiBurstOpts = {
   particleCount: 100,
   spread: 80,
-  origin: { y: 0.6 } as const,
+  origin: { y: 0.6 },
   zIndex: 99999,
   colors: ['#22c55e', '#16a34a', '#15803d', '#166534', '#14532d', '#4ade80', '#86efac'],
 }
 
-const MINT_OPTS = {
+const MINT_OPTS: ConfettiBurstOpts = {
   particleCount: 120,
   spread: 90,
-  origin: { y: 0.55 } as const,
+  origin: { y: 0.55 },
   zIndex: 99999,
   colors: ['#00FF9C', '#00C97A', '#7DFFB8', '#00E58B', '#E8FDF4', '#4ade80'],
 }
@@ -42,7 +50,7 @@ export function preloadConfetti(): void {
  * Safe to call from SSR; no-op if window is undefined.
  * Uses high z-index so it appears above dialogs/modals.
  */
-function fireConfettiBursts(opts: typeof GREEN_OPTS): void {
+function fireConfettiBursts(opts: ConfettiBurstOpts): void {
   if (typeof window === 'undefined') return
   getConfetti()
     .then((confetti) => {
