@@ -268,6 +268,11 @@ async function main() {
   )
 
   const config = {
+    owlCenter: {
+      launchId: jobRow.launch_id ?? null,
+      slug: launch?.slug ?? null,
+      jobId: jobRow.id,
+    },
     tokenStandard: 'nft',
     number: supply,
     symbol: launch?.symbol ?? 'COL',
@@ -332,7 +337,8 @@ This runs \`sugar validate\`, \`sugar deploy\`, and \`sugar guard add\` (require
 
 If deploy asks for collection image upload, set cache \`-1\` \`image_link\` to token \`0\` image URL (collection.png is a copy of 0.png).
 
-5. Paste **candy_machine_id** + **collection_mint** in Owl Center admin → Marketplace readiness.
+5. **Auto-sync** (if `config.json` has `owlCenter.launchId`): `npm run sugar:sync-ids -- collections/${folderName}` — or use **Import cache.json** in admin.
+
 6. Mint test: \`/owl-center/collection/${launch?.slug ?? 'YOUR_SLUG'}\`
 
 Regenerate: \`npm run prepare:sugar-deploy -- --launch-id=${jobRow.launch_id ?? 'LAUNCH_UUID'}\`
@@ -348,6 +354,7 @@ Regenerate: \`npm run prepare:sugar-deploy -- --launch-id=${jobRow.launch_id ?? 
   console.log('')
   console.log('Next:')
   console.log(`  npm run sugar:deploy -- collections/${folderName}`)
+  console.log(`  npm run sugar:sync-ids -- collections/${folderName}`)
 }
 
 main().catch((e) => {

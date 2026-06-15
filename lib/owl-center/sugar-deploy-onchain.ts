@@ -33,6 +33,7 @@ import {
 } from '@/lib/owl-center/sugar-deploy-package'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 const CONFIG_LINES_PER_TX = 10
@@ -119,9 +120,18 @@ export async function deployPublicSimpleCandyMachineOnchain(
   const supply = configLines.length
   const royaltyPercent = launchSellerFeeBasisPoints(launch) / 100
 
-  const creatorAddress = launch.creator_wallet?.trim()
-    ? publicKey(launch.creator_wallet.trim())
-    : umi.identity.publicKey
+  let creatorAddress = umi.identity.publicKey
+  const creatorWallet = launch.creator_wallet?.trim()
+  if (creatorWallet) {
+    const creatorCheck = validateSolanaPubkeyInput(creatorWallet, 'Creator wallet')
+    if (!creatorCheck.ok) {
+      return {
+        ok: false,
+        error: `${creatorCheck.error} Fix creator_wallet on the launch, or clear it to use the deployer wallet.`,
+      }
+    }
+    creatorAddress = publicKey(creatorCheck.pubkey)
+  }
 
   const candyMachine = generateSigner(umi)
   const collectionMint = generateSigner(umi)

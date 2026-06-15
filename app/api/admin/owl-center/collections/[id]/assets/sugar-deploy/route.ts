@@ -81,8 +81,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ ok: true, result })
   }
 
+  if (action === 'sync_from_cache') {
+    const cache = body.cache as { program?: { candyMachine?: string; collectionMint?: string; candyGuard?: string } } | undefined
+    const cm = typeof cache?.program?.candyMachine === 'string' ? cache.program.candyMachine : ''
+    const col = typeof cache?.program?.collectionMint === 'string' ? cache.program.collectionMint : ''
+    const guard = typeof cache?.program?.candyGuard === 'string' ? cache.program.candyGuard : undefined
+    if (!cm.trim() || !col.trim()) {
+      return jsonError(
+        'cache.json is missing program.candyMachine or program.collectionMint — run sugar deploy first.',
+        400
+      )
+    }
+    const result = await registerManualSugarDeployIds(id, cm, col, guard)
+    if (!result.ok) return jsonError(result.error, 400)
+    return NextResponse.json({ ok: true, result })
+  }
+
   if (action !== 'deploy_onchain') {
-    return jsonError('Invalid action — use deploy_onchain or register_ids', 400)
+    return jsonError('Invalid action — use deploy_onchain, register_ids, or sync_from_cache', 400)
   }
 
   const result = await runOnchainSugarDeployForLaunch(id)

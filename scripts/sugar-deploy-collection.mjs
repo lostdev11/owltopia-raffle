@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * One-shot Sugar deploy for Owl Center public_simple collections:
- * validate → deploy → guard add → guard show
+ * validate → deploy → guard add → guard show → sync IDs to Owl Center
  *
  * Usage:
  *   npm run sugar:deploy -- collections/papers
@@ -53,7 +53,12 @@ function main() {
   run('sugar guard add', 'sugar', ['guard', 'add'], { cwd: collectionDir })
   run('sugar guard show', 'sugar', ['guard', 'show'], { cwd: collectionDir })
 
-  console.log('\nDone. Paste candy_machine_id + collection_mint from cache.json into Owl Center admin.')
+  console.log('\n→ Sync IDs to Owl Center (Supabase)')
+  run('sugar:sync-ids', 'node', ['--env-file=.env.local', 'scripts/sugar-sync-ids-to-owl-center.mjs', rel], {
+    cwd: ROOT,
+  })
+
+  console.log('\nDone. Collection IDs synced — check admin Go Live panel or open the public mint page.')
 }
 
 main()

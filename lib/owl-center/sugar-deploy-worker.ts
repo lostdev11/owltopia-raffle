@@ -1,12 +1,12 @@
 import 'server-only'
 
 import {
-  getAssetUploadJobById,
   getLatestAssetUploadJobForLaunch,
   updateAssetUploadJob,
 } from '@/lib/db/owl-center-asset-upload-job'
 import { ensureMarketplaceRow, syncLaunchMarketplaceFieldsFromRow, upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
+import { promoteLaunchToLive, type PromoteLaunchResult } from '@/lib/owl-center/launch-go-live'
 import type { AssetUploadProgress } from '@/lib/owl-center/asset-upload-types'
 import {
   buildSugarDeployPackageFromJob,
@@ -18,6 +18,13 @@ import {
   OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY,
 } from '@/lib/owl-center/sugar-deploy-onchain'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
+
+export type SugarDeployGoLiveSummary = {
+  ok: boolean
+  already_live?: boolean
+  blockers?: string[]
+}
 
 export type SugarDeployWorkerResult =
   | {
@@ -26,6 +33,7 @@ export type SugarDeployWorkerResult =
       collection_mint: string
       candy_guard_id: string
       already_deployed?: boolean
+      go_live?: SugarDeployGoLiveSummary
     }
   | { ok: false; error: string; code?: string }
 
@@ -88,13 +96,20 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
 
   const existing = parseOnchainDeployState(job.upload_progress)
   if (existing?.status === 'completed' && existing.candy_machine_id && existing.collection_mint) {
-    await persistDeployIds(launchId, job.id, existing.candy_machine_id, existing.collection_mint, existing.candy_guard_id)
+    const go_live = await persistDeployIds(
+      launchId,
+      job.id,
+      existing.candy_machine_id,
+      existing.collection_mint,
+      existing.candy_guard_id
+    )
     return {
       ok: true,
       candy_machine_id: existing.candy_machine_id,
       collection_mint: existing.collection_mint,
       candy_guard_id: existing.candy_guard_id ?? '',
       already_deployed: true,
+      go_live,
     }
   }
   if (existing?.status === 'running') {
@@ -150,14 +165,28 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
     }),
   })
 
-  await persistDeployIds(launchId, job.id, result.candyMachineId, result.collectionMint, result.candyGuardId)
+  const go_live = await persistDeployIds(
+    launchId,
+    job.id,
+    result.candyMachineId,
+    result.collectionMint,
+    result.candyGuardId
+  )
 
   return {
     ok: true,
     candy_machine_id: result.candyMachineId,
     collection_mint: result.collectionMint,
     candy_guard_id: result.candyGuardId,
+    go_live,
   }
+}
+
+function summarizeGoLive(result: PromoteLaunchResult): SugarDeployGoLiveSummary {
+  if (result.ok) {
+    return { ok: true, already_live: result.already_live }
+  }
+  return { ok: false, blockers: result.blockers }
 }
 
 async function persistDeployIds(
@@ -166,19 +195,26 @@ async function persistDeployIds(
   candyMachineId: string,
   collectionMint: string,
   candyGuardId: string | null | undefined
-) {
+): Promise<SugarDeployGoLiveSummary> {
+  const cmCheck = validateSolanaPubkeyInput(candyMachineId, 'Candy Machine ID')
+  if (!cmCheck.ok) return { ok: false, blockers: [cmCheck.error] }
+  const colCheck = validateSolanaPubkeyInput(collectionMint, 'Collection mint')
+  if (!colCheck.ok) return { ok: false, blockers: [colCheck.error] }
+
   const row = await upsertMarketplaceReadinessForLaunch(launchId, {
-    candy_machine_id: candyMachineId,
-    collection_mint: collectionMint,
+    candy_machine_id: cmCheck.pubkey,
+    collection_mint: colCheck.pubkey,
     notes: candyGuardId ? `Candy guard ${candyGuardId} (Phase B on-chain deploy)` : undefined,
   })
   if (row) await syncLaunchMarketplaceFieldsFromRow(launchId, row)
 
   await getSupabaseAdmin().from('owl_center_activity_logs').insert({
     launch_id: launchId,
-    message: `Phase B on-chain CM deploy · CM ${candyMachineId.slice(0, 8)}… · job ${jobId.slice(0, 8)}`,
+    message: `Phase B on-chain CM deploy · CM ${cmCheck.pubkey.slice(0, 8)}… · job ${jobId.slice(0, 8)}`,
     event_type: 'system',
   })
+
+  return summarizeGoLive(await promoteLaunchToLive(launchId, { auto: true }))
 }
 
 export async function registerManualSugarDeployIds(
@@ -190,9 +226,14 @@ export async function registerManualSugarDeployIds(
   const launch = await getOwlCenterLaunchByIdAdmin(launchId)
   if (!launch) return { ok: false, error: 'Launch not found', code: 'not_found' }
 
-  const cm = candyMachineId.trim()
-  const col = collectionMint.trim()
-  if (!cm || !col) return { ok: false, error: 'Candy Machine ID and collection mint are required.', code: 'invalid_input' }
+  const cmCheck = validateSolanaPubkeyInput(candyMachineId, 'Candy Machine ID')
+  if (!cmCheck.ok) return { ok: false, error: cmCheck.error, code: 'invalid_input' }
+  const colCheck = validateSolanaPubkeyInput(collectionMint, 'Collection mint')
+  if (!colCheck.ok) return { ok: false, error: colCheck.error, code: 'invalid_input' }
+
+  const cm = cmCheck.pubkey
+  const col = colCheck.pubkey
+  let go_live: SugarDeployGoLiveSummary | undefined
 
   const job = await getLatestAssetUploadJobForLaunch(launchId)
   if (job) {
@@ -206,9 +247,9 @@ export async function registerManualSugarDeployIds(
         completed_at: new Date().toISOString(),
       }),
     })
-    await persistDeployIds(launchId, job.id, cm, col, candyGuardId)
+    go_live = await persistDeployIds(launchId, job.id, cm, col, candyGuardId)
   } else {
-    await persistDeployIds(launchId, 'manual', cm, col, candyGuardId)
+    go_live = await persistDeployIds(launchId, 'manual', cm, col, candyGuardId)
   }
 
   return {
@@ -216,5 +257,6 @@ export async function registerManualSugarDeployIds(
     candy_machine_id: cm,
     collection_mint: col,
     candy_guard_id: candyGuardId?.trim() ?? '',
+    go_live,
   }
 }

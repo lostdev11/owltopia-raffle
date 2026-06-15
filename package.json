@@ -19,6 +19,7 @@
     "prepare:owl-center-demo": "node scripts/prepare-owl-center-demo-collection.mjs",
     "prepare:sugar-deploy": "node --env-file=.env.local scripts/prepare-sugar-deploy-from-launch.mjs",
     "sugar:deploy": "node --env-file=.env.local scripts/sugar-deploy-collection.mjs",
+    "sugar:sync-ids": "node --env-file=.env.local scripts/sugar-sync-ids-to-owl-center.mjs",
     "build": "next build",
     "rebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "start": "next start",

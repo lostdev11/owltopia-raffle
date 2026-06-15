@@ -249,11 +249,9 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
               <strong className="font-normal text-[#E8EEF2]">Mark ready for Candy Machine</strong>.
             </li>
             <li>
-              Set <span className="text-[#E8EEF2]">candy_machine_id</span> + <span className="text-[#E8EEF2]">collection_mint</span> in{' '}
-              <a href="/admin/owl-center" className="text-[#00C97A] underline underline-offset-2">
-                Owl Center admin
-              </a>
-              . Full runbook: <span className="break-all text-[#7D8A93]">docs/OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md</span>
+              Deploy CM (server button or <span className="text-[#E8EEF2]">npm run sugar:deploy</span>) — IDs sync automatically.
+              Sugar CLI: use <span className="text-[#E8EEF2]">Import cache.json</span> in the deploy panel, or{' '}
+              <span className="text-[#E8EEF2]">npm run sugar:sync-ids</span>.
             </li>
           </ol>
           <p className="mt-3 text-[11px] text-[#5C6773]">

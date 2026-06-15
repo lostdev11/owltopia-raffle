@@ -11,6 +11,7 @@ import {
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { promoteLaunchToLive } from '@/lib/owl-center/launch-go-live'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
+import { validateOptionalSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -79,8 +80,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const patch: Parameters<typeof upsertMarketplaceReadinessForLaunch>[1] = {}
 
   const s = (key: string) => pickStr(key)
-  if (s('collection_mint') !== undefined) patch.collection_mint = s('collection_mint') ?? null
-  if (s('candy_machine_id') !== undefined) patch.candy_machine_id = s('candy_machine_id') ?? null
+  if (s('collection_mint') !== undefined) {
+    const v = validateOptionalSolanaPubkeyInput(s('collection_mint'), 'Collection mint')
+    if (!v.ok) return jsonError(v.error, 400)
+    patch.collection_mint = v.pubkey
+  }
+  if (s('candy_machine_id') !== undefined) {
+    const v = validateOptionalSolanaPubkeyInput(s('candy_machine_id'), 'Candy Machine ID')
+    if (!v.ok) return jsonError(v.error, 400)
+    patch.candy_machine_id = v.pubkey
+  }
   if (s('hash_list_url') !== undefined) patch.hash_list_url = s('hash_list_url') ?? null
   if (s('magic_eden_url') !== undefined) patch.magic_eden_url = s('magic_eden_url') ?? null
   if (s('tensor_url') !== undefined) patch.tensor_url = s('tensor_url') ?? null

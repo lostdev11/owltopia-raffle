@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -22,6 +22,32 @@ type DeployStatus = {
   terminal_command: string
 }
 
+type GoLiveSummary = {
+  ok?: boolean
+  already_live?: boolean
+  blockers?: string[]
+}
+
+type DeployActionResult = {
+  candy_machine_id: string
+  collection_mint: string
+  candy_guard_id: string
+  already_deployed?: boolean
+  go_live?: GoLiveSummary
+}
+
+function formatGoLiveMessage(goLive: GoLiveSummary | undefined, prefix: string): string {
+  if (!goLive) return prefix
+  if (goLive.ok && goLive.already_live) {
+    return `${prefix} Launch is already live on the public mint page.`
+  }
+  if (goLive.ok) {
+    return `${prefix} Launch auto-approved — collection is live to mint.`
+  }
+  const blockers = goLive.blockers?.join(' ') ?? 'Complete metadata checklist, then Approve & go live above.'
+  return `${prefix} IDs saved. Go-live pending: ${blockers}`
+}
+
 export function SugarDeployPanel({
   launchId,
   onApplied,
@@ -36,6 +62,7 @@ export function SugarDeployPanel({
   const [msg, setMsg] = useState<string | null>(null)
   const [manualCm, setManualCm] = useState('')
   const [manualCol, setManualCol] = useState('')
+  const cacheInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -74,14 +101,13 @@ export function SugarDeployPanel({
       const j = (await res.json()) as {
         ok?: boolean
         error?: string
-        result?: { candy_machine_id: string; collection_mint: string; candy_guard_id: string; already_deployed?: boolean }
+        result?: DeployActionResult
       }
       if (!res.ok || !j.ok) throw new Error(j.error || 'deploy_failed')
-      setMsg(
-        j.result?.already_deployed
-          ? 'Candy Machine already deployed — IDs synced to marketplace.'
-          : `Deployed · CM ${j.result?.candy_machine_id?.slice(0, 8)}… · guard attached.`
-      )
+      const prefix = j.result?.already_deployed
+        ? 'Candy Machine already deployed — IDs synced.'
+        : `Deployed · CM ${j.result?.candy_machine_id?.slice(0, 8)}… · guard attached.`
+      setMsg(formatGoLiveMessage(j.result?.go_live, prefix))
       onApplied()
       await load()
     } catch (e) {
@@ -91,7 +117,7 @@ export function SugarDeployPanel({
     }
   }
 
-  async function registerManual() {
+  async function postDeployAction(body: Record<string, unknown>, successPrefix: string) {
     setBusy(true)
     setErr(null)
     setMsg(null)
@@ -100,20 +126,56 @@ export function SugarDeployPanel({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'register_ids',
-          candy_machine_id: manualCm.trim(),
-          collection_mint: manualCol.trim(),
-        }),
+        body: JSON.stringify(body),
       })
-      const j = (await res.json()) as { ok?: boolean; error?: string }
-      if (!res.ok || !j.ok) throw new Error(j.error || 'register_failed')
-      setMsg('Candy Machine IDs saved to marketplace.')
+      const j = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        result?: DeployActionResult
+      }
+      if (!res.ok || !j.ok) throw new Error(j.error || 'save_failed')
+      if (j.result?.candy_machine_id) setManualCm(j.result.candy_machine_id)
+      if (j.result?.collection_mint) setManualCol(j.result.collection_mint)
+      setMsg(formatGoLiveMessage(j.result?.go_live, successPrefix))
       onApplied()
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'register_failed')
+      setErr(e instanceof Error ? e.message : 'save_failed')
     } finally {
+      setBusy(false)
+    }
+  }
+
+  async function registerManual() {
+    await postDeployAction(
+      {
+        action: 'register_ids',
+        candy_machine_id: manualCm.trim(),
+        collection_mint: manualCol.trim(),
+      },
+      'Candy Machine IDs saved.'
+    )
+  }
+
+  async function importCacheFile(file: File) {
+    setBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const text = await file.text()
+      const cache = JSON.parse(text) as {
+        program?: { candyMachine?: string; collectionMint?: string; candyGuard?: string }
+      }
+      const cm = cache.program?.candyMachine?.trim() ?? ''
+      const col = cache.program?.collectionMint?.trim() ?? ''
+      if (!cm || !col) {
+        throw new Error('cache.json missing program.candyMachine or program.collectionMint — run sugar deploy first.')
+      }
+      setManualCm(cm)
+      setManualCol(col)
+      await postDeployAction({ action: 'sync_from_cache', cache }, 'Imported cache.json — IDs saved.')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'import_failed')
       setBusy(false)
     }
   }
@@ -141,9 +203,10 @@ export function SugarDeployPanel({
   return (
     <CommandCard label="phase_b.sys · DEPLOY CM + GUARD">
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
-        After Arweave upload completes, deploy the Candy Machine and Candy Guard from admin (uses{' '}
-        <code className="text-[#7D8A93]">IRYS_PRIVATE_KEY</code> deployer) or run the terminal fallback for large
-        collections.
+        After Arweave upload, use <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong> (≤
+        {status?.server_deploy_max_supply ?? 250} items) or Sugar CLI below. IDs sync to marketplace automatically and
+        trigger go-live when metadata is ready. Use base58 addresses from <code className="text-[#7D8A93]">cache.json</code>
+        — not the launch UUID from the admin URL.
       </p>
 
       {!status?.arweave_ready ? (
@@ -201,7 +264,9 @@ export function SugarDeployPanel({
           Terminal fallback (Sugar CLI)
         </summary>
         <p className="mt-2 text-xs text-[#9BA8B4]">
-          For collections over {status?.server_deploy_max_supply ?? 250} items or if server deploy fails:
+          For collections over {status?.server_deploy_max_supply ?? 250} items or if server deploy fails. The deploy
+          script auto-syncs IDs to Owl Center when <code className="text-[#7D8A93]">config.json</code> includes{' '}
+          <code className="text-[#7D8A93]">owlCenter.launchId</code> (added by prepare script).
         </p>
         <pre className="mt-2 overflow-x-auto rounded bg-[#0F1419] p-3 font-mono text-[11px] text-[#C5D0D8]">
           npm run prepare:sugar-deploy -- --launch-id={launchId}
@@ -211,12 +276,35 @@ export function SugarDeployPanel({
       </details>
 
       <div className="mt-4 space-y-3 border-t border-[#1A222B] pt-4">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Or paste IDs from Sugar cache</p>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Sugar CLI — import cache.json</p>
+        <input
+          ref={cacheInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void importCacheFile(file)
+            e.target.value = ''
+          }}
+        />
+        <DeployButton
+          type="button"
+          variant="ghost"
+          className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+          disabled={busy}
+          onClick={() => cacheInputRef.current?.click()}
+        >
+          Import cache.json → save + go live
+        </DeployButton>
+
+        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Or paste base58 IDs manually</p>
         <label className="grid gap-1 text-sm text-[#C5D0D8]">
           Candy Machine ID
           <input
             value={manualCm}
             onChange={(e) => setManualCm(e.target.value)}
+            placeholder="From cache.json program.candyMachine (base58, ~44 chars)"
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 font-mono text-sm"
           />
         </label>
@@ -225,6 +313,7 @@ export function SugarDeployPanel({
           <input
             value={manualCol}
             onChange={(e) => setManualCol(e.target.value)}
+            placeholder="From cache.json program.collectionMint (base58)"
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 font-mono text-sm"
           />
         </label>
@@ -235,7 +324,7 @@ export function SugarDeployPanel({
           disabled={busy || !manualCm.trim() || !manualCol.trim()}
           onClick={() => void registerManual()}
         >
-          Save IDs to marketplace
+          Save IDs + try go live
         </DeployButton>
       </div>
 
