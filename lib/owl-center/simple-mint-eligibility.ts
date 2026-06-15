@@ -15,6 +15,7 @@ import {
 import { assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { invalidLaunchMintIdReason } from '@/lib/solana/validate-pubkey'
 
 async function walletPublicMintCount(launchId: string, wallet: string): Promise<number> {
   const db = getSupabaseAdmin()
@@ -66,8 +67,14 @@ export async function buildSimpleMintEligibility(
   let is_eligible = false
   let max_mintable = 0
 
+  const invalidMintIds =
+    invalidLaunchMintIdReason(launch.candy_machine_id, launch.collection_mint) ??
+    invalidLaunchMintIdReason(launch.devnet_candy_machine_id, launch.devnet_collection_mint)
+
   if (buildOwlCenterMintControls(launch.is_paused).disabled) {
     reason = 'Mint is paused'
+  } else if (invalidMintIds) {
+    reason = invalidMintIds
   } else if (!mint_operational) {
     reason = platformFeeEnabled && !platform_treasury_wallet
       ? 'Platform treasury not configured — contact support'

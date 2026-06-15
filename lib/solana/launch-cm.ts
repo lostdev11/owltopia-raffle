@@ -1,6 +1,7 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { resolvePublicSolanaRpcUrl, sanitizeRpcUrl } from '@/lib/solana-rpc-url'
 import { isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
+import { sanitizeLaunchMintPubkey } from '@/lib/solana/validate-pubkey'
 
 type LaunchCmFields = Pick<
   OwlCenterLaunchPublic,
@@ -36,18 +37,20 @@ export function resolveLaunchMintNetwork(launch: Pick<OwlCenterLaunchPublic, 'mi
 
 export function getLaunchCandyMachineId(launch: LaunchCmFields, network?: OwlMintNetwork): string {
   const net = network ?? resolveLaunchMintNetwork(launch)
-  if (net === 'devnet') {
-    return launch.devnet_candy_machine_id?.trim() || envForSlug(launch.slug, 'CM', 'devnet') || ''
-  }
-  return launch.candy_machine_id?.trim() || envForSlug(launch.slug, 'CM', 'mainnet') || ''
+  const raw =
+    net === 'devnet'
+      ? launch.devnet_candy_machine_id?.trim() || envForSlug(launch.slug, 'CM', 'devnet') || ''
+      : launch.candy_machine_id?.trim() || envForSlug(launch.slug, 'CM', 'mainnet') || ''
+  return sanitizeLaunchMintPubkey(raw) ?? ''
 }
 
 export function getLaunchCollectionMint(launch: LaunchCmFields, network?: OwlMintNetwork): string {
   const net = network ?? resolveLaunchMintNetwork(launch)
-  if (net === 'devnet') {
-    return launch.devnet_collection_mint?.trim() || envForSlug(launch.slug, 'COLLECTION', 'devnet') || ''
-  }
-  return launch.collection_mint?.trim() || envForSlug(launch.slug, 'COLLECTION', 'mainnet') || ''
+  const raw =
+    net === 'devnet'
+      ? launch.devnet_collection_mint?.trim() || envForSlug(launch.slug, 'COLLECTION', 'devnet') || ''
+      : launch.collection_mint?.trim() || envForSlug(launch.slug, 'COLLECTION', 'mainnet') || ''
+  return sanitizeLaunchMintPubkey(raw) ?? ''
 }
 
 export function launchMintInfraConfigured(launch: LaunchCmFields): boolean {

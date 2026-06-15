@@ -46,3 +46,35 @@ export function validateOptionalSolanaPubkeyInput(
   if (!v.ok) return v
   return { ok: true, pubkey: v.pubkey }
 }
+
+/** True when value is a valid Solana base58 address (not a UUID / hex id). */
+export function isValidSolanaPubkey(raw: string | null | undefined): boolean {
+  const t = raw?.trim() ?? ''
+  if (!t) return false
+  return validateSolanaPubkeyInput(t, 'Address').ok
+}
+
+/** Returns canonical base58 when valid; null when empty or invalid (UUID, malformed, etc.). */
+export function sanitizeLaunchMintPubkey(raw: string | null | undefined): string | null {
+  const t = raw?.trim() ?? ''
+  if (!t) return null
+  const v = validateSolanaPubkeyInput(t, 'Address')
+  return v.ok ? v.pubkey : null
+}
+
+/** User-facing hint when DB rows still hold launch UUIDs instead of on-chain addresses. */
+export function invalidLaunchMintIdReason(
+  candyMachineId: string | null | undefined,
+  collectionMint: string | null | undefined
+): string | null {
+  const cm = candyMachineId?.trim() ?? ''
+  const col = collectionMint?.trim() ?? ''
+  if (!cm && !col) return null
+
+  const cmBad = cm && !isValidSolanaPubkey(cm)
+  const colBad = col && !isValidSolanaPubkey(col)
+  if (!cmBad && !colBad) return null
+
+  const sample = (cmBad ? cm : col).slice(0, 8)
+  return `Candy Machine IDs are invalid (${sample}… looks like a launch UUID, not a Solana address). Admin: open Phase B → Import cache.json or Deploy CM + guard again — do not paste the launch id from the admin URL.`
+}

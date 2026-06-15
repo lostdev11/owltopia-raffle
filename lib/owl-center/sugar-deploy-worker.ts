@@ -18,7 +18,7 @@ import {
   OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY,
 } from '@/lib/owl-center/sugar-deploy-onchain'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
+import { isValidSolanaPubkey, sanitizeLaunchMintPubkey, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
 export type SugarDeployGoLiveSummary = {
   ok: boolean
@@ -52,8 +52,14 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
   ])
 
   const deployState = job ? parseOnchainDeployState(job.upload_progress) : null
-  const cmId = marketplace?.candy_machine_id?.trim() || deployState?.candy_machine_id || null
-  const colMint = marketplace?.collection_mint?.trim() || deployState?.collection_mint || null
+  const cmId =
+    sanitizeLaunchMintPubkey(marketplace?.candy_machine_id) ||
+    sanitizeLaunchMintPubkey(deployState?.candy_machine_id) ||
+    null
+  const colMint =
+    sanitizeLaunchMintPubkey(marketplace?.collection_mint) ||
+    sanitizeLaunchMintPubkey(deployState?.collection_mint) ||
+    null
 
   return {
     launch,
@@ -95,7 +101,13 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
   }
 
   const existing = parseOnchainDeployState(job.upload_progress)
-  if (existing?.status === 'completed' && existing.candy_machine_id && existing.collection_mint) {
+  if (
+    existing?.status === 'completed' &&
+    existing.candy_machine_id &&
+    existing.collection_mint &&
+    isValidSolanaPubkey(existing.candy_machine_id) &&
+    isValidSolanaPubkey(existing.collection_mint)
+  ) {
     const go_live = await persistDeployIds(
       launchId,
       job.id,

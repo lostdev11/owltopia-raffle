@@ -13,6 +13,7 @@ import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBal
 import { owlCenterPlatformMintFeeUsd } from '@/lib/owl-center/platform-mint-fee'
 import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
+import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
@@ -133,12 +134,31 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     (launch && 'mint_mode' in launch
       ? getLaunchCollectionMint(launch as Parameters<typeof getLaunchCollectionMint>[0], network)
       : getGen2CollectionMint(launch ?? undefined))
+  const invalidIds = invalidLaunchMintIdReason(
+    candyMachineId.trim() ||
+      (network === 'devnet' ? launch?.devnet_candy_machine_id : launch?.candy_machine_id) ||
+      null,
+    collectionMint.trim() ||
+      (network === 'devnet' ? launch?.devnet_collection_mint : launch?.collection_mint) ||
+      null
+  )
+  if (invalidIds) {
+    return { ok: false, error: invalidIds }
+  }
+
   if (!cmId) {
     return { ok: false, error: 'Missing Candy Machine ID — set env or Owl Center admin devnet fields.' }
   }
   if (!colMint) {
     return { ok: false, error: 'Missing Collection Mint — set env or Owl Center admin devnet fields.' }
   }
+
+  const cmCheck = validateSolanaPubkeyInput(cmId, 'Candy Machine ID')
+  if (!cmCheck.ok) return { ok: false, error: cmCheck.error }
+  const colCheck = validateSolanaPubkeyInput(colMint, 'Collection mint')
+  if (!colCheck.ok) return { ok: false, error: colCheck.error }
+  cmId = cmCheck.pubkey
+  colMint = colCheck.pubkey
 
   if (!isGen2MintablePhase(phase)) {
     return { ok: false, error: `Mint not available in phase ${phase}` }
@@ -264,6 +284,13 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
       return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }
+    }
+    if (low.includes('provided public key is invalid') || low.includes('public keys must be base58')) {
+      return {
+        ok: false,
+        error:
+          'Candy Machine IDs are invalid — admin must paste base58 addresses from Sugar cache.json (program.candyMachine / program.collectionMint), not the launch UUID from the admin URL.',
+      }
     }
     const rpcHint = friendlySolanaRpcErrorMessage(e)
     if (rpcHint) {
