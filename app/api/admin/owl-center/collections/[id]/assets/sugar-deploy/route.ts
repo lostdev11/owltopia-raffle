@@ -19,7 +19,7 @@ function jsonError(message: string, status: number) {
 
 /**
  * GET — Phase B deploy readiness (Arweave done? CM IDs saved? can deploy from server?)
- * POST — action: deploy_onchain | register_ids
+ * POST — action: deploy_onchain | register_ids | sync_from_cache
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await requireGen2PresaleAdminSession(request)
@@ -61,6 +61,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     candy_machine_id?: string
     collection_mint?: string
     candy_guard_id?: string
+    cache?: {
+      program?: { candyMachine?: string; collectionMint?: string; candyGuard?: string }
+    }
   }
   try {
     body = (await request.json()) as typeof body
@@ -82,7 +85,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   if (action === 'sync_from_cache') {
-    const cache = body.cache as { program?: { candyMachine?: string; collectionMint?: string; candyGuard?: string } } | undefined
+    const cache = body.cache
     const cm = typeof cache?.program?.candyMachine === 'string' ? cache.program.candyMachine : ''
     const col = typeof cache?.program?.collectionMint === 'string' ? cache.program.collectionMint : ''
     const guard = typeof cache?.program?.candyGuard === 'string' ? cache.program.candyGuard : undefined
