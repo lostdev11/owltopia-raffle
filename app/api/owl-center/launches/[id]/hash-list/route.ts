@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
 import { buildHashListPayloadForLaunch } from '@/lib/owl-center/hash-list-payload'
+import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -29,6 +30,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
+
+  if (!isLaunchMarketplaceListingUnlocked(launch)) {
+    return jsonError(
+      'Hash list is available after sell-out when every piece has been minted.',
+      403
+    )
+  }
 
   await ensureSelloutMarketplacePrepIfNeeded(launch)
 

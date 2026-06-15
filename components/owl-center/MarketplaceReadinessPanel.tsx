@@ -6,6 +6,7 @@ import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
+import { CreatorMarketplaceLockedSection } from '@/components/owl-center/CreatorMarketplaceLockedSection'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
 import { ReadinessChecklist, type ReadinessChecklistItem } from '@/components/owl-center/ReadinessChecklist'
 import {
@@ -15,6 +16,7 @@ import {
 import type { OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
 import { OWL_CENTER_MARKETPLACE_STATUSES } from '@/lib/owl-center/asset-types'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 
 type Props = {
   launchId: string
@@ -107,7 +109,14 @@ export function MarketplaceReadinessPanel({
     hashListApiPath ??
     (creatorMode ? creatorHashListApiPath(launchId) : `/api/admin/owl-center/collections/${launchId}/hash-list`)
 
+  const listingUnlocked =
+    !creatorMode || !launchProp || isLaunchMarketplaceListingUnlocked(launchProp)
+
   const load = useCallback(async () => {
+    if (creatorMode && launchProp && !isLaunchMarketplaceListingUnlocked(launchProp)) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setErr(null)
     try {
@@ -123,11 +132,15 @@ export function MarketplaceReadinessPanel({
     } finally {
       setLoading(false)
     }
-  }, [applyRow, mpApi])
+  }, [applyRow, mpApi, creatorMode, launchProp])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  if (creatorMode && launchProp && !listingUnlocked) {
+    return <CreatorMarketplaceLockedSection launch={launchProp} embedded={embedded} />
+  }
 
   async function save(patch: Record<string, unknown>) {
     setMsg(null)
@@ -176,8 +189,8 @@ export function MarketplaceReadinessPanel({
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         {creatorMode ? (
           <>
-            After sell-out, submit your hash list to Magic Eden, verify on Tensor, then paste your live collection URLs
-            below. When both marketplaces are ready, activate trading links to show buy buttons on your mint page.
+            Sell-out is done — Owl Center already generated your hash list and suggested URLs. Submit the list on Magic
+            Eden (manual), verify on Tensor, paste your live links below, then go live on your mint page.
           </>
         ) : (
           <>
@@ -416,6 +429,7 @@ export function MarketplaceReadinessPanel({
         </DeployButton>
           </>
         ) : null}
+        {!creatorMode ? (
         <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_me_listed' })}>
           Mark ME listed
         </DeployButton>
@@ -425,6 +439,7 @@ export function MarketplaceReadinessPanel({
         <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'activate_trading_links' })}>
           Activate trading links
         </DeployButton>
+        ) : null}
         {meUrl.trim() ? (
           <a
             href={meUrl.trim()}

@@ -6,6 +6,10 @@ import {
 } from '@/lib/owl-center/marketplace-urls'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import {
+  isLaunchSoldOutPhase,
+  isLaunchSupplyExhausted,
+} from '@/lib/owl-center/launch-marketplace-eligibility'
+import {
   getMarketplaceReadinessByLaunchId,
   syncLaunchMarketplaceFieldsFromRow,
   upsertMarketplaceReadinessForLaunch,
@@ -35,13 +39,8 @@ export async function ensureSelloutMarketplacePrepIfNeeded(
     return { ok: false, skipped: true, reason: 'not_public_simple' }
   }
 
-  const supplyExhausted =
-    launch.minted_count >= launch.total_supply && launch.total_supply > 0
-  const soldOutPhase =
-    launch.active_phase === 'SOLD_OUT' ||
-    launch.status === 'SOLD_OUT' ||
-    launch.active_phase === 'TRADING_ACTIVE' ||
-    launch.status === 'TRADING_ACTIVE'
+  const supplyExhausted = isLaunchSupplyExhausted(launch)
+  const soldOutPhase = isLaunchSoldOutPhase(launch)
 
   if (!supplyExhausted && !soldOutPhase) {
     return { ok: false, skipped: true, reason: 'not_sold_out' }
@@ -57,10 +56,8 @@ export async function runSelloutMarketplacePrep(
     return { ok: false, skipped: true, reason: 'not_public_simple' }
   }
 
-  if (launch.active_phase !== 'SOLD_OUT' && launch.status !== 'SOLD_OUT') {
-    const supplyExhausted =
-      launch.minted_count >= launch.total_supply && launch.total_supply > 0
-    if (!supplyExhausted) {
+  if (!isLaunchSoldOutPhase(launch)) {
+    if (!isLaunchSupplyExhausted(launch)) {
       return { ok: false, skipped: true, reason: 'not_sold_out' }
     }
   }

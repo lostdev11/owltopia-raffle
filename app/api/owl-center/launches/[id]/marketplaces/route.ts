@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
+import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import {
   ensureMarketplaceRow,
@@ -36,13 +37,20 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
 
-  await ensureSelloutMarketplacePrepIfNeeded(launch)
+  const listingUnlocked = isLaunchMarketplaceListingUnlocked(launch)
+  if (listingUnlocked) {
+    await ensureSelloutMarketplacePrepIfNeeded(launch)
+  }
 
   let row = await getMarketplaceReadinessByLaunchId(id)
   if (!row) row = await ensureMarketplaceRow(id)
 
   const launchFresh = await getOwlCenterLaunchByIdAdmin(id)
-  return NextResponse.json({ launch: launchFresh, marketplaceReadiness: row })
+  return NextResponse.json({
+    launch: launchFresh,
+    marketplaceReadiness: row,
+    listing_unlocked: listingUnlocked,
+  })
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -59,6 +67,13 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
+
+  if (!isLaunchMarketplaceListingUnlocked(launch)) {
+    return jsonError(
+      'Marketplace listing unlocks after sell-out. Finish minting your collection first.',
+      403
+    )
+  }
 
   let body: Record<string, unknown>
   try {
@@ -123,5 +138,5 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const launchFresh = await getOwlCenterLaunchByIdAdmin(id)
   const row = (await getMarketplaceReadinessByLaunchId(id)) ?? updated
 
-  return NextResponse.json({ launch: launchFresh, marketplaceReadiness: row })
+  return NextResponse.json({ launch: launchFresh, marketplaceReadiness: row, listing_unlocked: true })
 }

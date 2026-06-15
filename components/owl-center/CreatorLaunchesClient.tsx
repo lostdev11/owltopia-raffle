@@ -11,6 +11,7 @@ import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPan
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { creatorMetadataRefreshApiPath } from '@/lib/owl-center/creator-api-paths'
+import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 
 type LaunchRow = {
@@ -61,7 +62,7 @@ export function CreatorLaunchesClient() {
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
       title="My launches"
-      subtitle="Edit mint details, fix wallet metadata, and prepare Magic Eden listing for collections tied to your wallet."
+      subtitle="Edit mint details and metadata while your drop is live. Magic Eden / Tensor listing unlocks automatically after sell-out."
     >
       {!connected ? (
         <p className="font-mono text-sm text-[#9BA8B4]">
@@ -103,7 +104,9 @@ export function CreatorLaunchesClient() {
               </Link>
             </div>
           ) : null}
-          {launches.map((l) => (
+          {launches.map((l) => {
+            const listingUnlocked = isLaunchMarketplaceListingUnlocked(l)
+            return (
             <CommandCard key={l.id} label={`${l.status} · ${l.active_phase}`}>
               <div className="flex flex-col gap-4">
                 <div>
@@ -142,11 +145,22 @@ export function CreatorLaunchesClient() {
                     anchorId={`metadata-refresh-${l.id}`}
                     apiPath={creatorMetadataRefreshApiPath(l.id)}
                   />
-                  <MagicEdenHashListPanel embedded launchId={l.id} slug={l.slug} compact />
+                  {listingUnlocked ? (
+                    <MagicEdenHashListPanel embedded launchId={l.id} slug={l.slug} compact />
+                  ) : (
+                    <p className="font-mono text-xs leading-relaxed text-[#5C6773]">
+                      Magic Eden / Tensor listing unlocks after sell-out ({l.minted_count}/{l.total_supply} minted). Open{' '}
+                      <Link href={`/owl-center/my-launches/${l.id}/mint-details`} className="text-[#00FF9C] underline">
+                        Mint details
+                      </Link>{' '}
+                      for the full checklist.
+                    </p>
+                  )}
                 </>
               ) : null}
             </CommandCard>
-          ))}
+            )
+          })}
         </div>
       )}
     </OwlCenterShell>
