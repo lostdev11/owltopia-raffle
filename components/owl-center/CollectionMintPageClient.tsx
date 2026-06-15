@@ -142,7 +142,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             onRefresh={load}
           />
           <CollectionMintedGrid mints={minted_mints} preferMainnet={mint_network === 'mainnet'} />
-          {soldOut ? (
+          {soldOut && canEditMintSettings ? (
             <CollectionSoldOutPanel
               slug={slug}
               launch={launch}
