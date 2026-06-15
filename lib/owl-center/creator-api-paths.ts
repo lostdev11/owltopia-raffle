@@ -11,6 +11,10 @@ export function creatorHashListApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/hash-list`
 }
 
+export function creatorMarketplaceApiPath(launchId: string): string {
+  return `/api/owl-center/launches/${launchId}/marketplaces`
+}
+
 export function creatorLaunchDeleteApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}`
 }

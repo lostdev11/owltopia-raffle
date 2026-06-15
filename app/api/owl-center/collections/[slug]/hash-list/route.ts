@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { formatHashListText } from '@/lib/owl-center/marketplace-urls'
-import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
+import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
+import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { getMarketplaceReadinessByLaunchId } from '@/lib/db/owl-center-marketplace'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -28,6 +29,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (!launch || launch.mint_mode !== 'public_simple') {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }
+
+  const adminLaunch = await getOwlCenterLaunchBySlugAdmin(slug)
+  if (adminLaunch) await ensureSelloutMarketplacePrepIfNeeded(adminLaunch)
 
   const mp = await getMarketplaceReadinessByLaunchId(launch.id)
   let text = mp?.hash_list_text?.trim() ?? ''

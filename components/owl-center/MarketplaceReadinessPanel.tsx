@@ -8,6 +8,10 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
 import { ReadinessChecklist, type ReadinessChecklistItem } from '@/components/owl-center/ReadinessChecklist'
+import {
+  creatorHashListApiPath,
+  creatorMarketplaceApiPath,
+} from '@/lib/owl-center/creator-api-paths'
 import type { OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
 import { OWL_CENTER_MARKETPLACE_STATUSES } from '@/lib/owl-center/asset-types'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -16,6 +20,10 @@ type Props = {
   launchId: string
   launch?: OwlCenterLaunchPublic | null
   compact?: boolean
+  /** Creator mint-details: simpler fields and creator API routes. */
+  creatorMode?: boolean
+  marketplaceApiPath?: string
+  hashListApiPath?: string
   onSaved?: () => void
   /** Render as a section inside a parent CommandCard instead of its own card. */
   embedded?: boolean
@@ -40,6 +48,9 @@ export function MarketplaceReadinessPanel({
   launchId,
   launch: launchProp,
   compact,
+  creatorMode = false,
+  marketplaceApiPath,
+  hashListApiPath,
   onSaved,
   embedded = false,
 }: Props) {
@@ -89,11 +100,18 @@ export function MarketplaceReadinessPanel({
     setNotes(r.notes ?? '')
   }, [])
 
+  const mpApi =
+    marketplaceApiPath ??
+    (creatorMode ? creatorMarketplaceApiPath(launchId) : `/api/admin/owl-center/collections/${launchId}/marketplaces`)
+  const hashApi =
+    hashListApiPath ??
+    (creatorMode ? creatorHashListApiPath(launchId) : `/api/admin/owl-center/collections/${launchId}/hash-list`)
+
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/marketplaces`, {
+      const res = await fetch(mpApi, {
         credentials: 'include',
         cache: 'no-store',
       })
@@ -105,7 +123,7 @@ export function MarketplaceReadinessPanel({
     } finally {
       setLoading(false)
     }
-  }, [applyRow, launchId])
+  }, [applyRow, mpApi])
 
   useEffect(() => {
     void load()
@@ -115,7 +133,7 @@ export function MarketplaceReadinessPanel({
     setMsg(null)
     setErr(null)
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/marketplaces`, {
+      const res = await fetch(mpApi, {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -156,9 +174,18 @@ export function MarketplaceReadinessPanel({
   return (
     <MarketplaceShell embedded={embedded}>
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
-        Owl Center does not directly upload to Magic Eden or Tensor in V1. Solana NFT collections are indexed from on-chain
-        metadata. Paste final marketplace URLs after indexing or claiming. Use verified collection metadata and permanent image /
-        metadata storage. Trading links should only be activated once the collection is indexed and ready.
+        {creatorMode ? (
+          <>
+            After sell-out, submit your hash list to Magic Eden, verify on Tensor, then paste your live collection URLs
+            below. When both marketplaces are ready, activate trading links to show buy buttons on your mint page.
+          </>
+        ) : (
+          <>
+            Owl Center does not directly upload to Magic Eden or Tensor in V1. Solana NFT collections are indexed from on-chain
+            metadata. Paste final marketplace URLs after indexing or claiming. Use verified collection metadata and permanent image /
+            metadata storage. Trading links should only be activated once the collection is indexed and ready.
+          </>
+        )}
       </p>
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -167,7 +194,7 @@ export function MarketplaceReadinessPanel({
         <MarketplaceStatusBadge label="META" status={metadataStatus as OwlCenterMarketplaceReadiness['metadata_status']} />
       </div>
 
-      {!compact ? (
+      {!compact && !creatorMode ? (
         <div className="mb-8 border border-[#1A222B] bg-[#0F1419]/70 p-4">
           <ReadinessChecklist title="OPS_CHECKLIST.local" items={opsItems} onToggle={onOpsToggle} />
           <p className="mt-2 font-mono text-[10px] text-[#5C6773]">
@@ -181,7 +208,7 @@ export function MarketplaceReadinessPanel({
           embedded
           launchId={launchId}
           slug={launchProp?.slug}
-          hashListApiPath={`/api/admin/owl-center/collections/${launchId}/hash-list`}
+          hashListApiPath={hashApi}
           onSuggestedUrls={({ collectionMint: cm, magicEdenUrl }) => {
             if (cm && !collectionMint.trim()) setCollectionMint(cm)
             if (magicEdenUrl && !meUrl.trim()) setMeUrl(magicEdenUrl)
@@ -190,6 +217,8 @@ export function MarketplaceReadinessPanel({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
+        {!creatorMode ? (
+          <>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Collection mint
           <input
@@ -214,23 +243,29 @@ export function MarketplaceReadinessPanel({
             className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
-        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          </>
+        ) : null}
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">
           Magic Eden URL
           <input
             value={meUrl}
             onChange={(e) => setMeUrl(e.target.value)}
+            placeholder="https://magiceden.io/marketplace/…"
             className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
-        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">
           Tensor URL
           <input
             value={tensorUrl}
             onChange={(e) => setTensorUrl(e.target.value)}
+            placeholder="https://tensor.trade/trade/…"
             className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
 
+        {!creatorMode ? (
+          <>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Metadata status
           <select
@@ -307,6 +342,19 @@ export function MarketplaceReadinessPanel({
             className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
+          </>
+        ) : null}
+        {creatorMode ? (
+          <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">
+            <input
+              type="checkbox"
+              checked={tradingActive}
+              onChange={(e) => setTradingActive(e.target.checked)}
+              className="h-4 w-4 accent-[#00FF9C]"
+            />
+            Show trading links on mint page
+          </label>
+        ) : null}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
@@ -317,8 +365,11 @@ export function MarketplaceReadinessPanel({
             onChange={(e) => setConfirmTrading(e.target.checked)}
             className="h-4 w-4 accent-[#00FF9C]"
           />
-          Confirm TRADING_ACTIVE transition (requires SOLD_OUT or force below)
+          {creatorMode
+            ? 'Go live — show trading links on mint page (sold-out collections only)'
+            : 'Confirm TRADING_ACTIVE transition (requires SOLD_OUT or force below)'}
         </label>
+        {!creatorMode ? (
         <label className="flex items-center gap-2 font-mono text-[10px] text-[#5C6773]">
           <input
             type="checkbox"
@@ -328,6 +379,7 @@ export function MarketplaceReadinessPanel({
           />
           Force trading transition (admin override)
         </label>
+        ) : null}
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -335,27 +387,35 @@ export function MarketplaceReadinessPanel({
           type="button"
           onClick={() =>
             void save({
-              collection_mint: collectionMint.trim() || null,
-              candy_machine_id: candyMachineId.trim() || null,
-              hash_list_url: hashListUrl.trim() || null,
+              ...(creatorMode
+                ? {}
+                : {
+                    collection_mint: collectionMint.trim() || null,
+                    candy_machine_id: candyMachineId.trim() || null,
+                    hash_list_url: hashListUrl.trim() || null,
+                    metadata_status: metadataStatus,
+                    verified_collection_status: verifiedStatus,
+                    magic_eden_status: meStatus,
+                    tensor_status: tensorStatus,
+                  }),
               magic_eden_url: meUrl.trim() || null,
               tensor_url: tensorUrl.trim() || null,
-              metadata_status: metadataStatus,
-              verified_collection_status: verifiedStatus,
-              magic_eden_status: meStatus,
-              tensor_status: tensorStatus,
               trading_links_active: tradingActive,
               notes: notes.trim() || null,
               confirm_trading_transition: confirmTrading,
-              force_trading_transition: forceTrading,
+              ...(creatorMode ? {} : { force_trading_transition: forceTrading }),
             })
           }
         >
-          Save marketplace status
+          {creatorMode ? 'Save & update listing' : 'Save marketplace status'}
         </DeployButton>
+        {!creatorMode ? (
+          <>
         <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_ready_indexing' })}>
           Mark ready for indexing
         </DeployButton>
+          </>
+        ) : null}
         <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_me_listed' })}>
           Mark ME listed
         </DeployButton>

@@ -7,6 +7,8 @@ import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresale
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import {
+  creatorHashListApiPath,
+  creatorMarketplaceApiPath,
   creatorMetadataRefreshApiPath,
   creatorMintConfigApiPath,
 } from '@/lib/owl-center/creator-api-paths'
@@ -26,6 +28,9 @@ type Props = {
   showMarketplace?: boolean
   showPresaleOverage?: boolean
   marketplaceCompact?: boolean
+  marketplaceCreatorMode?: boolean
+  marketplaceApiPath?: string
+  hashListApiPath?: string
   /** Creator-only delete section at bottom of card. */
   deletable?: boolean
   redirectAfterDelete?: string
@@ -43,6 +48,9 @@ export function CollectionLaunchOpsCard({
   showMarketplace = true,
   showPresaleOverage = false,
   marketplaceCompact = false,
+  marketplaceCreatorMode = false,
+  marketplaceApiPath,
+  hashListApiPath,
   deletable = false,
   redirectAfterDelete,
   className,
@@ -74,6 +82,9 @@ export function CollectionLaunchOpsCard({
         <MarketplaceReadinessPanel
           embedded
           compact={marketplaceCompact}
+          creatorMode={marketplaceCreatorMode}
+          marketplaceApiPath={marketplaceApiPath}
+          hashListApiPath={hashListApiPath}
           launchId={launchId}
           launch={launch}
           onSaved={onSaved}
@@ -101,5 +112,8 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     launch,
     saveApiPath: creatorMintConfigApiPath(launchId),
     metadataApiPath: creatorMetadataRefreshApiPath(launchId),
+    marketplaceApiPath: creatorMarketplaceApiPath(launchId),
+    hashListApiPath: creatorHashListApiPath(launchId),
+    marketplaceCreatorMode: true,
   }
 }

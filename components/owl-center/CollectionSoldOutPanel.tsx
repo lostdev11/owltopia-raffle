@@ -25,18 +25,19 @@ export function CollectionSoldOutPanel({
   tradingActive: boolean
 }) {
   const hashListHref = `/api/owl-center/collections/${encodeURIComponent(slug)}/hash-list`
+  const mintDetailsHref = `/owl-center/my-launches/${launch.id}/mint-details#launch-ops`
 
   return (
     <CommandCard label="SOLD OUT // marketplace">
       <p className="text-sm leading-relaxed text-[#C5D0D8]">
-        All {launch.total_supply} pieces minted. Hash list is generated for{' '}
+        All {launch.total_supply} pieces minted. Your hash list is ready for{' '}
         <strong className="font-normal text-[#EAFBF4]">Magic Eden</strong> and{' '}
-        <strong className="font-normal text-[#EAFBF4]">Tensor</strong> submission.
+        <strong className="font-normal text-[#EAFBF4]">Tensor</strong>.
       </p>
 
       <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-[#9BA8B4]">
         <li>
-          Download the hash list ({mintCount} mint{mintCount === 1 ? '' : 's'}) and upload it in the{' '}
+          Download or copy the hash list ({mintCount} mint{mintCount === 1 ? '' : 's'}) and submit it in the{' '}
           <a
             href="https://magiceden.io/creators"
             target="_blank"
@@ -44,11 +45,17 @@ export function CollectionSoldOutPanel({
             className="text-[#00FF9C] underline"
           >
             Magic Eden creator hub
-          </a>{' '}
-          for this collection.
+          </a>
+          .
         </li>
         <li>Verify the collection on Tensor creator tools (collection mint).</li>
-        <li>Admin marks ME + Tensor as listed and activates trading links.</li>
+        <li>
+          In{' '}
+          <Link href={mintDetailsHref} className="text-[#00FF9C] underline">
+            Mint details
+          </Link>
+          , paste your live ME and Tensor URLs, then activate trading links.
+        </li>
       </ol>
 
       <div className="mt-6 flex flex-wrap gap-3">
@@ -62,9 +69,15 @@ export function CollectionSoldOutPanel({
           </a>
         ) : (
           <DeployButton type="button" disabled>
-            Hash list pending…
+            Preparing hash list…
           </DeployButton>
         )}
+        <Link
+          href={mintDetailsHref}
+          className="inline-flex min-h-[44px] touch-manipulation items-center justify-center border border-[#00FF9C]/40 px-6 font-bold uppercase tracking-wide text-[#00FF9C] hover:bg-[#00FF9C]/10"
+        >
+          Finish listing setup
+        </Link>
         {magicEdenUrl ? (
           <a
             href={magicEdenUrl}
@@ -75,12 +88,6 @@ export function CollectionSoldOutPanel({
             Magic Eden collection
           </a>
         ) : null}
-        <Link
-          href="/admin/owl-center/demo"
-          className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:text-[#00FF9C]"
-        >
-          Admin: finalize listing
-        </Link>
       </div>
 
       {tradingActive ? (

@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { parseCandyMachineMintFromTransaction } from '@/lib/owl-center/parse-candy-machine-mint-tx'
-import { runSelloutMarketplacePrep } from '@/lib/owl-center/sellout-marketplace-prep'
+import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
@@ -150,8 +150,8 @@ export async function reconcileOrphanCandyMachineMints(
   let sellout_prep = false
   if (sold_out_synced || launch.minted_count >= launch.total_supply) {
     const fresh = await getOwlCenterLaunchBySlugAdmin(launch.slug)
-    if (fresh && (fresh.active_phase === 'SOLD_OUT' || fresh.status === 'SOLD_OUT')) {
-      const prep = await runSelloutMarketplacePrep(fresh)
+    if (fresh) {
+      const prep = await ensureSelloutMarketplacePrepIfNeeded(fresh)
       sellout_prep = prep.ok === true
     }
   }
@@ -176,7 +176,13 @@ export async function maybeReconcileLaunchMintsFromChain(
 
   if (supply.itemsRedeemed <= launch.minted_count) {
     const sold_out_synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id)
-    return { recorded: 0, sold_out_synced, sellout_prep: false }
+    let sellout_prep = false
+    const fresh = await getOwlCenterLaunchBySlugAdmin(launch.slug)
+    if (fresh) {
+      const prep = await ensureSelloutMarketplacePrepIfNeeded(fresh)
+      sellout_prep = prep.ok === true
+    }
+    return { recorded: 0, sold_out_synced, sellout_prep }
   }
 
   return reconcileOrphanCandyMachineMints(launch)

@@ -7,6 +7,8 @@ import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quot
 import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { CollectionMintStateResponse, MintTerminalLine } from '@/lib/owl-center/types'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
+import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
+import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -19,6 +21,9 @@ export async function buildCollectionMintState(
   if (!launch || launch.mint_mode !== 'public_simple') return null
 
   await maybeReconcileLaunchMintsFromChain(launch)
+  launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
+  const adminLaunch = await getOwlCenterLaunchBySlugAdmin(slug)
+  if (adminLaunch) await ensureSelloutMarketplacePrepIfNeeded(adminLaunch)
   launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
 
   const db = getSupabaseAdmin()

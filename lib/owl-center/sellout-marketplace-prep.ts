@@ -27,6 +27,29 @@ export type SelloutMarketplacePrepResult = {
  * On sell-out: generate hash list, suggest ME/Tensor URLs, mark READY_FOR_INDEXING.
  * Magic Eden / Tensor still require creator-hub hash list submit (no public auto-upload API).
  */
+/** Run sell-out prep when supply is exhausted but hash list / ME URLs are not stored yet. */
+export async function ensureSelloutMarketplacePrepIfNeeded(
+  launch: OwlCenterLaunchPublic
+): Promise<SelloutMarketplacePrepResult> {
+  if (launch.mint_mode !== 'public_simple') {
+    return { ok: false, skipped: true, reason: 'not_public_simple' }
+  }
+
+  const supplyExhausted =
+    launch.minted_count >= launch.total_supply && launch.total_supply > 0
+  const soldOutPhase =
+    launch.active_phase === 'SOLD_OUT' ||
+    launch.status === 'SOLD_OUT' ||
+    launch.active_phase === 'TRADING_ACTIVE' ||
+    launch.status === 'TRADING_ACTIVE'
+
+  if (!supplyExhausted && !soldOutPhase) {
+    return { ok: false, skipped: true, reason: 'not_sold_out' }
+  }
+
+  return runSelloutMarketplacePrep(launch)
+}
+
 export async function runSelloutMarketplacePrep(
   launch: OwlCenterLaunchPublic
 ): Promise<SelloutMarketplacePrepResult> {
@@ -35,7 +58,11 @@ export async function runSelloutMarketplacePrep(
   }
 
   if (launch.active_phase !== 'SOLD_OUT' && launch.status !== 'SOLD_OUT') {
-    return { ok: false, skipped: true, reason: 'not_sold_out' }
+    const supplyExhausted =
+      launch.minted_count >= launch.total_supply && launch.total_supply > 0
+    if (!supplyExhausted) {
+      return { ok: false, skipped: true, reason: 'not_sold_out' }
+    }
   }
 
   const existing = await getMarketplaceReadinessByLaunchId(launch.id)
