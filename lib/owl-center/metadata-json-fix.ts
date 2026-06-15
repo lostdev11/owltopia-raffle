@@ -1,77 +1,148 @@
 import 'server-only'
 
-import { arweaveTxIdFromHttps, normalizeOwlCenterArweaveGatewayUri, walletSafeArweaveImageUri } from '@/lib/owl-center/arweave-gateway-uri'
+import {
+  arweaveTxIdFromHttps,
+  normalizeOwlCenterArweaveGatewayUri,
+  walletSafeArweaveImageUri,
+} from '@/lib/owl-center/arweave-gateway-uri'
 import { uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
 import { irysGatewayMirrorHttpsUrls } from '@/lib/nft-media-uri'
+import { getSiteBaseUrl } from '@/lib/site-config'
 
-export function imageGatewayUriFromUpload(
+export type WalletImageFile = {
+  uri: string
+  type: string
+  cdn?: boolean
+}
+
+export type WalletImageSet = {
+  /** Primary `image` field — Owltopia proxy (Phantom + Solflare mobile). */
+  primaryImage: string
+  /** Direct Irys gateway mirror for indexers. */
+  gatewayImage: string
+  files: WalletImageFile[]
+}
+
+export function buildOwlCenterWalletProxyImageUrl(gatewayBase: string): string {
+  return `${getSiteBaseUrl()}/api/proxy-image?url=${encodeURIComponent(gatewayBase)}`
+}
+
+export function buildWalletImageSetFromUpload(
   uploaded: Record<string, string>,
   assetPath: string,
   network: 'mainnet' | 'devnet'
-): string | null {
+): WalletImageSet | null {
   const raw = uploaded[assetPath]?.trim()
   if (!raw) return null
-  return walletSafeArweaveImageUri(raw, network)
+
+  const id = arweaveTxIdFromHttps(raw)
+  if (!id) return null
+
+  const gatewayImage = walletSafeArweaveImageUri(raw, network)
+  const gatewayBase = gatewayImage.split('?')[0] ?? gatewayImage
+  const primaryImage = buildOwlCenterWalletProxyImageUrl(gatewayBase)
+
+  return {
+    primaryImage,
+    gatewayImage,
+    files: [
+      { uri: primaryImage, type: 'image/png', cdn: true },
+      { uri: gatewayImage, type: 'image/png' },
+    ],
+  }
 }
 
 function rewriteJsonImageFields(
   json: Record<string, unknown>,
-  imageUri: string,
+  images: WalletImageSet,
   collectionName?: string | null
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...json, image: imageUri }
+  const out: Record<string, unknown> = { ...json, image: images.primaryImage }
   if (collectionName?.trim()) {
     out.collection = {
       name: collectionName.trim(),
       family: collectionName.trim(),
     }
   }
-  if (out.properties && typeof out.properties === 'object') {
-    const props = { ...(out.properties as Record<string, unknown>) }
-    if (Array.isArray(props.files)) {
-      props.files = (props.files as Record<string, unknown>[]).map((f) => ({
-        ...f,
-        uri: typeof f.uri === 'string' && (f.uri.endsWith('.png') || f.uri === json.image) ? imageUri : f.uri,
-      }))
-    } else {
-      props.files = [{ uri: imageUri, type: 'image/png' }]
-    }
-    props.category = props.category ?? 'image'
-    out.properties = props
-  } else {
-    out.properties = {
-      files: [{ uri: imageUri, type: 'image/png' }],
-      category: 'image',
-    }
-  }
+
+  const props =
+    out.properties && typeof out.properties === 'object'
+      ? { ...(out.properties as Record<string, unknown>) }
+      : ({} as Record<string, unknown>)
+
+  props.files = images.files
+  props.category = 'image'
+  out.properties = props
+
   return out
 }
 
-function isWalletSafeImageUrl(image: string, network: 'mainnet' | 'devnet'): boolean {
+function isWalletSafePrimaryImageUrl(image: string): boolean {
   if (!/^https?:\/\//i.test(image)) return false
   try {
+    const base = getSiteBaseUrl().toLowerCase()
     const u = new URL(image)
+    const path = `${u.origin}${u.pathname}`.toLowerCase()
+    if (path !== `${base}/api/proxy-image`) return false
+    const embedded = u.searchParams.get('url')?.trim()
+    return Boolean(embedded)
+  } catch {
+    return false
+  }
+}
+
+function isGatewayImageUrl(uri: string, network: 'mainnet' | 'devnet'): boolean {
+  if (!/^https?:\/\//i.test(uri)) return false
+  try {
+    const u = new URL(uri)
     const h = u.hostname.toLowerCase()
     const ext = u.searchParams.get('ext')?.toLowerCase()
     if (ext !== 'png') return false
     if (network === 'devnet') {
       return h === 'arweave.dev' || h.endsWith('.arweave.dev')
     }
-    // arweave.net returns HTML for many Irys-uploaded txs — use gateway.irys.xyz instead.
     return h === 'gateway.irys.xyz' || h === 'ardrive.net' || h === 'uploader.irys.xyz'
   } catch {
     return false
   }
 }
 
-/** Wallets fail on arweave.net HTML shells, bare gateway URLs without ?ext=png, and relative paths. */
+function hasGatewayFilesEntry(json: Record<string, unknown>, network: 'mainnet' | 'devnet'): boolean {
+  const props = json.properties
+  if (!props || typeof props !== 'object') return false
+  const files = (props as Record<string, unknown>).files
+  if (!Array.isArray(files)) return false
+  return files.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false
+    const uri = (entry as Record<string, unknown>).uri
+    return typeof uri === 'string' && isGatewayImageUrl(uri, network)
+  })
+}
+
+function hasProxyCdnFilesEntry(json: Record<string, unknown>): boolean {
+  const props = json.properties
+  if (!props || typeof props !== 'object') return false
+  const files = (props as Record<string, unknown>).files
+  if (!Array.isArray(files) || files.length === 0) return false
+  const first = files[0]
+  if (!first || typeof first !== 'object') return false
+  const entry = first as Record<string, unknown>
+  const uri = entry.uri
+  if (typeof uri !== 'string' || !isWalletSafePrimaryImageUrl(uri)) return false
+  return entry.cdn === true
+}
+
+/** Wallets fail without proxy primary image, gateway mirror in files, and cdn proxy first in files. */
 export function metadataJsonImageNeedsWalletFix(
   json: Record<string, unknown>,
   network: 'mainnet' | 'devnet'
 ): boolean {
   const image = typeof json.image === 'string' ? json.image.trim() : ''
   if (!image) return true
-  return !isWalletSafeImageUrl(image, network)
+  if (!isWalletSafePrimaryImageUrl(image)) return true
+  if (!hasGatewayFilesEntry(json, network)) return true
+  if (!hasProxyCdnFilesEntry(json)) return true
+  return false
 }
 
 function metadataJsonFetchCandidates(uri: string, network: 'mainnet' | 'devnet'): string[] {
@@ -151,15 +222,15 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
   collectionName?: string | null
 }): Promise<{ uri: string; reuploaded: boolean } | null> {
   const { uploaded, tokenIndex, network, sourceJsonUri, displayName, collectionName } = params
-  const imageUri = imageGatewayUriFromUpload(uploaded, `assets/${tokenIndex}.png`, network)
-  if (!imageUri) return null
+  const images = buildWalletImageSetFromUpload(uploaded, `assets/${tokenIndex}.png`, network)
+  if (!images) return null
 
   const jobJsonUri = uploaded[`assets/${tokenIndex}.json`]?.trim()
   const normalizedJobUri = jobJsonUri ? normalizeOwlCenterArweaveGatewayUri(jobJsonUri, network) : null
   const json = (await loadTokenMetadataJson(uploaded, tokenIndex, network, sourceJsonUri)) ?? {
     name: displayName ?? `Token ${tokenIndex}`,
     description: '',
-    image: imageUri,
+    image: images.primaryImage,
   }
 
   if (displayName?.trim()) {
@@ -184,7 +255,7 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, imageUri, collectionName)
+  const fixed = rewriteJsonImageFields(json, images, collectionName)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'
@@ -199,10 +270,10 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
   sourceJsonUri?: string | null
 }): Promise<{ uri: string; reuploaded: boolean } | null> {
   const { uploaded, collectionName, network, sourceJsonUri } = params
-  const imageUri =
-    imageGatewayUriFromUpload(uploaded, 'assets/collection.png', network) ??
-    imageGatewayUriFromUpload(uploaded, 'assets/0.png', network)
-  if (!imageUri) return null
+  const images =
+    buildWalletImageSetFromUpload(uploaded, 'assets/collection.png', network) ??
+    buildWalletImageSetFromUpload(uploaded, 'assets/0.png', network)
+  if (!images) return null
 
   const jobJsonUri = uploaded['assets/collection.json']?.trim()
   const normalizedJobUri = jobJsonUri ? normalizeOwlCenterArweaveGatewayUri(jobJsonUri, network) : null
@@ -213,7 +284,7 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
       name: collectionName,
       symbol: '',
       description: '',
-      image: imageUri,
+      image: images.primaryImage,
     } as Record<string, unknown>)
 
   json = { ...json, name: collectionName.slice(0, 32) }
@@ -236,7 +307,7 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, imageUri, collectionName)
+  const fixed = rewriteJsonImageFields(json, images, collectionName)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'

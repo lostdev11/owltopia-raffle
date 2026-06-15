@@ -17,6 +17,32 @@ import { createOwlCenterUmi } from '@/lib/solana/umi'
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
 
+const CM_SOLD_OUT_SIMULATION_PATTERNS = [
+  'candymachineempty',
+  'indexgreaterthanlength',
+  'index greater than',
+  'unable to increment',
+  'not enough unminted',
+  'collection is empty',
+] as const
+
+function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boolean): string | null {
+  const low = msg.toLowerCase()
+  if (CM_SOLD_OUT_SIMULATION_PATTERNS.some((p) => low.includes(p))) {
+    return 'Sold out on-chain — no NFTs remain in the Candy Machine. Refresh the page; if the counter still looks wrong, contact support.'
+  }
+  if (low.includes('notenoughsol') || low.includes('not enough sol') || low.includes('insufficient funds')) {
+    return 'Not enough SOL for the platform fee, NFT rent, and network fees.'
+  }
+  if (low.includes('simulation failed') || low.includes('accountnotfound')) {
+    const usd = owlCenterPlatformMintFeeUsd()
+    return collectPlatformMintFee
+      ? `Mint simulation failed — the Candy Machine may be sold out, or your wallet may need more SOL (~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee + ~0.02 SOL rent). Refresh and retry.`
+      : 'Mint simulation failed — the Candy Machine may be sold out, or your wallet may need ~0.02 SOL for NFT rent and network fees.'
+  }
+  return null
+}
+
 /**
  * Priority fee (micro-lamports per CU) for mainnet mint txs — at 800k CU the default
  * 100_000 adds 0.00008 SOL per mint. Set to 0 to disable.
@@ -134,6 +160,15 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     const plan = planRes.plan
 
+    const cmRemaining = Number(plan.candyMachine.itemsLoaded) - Number(plan.candyMachine.itemsRedeemed)
+    if (cmRemaining <= 0) {
+      return {
+        ok: false,
+        error:
+          'Sold out on-chain — no NFTs remain in the Candy Machine. Refresh the page; if the counter still looks wrong, contact support.',
+      }
+    }
+
     // Merkle-gated phase: create the allowList proof PDA once (route ix) before minting.
     if (plan.allowListMerkleRoot && plan.candyGuard) {
       const proofRes = await ensureGen2AllowListProof(umi, {
@@ -223,17 +258,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     if (low.includes('user rejected') || low.includes('cancel')) {
       return { ok: false, error: 'Mint transaction rejected in wallet' }
     }
-    if (low.includes('notenoughsol') || low.includes('not enough sol')) {
-      return { ok: false, error: 'Not enough SOL for the platform fee, NFT rent, and network fees.' }
-    }
-    if (low.includes('simulation failed') || low.includes('accountnotfound')) {
-      const usd = owlCenterPlatformMintFeeUsd()
-      return {
-        ok: false,
-        error: collectPlatformMintFee
-          ? `Mint simulation failed — keep enough SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee plus NFT rent (~0.02 SOL), then retry.`
-          : 'Mint simulation failed — keep enough SOL for NFT rent and network fees (~0.02 SOL), then retry.',
-      }
+    const simulationHint = friendlyMintSimulationError(msg, collectPlatformMintFee)
+    if (simulationHint) {
+      return { ok: false, error: simulationHint }
     }
     if (low.includes('missingallowedlistproof') || low.includes('addressnotfoundinallowedlist')) {
       return { ok: false, error: 'Wallet not validated on the on-chain allowlist for this phase.' }

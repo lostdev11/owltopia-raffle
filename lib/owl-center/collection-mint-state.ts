@@ -6,15 +6,20 @@ import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { CollectionMintStateResponse, MintTerminalLine } from '@/lib/owl-center/types'
-import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
+import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export async function buildCollectionMintState(
   slug: string,
   opts?: { includeSystemLogs?: boolean }
 ): Promise<CollectionMintStateResponse | null> {
-  const launch = await getOwlCenterLaunchBySlug(slug)
+  let launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch || launch.mint_mode !== 'public_simple') return null
+
+  await maybeReconcileLaunchMintsFromChain(launch)
+  launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
 
   const db = getSupabaseAdmin()
   const [mintRows, logRows, mpRow, prices_lamports, recordedMints] = await Promise.all([
@@ -68,8 +73,13 @@ export async function buildCollectionMintState(
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 50)
 
-  const remaining = Math.max(0, launch.total_supply - launch.minted_count)
-  const pct = launch.total_supply > 0 ? (launch.minted_count / launch.total_supply) * 100 : 0
+  const mint_network = resolveLaunchMintNetwork(launch)
+  const dbRemaining = Math.max(0, launch.total_supply - launch.minted_count)
+  const cmId = getLaunchCandyMachineId(launch, mint_network)
+  const onChainSupply = cmId ? await fetchCandyMachineOnChainSupply(cmId, mint_network) : { ok: false as const }
+  const onChainRemaining = onChainSupply.ok ? onChainSupply.remaining : null
+  const remaining = onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
+  const pct = launch.total_supply > 0 ? ((launch.total_supply - remaining) / launch.total_supply) * 100 : 0
   const mp = mpRow.data as {
     trading_links_active?: boolean
     magic_eden_url?: string | null
@@ -78,7 +88,6 @@ export async function buildCollectionMintState(
     sellout_prepared_at?: string | null
   } | null
 
-  const mint_network = resolveLaunchMintNetwork(launch)
   const presale_pool: PresaleMintPoolSnapshot | null = launchHasPresaleProgram(launch)
     ? await getPresaleMintPoolSnapshot(
         launch.id,

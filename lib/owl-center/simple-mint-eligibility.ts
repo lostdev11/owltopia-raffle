@@ -3,8 +3,15 @@ import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quot
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
 import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
+import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
-import { launchMintInfraConfigured, resolveLaunchMintNetwork, getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
+import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import {
+  getLaunchCandyMachineId,
+  launchMintInfraConfigured,
+  resolveLaunchMintNetwork,
+  getLaunchSolanaRpcUrl,
+} from '@/lib/solana/launch-cm'
 import { assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
@@ -24,8 +31,11 @@ export async function buildSimpleMintEligibility(
   slug: string,
   walletRaw: string | null
 ): Promise<SimpleMintEligibilityResponse | null> {
-  const launch = await getOwlCenterLaunchBySlug(slug)
+  let launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch || launch.mint_mode !== 'public_simple') return null
+
+  await maybeReconcileLaunchMintsFromChain(launch)
+  launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
 
   const mint_network = resolveLaunchMintNetwork(launch)
   const platform_treasury_wallet = getOwlCenterPlatformTreasuryWallet()
@@ -35,7 +45,13 @@ export async function buildSimpleMintEligibility(
     launchMintInfraConfigured(launch) &&
     (!platformFeeEnabled || !!platform_treasury_wallet)
 
-  const remaining = Math.max(0, launch.total_supply - launch.minted_count)
+  const dbRemaining = Math.max(0, launch.total_supply - launch.minted_count)
+  const cmId = getLaunchCandyMachineId(launch, mint_network)
+  const onChainSupply = cmId ? await fetchCandyMachineOnChainSupply(cmId, mint_network) : { ok: false as const }
+  const onChainRemaining = onChainSupply.ok ? onChainSupply.remaining : null
+  const remaining =
+    onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
+  const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
   const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet) : 0
   const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
@@ -57,7 +73,9 @@ export async function buildSimpleMintEligibility(
       ? 'Platform treasury not configured — contact support'
       : 'Candy Machine not configured — admin must set CM + collection mint'
   } else if (launch.active_phase === 'SOLD_OUT' || launch.active_phase === 'TRADING_ACTIVE' || remaining <= 0) {
-    reason = 'Sold out'
+    reason = onChainSoldOut
+      ? 'Sold out on-chain — supply counter is catching up. Refresh the page.'
+      : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
   } else if (!wallet) {

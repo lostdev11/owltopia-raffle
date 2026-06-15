@@ -139,7 +139,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     )
   }
 
-  const row = data as { ok?: boolean; error?: string } | null
+  const row = data as { ok?: boolean; error?: string; duplicate_tx?: boolean } | null
   if (!row || row.ok !== true) {
     const err = typeof row?.error === 'string' ? row.error : 'confirm_failed'
     const status =

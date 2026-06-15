@@ -9,6 +9,7 @@ import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -144,22 +145,14 @@ export function CollectionMintPanel({
         const mintPk = minted.mintedNftMints[0]
         setStep('confirming_transaction')
         setStep('recording_mint')
-        const conf = await fetch(`/api/owl-center/collections/${encodeURIComponent(slug)}/confirm-mint`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wallet: walletStr,
-            txSignature: sig,
-            quantity: 1,
-            phase: 'PUBLIC',
-            mintedNftMints: mintPk ? [mintPk] : [],
-            network: mintNetwork,
-          }),
+        await postCollectionConfirmMintWithRetry(slug, {
+          wallet: walletStr,
+          txSignature: sig,
+          quantity: 1,
+          phase: 'PUBLIC',
+          mintedNftMints: mintPk ? [mintPk] : [],
+          network: mintNetwork,
         })
-        const cj = (await conf.json()) as { ok?: boolean; error?: string }
-        if (!conf.ok || !cj.ok) {
-          throw new Error(cj.error || 'confirm_failed')
-        }
         setLastSig(sig)
         if (mintPk) setLastMintAddress(mintPk)
         setMintedCount((c) => c + 1)

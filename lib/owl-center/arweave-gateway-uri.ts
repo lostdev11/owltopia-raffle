@@ -27,10 +27,7 @@ export function walletSafeArweaveGatewayUri(uri: string, network: 'mainnet' | 'd
   return `https://${host}/${id}`
 }
 
-/**
- * Wallet image URL — Irys gateway serves raw PNG; arweave.net often returns an HTML shell for Irys txs.
- * Solflare requires `?ext=png` (URI JSON schema); Phantom loads the same gateway URL reliably on mobile.
- */
+/** Direct Irys gateway mirror for `properties.files` and indexers (not primary wallet `image`). */
 export function walletSafeArweaveImageUri(uri: string, network: 'mainnet' | 'devnet' = 'mainnet'): string {
   const id = arweaveTxIdFromHttps(uri)
   if (!id) return uri.trim()
