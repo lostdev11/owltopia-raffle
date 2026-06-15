@@ -1,5 +1,13 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
+/** Minimal launch fields for marketplace gating (API rows may use plain strings). */
+export type LaunchMarketplaceListingInput = {
+  minted_count: number
+  total_supply: number
+  active_phase: string
+  status: string
+}
+
 export type LaunchMarketplaceProgress = {
   minted: number
   total: number
@@ -24,7 +32,7 @@ export function isLaunchSupplyExhausted(
 }
 
 export function isLaunchSoldOutPhase(
-  launch: Pick<OwlCenterLaunchPublic, 'active_phase' | 'status'>
+  launch: Pick<LaunchMarketplaceListingInput, 'active_phase' | 'status'>
 ): boolean {
   return (
     launch.active_phase === 'SOLD_OUT' ||
@@ -36,7 +44,7 @@ export function isLaunchSoldOutPhase(
 
 /** Hash list, ME/Tensor listing fields, and trading activation (creator flow). */
 export function isLaunchMarketplaceListingUnlocked(
-  launch: Pick<OwlCenterLaunchPublic, 'minted_count' | 'total_supply' | 'active_phase' | 'status'>
+  launch: LaunchMarketplaceListingInput
 ): boolean {
   return isLaunchSoldOutPhase(launch) || isLaunchSupplyExhausted(launch)
 }
