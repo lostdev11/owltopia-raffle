@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Copy, Download, ExternalLink } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import {
   creatorHashListApiPath,
@@ -25,6 +26,8 @@ type Props = {
   hashListApiPath?: string
   onSuggestedUrls?: (urls: { collectionMint?: string | null; magicEdenUrl?: string | null }) => void
   compact?: boolean
+  /** Render as a section inside a parent CommandCard instead of its own card. */
+  embedded?: boolean
 }
 
 export function MagicEdenHashListPanel({
@@ -33,6 +36,7 @@ export function MagicEdenHashListPanel({
   hashListApiPath,
   onSuggestedUrls,
   compact = false,
+  embedded = false,
 }: Props) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -90,8 +94,8 @@ export function MagicEdenHashListPanel({
 
   const label = compact ? 'MAGIC EDEN · HASH LIST' : 'marketplace_listing.sys · MAGIC EDEN'
 
-  return (
-    <CommandCard label={label}>
+  const body = (
+    <>
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Magic Eden does not offer a public API to submit hash lists — you still log into Creator Hub once. Owl Center
         generates the mint list from your drop and copies it for paste-and-submit.
@@ -138,6 +142,12 @@ export function MagicEdenHashListPanel({
       </div>
       {err ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#FF9C9C]">{err}</p> : null}
       {msg ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#00FF9C]">{msg}</p> : null}
-    </CommandCard>
+    </>
   )
+
+  if (embedded) {
+    return <CommandCardSection label={label}>{body}</CommandCardSection>
+  }
+
+  return <CommandCard label={label}>{body}</CommandCard>
 }

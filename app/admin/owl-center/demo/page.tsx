@@ -3,24 +3,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
-
-type HashListPayload = {
-  mint_count: number
-  hash_list_text: string
-  suggested_magic_eden_url: string | null
-  suggested_tensor_url: string | null
-  me_submit_hint: string
-  tensor_submit_hint: string
-}
 
 export default function AdminOwlCenterDemoPage() {
   const { connected } = useWallet()
@@ -29,7 +21,6 @@ export default function AdminOwlCenterDemoPage() {
   const [launch, setLaunch] = useState<OwlCenterLaunchPublic | null>(null)
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<string | null>(null)
-  const [hashList, setHashList] = useState<HashListPayload | null>(null)
 
   const [slug, setSlug] = useState('demo')
   const [name, setName] = useState('Owltopia Launchpad Demo')
@@ -190,21 +181,6 @@ export default function AdminOwlCenterDemoPage() {
     await loadDemo()
   }
 
-  async function loadHashList() {
-    if (!launch) return
-    setMsg(null)
-    const res = await fetch(`/api/admin/owl-center/collections/${launch.id}/hash-list`, {
-      credentials: 'include',
-      cache: 'no-store',
-    })
-    const j = (await res.json()) as HashListPayload & { error?: string }
-    if (!res.ok) {
-      setMsg(j.error || 'hash_list_failed')
-      return
-    }
-    setHashList(j)
-  }
-
   if (!connected) {
     return (
       <div className="mx-auto max-w-lg px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] text-center">
@@ -284,8 +260,12 @@ export default function AdminOwlCenterDemoPage() {
           </DeployButton>
         </CommandCard>
       ) : (
-        <div className="mt-8 space-y-8">
-          <CommandCard label={`${launch.slug.toUpperCase()} // ${launch.minted_count}/${launch.total_supply} · ${mintNetwork}`}>
+        <CommandCard
+          label={`${launch.slug.toUpperCase()} // ${launch.minted_count}/${launch.total_supply} · ${mintNetwork}`}
+          className="mt-8"
+          id="launch-ops"
+        >
+          <CommandCardSection first label="CM_CONFIG · DEMO">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-1 text-xs uppercase tracking-widest text-[#5C6773]">
                 Mainnet CM
@@ -335,30 +315,20 @@ export default function AdminOwlCenterDemoPage() {
                 href={`/admin/owl-center/collections/${launch.id}/assets#metadata-refresh`}
                 className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#00FF9C]/35 px-4 text-center text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10 sm:w-auto"
               >
-                Fix wallet metadata
-              </Link>
-              <Link
-                href={`/admin/owl-center/collections/${launch.id}/assets`}
-                className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:text-[#00FF9C] sm:w-auto"
-              >
                 Assets admin
               </Link>
             </div>
-          </CommandCard>
+          </CommandCardSection>
 
-          <MetadataRefreshPanel launchId={launch.id} />
+          <MetadataRefreshPanel embedded launchId={launch.id} anchorId="metadata-refresh" />
 
-          <CommandCard label="HASH_LIST">
+          <CommandCardSection label="SELLOUT_PREP · HASH LIST">
             <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-              For Magic Eden + Tensor submission after mints
+              Regenerate marketplace hash list after mints
             </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <DeployButton variant="ghost" className="w-full sm:w-auto" onClick={() => void loadHashList()}>
-                Generate from mint events
-              </DeployButton>
-              <DeployButton
-                variant="ghost"
-                className="w-full sm:w-auto"
+            <DeployButton
+              variant="ghost"
+              className="w-full sm:w-auto"
               onClick={async () => {
                 if (!launch) return
                 setMsg(null)
@@ -369,48 +339,15 @@ export default function AdminOwlCenterDemoPage() {
                 const j = (await res.json()) as { ok?: boolean; error?: string; result?: { mint_count?: number } }
                 if (!res.ok) setMsg(j.error || 'sellout_prep_failed')
                 else setMsg(`Sell-out prep · ${j.result?.mint_count ?? 0} mint(s)`)
-                void loadHashList()
                 void loadDemo()
               }}
             >
               Run sell-out prep
-              </DeployButton>
-            </div>
-            {hashList ? (
-              <div className="mt-4 space-y-3 text-sm text-[#C5D0D8]">
-                <p>
-                  {hashList.mint_count} mint(s) recorded
-                  {hashList.suggested_magic_eden_url ? (
-                    <>
-                      {' · '}
-                      <a href={hashList.suggested_magic_eden_url} target="_blank" rel="noreferrer" className="text-[#00FF9C] underline">
-                        ME preview
-                      </a>
-                    </>
-                  ) : null}
-                </p>
-                <textarea
-                  readOnly
-                  value={hashList.hash_list_text}
-                  rows={6}
-                  className="w-full border border-[#1A222B] bg-[#0F1419] p-2 font-mono text-xs"
-                />
-                <button
-                  type="button"
-                  className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 text-xs text-[#00FF9C] sm:w-auto sm:justify-start"
-                  onClick={() => void navigator.clipboard.writeText(hashList.hash_list_text)}
-                >
-                  <Copy className="h-3.5 w-3.5" aria-hidden />
-                  Copy hash list
-                </button>
-                <p className="text-xs text-[#5C6773]">{hashList.me_submit_hint}</p>
-                <p className="text-xs text-[#5C6773]">{hashList.tensor_submit_hint}</p>
-              </div>
-            ) : null}
-          </CommandCard>
+            </DeployButton>
+          </CommandCardSection>
 
-          <MarketplaceReadinessPanel launchId={launch.id} launch={launch} />
-        </div>
+          <MarketplaceReadinessPanel embedded launchId={launch.id} launch={launch} onSaved={() => void loadDemo()} />
+        </CommandCard>
       )}
 
       {msg ? <p className="mt-6 font-mono text-sm text-[#00FF9C]">{msg}</p> : null}

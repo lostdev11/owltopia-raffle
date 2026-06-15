@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 
 type MintPreview = {
@@ -46,15 +47,43 @@ function AlertBox({ children, tone }: { children: ReactNode; tone: 'warn' | 'err
   )
 }
 
+function PanelShell({
+  children,
+  embedded,
+  id,
+  label,
+}: {
+  children: ReactNode
+  embedded?: boolean
+  id?: string
+  label: string
+}) {
+  if (embedded) {
+    return (
+      <CommandCardSection id={id} label={label}>
+        {children}
+      </CommandCardSection>
+    )
+  }
+  return (
+    <CommandCard id={id} label={label}>
+      {children}
+    </CommandCard>
+  )
+}
+
 export function MetadataRefreshPanel({
   launchId,
   anchorId = 'metadata-refresh',
   apiPath,
+  embedded = false,
 }: {
   launchId: string
   anchorId?: string
   /** Defaults to admin API; creator pages pass creatorMetadataRefreshApiPath(launchId). */
   apiPath?: string
+  /** Render as a section inside a parent CommandCard instead of its own card. */
+  embedded?: boolean
 }) {
   const refreshApi =
     apiPath ?? `/api/admin/owl-center/collections/${launchId}/metadata-refresh`
@@ -120,7 +149,7 @@ export function MetadataRefreshPanel({
       } else {
         setMsg(
           `Updated ${okCount} mint${okCount === 1 ? '' : 's'} on-chain${
-            colOk ? ` · collection → ${j.collection?.name ?? 'Papers'}` : ''
+            colOk ? ` · collection → ${j.collection?.name ?? 'collection'}` : ''
           }${skipped.length ? ` · ${skipped.length} skipped` : ''}.`
         )
         if ((skipped.length && okCount > 0) || colErr) {
@@ -141,9 +170,9 @@ export function MetadataRefreshPanel({
 
   if (loading) {
     return (
-      <CommandCard label={PANEL_LABEL} id={anchorId}>
+      <PanelShell embedded={embedded} id={anchorId} label={PANEL_LABEL}>
         <p className="font-mono text-xs text-[#5C6773]">Loading metadata refresh…</p>
-      </CommandCard>
+      </PanelShell>
     )
   }
 
@@ -156,11 +185,12 @@ export function MetadataRefreshPanel({
   const needsCount = mintNeedsCount + collectionNeeds
 
   return (
-    <CommandCard label={PANEL_LABEL} id={anchorId}>
+    <PanelShell embedded={embedded} id={anchorId} label={PANEL_LABEL}>
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong>, a blank image, or
         <strong className="font-normal text-[#C5D0D8]"> Collection: collection</strong> in Phantom/Solflare. Re-uploads
-        metadata JSON with Solflare-compatible image URLs (arweave.net/?ext=png), then updates on-chain name + URI. Run again after gateway updates — pull to refresh in Phantom/Solflare mobile.
+        metadata JSON with wallet-safe Irys image URLs (<code className="text-[#C5D0D8]">gateway.irys.xyz/?ext=png</code>
+        ), then updates on-chain name + URI. Pull to refresh in your wallet after a successful run.
       </p>
 
       <div className="mb-4 space-y-3">
@@ -262,6 +292,6 @@ export function MetadataRefreshPanel({
 
       {err && status ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#FF9C9C]">{err}</p> : null}
       {msg ? <p className="mt-3 font-mono text-xs leading-relaxed text-[#00FF9C]">{msg}</p> : null}
-    </CommandCard>
+    </PanelShell>
   )
 }

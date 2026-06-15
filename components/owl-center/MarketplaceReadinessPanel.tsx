@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
@@ -16,9 +17,32 @@ type Props = {
   launch?: OwlCenterLaunchPublic | null
   compact?: boolean
   onSaved?: () => void
+  /** Render as a section inside a parent CommandCard instead of its own card. */
+  embedded?: boolean
 }
 
-export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compact, onSaved }: Props) {
+const PANEL_LABEL = 'MARKETPLACE_INDEXING · TRADING_ACTIVATION'
+
+function MarketplaceShell({
+  children,
+  embedded,
+}: {
+  children: React.ReactNode
+  embedded?: boolean
+}) {
+  if (embedded) {
+    return <CommandCardSection label={PANEL_LABEL}>{children}</CommandCardSection>
+  }
+  return <CommandCard label={PANEL_LABEL}>{children}</CommandCard>
+}
+
+export function MarketplaceReadinessPanel({
+  launchId,
+  launch: launchProp,
+  compact,
+  onSaved,
+  embedded = false,
+}: Props) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -123,14 +147,14 @@ export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compac
 
   if (loading && !row) {
     return (
-      <CommandCard label="marketplace_indexing.sys">
+      <MarketplaceShell embedded={embedded}>
         <p className="font-mono text-sm text-[#5C6773]">Loading marketplace readiness…</p>
-      </CommandCard>
+      </MarketplaceShell>
     )
   }
 
   return (
-    <CommandCard label="MARKETPLACE_INDEXING · TRADING_ACTIVATION">
+    <MarketplaceShell embedded={embedded}>
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Owl Center does not directly upload to Magic Eden or Tensor in V1. Solana NFT collections are indexed from on-chain
         metadata. Paste final marketplace URLs after indexing or claiming. Use verified collection metadata and permanent image /
@@ -154,6 +178,7 @@ export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compac
 
       <div className="mb-6">
         <MagicEdenHashListPanel
+          embedded
           launchId={launchId}
           slug={launchProp?.slug}
           hashListApiPath={`/api/admin/owl-center/collections/${launchId}/hash-list`}
@@ -371,6 +396,6 @@ export function MarketplaceReadinessPanel({ launchId, launch: launchProp, compac
 
       {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
       {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
-    </CommandCard>
+    </MarketplaceShell>
   )
 }

@@ -53,16 +53,18 @@ function isWalletSafeImageUrl(image: string, network: 'mainnet' | 'devnet'): boo
     const u = new URL(image)
     const h = u.hostname.toLowerCase()
     const ext = u.searchParams.get('ext')?.toLowerCase()
+    if (ext !== 'png') return false
     if (network === 'devnet') {
-      return (h === 'arweave.dev' || h.endsWith('.arweave.dev')) && ext === 'png'
+      return h === 'arweave.dev' || h.endsWith('.arweave.dev')
     }
-    return (h === 'arweave.net' || h === 'www.arweave.net') && ext === 'png'
+    // arweave.net returns HTML for many Irys-uploaded txs — use gateway.irys.xyz instead.
+    return h === 'gateway.irys.xyz' || h === 'ardrive.net' || h === 'uploader.irys.xyz'
   } catch {
     return false
   }
 }
 
-/** Wallets fail on arweave.net HTML shells and relative paths like collection.png. */
+/** Wallets fail on arweave.net HTML shells, bare gateway URLs without ?ext=png, and relative paths. */
 export function metadataJsonImageNeedsWalletFix(
   json: Record<string, unknown>,
   network: 'mainnet' | 'devnet'

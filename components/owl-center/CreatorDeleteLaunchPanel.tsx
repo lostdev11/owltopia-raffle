@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import {
   Dialog,
@@ -23,6 +24,8 @@ type Props = {
   /** Called after successful delete (e.g. refresh My Launches list). */
   onDeleted?: () => void
   compact?: boolean
+  /** Inline button row on list cards. */
+  embedded?: boolean
 }
 
 export function CreatorDeleteLaunchPanel({
@@ -31,6 +34,7 @@ export function CreatorDeleteLaunchPanel({
   redirectAfterDelete,
   onDeleted,
   compact = false,
+  embedded = false,
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -97,25 +101,48 @@ export function CreatorDeleteLaunchPanel({
     )
   }
 
+  const deleteBody = (
+    <>
+      <p className="font-mono text-sm leading-relaxed text-[#9BA8B4]">
+        Remove this collection before it goes public and before any mints. This permanently deletes your Owl Center
+        submission and related prep data. Your Owl Generator project (if any) is not deleted.
+      </p>
+      <DeployButton
+        type="button"
+        className="mt-4 w-full border-red-500/40 bg-red-500/10 text-red-200 shadow-none hover:bg-red-500/18 sm:w-auto"
+        onClick={() => {
+          setErr(null)
+          setConfirmName('')
+          setOpen(true)
+        }}
+      >
+        Delete collection
+      </DeployButton>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <>
+        <CommandCardSection label="DELETE SUBMISSION">{deleteBody}</CommandCardSection>
+        <DeleteDialog
+          open={open}
+          onOpenChange={setOpen}
+          launchName={launchName}
+          confirmName={confirmName}
+          onConfirmNameChange={setConfirmName}
+          busy={busy}
+          err={err}
+          canSubmit={canSubmit}
+          onDelete={() => void handleDelete()}
+        />
+      </>
+    )
+  }
+
   return (
     <CommandCard label="DELETE SUBMISSION">
-      <div className="space-y-4">
-        <p className="font-mono text-sm leading-relaxed text-[#9BA8B4]">
-          Remove this collection before it goes public and before any mints. This permanently deletes your Owl Center
-          submission and related prep data. Your Owl Generator project (if any) is not deleted.
-        </p>
-        <DeployButton
-          type="button"
-          className="w-full border-red-500/40 bg-red-500/10 text-red-200 shadow-none hover:bg-red-500/18 sm:w-auto"
-          onClick={() => {
-            setErr(null)
-            setConfirmName('')
-            setOpen(true)
-          }}
-        >
-          Delete collection
-        </DeployButton>
-      </div>
+      <div className="space-y-4">{deleteBody}</div>
 
       <DeleteDialog
         open={open}

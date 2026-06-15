@@ -6,7 +6,6 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
-import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
@@ -36,7 +35,6 @@ export function CreatorLaunchesClient() {
   const [err, setErr] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [launches, setLaunches] = useState<LaunchRow[]>([])
-  const [refreshLaunchId, setRefreshLaunchId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -58,19 +56,6 @@ export function CreatorLaunchesClient() {
   useEffect(() => {
     if (signedIn) void load()
   }, [signedIn, load])
-
-  useEffect(() => {
-    if (refreshLaunchId || launches.length === 0) return
-    const withMints = launches.find((l) => l.minted_count > 0)
-    if (withMints) setRefreshLaunchId(withMints.id)
-  }, [launches, refreshLaunchId])
-
-  function openMetadataRefresh(launchId: string) {
-    setRefreshLaunchId(launchId)
-    requestAnimationFrame(() => {
-      document.getElementById(`metadata-refresh-${launchId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-  }
 
   return (
     <OwlCenterShell
@@ -119,59 +104,48 @@ export function CreatorLaunchesClient() {
             </div>
           ) : null}
           {launches.map((l) => (
-            <div key={l.id} className="space-y-4">
-              <CommandCard label={`${l.status} · ${l.active_phase}`}>
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
-                    <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
-                      {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
-                      · slug {l.slug.slice(0, 12)}…
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                    <Link
-                      href={`/owl-center/my-launches/${l.id}/mint-details`}
-                      className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-6 text-center font-bold uppercase tracking-wide text-[#E8FDF4] shadow-[0_0_24px_rgba(0,255,156,0.18)] hover:bg-[#00FF9C]/18 sm:w-auto"
-                    >
-                      Manage collection
-                    </Link>
-                    <DeployButton
-                      type="button"
-                      variant="ghost"
-                      className="w-full sm:w-auto"
-                      onClick={() => openMetadataRefresh(l.id)}
-                    >
-                      Fix wallet metadata
-                    </DeployButton>
-                    {l.deletable ? (
-                      <CreatorDeleteLaunchPanel
-                        launchId={l.id}
-                        launchName={l.name}
-                        compact
-                        onDeleted={() => void load()}
-                      />
-                    ) : null}
-                  </div>
-                  {!l.deletable && l.delete_block_reason && l.minted_count === 0 ? (
-                    <p className="font-mono text-xs text-[#5C6773]">{l.delete_block_reason}</p>
+            <CommandCard key={l.id} label={`${l.status} · ${l.active_phase}`}>
+              <div className="flex flex-col gap-4">
+                <div>
+                  <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
+                  <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
+                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase ·
+                    slug {l.slug.slice(0, 12)}…
+                  </p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <Link
+                    href={`/owl-center/my-launches/${l.id}/mint-details`}
+                    className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-6 text-center font-bold uppercase tracking-wide text-[#E8FDF4] shadow-[0_0_24px_rgba(0,255,156,0.18)] hover:bg-[#00FF9C]/18 sm:w-auto"
+                  >
+                    Manage collection
+                  </Link>
+                  {l.deletable ? (
+                    <CreatorDeleteLaunchPanel
+                      launchId={l.id}
+                      launchName={l.name}
+                      compact
+                      onDeleted={() => void load()}
+                    />
                   ) : null}
                 </div>
-              </CommandCard>
+                {!l.deletable && l.delete_block_reason && l.minted_count === 0 ? (
+                  <p className="font-mono text-xs text-[#5C6773]">{l.delete_block_reason}</p>
+                ) : null}
+              </div>
 
-              {refreshLaunchId === l.id ? (
+              {l.minted_count > 0 ? (
                 <>
                   <MetadataRefreshPanel
+                    embedded
                     launchId={l.id}
                     anchorId={`metadata-refresh-${l.id}`}
                     apiPath={creatorMetadataRefreshApiPath(l.id)}
                   />
-                  {l.minted_count > 0 ? (
-                    <MagicEdenHashListPanel launchId={l.id} slug={l.slug} compact />
-                  ) : null}
+                  <MagicEdenHashListPanel embedded launchId={l.id} slug={l.slug} compact />
                 </>
               ) : null}
-            </div>
+            </CommandCard>
           ))}
         </div>
       )}

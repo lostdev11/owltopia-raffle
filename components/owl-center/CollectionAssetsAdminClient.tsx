@@ -6,16 +6,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Gen2GeneratorLinkPanel } from '@/components/owl-center/Gen2GeneratorLinkPanel'
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
 import { AssetPackageUploadPanel } from '@/components/owl-center/AssetPackageUploadPanel'
-import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
+import { CollectionLaunchOpsCard } from '@/components/owl-center/CollectionLaunchOpsCard'
 import { SugarDeployPanel } from '@/components/owl-center/SugarDeployPanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { LaunchGoLivePanel } from '@/components/owl-center/LaunchGoLivePanel'
-import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
-import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
-import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataUploadStatusBadge } from '@/components/owl-center/MetadataUploadStatusBadge'
 import { formatValidationErrors, mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
 import { formatSugarBatchScanSummary, type SugarBatchScanResult } from '@/lib/owl-center/scan-sugar-batch'
@@ -273,8 +270,6 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         marketplaceReadiness={bundle.marketplaceReadiness}
         onPromoted={() => void load()}
       />
-
-      <MetadataRefreshPanel launchId={launchId} />
 
       <AssetPackageUploadPanel launchId={launchId} onApplied={() => void load()} />
 
@@ -557,11 +552,13 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
 
       <AssetPackagePanel pkg={assetPackage} />
 
-      <MarketplaceReadinessPanel launchId={launchId} launch={launch} onSaved={() => void load()} />
-
-      <LaunchMintConfigPanel launchId={launchId} launch={launch} onSaved={() => void load()} />
-
-      <LaunchPresaleOveragePanel launchId={launchId} launch={launch} />
+      <CollectionLaunchOpsCard
+        launchId={launchId}
+        launch={launch}
+        label={`${launch.status} · LAUNCH_OPS`}
+        onSaved={() => void load()}
+        showPresaleOverage
+      />
 
     </div>
   )

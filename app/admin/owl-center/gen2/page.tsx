@@ -507,9 +507,14 @@ export default function AdminOwlCenterPage() {
                   {saveMsg}
                 </p>
               ) : null}
-            </CommandCard>
 
-            <MarketplaceReadinessPanel launchId={state.launch.id} launch={state.launch} compact />
+              <MarketplaceReadinessPanel
+                embedded
+                compact
+                launchId={state.launch.id}
+                launch={state.launch}
+              />
+            </CommandCard>
 
             <CommandCard label="gen2_devnet_test.sys">
               <p className="mb-4 text-sm text-[#9BA8B4]">

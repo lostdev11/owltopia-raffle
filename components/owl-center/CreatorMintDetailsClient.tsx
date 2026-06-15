@@ -4,17 +4,13 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
-import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
+import {
+  CollectionLaunchOpsCard,
+  creatorLaunchOpsCardProps,
+} from '@/components/owl-center/CollectionLaunchOpsCard'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
-import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
-import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
-import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { DeployButton } from '@/components/owl-center/DeployButton'
-import {
-  creatorMetadataRefreshApiPath,
-  creatorMintConfigApiPath,
-} from '@/lib/owl-center/creator-api-paths'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { assessCreatorLaunchDeleteEligibility } from '@/lib/owl-center/creator-launch-delete'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -53,6 +49,8 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
     if (signedIn) void load()
   }, [signedIn, load])
 
+  const deletable = launch ? assessCreatorLaunchDeleteEligibility(launch).deletable : false
+
   return (
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
@@ -88,31 +86,13 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
       ) : err ? (
         <p className="font-mono text-sm text-[#FF9C9C]">{err}</p>
       ) : launch ? (
-        <div className="space-y-8">
-          <LaunchMintConfigPanel
-            launchId={launchId}
-            launch={launch}
-            saveApiPath={creatorMintConfigApiPath(launchId)}
-            onSaved={() => void load()}
-          />
-          {launch.minted_count > 0 ? (
-            <>
-              <MetadataRefreshPanel
-                launchId={launchId}
-                anchorId="metadata-refresh"
-                apiPath={creatorMetadataRefreshApiPath(launchId)}
-              />
-              <MagicEdenHashListPanel launchId={launchId} slug={launch.slug} />
-            </>
-          ) : null}
-          {assessCreatorLaunchDeleteEligibility(launch).deletable ? (
-            <CreatorDeleteLaunchPanel
-              launchId={launchId}
-              launchName={launch.name}
-              redirectAfterDelete="/owl-center/my-launches"
-            />
-          ) : null}
-        </div>
+        <CollectionLaunchOpsCard
+          {...creatorLaunchOpsCardProps(launchId, launch)}
+          onSaved={() => void load()}
+          deletable={deletable}
+          redirectAfterDelete="/owl-center/my-launches"
+          className="max-w-2xl"
+        />
       ) : null}
     </OwlCenterShell>
   )
