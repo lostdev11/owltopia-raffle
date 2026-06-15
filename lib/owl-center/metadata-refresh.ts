@@ -448,6 +448,7 @@ export async function runMetadataRefreshForLaunch(
         network,
         sourceJsonUri: preview.current_uri,
         displayName: preview.target_name,
+        collectionName: launch.name,
       })
       if (!safeJson?.uri) {
         skipped.push({ mint: preview.mint, ok: false, error: 'Could not build wallet-safe metadata JSON' })

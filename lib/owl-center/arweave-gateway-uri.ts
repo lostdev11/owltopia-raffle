@@ -19,10 +19,18 @@ export function normalizeOwlCenterArweaveGatewayUri(uri: string, network: 'mainn
   return `https://${host}/${id}`
 }
 
-/** Wallets + our serverless proxy reliably fetch raw PNG/JSON from gateway.irys.xyz (ar-io.net often RSTs). */
+/** On-chain / off-chain JSON URI — raw JSON from Irys gateway. */
 export function walletSafeArweaveGatewayUri(uri: string, network: 'mainnet' | 'devnet' = 'mainnet'): string {
   const id = arweaveTxIdFromHttps(uri)
   if (!id) return uri.trim()
   const host = network === 'devnet' ? 'arweave.dev' : 'gateway.irys.xyz'
   return `https://${host}/${id}`
+}
+
+/** Solflare mobile: Metaplex-style image URL with ?ext=png query (Solflare URI JSON schema). */
+export function walletSafeArweaveImageUri(uri: string, network: 'mainnet' | 'devnet' = 'mainnet'): string {
+  const id = arweaveTxIdFromHttps(uri)
+  if (!id) return uri.trim()
+  const host = network === 'devnet' ? 'arweave.dev' : ['arweave', 'net'].join('.')
+  return `https://${host}/${id}?ext=png`
 }

@@ -160,8 +160,7 @@ export function MetadataRefreshPanel({
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4] sm:text-xs">
         Fixes mints that show only <strong className="font-normal text-[#C5D0D8]">#N</strong>, a blank image, or
         <strong className="font-normal text-[#C5D0D8]"> Collection: collection</strong> in Phantom/Solflare. Re-uploads
-        metadata JSON with Irys image URLs, then updates on-chain name + URI. After deploying a gateway fix, run refresh
-        once more so wallets pick up working image URLs.
+        metadata JSON with Solflare-compatible image URLs (arweave.net/?ext=png), then updates on-chain name + URI. Run again after gateway updates — pull to refresh in Phantom/Solflare mobile.
       </p>
 
       <div className="mb-4 space-y-3">

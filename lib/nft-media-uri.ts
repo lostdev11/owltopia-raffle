@@ -87,6 +87,7 @@ export function preferredNftImageHttpsUrl(urlStr: string): string {
         host === 'ar-io.net' ||
         host.endsWith('.arweave.net') ||
         host === 'arweave.net' ||
+        host === 'www.arweave.net' ||
         isIrysGatewayHttpsUrl(trimmed) ||
         isIrysUploaderHttpsUrl(trimmed)
       ) {

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { arweaveTxIdFromHttps, normalizeOwlCenterArweaveGatewayUri, walletSafeArweaveGatewayUri } from '@/lib/owl-center/arweave-gateway-uri'
+import { arweaveTxIdFromHttps, normalizeOwlCenterArweaveGatewayUri, walletSafeArweaveImageUri } from '@/lib/owl-center/arweave-gateway-uri'
 import { uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
 import { irysGatewayMirrorHttpsUrls } from '@/lib/nft-media-uri'
 
@@ -11,11 +11,21 @@ export function imageGatewayUriFromUpload(
 ): string | null {
   const raw = uploaded[assetPath]?.trim()
   if (!raw) return null
-  return walletSafeArweaveGatewayUri(raw, network)
+  return walletSafeArweaveImageUri(raw, network)
 }
 
-function rewriteJsonImageFields(json: Record<string, unknown>, imageUri: string): Record<string, unknown> {
+function rewriteJsonImageFields(
+  json: Record<string, unknown>,
+  imageUri: string,
+  collectionName?: string | null
+): Record<string, unknown> {
   const out: Record<string, unknown> = { ...json, image: imageUri }
+  if (collectionName?.trim()) {
+    out.collection = {
+      name: collectionName.trim(),
+      family: collectionName.trim(),
+    }
+  }
   if (out.properties && typeof out.properties === 'object') {
     const props = { ...(out.properties as Record<string, unknown>) }
     if (Array.isArray(props.files)) {
@@ -39,13 +49,14 @@ function rewriteJsonImageFields(json: Record<string, unknown>, imageUri: string)
 
 function isWalletSafeImageUrl(image: string, network: 'mainnet' | 'devnet'): boolean {
   if (!/^https?:\/\//i.test(image)) return false
-  if (/arweave\.net/i.test(image)) return false
   try {
-    const h = new URL(image).hostname.toLowerCase()
+    const u = new URL(image)
+    const h = u.hostname.toLowerCase()
+    const ext = u.searchParams.get('ext')?.toLowerCase()
     if (network === 'devnet') {
-      return h === 'arweave.dev' || h.endsWith('.arweave.dev')
+      return (h === 'arweave.dev' || h.endsWith('.arweave.dev')) && ext === 'png'
     }
-    return h === 'gateway.irys.xyz' || h === 'uploader.irys.xyz' || h === 'ardrive.net'
+    return (h === 'arweave.net' || h === 'www.arweave.net') && ext === 'png'
   } catch {
     return false
   }
@@ -135,8 +146,9 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
   network: 'mainnet' | 'devnet'
   sourceJsonUri?: string | null
   displayName?: string | null
+  collectionName?: string | null
 }): Promise<{ uri: string; reuploaded: boolean } | null> {
-  const { uploaded, tokenIndex, network, sourceJsonUri, displayName } = params
+  const { uploaded, tokenIndex, network, sourceJsonUri, displayName, collectionName } = params
   const imageUri = imageGatewayUriFromUpload(uploaded, `assets/${tokenIndex}.png`, network)
   if (!imageUri) return null
 
@@ -170,7 +182,7 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, imageUri)
+  const fixed = rewriteJsonImageFields(json, imageUri, collectionName)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'
@@ -222,7 +234,7 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, imageUri)
+  const fixed = rewriteJsonImageFields(json, imageUri, collectionName)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'
