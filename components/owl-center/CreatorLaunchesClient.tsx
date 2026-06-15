@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
@@ -24,6 +25,8 @@ type LaunchRow = {
   minted_count: number
   wallet_mint_limit: number
   updated_at: string
+  deletable: boolean
+  delete_block_reason: string | null
 }
 
 export function CreatorLaunchesClient() {
@@ -141,7 +144,18 @@ export function CreatorLaunchesClient() {
                     >
                       Fix wallet metadata
                     </DeployButton>
+                    {l.deletable ? (
+                      <CreatorDeleteLaunchPanel
+                        launchId={l.id}
+                        launchName={l.name}
+                        compact
+                        onDeleted={() => void load()}
+                      />
+                    ) : null}
                   </div>
+                  {!l.deletable && l.delete_block_reason && l.minted_count === 0 ? (
+                    <p className="font-mono text-xs text-[#5C6773]">{l.delete_block_reason}</p>
+                  ) : null}
                 </div>
               </CommandCard>
 

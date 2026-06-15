@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isOwlVisionAdmin } from '@/lib/admin/access'
 import { requireSession } from '@/lib/auth-server'
 import { listOwlCenterLaunchesAdmin, listOwlCenterLaunchesByCreatorWallet } from '@/lib/db/owl-center-launch'
+import { assessCreatorLaunchDeleteEligibility } from '@/lib/owl-center/creator-launch-delete'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -31,17 +32,22 @@ export async function GET(request: NextRequest) {
     ok: true,
     wallet,
     isAdmin,
-    launches: rows.map((l) => ({
-      id: l.id,
-      slug: l.slug,
-      name: l.name,
-      symbol: l.symbol,
-      status: l.status,
-      active_phase: l.active_phase,
-      total_supply: l.total_supply,
-      minted_count: l.minted_count,
-      wallet_mint_limit: l.wallet_mint_limit,
-      updated_at: l.updated_at,
-    })),
+    launches: rows.map((l) => {
+      const deleteEligibility = assessCreatorLaunchDeleteEligibility(l)
+      return {
+        id: l.id,
+        slug: l.slug,
+        name: l.name,
+        symbol: l.symbol,
+        status: l.status,
+        active_phase: l.active_phase,
+        total_supply: l.total_supply,
+        minted_count: l.minted_count,
+        wallet_mint_limit: l.wallet_mint_limit,
+        updated_at: l.updated_at,
+        deletable: deleteEligibility.deletable,
+        delete_block_reason: deleteEligibility.reason,
+      }
+    }),
   })
 }

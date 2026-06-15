@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
+import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
@@ -15,6 +16,7 @@ import {
   creatorMintConfigApiPath,
 } from '@/lib/owl-center/creator-api-paths'
 import { useSiwsSession } from '@/hooks/use-siws-session'
+import { assessCreatorLaunchDeleteEligibility } from '@/lib/owl-center/creator-launch-delete'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 type Props = {
@@ -102,6 +104,13 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
               />
               <MagicEdenHashListPanel launchId={launchId} slug={launch.slug} />
             </>
+          ) : null}
+          {assessCreatorLaunchDeleteEligibility(launch).deletable ? (
+            <CreatorDeleteLaunchPanel
+              launchId={launchId}
+              launchName={launch.name}
+              redirectAfterDelete="/owl-center/my-launches"
+            />
           ) : null}
         </div>
       ) : null}

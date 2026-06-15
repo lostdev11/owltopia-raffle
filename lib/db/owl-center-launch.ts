@@ -283,3 +283,14 @@ export async function insertOwlCenterLaunchAdmin(input: InsertOwlCenterLaunchInp
   }
   return mapRow(data as Record<string, unknown>)
 }
+
+/** Hard delete — cascades mint events, asset packages, marketplace rows, upload jobs. */
+export async function deleteOwlCenterLaunchByIdAdmin(id: string): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const { error, count } = await db.from('owl_center_launches').delete({ count: 'exact' }).eq('id', id)
+  if (error) {
+    console.error('deleteOwlCenterLaunchByIdAdmin', error)
+    return false
+  }
+  return (count ?? 0) > 0
+}
