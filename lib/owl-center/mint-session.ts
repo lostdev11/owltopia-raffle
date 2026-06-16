@@ -15,16 +15,17 @@ export function resolveMintSessionOutcome(
   const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
   const mints = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
 
-  if (!minted.ok && sigs.length === 0) {
+  if (!minted.ok && mints.length === 0 && sigs.length === 0) {
     return { error: minted.error }
   }
 
   const lastSig = sigs.length ? sigs[sigs.length - 1]! : null
   const lastMintAddress = mints.length ? mints[mints.length - 1]! : null
+  const mintedCount = mints.length || sigs.length
 
   let warning: string | null = null
   if (!minted.ok) {
-    const remaining = Math.max(0, requestedQuantity - sigs.length)
+    const remaining = Math.max(0, requestedQuantity - mintedCount)
     warning =
       remaining > 0
         ? `${minted.error} ${remaining} mint${remaining === 1 ? '' : 's'} left — tap Mint again to continue.`
@@ -32,33 +33,58 @@ export function resolveMintSessionOutcome(
   }
 
   return {
-    mintedCount: sigs.length,
+    mintedCount,
     lastSig,
     lastMintAddress,
     warning,
   }
 }
 
-export type MintConfirmPayload = {
+export type MintConfirmBatchPayload = {
   txSignature: string
-  mintedNftMint: string | null
+  quantity: number
+  mintedNftMints: string[]
 }
 
-export async function recordMintConfirms(
-  payloads: MintConfirmPayload[],
-  confirmOne: (payload: MintConfirmPayload) => Promise<void>,
-  onProgress?: (confirmedCount: number) => void
+export async function recordMintSessionConfirms(
+  sigs: string[],
+  mintPks: string[],
+  confirmBatch: (payload: MintConfirmBatchPayload) => Promise<void>,
+  onProgress?: (confirmedCount: number, totalSteps: number) => void
 ): Promise<{ confirmedCount: number; lastSig: string | null; lastMintAddress: string | null }> {
-  let lastSig: string | null = null
-  let lastMintAddress: string | null = null
-
-  for (let i = 0; i < payloads.length; i++) {
-    const payload = payloads[i]!
-    await confirmOne(payload)
-    lastSig = payload.txSignature
-    if (payload.mintedNftMint) lastMintAddress = payload.mintedNftMint
-    onProgress?.(i + 1)
+  if (sigs.length === 0) {
+    return { confirmedCount: 0, lastSig: null, lastMintAddress: null }
   }
 
-  return { confirmedCount: payloads.length, lastSig, lastMintAddress }
+  if (sigs.length === 1) {
+    onProgress?.(0, 1)
+    await confirmBatch({
+      txSignature: sigs[0]!,
+      quantity: mintPks.length,
+      mintedNftMints: mintPks,
+    })
+    onProgress?.(1, 1)
+    return {
+      confirmedCount: mintPks.length,
+      lastSig: sigs[0]!,
+      lastMintAddress: mintPks[mintPks.length - 1] ?? null,
+    }
+  }
+
+  let lastSig: string | null = null
+  let lastMintAddress: string | null = null
+  for (let i = 0; i < sigs.length; i++) {
+    const txSignature = sigs[i]!
+    const mintedNftMint = mintPks[i] ?? null
+    await confirmBatch({
+      txSignature,
+      quantity: 1,
+      mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
+    })
+    lastSig = txSignature
+    if (mintedNftMint) lastMintAddress = mintedNftMint
+    onProgress?.(i + 1, sigs.length)
+  }
+
+  return { confirmedCount: mintPks.length, lastSig, lastMintAddress }
 }

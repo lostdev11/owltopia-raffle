@@ -21,7 +21,7 @@ export function MintProgressOverlay({ open, step, progress = null }: MintProgres
 
   const heading = mintProgressHeading(step, progress)
   const subtext = mintProgressSubtext(step, progress)
-  const showBar = progress != null && progress.total > 1
+  const showBar = progress != null && progress.phase === 'chain' && progress.total > 1 && progress.current > 0
   const barPct = showBar ? Math.min(100, Math.round((progress.current / progress.total) * 100)) : null
 
   return (

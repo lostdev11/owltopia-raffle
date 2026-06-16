@@ -87,6 +87,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     candyMachineId,
     network,
     requirePlatformMintFee: shouldRequireOwlCenterPlatformMintFeeServer(),
+    mintQuantity: qty,
   })
   if (!verified.ok) {
     const map: Record<string, string> = {

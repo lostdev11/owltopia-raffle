@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MintProgressOverlay } from '@/components/owl-center/MintProgressOverlay'
+import { MintQuantityInput, parseMintQuantityText } from '@/components/owl-center/MintQuantityInput'
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import {
@@ -13,7 +14,7 @@ import {
   owlCenterMintWrongPhaseHint,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
-import { recordMintConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { recordMintSessionConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -87,7 +88,7 @@ export function Gen2MintPanel({
   const walletStr = publicKey?.toBase58() ?? null
   const adapter = wallet?.adapter
 
-  const [qty, setQty] = useState(1)
+  const [qtyText, setQtyText] = useState('1')
   const { elig, loading: eligLoading, refresh: loadElig } = useGen2MintEligibility(walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
@@ -116,7 +117,12 @@ export function Gen2MintPanel({
   }, [elig, remaining])
 
   useEffect(() => {
-    setQty((q) => Math.min(Math.max(1, q), maxQ))
+    setQtyText((t) => {
+      const n = parseInt(t.trim(), 10)
+      if (!Number.isFinite(n) || n < 1) return t
+      if (n > maxQ) return String(maxQ)
+      return t
+    })
   }, [maxQ])
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
@@ -154,7 +160,7 @@ export function Gen2MintPanel({
       return
     }
 
-    const n = Math.min(qty, elig.max_mintable, remaining)
+    const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
     let confirmedCount = 0
     let confirmedLastSig: string | null = null
     let confirmedLastMint: string | null = null
@@ -168,35 +174,33 @@ export function Gen2MintPanel({
         quantity: n,
         phase,
         launch,
-        onMintProgress: (current, total) => {
+        onMintProgress: (_current, total) => {
           setStep('awaiting_signature')
-          setMintProgress({ current, total, phase: 'chain' })
+          setMintProgress({ current: 0, total, phase: 'chain' })
         },
       })
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
       const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
-      if (!minted.ok && sigs.length === 0) {
+      if (!minted.ok && mintPks.length === 0 && sigs.length === 0) {
         throw new Error(minted.error || 'mint_failed')
       }
 
       setStep('recording_mint')
-      setMintProgress({ current: 0, total: sigs.length, phase: 'record' })
-      const recorded = await recordMintConfirms(
-        sigs.map((txSignature, i) => ({
-          txSignature,
-          mintedNftMint: mintPks[i] ?? null,
-        })),
-        async ({ txSignature, mintedNftMint }) => {
+      setMintProgress({ current: 0, total: 1, phase: 'record' })
+      const recorded = await recordMintSessionConfirms(
+        sigs,
+        mintPks,
+        async ({ txSignature, quantity, mintedNftMints }) => {
           const conf = await fetch('/api/owl-center/gen2/confirm-mint', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               wallet: walletStr,
               txSignature,
-              quantity: 1,
+              quantity,
               phase,
-              mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
+              mintedNftMints,
               network: isDevnetMintEnabled() ? 'devnet' : 'mainnet',
             }),
           })
@@ -205,10 +209,10 @@ export function Gen2MintPanel({
             throw new Error(cj.error || 'Confirm route failed')
           }
         },
-        (count) => {
-          confirmedCount = count
-          setMintedCount(count)
-          setMintProgress({ current: count, total: sigs.length, phase: 'record' })
+        () => {
+          confirmedCount = mintPks.length
+          setMintedCount(mintPks.length)
+          setMintProgress({ current: 1, total: 1, phase: 'record' })
         }
       )
       confirmedLastSig = recorded.lastSig
@@ -388,7 +392,7 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
-              {elig.gen1_snapshot.gen1_nft_count} detected). Sign once per NFT in your wallet.
+              {elig.gen1_snapshot.gen1_nft_count} detected). Approve once in your wallet — multiple NFTs mint in one transaction when quantity is above 1.
             </p>
           ) : null}
 
@@ -425,7 +429,7 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               Presale redemption (free — already paid): mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your presale credits (
-              {elig.presale_balance.purchased_available_mints} left). Sign once per NFT; you only pay network fees.
+              {elig.presale_balance.purchased_available_mints} left). One wallet approval mints your selected quantity.
             </p>
           ) : null}
 
@@ -434,7 +438,7 @@ export function Gen2MintPanel({
               WL phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your{' '}
               {elig.wl_allocation.available_mints} assigned WL spot
-              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. Sign once per NFT.
+              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. One wallet approval mints your selected quantity.
             </p>
           ) : null}
 
@@ -447,17 +451,7 @@ export function Gen2MintPanel({
           ) : null}
 
           <div className="flex flex-wrap items-end gap-4">
-            <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-              Quantity
-              <input
-                type="number"
-                min={1}
-                max={maxQ}
-                value={qty}
-                onChange={(e) => setQty(Math.min(maxQ, Math.max(1, Number(e.target.value) || 1)))}
-                className="w-24 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8] touch-manipulation"
-              />
-            </label>
+            <MintQuantityInput max={maxQ} value={qtyText} onChange={setQtyText} />
             <DeployButton
               disabled={
                 mintClosed ||
@@ -483,8 +477,7 @@ export function Gen2MintPanel({
           </div>
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare sign each sequential mint. Server records credits after on-chain success — never trust client-only
-            eligibility.
+            Phantom / Solflare: one approval mints your selected quantity in a single transaction. Server records credits after on-chain success.
           </p>
         </div>
     </MintPanelShell>

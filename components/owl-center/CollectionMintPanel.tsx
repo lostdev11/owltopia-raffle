@@ -6,12 +6,13 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MintProgressOverlay } from '@/components/owl-center/MintProgressOverlay'
+import { MintQuantityInput, parseMintQuantityText } from '@/components/owl-center/MintQuantityInput'
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
-import { recordMintConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { recordMintSessionConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
@@ -65,7 +66,7 @@ export function CollectionMintPanel({
   const adapter = wallet?.adapter
   const mintNetwork = resolveLaunchMintNetwork(launch)
 
-  const [qty, setQty] = useState(1)
+  const [qtyText, setQtyText] = useState('1')
   const { elig, loading: eligLoading, refresh: loadElig } = useCollectionMintEligibility(slug, walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
@@ -85,7 +86,12 @@ export function CollectionMintPanel({
   }, [elig, remaining])
 
   useEffect(() => {
-    setQty((q) => Math.min(Math.max(1, q), maxQ))
+    setQtyText((t) => {
+      const n = parseInt(t.trim(), 10)
+      if (!Number.isFinite(n) || n < 1) return t
+      if (n > maxQ) return String(maxQ)
+      return t
+    })
   }, [maxQ])
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
@@ -124,7 +130,7 @@ export function CollectionMintPanel({
       return
     }
 
-    const n = Math.min(qty, elig.max_mintable, remaining)
+    const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
     let confirmedCount = 0
     let confirmedLastSig: string | null = null
     let confirmedLastMint: string | null = null
@@ -140,39 +146,37 @@ export function CollectionMintPanel({
         launch,
         mintNetwork,
         collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
-        onMintProgress: (current, total) => {
+        onMintProgress: (_current, total) => {
           setStep('awaiting_signature')
-          setMintProgress({ current, total, phase: 'chain' })
+          setMintProgress({ current: 0, total, phase: 'chain' })
         },
       })
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
       const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
-      if (!minted.ok && sigs.length === 0) {
+      if (!minted.ok && mintPks.length === 0 && sigs.length === 0) {
         throw new Error(minted.error || 'mint_failed')
       }
 
       setStep('recording_mint')
-      setMintProgress({ current: 0, total: sigs.length, phase: 'record' })
-      const recorded = await recordMintConfirms(
-        sigs.map((txSignature, i) => ({
-          txSignature,
-          mintedNftMint: mintPks[i] ?? null,
-        })),
-        async ({ txSignature, mintedNftMint }) => {
+      setMintProgress({ current: 0, total: 1, phase: 'record' })
+      const recorded = await recordMintSessionConfirms(
+        sigs,
+        mintPks,
+        async ({ txSignature, quantity, mintedNftMints }) => {
           await postCollectionConfirmMintWithRetry(slug, {
             wallet: walletStr,
             txSignature,
-            quantity: 1,
+            quantity,
             phase: 'PUBLIC',
-            mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
+            mintedNftMints,
             network: mintNetwork,
           })
         },
-        (count) => {
-          confirmedCount = count
-          setMintedCount(count)
-          setMintProgress({ current: count, total: sigs.length, phase: 'record' })
+        () => {
+          confirmedCount = mintPks.length
+          setMintedCount(mintPks.length)
+          setMintProgress({ current: 1, total: 1, phase: 'record' })
         }
       )
       confirmedLastSig = recorded.lastSig
@@ -280,17 +284,7 @@ export function CollectionMintPanel({
             )}
 
             {connected && elig?.is_eligible && maxQ > 1 ? (
-              <label className="flex flex-col gap-2 text-sm text-[#C5D0D8]">
-                Quantity
-                <input
-                  type="number"
-                  min={1}
-                  max={maxQ}
-                  value={qty}
-                  onChange={(e) => setQty(Math.min(maxQ, Math.max(1, Number(e.target.value) || 1)))}
-                  className="min-h-[44px] w-24 touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 font-mono text-[#E8EEF2]"
-                />
-              </label>
+              <MintQuantityInput max={maxQ} value={qtyText} onChange={setQtyText} />
             ) : null}
 
             <DeployButton

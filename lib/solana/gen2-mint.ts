@@ -17,6 +17,10 @@ import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/sola
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
+/** Solana per-transaction compute budget cap (mainnet). */
+const SOLANA_MAX_COMPUTE_UNITS = 1_400_000
+/** Estimated CU per mintV2 ix when batching (actual use is often lower). */
+const ESTIMATED_COMPUTE_UNITS_PER_MINT = 380_000
 
 const CM_SOLD_OUT_SIMULATION_PATTERNS = [
   'candymachineempty',
@@ -80,9 +84,9 @@ export type MintGen2Params = {
 }
 
 export type MintGen2Result =
-  | {
+      | {
       ok: true
-      /** One signature per sequential mint (CM typically one NFT per tx). */
+      /** One signature per transaction (batched mints share a single signature). */
       txSignatures: string[]
       mintedNftMints: string[]
     }
@@ -112,6 +116,29 @@ function friendlyBlockhashExpiredError(): string {
 }
 
 const MINT_TX_MAX_ATTEMPTS = 3
+
+function computeUnitsForBatch(quantity: number): number {
+  const estimated = 100_000 + quantity * ESTIMATED_COMPUTE_UNITS_PER_MINT
+  return Math.min(SOLANA_MAX_COMPUTE_UNITS, Math.max(MINT_COMPUTE_UNIT_LIMIT, estimated))
+}
+
+const TX_TOO_LARGE_PATTERNS = [
+  'too large',
+  'transaction is too large',
+  'encoding overruns',
+  'exceeds max',
+] as const
+
+function isTransactionTooLargeError(error: unknown): boolean {
+  const low = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  return TX_TOO_LARGE_PATTERNS.some((p) => low.includes(p))
+}
+
+function friendlyTransactionTooLargeError(quantity: number): string {
+  return quantity > 1
+    ? `Could not fit ${quantity} mints in one transaction — try a smaller quantity (e.g. ${Math.max(1, Math.floor(quantity / 2))}).`
+    : 'Mint transaction too large — contact support.'
+}
 
 /**
  * Prepare + sign + confirm Candy Machine `mintV2` txs via Phantom / Solflare (wallet-standard adapter).
@@ -256,7 +283,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
             walletB58,
             network,
             platformFeeLamports,
-            getLaunchSolanaRpcUrl(network)
+            getLaunchSolanaRpcUrl(network),
+            quantity
           ),
         MINT_SOLANA_RPC_RETRY
       )
@@ -265,89 +293,77 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    const txSignatures: string[] = []
-    const mintedNftMints: string[] = []
+    const nftMints = Array.from({ length: quantity }, () => generateSigner(umi))
+    onMintProgress?.(quantity, quantity)
 
-    const buildMintBuilder = (nftMint: ReturnType<typeof generateSigner>) => {
-      let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: MINT_COMPUTE_UNIT_LIMIT }))
+    const buildBatchMintBuilder = () => {
+      const computeUnits = computeUnitsForBatch(quantity)
+      let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: computeUnits }))
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
       if (collectPlatformMintFee && platformFeeLamports > 0n) {
-        const feeRes = appendOwlCenterPlatformMintFeeSol(umi, platformFeeLamports, builder)
+        const totalFee = platformFeeLamports * BigInt(quantity)
+        const feeRes = appendOwlCenterPlatformMintFeeSol(umi, totalFee, builder)
         if (!feeRes.ok) {
           return feeRes
         }
         builder = feeRes.builder
       }
-      builder = builder.add(
-        mintV2(umi, {
-          candyMachine,
-          candyGuard: plan.candyGuard?.publicKey,
-          nftMint,
-          collectionMint: collectionMintPk,
-          collectionUpdateAuthority,
-          collectionMetadata,
-          collectionMasterEdition,
-          mintArgs: plan.mintArgs,
-          ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
-        })
-      )
+      for (const nftMint of nftMints) {
+        builder = builder.add(
+          mintV2(umi, {
+            candyMachine,
+            candyGuard: plan.candyGuard?.publicKey,
+            nftMint,
+            collectionMint: collectionMintPk,
+            collectionUpdateAuthority,
+            collectionMetadata,
+            collectionMasterEdition,
+            mintArgs: plan.mintArgs,
+            ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
+          })
+        )
+      }
       return { ok: true as const, builder }
     }
 
-    for (let i = 0; i < quantity; i++) {
-      onMintProgress?.(i + 1, quantity)
-      const nftMint = generateSigner(umi)
-      let sent = false
-      let lastMintError: unknown
-
-      for (let attempt = 0; attempt < MINT_TX_MAX_ATTEMPTS; attempt++) {
-        const built = buildMintBuilder(nftMint)
-        if (!built.ok) {
-          return txSignatures.length
-            ? {
-                ok: false,
-                error: built.error,
-                txSignatures,
-                mintedNftMints,
-              }
-            : { ok: false, error: built.error }
-        }
-
-        try {
-          const res = await withSolanaRpcRetry(
-            () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
-            MINT_SOLANA_RPC_RETRY
-          )
-          const sig = res.signature as string | Uint8Array
-          const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
-          txSignatures.push(sigStr)
-          mintedNftMints.push(String(nftMint.publicKey))
-          sent = true
-          break
-        } catch (e) {
-          lastMintError = e
-          if (!isBlockhashExpiredError(e) || attempt >= MINT_TX_MAX_ATTEMPTS - 1) {
-            break
-          }
-        }
+    let lastMintError: unknown
+    for (let attempt = 0; attempt < MINT_TX_MAX_ATTEMPTS; attempt++) {
+      const built = buildBatchMintBuilder()
+      if (!built.ok) {
+        return { ok: false, error: built.error }
       }
 
-      if (!sent) {
-        const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
-        const error = isBlockhashExpiredError(lastMintError)
-          ? friendlyBlockhashExpiredError()
-          : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
-            friendlySolanaRpcErrorMessage(lastMintError) ??
-            msg
-        return txSignatures.length
-          ? { ok: false, error, txSignatures, mintedNftMints }
-          : { ok: false, error }
+      try {
+        const res = await withSolanaRpcRetry(
+          () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
+          MINT_SOLANA_RPC_RETRY
+        )
+        const sig = res.signature as string | Uint8Array
+        const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
+        return {
+          ok: true,
+          txSignatures: [sigStr],
+          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+        }
+      } catch (e) {
+        lastMintError = e
+        if (!isBlockhashExpiredError(e) || attempt >= MINT_TX_MAX_ATTEMPTS - 1) {
+          break
+        }
       }
     }
 
-    return { ok: true, txSignatures, mintedNftMints }
+    const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
+    const error = isBlockhashExpiredError(lastMintError)
+      ? friendlyBlockhashExpiredError()
+      : isTransactionTooLargeError(lastMintError)
+        ? friendlyTransactionTooLargeError(quantity)
+        : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
+          friendlySolanaRpcErrorMessage(lastMintError) ??
+          msg
+    return { ok: false, error }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     const low = msg.toLowerCase()

@@ -55,22 +55,27 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
   wallet: string,
   network: OwlMintNetwork,
   feeLamports: bigint,
-  rpcUrl?: string
+  rpcUrl?: string,
+  mintQuantity = 1
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) return { ok: true }
+
+  const qty = Math.max(1, Math.floor(mintQuantity))
+  const totalFee = feeLamports * BigInt(qty)
 
   try {
     const owner = new PublicKey(wallet)
     const conn = new Connection(rpcUrl?.trim() || getLaunchSolanaRpcUrl(network), 'confirmed')
     const balance = BigInt(await conn.getBalance(owner, 'confirmed'))
-    const needed = feeLamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS
+    const needed = totalFee + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(qty)
     if (balance < needed) {
-      const feeSol = Number(feeLamports) / LAMPORTS_PER_SOL
-      const reserveSol = Number(OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS) / LAMPORTS_PER_SOL
+      const feeSol = Number(totalFee) / LAMPORTS_PER_SOL
+      const reserveSol = (Number(OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS) * qty) / LAMPORTS_PER_SOL
       const usd = owlCenterPlatformMintFeeUsd()
+      const perNft = qty > 1 ? ` (${qty} NFTs)` : ''
       return {
         ok: false,
-        error: `Keep ~${feeSol.toFixed(3)} SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee plus ~${reserveSol.toFixed(2)} SOL for NFT rent and network fees.`,
+        error: `Keep ~${feeSol.toFixed(3)} SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${perNft} plus ~${reserveSol.toFixed(2)} SOL for NFT rent and network fees.`,
       }
     }
     return { ok: true }
@@ -155,7 +160,19 @@ export function owlCenterPlatformMintFeeVerifyBand(unitLamports: bigint): {
  * Wide fallback band when Jupiter pricing is unavailable at confirm time.
  * Covers ~$0.40–$2.50 notional at SOL/USD between ~40 and ~250.
  */
-export function owlCenterPlatformMintFeeVerifyFallbackBand(): {
+export function owlCenterPlatformMintFeeVerifyFallbackBand(mintQuantity = 1): {
+  minLamports: bigint
+  maxLamports: bigint
+} {
+  const qty = Math.max(1, Math.floor(mintQuantity))
+  const unit = owlCenterPlatformMintFeeVerifyFallbackBandUnit()
+  return {
+    minLamports: unit.minLamports * BigInt(qty),
+    maxLamports: unit.maxLamports * BigInt(qty),
+  }
+}
+
+function owlCenterPlatformMintFeeVerifyFallbackBandUnit(): {
   minLamports: bigint
   maxLamports: bigint
 } {

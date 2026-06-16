@@ -29,6 +29,8 @@ export async function verifyGen2MintTransaction(params: {
   network?: OwlMintNetwork
   /** When true, require SOL platform fee credit to OWL_PLATFORM_FEE_TREASURY_WALLET in the same tx. */
   requirePlatformMintFee?: boolean
+  /** Number of NFTs minted in this tx — scales expected platform fee when batched. */
+  mintQuantity?: number
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'
   const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(net), 'confirmed')
@@ -56,10 +58,11 @@ export async function verifyGen2MintTransaction(params: {
   }
 
   if (params.requirePlatformMintFee) {
+    const mintQty = Math.max(1, Math.floor(params.mintQuantity ?? 1))
     const feeQuote = await resolveOwlCenterPlatformMintFeeLamports()
     const band = feeQuote.ok
-      ? owlCenterPlatformMintFeeVerifyBand(feeQuote.lamports)
-      : owlCenterPlatformMintFeeVerifyFallbackBand()
+      ? owlCenterPlatformMintFeeVerifyBand(feeQuote.lamports * BigInt(mintQty))
+      : owlCenterPlatformMintFeeVerifyFallbackBand(mintQty)
     const feeCheck = verifyOwlCenterPlatformMintFeeSol({
       parsed,
       minLamports: band.minLamports,

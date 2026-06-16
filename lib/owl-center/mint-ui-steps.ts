@@ -38,7 +38,7 @@ export function mintProgressHeading(
   }
 
   if (progress?.phase === 'chain' && progress.total > 1) {
-    return `Minting NFT ${progress.current} of ${progress.total}`
+    return `Minting ${progress.total} NFTs in one transaction`
   }
 
   switch (step) {
@@ -67,7 +67,7 @@ export function mintProgressSubtext(
 
   if (progress?.phase === 'chain') {
     if (progress.total > 1) {
-      return 'Approve each mint in Phantom or Solflare. Keep this tab open until all signatures finish.'
+      return 'Approve once in Phantom or Solflare — all NFTs mint in a single transaction. Keep this tab open.'
     }
     return 'Approve the mint in Phantom or Solflare. Keep this tab open until it completes.'
   }
