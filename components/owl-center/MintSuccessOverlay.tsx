@@ -106,7 +106,7 @@ function MintRevealCard({ mint, preferMainnet, active, onArtworkLoaded }: MintRe
   useEffect(() => {
     if (!active || !mint) return
     if (!imageLoading && !currentImageSrc) {
-      const timer = window.setTimeout(onArtworkLoaded, 500)
+      const timer = window.setTimeout(onArtworkLoaded, 250)
       return () => window.clearTimeout(timer)
     }
   }, [active, mint, imageLoading, currentImageSrc, onArtworkLoaded])
@@ -221,6 +221,14 @@ export function MintSuccessOverlay({
   }, [mints.length])
 
   useEffect(() => {
+    if (!open || mints.length === 0) return
+    const qs = preferMainnet ? '&preferMainnet=1' : ''
+    for (const mint of mints) {
+      void fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}${qs}`, { cache: 'no-store' }).catch(() => {})
+    }
+  }, [open, mints, preferMainnet])
+
+  useEffect(() => {
     if (!open) {
       setActiveIndex(0)
       setActiveArtLoaded(false)
@@ -241,7 +249,7 @@ export function MintSuccessOverlay({
       return
     }
     if (activeArtLoaded) {
-      const timer = window.setTimeout(() => setRevealComplete(true), 900)
+      const timer = window.setTimeout(() => setRevealComplete(true), 400)
       return () => window.clearTimeout(timer)
     }
   }, [open, mints.length, activeArtLoaded])

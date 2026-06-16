@@ -49,8 +49,11 @@ export async function withSolanaRpcRetry<T>(
   throw lastError
 }
 
-/** Heavier retry budget for candy-machine mint prep + confirm (mobile RPC is flaky). */
-export const MINT_SOLANA_RPC_RETRY = { retries: 6, baseDelayMs: 1500 } as const
+/** Heavier retry budget for candy-machine mint prep reads (mobile RPC is flaky). */
+export const MINT_SOLANA_RPC_RETRY = { retries: 4, baseDelayMs: 800 } as const
+
+/** Lighter retries for mint send — fail fast and recover on-chain instead of long RPC backoff. */
+export const MINT_SOLANA_SEND_RETRY = { retries: 2, baseDelayMs: 350 } as const
 
 export function friendlySolanaRpcErrorMessage(error: unknown): string | null {
   if (!isTransientSolanaRpcError(error)) return null

@@ -1,6 +1,10 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { fetchParsedTransactionConfirmed, feePayerMatchesBuyer, collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
+import {
+  fetchParsedTransactionWithPoll,
+  feePayerMatchesBuyer,
+  collectParsedTransactionAccountKeys,
+} from '@/lib/gen2-presale/verify-payment'
 import {
   owlCenterPlatformMintFeeVerifyBand,
   owlCenterPlatformMintFeeVerifyFallbackBand,
@@ -34,7 +38,7 @@ export async function verifyGen2MintTransaction(params: {
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'
   const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(net), 'confirmed')
-  const parsed = await fetchParsedTransactionConfirmed(connection, params.txSignature)
+  const parsed = await fetchParsedTransactionWithPoll(connection, params.txSignature)
   if (!parsed) return { ok: false, reason: 'not_found' }
   if (parsed.meta?.err) return { ok: false, reason: 'failed' }
 

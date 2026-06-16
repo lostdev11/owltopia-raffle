@@ -12,11 +12,13 @@ import {
   isGen2MintablePhase,
   resolveGen2AllowListRoutePlan,
   type Gen2AllowListRoutePlan,
+  type Gen2GuardMintPlan,
+  type Gen2MintablePhase,
 } from '@/lib/solana/gen2-guards'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
-import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
+import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, MINT_SOLANA_SEND_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 import {
   extractTxSignatureFromUnknownError,
@@ -77,9 +79,60 @@ function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boole
  */
 function mintPriorityFeeMicroLamports(): number {
   const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
-  if (!raw) return 100_000
+  if (!raw) return 250_000
   const n = Number(raw)
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 100_000
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 250_000
+}
+
+const MINT_PREP_CACHE_TTL_MS = 45_000
+
+type CachedMintMetadata = { expires: number; updateAuthorityB58: string }
+type CachedMintPlan = { expires: number; plan: Gen2GuardMintPlan }
+
+const mintMetadataCache = new Map<string, CachedMintMetadata>()
+const mintPlanCache = new Map<string, CachedMintPlan>()
+
+function mintPlanCacheKey(cmId: string, phase: Gen2MintablePhase): string {
+  return `${cmId}:${phase}`
+}
+
+async function loadCollectionUpdateAuthority(
+  umi: ReturnType<typeof createOwlCenterUmi>,
+  collectionMintB58: string,
+  collectionMetadata: ReturnType<typeof findMetadataPda>
+): Promise<{ ok: true; updateAuthorityB58: string } | { ok: false; error: string }> {
+  const cached = mintMetadataCache.get(collectionMintB58)
+  if (cached && cached.expires > Date.now()) {
+    return { ok: true, updateAuthorityB58: cached.updateAuthorityB58 }
+  }
+  try {
+    const md = await withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_SOLANA_RPC_RETRY)
+    const updateAuthorityB58 = String(md.updateAuthority)
+    mintMetadataCache.set(collectionMintB58, {
+      expires: Date.now() + MINT_PREP_CACHE_TTL_MS,
+      updateAuthorityB58,
+    })
+    return { ok: true, updateAuthorityB58 }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'metadata_fetch_failed' }
+  }
+}
+
+async function loadGuardMintPlan(
+  umi: ReturnType<typeof createOwlCenterUmi>,
+  candyMachine: ReturnType<typeof publicKey>,
+  cmId: string,
+  phase: Gen2MintablePhase
+): Promise<{ ok: true; plan: Gen2GuardMintPlan } | { ok: false; error: string }> {
+  const key = mintPlanCacheKey(cmId, phase)
+  const cached = mintPlanCache.get(key)
+  if (cached && cached.expires > Date.now()) {
+    return { ok: true, plan: cached.plan }
+  }
+  const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_SOLANA_RPC_RETRY)
+  if (!planRes.ok) return planRes
+  mintPlanCache.set(key, { expires: Date.now() + MINT_PREP_CACHE_TTL_MS, plan: planRes.plan })
+  return planRes
 }
 
 /** Optional DB-backed overrides (see `owl_center_launches` devnet columns). */
@@ -104,6 +157,8 @@ export type MintGen2Params = {
   collectPlatformMintFee?: boolean
   /** Skip live Jupiter quote when eligibility already returned a lamports estimate. */
   platformFeeLamports?: bigint
+  /** Skip redundant getBalance when eligibility already fetched wallet SOL. */
+  prefetchedWalletBalanceLamports?: bigint
   /** Called before each on-chain mint (1-indexed current, total quantity). */
   onMintProgress?: (current: number, total: number) => void
 }
@@ -166,6 +221,84 @@ function friendlyTransactionTooLargeError(quantity: number): string {
     : 'Mint transaction too large — contact support.'
 }
 
+type ResolvedMintIds = {
+  cmId: string
+  colMint: string
+  network: OwlMintNetwork
+}
+
+function resolveMintIds(params: Pick<MintGen2Params, 'candyMachineId' | 'collectionMint' | 'launch' | 'mintNetwork'>): ResolvedMintIds | { error: string } {
+  const { candyMachineId, collectionMint, launch, mintNetwork } = params
+  const network =
+    mintNetwork ??
+    (launch && 'mint_mode' in launch
+      ? resolveLaunchMintNetwork(launch as Parameters<typeof resolveLaunchMintNetwork>[0])
+      : isDevnetMintEnabled()
+        ? 'devnet'
+        : 'mainnet')
+
+  if (network === 'devnet' && getSolanaCluster().toLowerCase() !== 'devnet' && !mintNetwork) {
+    return {
+      error:
+        'Wrong network / devnet required — use NEXT_PUBLIC_SOLANA_CLUSTER=devnet with NEXT_PUBLIC_GEN2_USE_DEVNET_MINT=true.',
+    }
+  }
+
+  let cmId =
+    candyMachineId.trim() ||
+    (launch && 'mint_mode' in launch
+      ? getLaunchCandyMachineId(launch as Parameters<typeof getLaunchCandyMachineId>[0], network)
+      : getGen2CandyMachineId(launch ?? undefined))
+  let colMint =
+    collectionMint.trim() ||
+    (launch && 'mint_mode' in launch
+      ? getLaunchCollectionMint(launch as Parameters<typeof getLaunchCollectionMint>[0], network)
+      : getGen2CollectionMint(launch ?? undefined))
+
+  const invalidIds = invalidLaunchMintIdReason(
+    candyMachineId.trim() ||
+      (network === 'devnet' ? launch?.devnet_candy_machine_id : launch?.candy_machine_id) ||
+      null,
+    collectionMint.trim() ||
+      (network === 'devnet' ? launch?.devnet_collection_mint : launch?.collection_mint) ||
+      null
+  )
+  if (invalidIds) return { error: invalidIds }
+  if (!cmId) return { error: 'Missing Candy Machine ID — set env or Owl Center admin devnet fields.' }
+  if (!colMint) return { error: 'Missing Collection Mint — set env or Owl Center admin devnet fields.' }
+
+  const cmCheck = validateSolanaPubkeyInput(cmId, 'Candy Machine ID')
+  if (!cmCheck.ok) return { error: cmCheck.error }
+  const colCheck = validateSolanaPubkeyInput(colMint, 'Collection mint')
+  if (!colCheck.ok) return { error: colCheck.error }
+
+  return { cmId: cmCheck.pubkey, colMint: colCheck.pubkey, network }
+}
+
+/** Prefetch CM guard plan + collection metadata while the user is on the mint page. */
+export async function warmGen2MintPrep(
+  params: Pick<
+    MintGen2Params,
+    'walletAdapter' | 'candyMachineId' | 'collectionMint' | 'phase' | 'launch' | 'mintNetwork'
+  >
+): Promise<void> {
+  if (!params.walletAdapter.publicKey || !isGen2MintablePhase(params.phase)) return
+  const resolved = resolveMintIds(params)
+  if ('error' in resolved) return
+
+  const { cmId, colMint, network } = resolved
+  try {
+    const umi = createOwlCenterUmi(params.walletAdapter, getLaunchSolanaRpcUrl(network))
+    const collectionMetadata = findMetadataPda(umi, { mint: publicKey(colMint) })
+    await Promise.all([
+      loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
+      loadGuardMintPlan(umi, publicKey(cmId), cmId, params.phase),
+    ])
+  } catch {
+    // warm is best-effort
+  }
+}
+
 /**
  * Prepare + sign + confirm Candy Machine `mintV2` txs via Phantom / Solflare (wallet-standard adapter).
  *
@@ -189,6 +322,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     mintNetwork,
     collectPlatformMintFee,
     platformFeeLamports: platformFeeLamportsOverride,
+    prefetchedWalletBalanceLamports,
     onMintProgress,
   } = params
   if (!walletAdapter.publicKey) {
@@ -198,57 +332,11 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     return { ok: false, error: 'Invalid quantity (max 25 per transaction)' }
   }
 
-  const network =
-    mintNetwork ??
-    (launch && 'mint_mode' in launch
-      ? resolveLaunchMintNetwork(launch as Parameters<typeof resolveLaunchMintNetwork>[0])
-      : isDevnetMintEnabled()
-        ? 'devnet'
-        : 'mainnet')
-
-  if (network === 'devnet' && getSolanaCluster().toLowerCase() !== 'devnet' && !mintNetwork) {
-    return {
-      ok: false,
-      error:
-        'Wrong network / devnet required — use NEXT_PUBLIC_SOLANA_CLUSTER=devnet with NEXT_PUBLIC_GEN2_USE_DEVNET_MINT=true.',
-    }
+  const resolved = resolveMintIds({ candyMachineId, collectionMint, launch, mintNetwork })
+  if ('error' in resolved) {
+    return { ok: false, error: resolved.error }
   }
-
-  let cmId =
-    candyMachineId.trim() ||
-    (launch && 'mint_mode' in launch
-      ? getLaunchCandyMachineId(launch as Parameters<typeof getLaunchCandyMachineId>[0], network)
-      : getGen2CandyMachineId(launch ?? undefined))
-  let colMint =
-    collectionMint.trim() ||
-    (launch && 'mint_mode' in launch
-      ? getLaunchCollectionMint(launch as Parameters<typeof getLaunchCollectionMint>[0], network)
-      : getGen2CollectionMint(launch ?? undefined))
-  const invalidIds = invalidLaunchMintIdReason(
-    candyMachineId.trim() ||
-      (network === 'devnet' ? launch?.devnet_candy_machine_id : launch?.candy_machine_id) ||
-      null,
-    collectionMint.trim() ||
-      (network === 'devnet' ? launch?.devnet_collection_mint : launch?.collection_mint) ||
-      null
-  )
-  if (invalidIds) {
-    return { ok: false, error: invalidIds }
-  }
-
-  if (!cmId) {
-    return { ok: false, error: 'Missing Candy Machine ID — set env or Owl Center admin devnet fields.' }
-  }
-  if (!colMint) {
-    return { ok: false, error: 'Missing Collection Mint — set env or Owl Center admin devnet fields.' }
-  }
-
-  const cmCheck = validateSolanaPubkeyInput(cmId, 'Candy Machine ID')
-  if (!cmCheck.ok) return { ok: false, error: cmCheck.error }
-  const colCheck = validateSolanaPubkeyInput(colMint, 'Collection mint')
-  if (!colCheck.ok) return { ok: false, error: colCheck.error }
-  cmId = cmCheck.pubkey
-  colMint = colCheck.pubkey
+  const { cmId, colMint, network } = resolved
 
   if (!isGen2MintablePhase(phase)) {
     return { ok: false, error: `Mint not available in phase ${phase}` }
@@ -261,9 +349,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     const collectionMetadata = findMetadataPda(umi, { mint: collectionMintPk })
     const collectionMasterEdition = findMasterEditionPda(umi, { mint: collectionMintPk })
 
-    const [md, planRes, feeQuote] = await Promise.all([
-      withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_SOLANA_RPC_RETRY),
-      withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_SOLANA_RPC_RETRY),
+    const [metadataRes, planRes, feeQuote] = await Promise.all([
+      loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
+      loadGuardMintPlan(umi, candyMachine, cmId, phase),
       collectPlatformMintFee
         ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
           ? Promise.resolve({
@@ -275,11 +363,14 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         : Promise.resolve({ ok: true as const, lamports: 0n, solUsdPrice: 0 }),
     ])
 
+    if (!metadataRes.ok) {
+      return { ok: false, error: metadataRes.error }
+    }
     if (!planRes.ok) {
       return { ok: false, error: planRes.error }
     }
     const plan = planRes.plan
-    const collectionUpdateAuthority = md.updateAuthority
+    const collectionUpdateAuthority = publicKey(metadataRes.updateAuthorityB58)
 
     const cmRemaining = Number(plan.candyMachine.itemsLoaded) - Number(plan.candyMachine.itemsRedeemed)
     if (cmRemaining <= 0) {
@@ -328,7 +419,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
               network,
               platformFeeLamports,
               getLaunchSolanaRpcUrl(network),
-              quantity
+              quantity,
+              prefetchedWalletBalanceLamports
             ),
           MINT_SOLANA_RPC_RETRY
         ).then((feeBal) => {
@@ -400,8 +492,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     let submittedSig: string | null = null
     try {
       const res = await withSolanaRpcRetry(
-        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
-        MINT_SOLANA_RPC_RETRY
+        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
+        MINT_SOLANA_SEND_RETRY
       )
       const sig = res.signature as string | Uint8Array
       const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
@@ -416,7 +508,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     if (submittedSig) {
-      await pollTransactionSignatureConfirmed(rpcUrl, submittedSig)
+      await pollTransactionSignatureConfirmed(rpcUrl, submittedSig, { maxWaitMs: 35000, intervalMs: 1000 })
     }
 
     const recoveredEarly = await recoverCandyMachineMintFromPlannedSigners({

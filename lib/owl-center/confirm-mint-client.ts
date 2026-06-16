@@ -13,7 +13,7 @@ export type CollectionConfirmMintResponse = {
   duplicate_tx?: boolean
 }
 
-const CONFIRM_RETRY_DELAYS_MS = [0, 1500, 4000, 8000] as const
+const CONFIRM_RETRY_DELAYS_MS = [0, 350, 900, 2200] as const
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

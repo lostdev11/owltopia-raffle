@@ -19,7 +19,7 @@ import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
-import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
+import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
 import {
   getGen2CandyMachineId,
   getGen2CollectionMint,
@@ -124,6 +124,20 @@ export function Gen2MintPanel({
       return t
     })
   }, [maxQ])
+
+  useEffect(() => {
+    if (!connected || !adapter?.publicKey || !elig?.is_eligible || !cmConfigured) return
+    const phase = elig.active_phase
+    const allowedPhases = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC'] as const
+    if (!allowedPhases.includes(phase as (typeof allowedPhases)[number])) return
+    void warmGen2MintPrep({
+      walletAdapter: adapter,
+      candyMachineId: getGen2CandyMachineId(launch) ?? '',
+      collectionMint: getGen2CollectionMint(launch) ?? '',
+      phase,
+      launch,
+    })
+  }, [connected, adapter, elig?.is_eligible, elig?.active_phase, cmConfigured, launch])
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0

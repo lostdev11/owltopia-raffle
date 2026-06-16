@@ -261,6 +261,24 @@ export async function fetchParsedTransactionConfirmed(
   return null
 }
 
+/** Poll until RPC indexes a confirmed parsed tx (used right after mint lands at processed). */
+export async function fetchParsedTransactionWithPoll(
+  connection: Connection,
+  signature: string,
+  options?: { maxWaitMs?: number; intervalMs?: number }
+): Promise<ParsedTransactionWithMeta | null> {
+  const maxWaitMs = Math.max(2000, options?.maxWaitMs ?? 14000)
+  const intervalMs = Math.max(200, options?.intervalMs ?? 350)
+  const start = Date.now()
+
+  while (Date.now() - start < maxWaitMs) {
+    const tx = await fetchParsedTransactionConfirmed(connection, signature)
+    if (tx) return tx
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return null
+}
+
 /**
  * `getParsedTransaction` uses {@link ParsedMessage}: `accountKeys[0]` may be
  * `{ pubkey, signer, writable }`, not a bare {@link PublicKey}. Legacy /

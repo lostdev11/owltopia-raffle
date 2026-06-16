@@ -25,7 +25,7 @@ import {
   resolveLaunchMintNetwork,
 } from '@/lib/solana/launch-cm'
 import { attemptOwlCenterMintRecovery, isLikelyWalletMintDisconnectError } from '@/lib/owl-center/mint-recovery-client'
-import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
+import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { preloadConfetti } from '@/lib/confetti'
 import { owlCenterSolanaExplorerTxUrl } from '@/lib/solana/network'
@@ -97,6 +97,18 @@ export function CollectionMintPanel({
       return t
     })
   }, [maxQ])
+
+  useEffect(() => {
+    if (!connected || !adapter?.publicKey || !elig?.is_eligible || !cmConfigured) return
+    void warmGen2MintPrep({
+      walletAdapter: adapter,
+      candyMachineId,
+      collectionMint: getLaunchCollectionMint(launch, mintNetwork)?.trim() ?? '',
+      phase: 'PUBLIC',
+      launch,
+      mintNetwork,
+    })
+  }, [connected, adapter, elig?.is_eligible, cmConfigured, candyMachineId, launch, mintNetwork])
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
@@ -231,6 +243,10 @@ export function CollectionMintPanel({
         platformFeeLamports:
           elig?.platform_mint_fee_lamports_estimate != null
             ? BigInt(elig.platform_mint_fee_lamports_estimate)
+            : undefined,
+        prefetchedWalletBalanceLamports:
+          elig?.wallet_sol_balance_lamports != null
+            ? BigInt(elig.wallet_sol_balance_lamports)
             : undefined,
         onMintProgress: (_current, total) => {
           setStep('awaiting_signature')
