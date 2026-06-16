@@ -1,7 +1,9 @@
+import { Connection, PublicKey } from '@solana/web3.js'
+
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
-import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
+import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
@@ -66,6 +68,24 @@ export async function buildSimpleMintEligibility(
   let reason: string | null = null
   let is_eligible = false
   let max_mintable = 0
+  let wallet_sol_balance_lamports: string | null = null
+  let mint_sol_needed_lamports: string | null = null
+
+  if (wallet) {
+    try {
+      const conn = new Connection(getLaunchSolanaRpcUrl(mint_network), 'confirmed')
+      wallet_sol_balance_lamports = String(await conn.getBalance(new PublicKey(wallet), 'confirmed'))
+    } catch {
+      wallet_sol_balance_lamports = null
+    }
+  }
+
+  if (platformFeeEnabled && platformFeeQuote?.ok === true) {
+    mint_sol_needed_lamports = String(platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS)
+  }
+
+  const prefetchedBalance =
+    wallet_sol_balance_lamports != null ? BigInt(wallet_sol_balance_lamports) : null
 
   const invalidMintIds =
     invalidLaunchMintIdReason(launch.candy_machine_id, launch.collection_mint) ??
@@ -97,7 +117,9 @@ export async function buildSimpleMintEligibility(
         wallet,
         mint_network,
         platformFeeQuote.lamports,
-        getLaunchSolanaRpcUrl(mint_network)
+        getLaunchSolanaRpcUrl(mint_network),
+        1,
+        prefetchedBalance
       )
       if (!feeBal.ok) {
         is_eligible = false
@@ -125,6 +147,8 @@ export async function buildSimpleMintEligibility(
     platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(
       platform_mint_fee_lamports_estimate != null ? BigInt(platform_mint_fee_lamports_estimate) : null
     ),
+    wallet_sol_balance_lamports,
+    mint_sol_needed_lamports,
     platform_treasury_wallet,
     mint_network,
     mint_operational,

@@ -9,13 +9,13 @@ export function useGen2MintEligibility(wallet: string | null, connected: boolean
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { background?: boolean }) => {
     if (!connected || !wallet) {
       setElig(null)
       setError(null)
       return
     }
-    setLoading(true)
+    if (!opts?.background) setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/owl-center/gen2/eligibility', {

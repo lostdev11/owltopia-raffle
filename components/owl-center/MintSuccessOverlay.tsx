@@ -124,10 +124,10 @@ export function MintSuccessOverlay({
   }, [open, mint, artworkLoaded, imageLoading, currentImageSrc])
 
   useEffect(() => {
-    if (open && revealComplete) {
-      fireMintConfetti()
-    }
-  }, [open, revealComplete])
+    if (!open) return
+    preloadConfetti()
+    fireMintConfetti()
+  }, [open])
 
   if (!open) return null
 
@@ -147,12 +147,12 @@ export function MintSuccessOverlay({
 
   return (
     <div
-      className="mint-reveal-backdrop fixed inset-0 z-[200] flex items-end justify-center bg-[#0B0F14]/92 p-4 backdrop-blur-sm sm:items-center safe-area-bottom"
+      className="mint-reveal-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-[#0B0F14]/92 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="mint-success-overlay-title"
     >
-      <div className="mint-reveal-dialog relative w-full max-w-md space-y-4 overflow-hidden border border-[#1A222B] bg-[#0F1419] p-6 shadow-[0_0_40px_rgba(0,255,156,0.12)] sm:text-center">
+      <div className="mint-reveal-dialog relative w-full max-w-md space-y-4 overflow-hidden border border-[#1A222B] bg-[#0F1419] p-6 text-center shadow-[0_0_40px_rgba(0,255,156,0.12)]">
         {revealComplete ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 h-32 overflow-hidden" aria-hidden>
             {CONFETTI_PIECES.map((piece, index) => (

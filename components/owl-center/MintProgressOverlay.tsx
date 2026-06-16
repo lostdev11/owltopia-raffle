@@ -26,13 +26,13 @@ export function MintProgressOverlay({ open, step, progress = null }: MintProgres
 
   return (
     <div
-      className="mint-reveal-backdrop fixed inset-0 z-[199] flex items-end justify-center bg-[#0B0F14]/92 p-4 backdrop-blur-sm sm:items-center safe-area-bottom"
+      className="mint-reveal-backdrop fixed inset-0 z-[199] flex items-center justify-center bg-[#0B0F14]/92 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
       role="status"
       aria-live="polite"
       aria-busy="true"
       aria-labelledby="mint-progress-overlay-title"
     >
-      <div className="mint-reveal-dialog relative w-full max-w-md space-y-5 overflow-hidden border border-[#1A222B] bg-[#0F1419] p-6 shadow-[0_0_40px_rgba(0,255,156,0.08)] sm:text-center">
+      <div className="mint-reveal-dialog relative w-full max-w-md space-y-5 overflow-hidden border border-[#1A222B] bg-[#0F1419] p-6 text-center shadow-[0_0_40px_rgba(0,255,156,0.08)]">
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#00FF9C]/30 bg-[#00FF9C]/10">
           <Loader2 className="h-8 w-8 animate-spin text-[#00FF9C]" aria-hidden />
         </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -14,6 +14,7 @@ import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-s
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { recordMintSessionConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
+import { collectionMintDisabledHint } from '@/lib/owl-center/mint-button-hint'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -23,7 +24,9 @@ import {
   getLaunchCollectionMint,
   resolveLaunchMintNetwork,
 } from '@/lib/solana/launch-cm'
+import { attemptOwlCenterMintRecovery, isLikelyWalletMintDisconnectError } from '@/lib/owl-center/mint-recovery-client'
 import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
+import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { preloadConfetti } from '@/lib/confetti'
 import { owlCenterSolanaExplorerTxUrl } from '@/lib/solana/network'
 
@@ -67,7 +70,7 @@ export function CollectionMintPanel({
   const mintNetwork = resolveLaunchMintNetwork(launch)
 
   const [qtyText, setQtyText] = useState('1')
-  const { elig, loading: eligLoading, refresh: loadElig } = useCollectionMintEligibility(slug, walletStr, connected)
+  const { elig, loading: eligLoading, error: eligError, refresh: loadElig } = useCollectionMintEligibility(slug, walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
@@ -75,10 +78,11 @@ export function CollectionMintPanel({
   const [mintedCount, setMintedCount] = useState(0)
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [recoveringMint, setRecoveringMint] = useState(false)
+  const lastPlannedMintB58sRef = useRef<string[]>([])
 
-  const cmConfigured = Boolean(
-    getLaunchCandyMachineId(launch, mintNetwork)?.trim() && getLaunchCollectionMint(launch, mintNetwork)?.trim()
-  )
+  const candyMachineId = getLaunchCandyMachineId(launch, mintNetwork)?.trim() ?? ''
+  const cmConfigured = Boolean(candyMachineId && getLaunchCollectionMint(launch, mintNetwork)?.trim())
 
   const maxQ = useMemo(() => {
     if (!elig) return 1
@@ -106,6 +110,86 @@ export function CollectionMintPanel({
     setSuccessWarning(null)
     setMintProgress(null)
   }, [])
+
+  const finalizeRecoveredMint = useCallback(
+    async (recovered: RecoveredCandyMachineMint, warning?: string | null) => {
+      if (!walletStr || recovered.txSignatures.length === 0) return false
+
+      const sigs = recovered.txSignatures
+      const mintPks = recovered.mintedNftMints
+      let confirmedCount = 0
+      let confirmedLastSig: string | null = null
+      let confirmedLastMint: string | null = null
+
+      setStep('recording_mint')
+      setMintProgress({ current: 0, total: 1, phase: 'record' })
+      const recorded = await recordMintSessionConfirms(
+        sigs,
+        mintPks,
+        async ({ txSignature, quantity, mintedNftMints }) => {
+          await postCollectionConfirmMintWithRetry(slug, {
+            wallet: walletStr,
+            txSignature,
+            quantity,
+            phase: 'PUBLIC',
+            mintedNftMints,
+            network: mintNetwork,
+          })
+        },
+        () => {
+          confirmedCount = Math.max(mintPks.length, 1)
+          setMintedCount(Math.max(mintPks.length, 1))
+          setMintProgress({ current: 1, total: 1, phase: 'record' })
+        }
+      )
+      confirmedLastSig = recorded.lastSig
+      confirmedLastMint = recorded.lastMintAddress
+
+      setLastSig(confirmedLastSig ?? sigs[sigs.length - 1] ?? null)
+      if (confirmedLastMint) setLastMintAddress(confirmedLastMint)
+      else if (mintPks.length) setLastMintAddress(mintPks[mintPks.length - 1] ?? null)
+      setMintedCount(confirmedCount || mintPks.length || 1)
+      setSuccessWarning(warning ?? null)
+      setErr(null)
+      setMintProgress(null)
+      setStep('success')
+      await Promise.all([loadElig(), onRefresh()])
+      return true
+    },
+    [walletStr, slug, mintNetwork, loadElig, onRefresh]
+  )
+
+  const checkWalletForMint = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!walletStr || !candyMachineId) return false
+      setRecoveringMint(true)
+      try {
+        const recovered = await attemptOwlCenterMintRecovery({
+          walletB58: walletStr,
+          candyMachineB58: candyMachineId,
+          mintNetwork,
+          plannedMintB58s: lastPlannedMintB58sRef.current,
+        })
+        if (recovered?.txSignatures.length) {
+          return finalizeRecoveredMint(
+            recovered,
+            'Recovered your mint from on-chain history (Phantom/Solflare sometimes disconnect before the site finishes).'
+          )
+        }
+        if (!options?.silent) {
+          setErr((prev) =>
+            prev
+              ? `${prev} No recent mint found in your wallet — check Collectibles, then try again.`
+              : 'No recent mint found in your wallet history. Check Collectibles in Phantom or Solflare.'
+          )
+        }
+        return false
+      } finally {
+        setRecoveringMint(false)
+      }
+    },
+    [walletStr, candyMachineId, mintNetwork, finalizeRecoveredMint]
+  )
 
   const runMint = async () => {
     setErr(null)
@@ -151,6 +235,10 @@ export function CollectionMintPanel({
           setMintProgress({ current: 0, total, phase: 'chain' })
         },
       })
+
+      if (!minted.ok && minted.plannedMintB58s?.length) {
+        lastPlannedMintB58sRef.current = minted.plannedMintB58s
+      }
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
       const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
@@ -210,6 +298,10 @@ export function CollectionMintPanel({
         await Promise.all([loadElig(), onRefresh()])
         return
       }
+      if (isLikelyWalletMintDisconnectError(msg) && walletStr && candyMachineId) {
+        const recovered = await checkWalletForMint({ silent: true })
+        if (recovered) return
+      }
       setErr(
         low.includes('user rejected') || low.includes('cancel')
           ? 'Mint transaction rejected in wallet'
@@ -235,6 +327,21 @@ export function CollectionMintPanel({
         : null
     )
 
+  const mintDisabledHint = collectionMintDisabledHint({
+    connected,
+    eligLoading,
+    elig,
+    eligError,
+    cmConfigured,
+  })
+
+  const mintButtonDisabled =
+    !connected ||
+    (eligLoading && !elig) ||
+    !elig?.is_eligible ||
+    isMintInProgress(step) ||
+    !cmConfigured
+
   if (trading) {
     return (
       <CommandCard label="TRADE // marketplaces">
@@ -247,7 +354,7 @@ export function CollectionMintPanel({
     <>
       <MintProgressOverlay open={isMintInProgress(step)} step={step} progress={mintProgress} />
       <MintSuccessOverlay
-        open={step === 'success' && Boolean(lastSig)}
+        open={step === 'success' && Boolean(lastSig || lastMintAddress)}
         quantity={mintedCount}
         mintAddress={lastMintAddress}
         preferMainnet={mintNetwork === 'mainnet'}
@@ -277,8 +384,10 @@ export function CollectionMintPanel({
           <>
             {!connected ? (
               <p className="text-sm text-[#9BA8B4]">Connect wallet to mint on {mintNetwork}.</p>
-            ) : eligLoading ? (
-              <p className="font-mono text-xs text-[#5C6773]">Checking eligibility…</p>
+            ) : eligError ? (
+              <p className="text-sm text-[#FFD769]">Could not verify eligibility — check your connection and tap Refresh.</p>
+            ) : eligLoading && !elig ? (
+              <p className="font-mono text-xs text-[#00FF9C]">Checking eligibility…</p>
             ) : (
               <p className="text-sm text-[#C5D0D8]">{elig?.reason ?? (elig?.is_eligible ? 'Eligible to mint' : '—')}</p>
             )}
@@ -289,18 +398,52 @@ export function CollectionMintPanel({
 
             <DeployButton
               className="w-full sm:w-auto"
-              disabled={!connected || !elig?.is_eligible || isMintInProgress(step) || !cmConfigured}
+              loading={Boolean(connected && eligLoading && !elig)}
+              disabled={mintButtonDisabled}
               onClick={() => {
                 preloadConfetti()
                 void runMint()
               }}
             >
-              {step !== 'idle' && step !== 'success' && step !== 'error' ? stepLabel(step) : 'Mint now'}
+              {isMintInProgress(step)
+                ? stepLabel(step)
+                : connected && eligLoading && !elig
+                  ? 'Checking eligibility…'
+                  : 'Mint now'}
             </DeployButton>
+
+            {mintDisabledHint ? (
+              <p
+                className={`text-sm leading-relaxed ${mintButtonDisabled || eligError ? 'text-[#FFD769]' : 'text-[#9BA8B4]'}`}
+              >
+                {mintDisabledHint}
+              </p>
+            ) : null}
+
+            {connected && (eligError || (!eligLoading && !elig?.is_eligible && elig)) ? (
+              <button
+                type="button"
+                onClick={() => void loadElig({ background: true })}
+                className="min-h-[44px] touch-manipulation font-mono text-[10px] uppercase tracking-widest text-[#00C97A] underline-offset-4 hover:underline"
+              >
+                Refresh eligibility
+              </button>
+            ) : null}
           </>
         )}
 
         {err ? <p className="text-sm text-red-400">{err}</p> : null}
+        {step === 'error' && connected && cmConfigured ? (
+          <DeployButton
+            variant="ghost"
+            className="w-full sm:w-auto"
+            loading={recoveringMint}
+            disabled={recoveringMint || isMintInProgress(step)}
+            onClick={() => void checkWalletForMint()}
+          >
+            My NFT minted — check wallet
+          </DeployButton>
+        ) : null}
       </div>
     </CommandCard>
     </>

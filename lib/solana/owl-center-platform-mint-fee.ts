@@ -56,9 +56,12 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
   network: OwlMintNetwork,
   feeLamports: bigint,
   rpcUrl?: string,
-  mintQuantity = 1
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) return { ok: true }
+  mintQuantity = 1,
+  prefetchedBalanceLamports?: bigint | null
+): Promise<{ ok: true; balance: bigint } | { ok: false; error: string; balance: bigint }> {
+  if (!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) {
+    return { ok: true, balance: prefetchedBalanceLamports ?? 0n }
+  }
 
   const qty = Math.max(1, Math.floor(mintQuantity))
   const totalFee = feeLamports * BigInt(qty)
@@ -66,21 +69,24 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
   try {
     const owner = new PublicKey(wallet)
     const conn = new Connection(rpcUrl?.trim() || getLaunchSolanaRpcUrl(network), 'confirmed')
-    const balance = BigInt(await conn.getBalance(owner, 'confirmed'))
+    const balance =
+      prefetchedBalanceLamports ?? BigInt(await conn.getBalance(owner, 'confirmed'))
     const needed = totalFee + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(qty)
     if (balance < needed) {
       const feeSol = Number(totalFee) / LAMPORTS_PER_SOL
       const reserveSol = (Number(OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS) * qty) / LAMPORTS_PER_SOL
+      const haveSol = Number(balance) / LAMPORTS_PER_SOL
       const usd = owlCenterPlatformMintFeeUsd()
       const perNft = qty > 1 ? ` (${qty} NFTs)` : ''
       return {
         ok: false,
-        error: `Keep ~${feeSol.toFixed(3)} SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${perNft} plus ~${reserveSol.toFixed(2)} SOL for NFT rent and network fees.`,
+        balance,
+        error: `Need ~${(feeSol + reserveSol).toFixed(3)} SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${perNft} and rent (your wallet has ~${haveSol.toFixed(3)} SOL).`,
       }
     }
-    return { ok: true }
+    return { ok: true, balance }
   } catch {
-    return { ok: false, error: 'Could not read wallet SOL balance — check your connection and retry.' }
+    return { ok: false, balance: prefetchedBalanceLamports ?? 0n, error: 'Could not read wallet SOL balance — check your connection and retry.' }
   }
 }
 

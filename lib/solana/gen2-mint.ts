@@ -10,9 +10,9 @@ import { buildGen2GuardMintPlan, ensureGen2AllowListProof, isGen2MintablePhase }
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
-import { owlCenterPlatformMintFeeUsd } from '@/lib/owl-center/platform-mint-fee'
 import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
+import { recoverCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
@@ -39,11 +39,21 @@ function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boole
   if (low.includes('notenoughsol') || low.includes('not enough sol') || low.includes('insufficient funds')) {
     return 'Not enough SOL for the platform fee, NFT rent, and network fees.'
   }
-  if (low.includes('simulation failed') || low.includes('accountnotfound')) {
-    const usd = owlCenterPlatformMintFeeUsd()
+  if (
+    low.includes('blocked') ||
+    low.includes('malicious') ||
+    low.includes('security') ||
+    low.includes('dapp could be')
+  ) {
+    return 'Your wallet blocked this mint for security. If you trust Owltopia, ask Phantom to review owltopia.xyz at review@phantom.com — or try Solflare.'
+  }
+  if (low.includes('accountnotfound') || low.includes('account does not exist')) {
+    return 'Mint setup error — a required on-chain account was not found. Refresh and retry; if this persists, contact the collection team.'
+  }
+  if (low.includes('simulation failed')) {
     return collectPlatformMintFee
-      ? `Mint simulation failed — the Candy Machine may be sold out, or your wallet may need more SOL (~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee + ~0.02 SOL rent). Refresh and retry.`
-      : 'Mint simulation failed — the Candy Machine may be sold out, or your wallet may need ~0.02 SOL for NFT rent and network fees.'
+      ? 'Mint could not be simulated — Phantom and Solflare on mobile sometimes approve the mint but disconnect before the site finishes. If your NFT appears in your wallet, tap “My NFT minted — check wallet”.'
+      : 'Mint could not be simulated — if your NFT is already in your wallet, tap “My NFT minted — check wallet”.'
   }
   return null
 }
@@ -96,6 +106,8 @@ export type MintGen2Result =
       /** On-chain mints that succeeded before a later tx failed (e.g. blockhash expired). */
       txSignatures?: string[]
       mintedNftMints?: string[]
+      /** Client-generated mint pubkeys from the last attempt — used for post-error recovery. */
+      plannedMintB58s?: string[]
     }
 
 const BLOCKHASH_EXPIRED_PATTERNS = [
@@ -356,6 +368,26 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
+    const rpcUrl = getLaunchSolanaRpcUrl(network)
+    const recovered = await recoverCandyMachineMint({
+      rpcUrl,
+      walletB58: walletAdapter.publicKey.toBase58(),
+      candyMachineB58: cmId,
+      nftMints,
+      lastError: lastMintError,
+    })
+
+    if (recovered && (recovered.mintedNftMints.length > 0 || recovered.txSignatures.length > 0)) {
+      return {
+        ok: false,
+        error:
+          'Your wallet reported an error, but your mint appears on-chain — saving it now. Open your wallet Collectibles if the reveal is slow.',
+        txSignatures: recovered.txSignatures,
+        mintedNftMints: recovered.mintedNftMints,
+        plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
+      }
+    }
+
     const error = isBlockhashExpiredError(lastMintError)
       ? friendlyBlockhashExpiredError()
       : isTransactionTooLargeError(lastMintError)
@@ -363,7 +395,11 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
           friendlySolanaRpcErrorMessage(lastMintError) ??
           msg
-    return { ok: false, error }
+    return {
+      ok: false,
+      error,
+      plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     const low = msg.toLowerCase()

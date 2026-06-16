@@ -301,7 +301,7 @@ export function Gen2MintPanel({
     <>
       <MintProgressOverlay open={isMintInProgress(step)} step={step} progress={mintProgress} />
       <MintSuccessOverlay
-        open={step === 'success' && Boolean(lastSig)}
+        open={step === 'success' && Boolean(lastSig || lastMintAddress)}
         quantity={mintedCount}
         mintAddress={lastMintAddress}
         preferMainnet={mintNetwork === 'mainnet'}
@@ -341,7 +341,7 @@ export function Gen2MintPanel({
           {connected ? (
             <button
               type="button"
-              onClick={() => void loadElig()}
+              onClick={() => void loadElig({ background: true })}
               className="min-h-[44px] touch-manipulation font-mono text-[10px] uppercase tracking-widest text-[#00C97A] underline-offset-4 hover:underline"
             >
               Refresh
@@ -453,11 +453,14 @@ export function Gen2MintPanel({
           <div className="flex flex-wrap items-end gap-4">
             <MintQuantityInput max={maxQ} value={qtyText} onChange={setQtyText} />
             <DeployButton
+              loading={Boolean(connected && eligLoading && !elig)}
               disabled={
                 mintClosed ||
                 !connected ||
+                (eligLoading && !elig) ||
                 !elig?.is_eligible ||
-                isMintInProgress(step)
+                isMintInProgress(step) ||
+                !cmConfigured
               }
               onClick={() => {
                 preloadConfetti()
@@ -465,7 +468,11 @@ export function Gen2MintPanel({
               }}
               className="flex-1 sm:flex-none"
             >
-              Mint
+              {isMintInProgress(step)
+                ? stepLabel(step)
+                : connected && eligLoading && !elig
+                  ? 'Checking eligibility…'
+                  : 'Mint now'}
             </DeployButton>
           </div>
 
