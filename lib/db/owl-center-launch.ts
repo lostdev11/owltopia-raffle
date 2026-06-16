@@ -1,7 +1,47 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
-import type { OwlCenterLaunchPublic, OwlCenterMintMode, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
+import type {
+  OwlCenterLaunchPublic,
+  OwlCenterMintMode,
+  OwlCenterPhase,
+  OwlCenterRevealMode,
+  OwlCenterRevealProgress,
+  OwlCenterRevealStatus,
+  OwlCenterStatus,
+} from '@/lib/owl-center/types'
+
+function parseRevealMode(raw: unknown): OwlCenterRevealMode | null {
+  if (raw === 'reveal_day') return 'reveal_day'
+  if (raw === 'standard') return 'standard'
+  return null
+}
+
+function parseRevealStatus(raw: unknown): OwlCenterRevealStatus {
+  const s = String(raw ?? 'disabled')
+  if (
+    s === 'draft' ||
+    s === 'scheduled' ||
+    s === 'running' ||
+    s === 'completed' ||
+    s === 'failed'
+  ) {
+    return s
+  }
+  return 'disabled'
+}
+
+function parseRevealProgress(raw: unknown): OwlCenterRevealProgress {
+  if (!raw || typeof raw !== 'object') return {}
+  const o = raw as Record<string, unknown>
+  return {
+    last_run_at: typeof o.last_run_at === 'string' ? o.last_run_at : undefined,
+    refreshed_count: typeof o.refreshed_count === 'number' ? o.refreshed_count : undefined,
+    skipped_count: typeof o.skipped_count === 'number' ? o.skipped_count : undefined,
+    error: typeof o.error === 'string' ? o.error : undefined,
+    attempts: typeof o.attempts === 'number' ? o.attempts : undefined,
+  }
+}
 
 function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
   return {
@@ -60,6 +100,15 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
         ? String(data.generator_project_id).trim()
         : null,
     seller_fee_basis_points: Number(data.seller_fee_basis_points ?? 500),
+    reveal_mode: parseRevealMode(data.reveal_mode),
+    reveal_status: parseRevealStatus(data.reveal_status),
+    reveal_at: data.reveal_at != null ? String(data.reveal_at) : null,
+    reveal_completed_at: data.reveal_completed_at != null ? String(data.reveal_completed_at) : null,
+    reveal_payment_tx_signature:
+      data.reveal_payment_tx_signature != null ? String(data.reveal_payment_tx_signature) : null,
+    placeholder_metadata_uri:
+      data.placeholder_metadata_uri != null ? String(data.placeholder_metadata_uri) : null,
+    reveal_progress: parseRevealProgress(data.reveal_progress),
   }
 }
 
@@ -204,6 +253,13 @@ export async function updateOwlCenterLaunchByIdAdmin(
     creator_launch_date: string | null
     generator_project_id: string | null
     seller_fee_basis_points: number
+    reveal_mode: OwlCenterRevealMode | null
+    reveal_status: OwlCenterRevealStatus
+    reveal_at: string | null
+    reveal_completed_at: string | null
+    reveal_payment_tx_signature: string | null
+    placeholder_metadata_uri: string | null
+    reveal_progress: OwlCenterRevealProgress
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
@@ -293,4 +349,22 @@ export async function deleteOwlCenterLaunchByIdAdmin(id: string): Promise<boolea
     return false
   }
   return (count ?? 0) > 0
+}
+
+/** Reveal Day cron — scheduled launches whose reveal_at has passed. */
+export async function listOwlCenterLaunchesDueForReveal(
+  nowMs: number = Date.now()
+): Promise<OwlCenterLaunchPublic[]> {
+  const db = getSupabaseAdmin()
+  const nowIso = new Date(nowMs).toISOString()
+  const { data, error } = await db
+    .from('owl_center_launches')
+    .select('*')
+    .eq('reveal_mode', 'reveal_day')
+    .eq('reveal_status', 'scheduled')
+    .not('reveal_at', 'is', null)
+    .lte('reveal_at', nowIso)
+
+  if (error || !data) return []
+  return (data as Record<string, unknown>[]).map(mapRow)
 }

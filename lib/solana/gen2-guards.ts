@@ -1,5 +1,5 @@
 import bs58 from 'bs58'
-import { isSome, some, type Option, type PublicKey, type Umi } from '@metaplex-foundation/umi'
+import { isSome, some, type Option, type PublicKey, type TransactionBuilder, type Umi } from '@metaplex-foundation/umi'
 import {
   fetchCandyMachine,
   safeFetchCandyGuard,
@@ -183,43 +183,32 @@ type WlProofResponse = {
   error?: string
 }
 
-/**
- * Ensure the allowList proof PDA exists for the connected wallet (candy guard `route` instruction).
- * Fetches the merkle proof from the server (`/api/owl-center/gen2/wl-proof`), which derives it from
- * the same DB tables used for site eligibility. No-op when the PDA was already created.
- */
-export async function ensureGen2AllowListProof(
-  umi: Umi,
-  args: {
-    candyMachine: PublicKey
-    candyGuard: PublicKey
-    groupLabel: string | null
-    merkleRoot: Uint8Array
-    phase: Gen2MintablePhase
-  }
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { candyMachine, candyGuard, groupLabel, merkleRoot, phase } = args
-  const user = umi.identity.publicKey
+export type Gen2AllowListRoutePlan =
+  | { includeRoute: false }
+  | { includeRoute: true; merkleRoot: Uint8Array; merkleProof: Uint8Array[] }
 
-  const existing = await withSolanaRpcRetry(
-    () => safeFetchAllowListProofFromSeeds(umi, { merkleRoot, user, candyGuard, candyMachine }),
-    MINT_SOLANA_RPC_RETRY
-  )
-  if (existing) return { ok: true }
-
-  let body: WlProofResponse
+async function fetchGen2WlProofResponse(
+  wallet: PublicKey,
+  phase: Gen2MintablePhase
+): Promise<{ ok: true; body: WlProofResponse } | { ok: false; error: string }> {
   try {
     const res = await fetch(
-      `/api/owl-center/gen2/wl-proof?wallet=${encodeURIComponent(String(user))}&phase=${encodeURIComponent(phase)}`
+      `/api/owl-center/gen2/wl-proof?wallet=${encodeURIComponent(String(wallet))}&phase=${encodeURIComponent(phase)}`
     )
-    body = (await res.json()) as WlProofResponse
+    const body = (await res.json()) as WlProofResponse
     if (!res.ok) {
       return { ok: false, error: body.error || 'Allowlist proof lookup failed' }
     }
+    return { ok: true, body }
   } catch {
     return { ok: false, error: 'Allowlist proof lookup failed — check your connection and retry.' }
   }
+}
 
+function validateGen2WlProofBody(
+  body: WlProofResponse,
+  merkleRoot: Uint8Array
+): { ok: true; merkleProof: Uint8Array[] } | { ok: false; error: string } {
   if (!body.merkle_root || !Array.isArray(body.proof)) {
     return { ok: false, error: 'Allowlist proof response malformed' }
   }
@@ -229,27 +218,70 @@ export async function ensureGen2AllowListProof(
       error: 'Allowlist out of sync — on-chain merkle root does not match the server list. Contact the team.',
     }
   }
+  return { ok: true, merkleProof: body.proof.map((p) => bs58.decode(p)) }
+}
 
-  const merkleProof = body.proof.map((p) => bs58.decode(p))
-  try {
-    await withSolanaRpcRetry(
-      () =>
-        route(umi, {
-          candyMachine,
-          candyGuard,
-          guard: 'allowList',
-          group: groupLabel,
-          routeArgs: { path: 'proof', merkleRoot, merkleProof },
-        }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
-      MINT_SOLANA_RPC_RETRY
-    )
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (/user rejected|cancel/i.test(msg)) {
-      return { ok: false, error: 'Allowlist proof transaction rejected in wallet' }
-    }
-    return { ok: false, error: 'Could not submit allowlist proof — refresh and retry mint.' }
+/**
+ * Resolve whether the mint transaction must include the candy guard allowList `route` (proof) ix.
+ * When the proof PDA already exists, returns `includeRoute: false`. Otherwise fetches merkle proof
+ * from `/api/owl-center/gen2/wl-proof` so the route ix can be batched into the same tx as `mintV2`.
+ */
+export async function resolveGen2AllowListRoutePlan(
+  umi: Umi,
+  args: {
+    candyMachine: PublicKey
+    candyGuard: PublicKey
+    groupLabel: string | null
+    merkleRoot: Uint8Array
+    phase: Gen2MintablePhase
   }
+): Promise<{ ok: true; plan: Gen2AllowListRoutePlan } | { ok: false; error: string }> {
+  const { candyMachine, candyGuard, groupLabel, merkleRoot, phase } = args
+  const user = umi.identity.publicKey
 
-  return { ok: true }
+  const [existing, proofRes] = await Promise.all([
+    withSolanaRpcRetry(
+      () => safeFetchAllowListProofFromSeeds(umi, { merkleRoot, user, candyGuard, candyMachine }),
+      MINT_SOLANA_RPC_RETRY
+    ),
+    fetchGen2WlProofResponse(user, phase),
+  ])
+
+  if (existing) return { ok: true, plan: { includeRoute: false } }
+  if (!proofRes.ok) return proofRes
+
+  const validated = validateGen2WlProofBody(proofRes.body, merkleRoot)
+  if (!validated.ok) return validated
+
+  return {
+    ok: true,
+    plan: {
+      includeRoute: true,
+      merkleRoot,
+      merkleProof: validated.merkleProof,
+    },
+  }
+}
+
+/** Append allowList proof route ix to a mint transaction builder (runs before `mintV2` in the same tx). */
+export function appendGen2AllowListRouteInstruction(
+  umi: Umi,
+  builder: TransactionBuilder,
+  args: {
+    candyMachine: PublicKey
+    candyGuard: PublicKey
+    groupLabel: string | null
+    merkleRoot: Uint8Array
+    merkleProof: Uint8Array[]
+  }
+): TransactionBuilder {
+  return builder.add(
+    route(umi, {
+      candyMachine: args.candyMachine,
+      candyGuard: args.candyGuard,
+      guard: 'allowList',
+      group: args.groupLabel,
+      routeArgs: { path: 'proof', merkleRoot: args.merkleRoot, merkleProof: args.merkleProof },
+    })
+  )
 }

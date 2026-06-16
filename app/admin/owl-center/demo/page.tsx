@@ -11,6 +11,7 @@ import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
+import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -103,6 +104,25 @@ export default function AdminOwlCenterDemoPage() {
               ? demo.mint_network
               : null,
           seller_fee_basis_points: Number(demo.seller_fee_basis_points ?? 500),
+          reveal_mode: demo.reveal_mode === 'reveal_day' ? 'reveal_day' : demo.reveal_mode === 'standard' ? 'standard' : null,
+          reveal_status:
+            demo.reveal_status === 'draft' ||
+            demo.reveal_status === 'scheduled' ||
+            demo.reveal_status === 'running' ||
+            demo.reveal_status === 'completed' ||
+            demo.reveal_status === 'failed'
+              ? demo.reveal_status
+              : 'disabled',
+          reveal_at: demo.reveal_at != null ? String(demo.reveal_at) : null,
+          reveal_completed_at: demo.reveal_completed_at != null ? String(demo.reveal_completed_at) : null,
+          reveal_payment_tx_signature:
+            demo.reveal_payment_tx_signature != null ? String(demo.reveal_payment_tx_signature) : null,
+          placeholder_metadata_uri:
+            demo.placeholder_metadata_uri != null ? String(demo.placeholder_metadata_uri) : null,
+          reveal_progress:
+            demo.reveal_progress && typeof demo.reveal_progress === 'object' && !Array.isArray(demo.reveal_progress)
+              ? (demo.reveal_progress as OwlCenterLaunchPublic['reveal_progress'])
+              : {},
         })
         setCm(demo.candy_machine_id != null ? String(demo.candy_machine_id) : '')
         setCol(demo.collection_mint != null ? String(demo.collection_mint) : '')
@@ -320,6 +340,7 @@ export default function AdminOwlCenterDemoPage() {
             </div>
           </CommandCardSection>
 
+          <RevealDayPanel embedded launchId={launch.id} launch={launch} anchorId="reveal-day" />
           <MetadataRefreshPanel embedded launchId={launch.id} anchorId="metadata-refresh" />
 
           <CommandCardSection label="SELLOUT_PREP · HASH LIST">

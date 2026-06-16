@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/owl-center-asset-upload",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/owl-center-reveal-day",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

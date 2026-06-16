@@ -230,6 +230,10 @@ export function CollectionMintPanel({
         launch,
         mintNetwork,
         collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+        platformFeeLamports:
+          elig?.platform_mint_fee_lamports_estimate != null
+            ? BigInt(elig.platform_mint_fee_lamports_estimate)
+            : undefined,
         onMintProgress: (_current, total) => {
           setStep('awaiting_signature')
           setMintProgress({ current: 0, total, phase: 'chain' })
@@ -365,7 +369,7 @@ export function CollectionMintPanel({
       />
       <CommandCard label={`MINT // public · ${mintNetwork}`}>
       <div className="space-y-4">
-        <p className="font-mono text-xs text-[#9BA8B4]">
+        <p className="break-words font-mono text-xs leading-relaxed text-[#9BA8B4]">
           {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet/phase
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining

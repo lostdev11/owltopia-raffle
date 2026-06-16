@@ -7,6 +7,10 @@ export function creatorMetadataRefreshApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/metadata-refresh`
 }
 
+export function creatorRevealDayApiPath(launchId: string): string {
+  return `/api/owl-center/launches/${launchId}/reveal-day`
+}
+
 export function creatorHashListApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/hash-list`
 }

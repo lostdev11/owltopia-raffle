@@ -96,6 +96,14 @@
     display: none;
   }
 
+  /* Owl Center: prevent horizontal scroll bleed on mobile (long mono lines, phase rings, edge-bleed nav). */
+  body:has([data-owl-center-root]) {
+    overflow-x: clip;
+  }
+  body:has([data-owl-center-root]) main {
+    overflow-x: clip;
+  }
+
   body {
     @apply bg-background text-foreground;
     background-image: 

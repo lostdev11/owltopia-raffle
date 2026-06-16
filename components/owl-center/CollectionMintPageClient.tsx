@@ -98,7 +98,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
       </div>
 
       {canEditMintSettings ? (
-        <p className="mb-6 rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs text-[#9BA8B4]">
+        <p className="mb-6 break-words rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
           Per-wallet cap:{' '}
           <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max per phase</span>
           {' · '}
@@ -108,8 +108,8 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
         </p>
       ) : null}
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-8">
+      <div className="grid w-full min-w-0 max-w-full gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
+        <div className="min-w-0 space-y-8">
           <SupplyProgress minted={supply.minted} total={supply.total} />
           {presale_pool ? (
             <div className="space-y-4 border border-[#1A222B] bg-[#0F1419]/70 p-4">
@@ -164,7 +164,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
           ) : null}
         </div>
 
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <StatPanel label="Supply" value={`${supply.minted} / ${supply.total}`} />
           <StatPanel label="Remaining" value={String(supply.remaining)} />
           <StatPanel label="Per wallet" value={String(launch.wallet_mint_limit)} />

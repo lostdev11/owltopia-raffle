@@ -39,7 +39,16 @@ export function sugarConfigLineNameLength(configLines: SugarDeployConfigLine[]):
 /** Build Sugar config + cache items from a completed Phase B upload job. */
 export function buildSugarDeployPackageFromJob(
   job: OwlCenterAssetUploadJob,
-  launch: Pick<OwlCenterLaunchPublic, 'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'seller_fee_basis_points'>
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    | 'name'
+    | 'symbol'
+    | 'total_supply'
+    | 'creator_wallet'
+    | 'seller_fee_basis_points'
+    | 'reveal_mode'
+    | 'placeholder_metadata_uri'
+  >
 ): SugarDeployPackage {
   const uploaded = job.upload_progress.uploaded ?? {}
   const configLines: SugarDeployConfigLine[] = []
@@ -55,7 +64,15 @@ export function buildSugarDeployPackageFromJob(
   configLines.sort((a, b) => Number(a.name) - Number(b.name))
 
   const supply = configLines.length || launch.total_supply || 0
-  const collectionMetadataUri = uploaded['assets/collection.json']?.trim() || null
+  let collectionMetadataUri = uploaded['assets/collection.json']?.trim() || null
+
+  const placeholderUri = launch.placeholder_metadata_uri?.trim()
+  if (launch.reveal_mode === 'reveal_day' && placeholderUri) {
+    for (const line of configLines) {
+      line.uri = placeholderUri
+    }
+    collectionMetadataUri = placeholderUri
+  }
 
   const cacheItems: Record<string, unknown> = {}
   for (const line of configLines) {

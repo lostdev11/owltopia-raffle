@@ -6,7 +6,13 @@ import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
-import { buildGen2GuardMintPlan, ensureGen2AllowListProof, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
+import {
+  appendGen2AllowListRouteInstruction,
+  buildGen2GuardMintPlan,
+  isGen2MintablePhase,
+  resolveGen2AllowListRoutePlan,
+  type Gen2AllowListRoutePlan,
+} from '@/lib/solana/gen2-guards'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
@@ -21,6 +27,8 @@ const MINT_COMPUTE_UNIT_LIMIT = 800_000
 const SOLANA_MAX_COMPUTE_UNITS = 1_400_000
 /** Estimated CU per mintV2 ix when batching (actual use is often lower). */
 const ESTIMATED_COMPUTE_UNITS_PER_MINT = 380_000
+/** Extra CU when batching allowList `route` (proof) into the same tx as mint. */
+const ESTIMATED_COMPUTE_UNITS_ALLOWLIST_ROUTE = 100_000
 
 const CM_SOLD_OUT_SIMULATION_PATTERNS = [
   'candymachineempty',
@@ -89,6 +97,8 @@ export type MintGen2Params = {
   mintNetwork?: OwlMintNetwork
   /** When true, transfer Owltopia platform SOL fee to treasury in the same tx as each mint. */
   collectPlatformMintFee?: boolean
+  /** Skip live Jupiter quote when eligibility already returned a lamports estimate. */
+  platformFeeLamports?: bigint
   /** Called before each on-chain mint (1-indexed current, total quantity). */
   onMintProgress?: (current: number, total: number) => void
 }
@@ -129,8 +139,9 @@ function friendlyBlockhashExpiredError(): string {
 
 const MINT_TX_MAX_ATTEMPTS = 3
 
-function computeUnitsForBatch(quantity: number): number {
-  const estimated = 100_000 + quantity * ESTIMATED_COMPUTE_UNITS_PER_MINT
+function computeUnitsForBatch(quantity: number, includeAllowListRoute = false): number {
+  const routeExtra = includeAllowListRoute ? ESTIMATED_COMPUTE_UNITS_ALLOWLIST_ROUTE : 0
+  const estimated = routeExtra + 100_000 + quantity * ESTIMATED_COMPUTE_UNITS_PER_MINT
   return Math.min(SOLANA_MAX_COMPUTE_UNITS, Math.max(MINT_COMPUTE_UNIT_LIMIT, estimated))
 }
 
@@ -157,8 +168,8 @@ function friendlyTransactionTooLargeError(quantity: number): string {
  *
  * Guard-aware: fetches the candy guard, selects the guard group for the active phase
  * (`gen1` / `pre` / `wl` / `pub` — see `lib/solana/gen2-guards.ts`), builds `mintArgs`
- * (solPayment destination, mintLimit id, allowList merkle root) and sends the allowList
- * `route` proof instruction first when the phase is merkle-gated.
+ * (solPayment destination, mintLimit id, allowList merkle root) and batches the allowList
+ * `route` proof instruction into the same transaction as `mintV2` when needed.
  *
  * Required packages: see `lib/solana/umi.ts` / `candy-machine-v3.ts` header comments.
  *
@@ -174,6 +185,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     launch,
     mintNetwork,
     collectPlatformMintFee,
+    platformFeeLamports: platformFeeLamportsOverride,
     onMintProgress,
   } = params
   if (!walletAdapter.publicKey) {
@@ -244,16 +256,27 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     const candyMachine = publicKey(cmId)
     const collectionMintPk = publicKey(colMint)
     const collectionMetadata = findMetadataPda(umi, { mint: collectionMintPk })
-    const md = await withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_SOLANA_RPC_RETRY)
-    const collectionUpdateAuthority = md.updateAuthority
     const collectionMasterEdition = findMasterEditionPda(umi, { mint: collectionMintPk })
 
-    // Resolve guard group + mintArgs before asking the wallet for any signature.
-    const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_SOLANA_RPC_RETRY)
+    const [md, planRes, feeQuote] = await Promise.all([
+      withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_SOLANA_RPC_RETRY),
+      withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_SOLANA_RPC_RETRY),
+      collectPlatformMintFee
+        ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
+          ? Promise.resolve({
+              ok: true as const,
+              lamports: platformFeeLamportsOverride,
+              solUsdPrice: 0,
+            })
+          : resolveOwlCenterPlatformMintFeeLamports()
+        : Promise.resolve({ ok: true as const, lamports: 0n, solUsdPrice: 0 }),
+    ])
+
     if (!planRes.ok) {
       return { ok: false, error: planRes.error }
     }
     const plan = planRes.plan
+    const collectionUpdateAuthority = md.updateAuthority
 
     const cmRemaining = Number(plan.candyMachine.itemsLoaded) - Number(plan.candyMachine.itemsRedeemed)
     if (cmRemaining <= 0) {
@@ -264,44 +287,58 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    // Merkle-gated phase: create the allowList proof PDA once (route ix) before minting.
-    if (plan.allowListMerkleRoot && plan.candyGuard) {
-      const proofRes = await ensureGen2AllowListProof(umi, {
-        candyMachine,
-        candyGuard: plan.candyGuard.publicKey,
-        groupLabel: plan.groupLabel,
-        merkleRoot: plan.allowListMerkleRoot,
-        phase,
-      })
-      if (!proofRes.ok) {
-        return { ok: false, error: proofRes.error }
-      }
-    }
-
     const priorityFee = mintPriorityFeeMicroLamports()
 
     let platformFeeLamports = 0n
     if (collectPlatformMintFee) {
-      const feeQuote = await resolveOwlCenterPlatformMintFeeLamports()
       if (!feeQuote.ok) {
         return { ok: false, error: feeQuote.error }
       }
       platformFeeLamports = feeQuote.lamports
+    }
 
-      const walletB58 = walletAdapter.publicKey.toBase58()
-      const feeBal = await withSolanaRpcRetry(
-        () =>
-          assertOwlCenterPlatformMintFeeSolBalance(
-            walletB58,
-            network,
-            platformFeeLamports,
-            getLaunchSolanaRpcUrl(network),
-            quantity
-          ),
-        MINT_SOLANA_RPC_RETRY
+    let allowListRoutePlan: Gen2AllowListRoutePlan = { includeRoute: false }
+    const walletB58 = walletAdapter.publicKey.toBase58()
+    const prepTasks: Promise<unknown>[] = []
+
+    if (plan.allowListMerkleRoot && plan.candyGuard) {
+      prepTasks.push(
+        resolveGen2AllowListRoutePlan(umi, {
+          candyMachine,
+          candyGuard: plan.candyGuard.publicKey,
+          groupLabel: plan.groupLabel,
+          merkleRoot: plan.allowListMerkleRoot,
+          phase,
+        }).then((routeRes) => {
+          if (!routeRes.ok) throw new Error(routeRes.error)
+          allowListRoutePlan = routeRes.plan
+        })
       )
-      if (!feeBal.ok) {
-        return { ok: false, error: feeBal.error }
+    }
+
+    if (collectPlatformMintFee && platformFeeLamports > 0n) {
+      prepTasks.push(
+        withSolanaRpcRetry(
+          () =>
+            assertOwlCenterPlatformMintFeeSolBalance(
+              walletB58,
+              network,
+              platformFeeLamports,
+              getLaunchSolanaRpcUrl(network),
+              quantity
+            ),
+          MINT_SOLANA_RPC_RETRY
+        ).then((feeBal) => {
+          if (!feeBal.ok) throw new Error(feeBal.error)
+        })
+      )
+    }
+
+    if (prepTasks.length > 0) {
+      try {
+        await Promise.all(prepTasks)
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
     }
 
@@ -309,10 +346,19 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     onMintProgress?.(quantity, quantity)
 
     const buildBatchMintBuilder = () => {
-      const computeUnits = computeUnitsForBatch(quantity)
+      const computeUnits = computeUnitsForBatch(quantity, allowListRoutePlan.includeRoute)
       let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: computeUnits }))
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
+      }
+      if (allowListRoutePlan.includeRoute && plan.candyGuard) {
+        builder = appendGen2AllowListRouteInstruction(umi, builder, {
+          candyMachine,
+          candyGuard: plan.candyGuard.publicKey,
+          groupLabel: plan.groupLabel,
+          merkleRoot: allowListRoutePlan.merkleRoot,
+          merkleProof: allowListRoutePlan.merkleProof,
+        })
       }
       if (collectPlatformMintFee && platformFeeLamports > 0n) {
         const totalFee = platformFeeLamports * BigInt(quantity)

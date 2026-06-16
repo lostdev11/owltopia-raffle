@@ -55,7 +55,7 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
     <OwlCenterShell
       eyebrow="OWL_CENTER // CREATOR"
       title={launch?.name ?? 'Mint details'}
-      subtitle="Mint prices, phase schedule, metadata refresh, and post–sell-out Magic Eden / Tensor listing."
+      subtitle="Mint prices, phase schedule, Reveal Day blind mint, metadata refresh, and post–sell-out Magic Eden / Tensor listing."
     >
       <div className="mb-6">
         <Link href="/owl-center/my-launches">

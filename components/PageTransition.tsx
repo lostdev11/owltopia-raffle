@@ -7,7 +7,7 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
   return (
     <div
       key={pathname}
-      className="min-h-full max-md:animate-none md:animate-page-enter motion-reduce:animate-none"
+      className="min-h-full w-full min-w-0 max-w-full overflow-x-clip max-md:animate-none md:animate-page-enter motion-reduce:animate-none"
     >
       {children}
     </div>

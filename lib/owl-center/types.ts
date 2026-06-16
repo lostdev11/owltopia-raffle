@@ -25,6 +25,25 @@ export type OwlCenterStatus =
 /** gen2_full = Owltopia Gen2 phased mint; public_simple = PUBLIC-only partner/demo collections. */
 export type OwlCenterMintMode = 'gen2_full' | 'public_simple'
 
+/** standard = final art at mint; reveal_day = placeholder mint until scheduled bulk reveal. */
+export type OwlCenterRevealMode = 'standard' | 'reveal_day'
+
+export type OwlCenterRevealStatus =
+  | 'disabled'
+  | 'draft'
+  | 'scheduled'
+  | 'running'
+  | 'completed'
+  | 'failed'
+
+export type OwlCenterRevealProgress = {
+  last_run_at?: string
+  refreshed_count?: number
+  skipped_count?: number
+  error?: string
+  attempts?: number
+}
+
 export type OwlCenterLaunchPublic = {
   id: string
   slug: string
@@ -77,6 +96,14 @@ export type OwlCenterLaunchPublic = {
   generator_project_id: string | null
   /** Secondary sale royalty in basis points (500 = 5%). Locked after CM deploy. */
   seller_fee_basis_points: number
+  /** null | standard = revealed at mint; reveal_day = blind mint until reveal_at. */
+  reveal_mode: OwlCenterRevealMode | null
+  reveal_status: OwlCenterRevealStatus
+  reveal_at: string | null
+  reveal_completed_at: string | null
+  reveal_payment_tx_signature: string | null
+  placeholder_metadata_uri: string | null
+  reveal_progress: OwlCenterRevealProgress
 }
 
 export type SimpleMintEligibilityResponse = {

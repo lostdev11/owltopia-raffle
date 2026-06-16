@@ -6,11 +6,13 @@ import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigP
 import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
+import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import {
   creatorHashListApiPath,
   creatorMarketplaceApiPath,
   creatorMetadataRefreshApiPath,
   creatorMintConfigApiPath,
+  creatorRevealDayApiPath,
 } from '@/lib/owl-center/creator-api-paths'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -24,6 +26,8 @@ type Props = {
   saveApiPath?: string
   /** Creator metadata refresh GET/POST path; omit for admin default. */
   metadataApiPath?: string
+  /** Creator reveal day GET/POST path; omit for admin default. */
+  revealDayApiPath?: string
   showMintConfig?: boolean
   showMarketplace?: boolean
   showPresaleOverage?: boolean
@@ -44,6 +48,7 @@ export function CollectionLaunchOpsCard({
   onSaved,
   saveApiPath,
   metadataApiPath,
+  revealDayApiPath,
   showMintConfig = true,
   showMarketplace = true,
   showPresaleOverage = false,
@@ -68,6 +73,14 @@ export function CollectionLaunchOpsCard({
           onSaved={onSaved}
         />
       ) : null}
+
+      <RevealDayPanel
+        embedded
+        launchId={launchId}
+        launch={launch}
+        anchorId="reveal-day"
+        apiPath={revealDayApiPath}
+      />
 
       {launch.minted_count > 0 ? (
         <MetadataRefreshPanel
@@ -112,6 +125,7 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     launch,
     saveApiPath: creatorMintConfigApiPath(launchId),
     metadataApiPath: creatorMetadataRefreshApiPath(launchId),
+    revealDayApiPath: creatorRevealDayApiPath(launchId),
     marketplaceApiPath: creatorMarketplaceApiPath(launchId),
     hashListApiPath: creatorHashListApiPath(launchId),
     marketplaceCreatorMode: true,

@@ -19,7 +19,7 @@ export function OwlCenterShell({
   return (
     <div
       className={cn(
-        'min-h-[100dvh] w-full min-w-0 bg-[#0F1419] text-[#E8EEF2]',
+        'min-h-[100dvh] w-full min-w-0 max-w-full overflow-x-clip bg-[#0F1419] text-[#E8EEF2]',
         'bg-[radial-gradient(ellipse_at_top,rgba(29,255,178,0.06),transparent_55%)]',
         className
       )}

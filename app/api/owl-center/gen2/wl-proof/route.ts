@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic'
  *
  * Operators: call without `wallet` to get the canonical `merkle_root` (base58) for
  * `sugar guard` / candy guard config. Minters: the client calls with `wallet` to build
- * the allowList `route` (proof) instruction before `mintV2`.
+ * the allowList `route` (proof) instruction in the same transaction as `mintV2`.
  */
 
 type AllowlistSource = 'WHITELIST' | 'PRESALE' | 'AIRDROP'
