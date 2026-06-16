@@ -8,7 +8,15 @@
 const DEFAULT_UA = 'OwltopiaImageBot/1.0 (+https://owltopia.xyz)'
 
 const DEFAULT_TIMEOUT_MS = 18_000
+/** Proxy-image gateway races can take ~14s; match promo PNG headroom. */
+const PROXY_ROUTE_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_BYTES = 1_500_000
+
+function timeoutForOgFetchUrl(url: string, override?: number): number {
+  if (override != null) return override
+  if (url.includes('/api/proxy-image')) return PROXY_ROUTE_TIMEOUT_MS
+  return DEFAULT_TIMEOUT_MS
+}
 
 function isSvg(mime: string, url: string) {
   if (mime === 'image/svg+xml') return true
@@ -43,14 +51,14 @@ function sniffImageMimeFromBuffer(buf: ArrayBuffer): string | null {
  */
 export async function fetchImageDataUrlForOg(
   url: string,
-  { timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES } = {}
+  { timeoutMs, maxBytes = DEFAULT_MAX_BYTES }: { timeoutMs?: number; maxBytes?: number } = {}
 ): Promise<string | null> {
   const s = url.trim()
   if (!s.startsWith('https://') && !s.startsWith('http://')) return null
   if (isSvg('', s)) return null
 
   const ac = new AbortController()
-  const t = setTimeout(() => ac.abort(), timeoutMs)
+  const t = setTimeout(() => ac.abort(), timeoutForOgFetchUrl(s, timeoutMs))
   try {
     const res = await fetch(s, {
       signal: ac.signal,

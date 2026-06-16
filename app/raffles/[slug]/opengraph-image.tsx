@@ -5,11 +5,12 @@ import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
-import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
-import { absolutizeForOg } from '@/lib/og/server-og-asset-url'
+import { buildOgArtFetchAttemptChain } from '@/lib/og/build-og-art-fetch-urls'
+import { fetchRaffleArtDataUrlForOg } from '@/lib/og/fetch-raffle-art-for-og'
+import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
 import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-preview'
 import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
-import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
+import { absolutizeForOg } from '@/lib/og/server-og-asset-url'
 import { getPartnerPrizeListingImageUrl, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import { urlChainIncludesSolanaMark } from '@/lib/promo-png-art-draw'
@@ -124,27 +125,22 @@ export default async function Image({ params }: { params: Promise<{ slug: string
       year: 'numeric',
     })
 
-    const absolutized: string[] = []
-    for (const u of buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url)) {
-      const abs = absolutizeForOg(u, site)
-      if (abs && (absolutized.length === 0 || absolutized[absolutized.length - 1] !== abs)) {
-        absolutized.push(abs)
-      }
-    }
-    if (absolutized.length === 0 && isPartnerSplPrizeRaffle(raffle)) {
+    const ogFetchUrls = buildOgArtFetchAttemptChain(site, raffle.image_url, raffle.image_fallback_url)
+    if (ogFetchUrls.length === 0 && isPartnerSplPrizeRaffle(raffle)) {
       const rel = getPartnerPrizeListingImageUrl(raffle.prize_currency)
       const abs = absolutizeForOg(rel, site)
-      if (abs) absolutized.push(abs)
+      if (abs) ogFetchUrls.push(abs)
     }
 
     const line1 = `Ticket: ${formatRaffleTicketPriceSummary(raffle)}`
     const line2 = `Ends ${endStr}`
-    const insetBrandArt = urlChainIncludesSolanaMark(absolutized)
+    const insetBrandArt = urlChainIncludesSolanaMark(ogFetchUrls)
 
-    let artData: string | null = null
-    for (const abs of absolutized) {
-      artData = await fetchImageDataUrlForOg(abs)
-      if (artData) break
+    let artData = await fetchRaffleArtDataUrlForOg(raffle, site)
+    if (!artData && isPartnerSplPrizeRaffle(raffle)) {
+      const rel = getPartnerPrizeListingImageUrl(raffle.prize_currency)
+      const abs = absolutizeForOg(rel, site)
+      if (abs) artData = await fetchImageDataUrlForOg(abs)
     }
     const ogOpts = await getOwltopiaOgResponseOptions()
 
