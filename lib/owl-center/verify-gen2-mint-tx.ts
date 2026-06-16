@@ -13,6 +13,7 @@ import {
 } from '@/lib/solana/owl-center-platform-mint-fee'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { resolveOwlCenterMintVerifyRpcUrl, type OwlMintNetwork } from '@/lib/solana/network'
+import { pollTransactionSignatureStatus } from '@/lib/solana/recover-candy-machine-mint'
 
 export type VerifyGen2MintTxResult =
   | { ok: true }
@@ -37,8 +38,17 @@ export async function verifyGen2MintTransaction(params: {
   mintQuantity?: number
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'
-  const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(net), 'confirmed')
-  const parsed = await fetchParsedTransactionWithPoll(connection, params.txSignature)
+  const rpcUrl = resolveOwlCenterMintVerifyRpcUrl(net)
+  const connection = new Connection(rpcUrl, 'confirmed')
+  await pollTransactionSignatureStatus(rpcUrl, params.txSignature, {
+    maxWaitMs: 5000,
+    intervalMs: 200,
+    minCommitment: 'processed',
+  })
+  const parsed = await fetchParsedTransactionWithPoll(connection, params.txSignature, {
+    maxWaitMs: 3000,
+    intervalMs: 200,
+  })
   if (!parsed) return { ok: false, reason: 'not_found' }
   if (parsed.meta?.err) return { ok: false, reason: 'failed' }
 

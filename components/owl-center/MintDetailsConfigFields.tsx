@@ -1,17 +1,44 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
 import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
+import { defaultWalletSplitFormRows } from '@/lib/owl-center/wallet-splits'
+import { WalletSplitEditor } from '@/components/owl-center/WalletSplitEditor'
 
 type Props = {
   values: MintDetailsFormValues
   onChange: (next: MintDetailsFormValues) => void
   compact?: boolean
+  /** Prefills split rows when empty (e.g. creator wallet from step 1). */
+  defaultWallet?: string
   /** When true, royalty cannot be changed (Candy Machine already deployed). */
   royaltiesLocked?: boolean
 }
 
-export function MintDetailsConfigFields({ values, onChange, compact, royaltiesLocked = false }: Props) {
+export function MintDetailsConfigFields({
+  values,
+  onChange,
+  compact,
+  defaultWallet = '',
+  royaltiesLocked = false,
+}: Props) {
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
+  useEffect(() => {
+    if (!defaultWallet.trim()) return
+    const wallet = defaultWallet.trim()
+    const royaltyEmpty = values.royalty_splits.every((row) => !row.address.trim())
+    const mintFundEmpty = values.mint_fund_splits.every((row) => !row.address.trim())
+    if (!royaltyEmpty && !mintFundEmpty) return
+    onChange({
+      ...values,
+      royalty_splits: royaltyEmpty ? defaultWalletSplitFormRows(wallet) : values.royalty_splits,
+      mint_fund_splits: mintFundEmpty ? defaultWalletSplitFormRows(wallet) : values.mint_fund_splits,
+    })
+  }, [defaultWallet]) // eslint-disable-line react-hooks/exhaustive-deps -- only prefill when creator wallet appears
+
   const set = <K extends keyof MintDetailsFormValues>(key: K, v: MintDetailsFormValues[K]) =>
     onChange({ ...values, [key]: v })
 
@@ -49,6 +76,22 @@ export function MintDetailsConfigFields({ values, onChange, compact, royaltiesLo
             : 'Choose before deploy (default 5%). Baked into the Candy Machine and every NFT minted from it. Cannot be changed after deploy.'}
         </p>
       </div>
+
+      <WalletSplitEditor
+        title="Secondary Royalty Split"
+        hint="Who receives your secondary royalty % on marketplace sales. Shares must total 100%."
+        rows={values.royalty_splits}
+        onChange={(royalty_splits) => set('royalty_splits', royalty_splits)}
+        disabled={royaltiesLocked}
+      />
+
+      <WalletSplitEditor
+        title="Mint funds Split"
+        hint="Where primary mint proceeds go (before the Owltopia platform fee). Shares must total 100%."
+        rows={values.mint_fund_splits}
+        onChange={(mint_fund_splits) => set('mint_fund_splits', mint_fund_splits)}
+        disabled={royaltiesLocked}
+      />
 
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
@@ -116,6 +159,20 @@ export function MintDetailsConfigFields({ values, onChange, compact, royaltiesLo
 
       <p className="font-mono text-[10px] text-[#5C6773]">{formatOwlCenterPlatformMintFeeLabel()} applies on top of creator price.</p>
 
+      <label className="flex min-h-[44px] touch-manipulation items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+        <span>Show Advanced</span>
+        <input
+          type="checkbox"
+          checked={showAdvanced}
+          onChange={(e) => setShowAdvanced(e.target.checked)}
+          className="h-5 w-9 shrink-0 appearance-none rounded-full border border-[#2A343F] bg-[#0F1419] transition checked:border-[#00FF9C]/50 checked:bg-[#00FF9C]/20"
+          role="switch"
+          aria-checked={showAdvanced}
+        />
+      </label>
+
+      {showAdvanced ? (
+        <>
       <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         <input
           type="checkbox"
@@ -208,27 +265,10 @@ export function MintDetailsConfigFields({ values, onChange, compact, royaltiesLo
           </label>
         </div>
       ) : null}
+        </>
+      ) : null}
     </div>
   )
 }
 
-export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormValues>): MintDetailsFormValues {
-  return {
-    total_supply: '1000',
-    public_price: '1',
-    wl_price: '',
-    currency: 'SOL',
-    wallet_mint_limit: '5',
-    launch_date: '',
-    public_start: '',
-    presale_enabled: false,
-    presale_supply: '',
-    presale_overage_supply: '13',
-    presale_start: '',
-    wl_enabled: false,
-    wl_supply: '',
-    wl_start: '',
-    royalty_percent: '5',
-    ...partial,
-  }
-}
+export { defaultMintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'

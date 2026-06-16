@@ -50,12 +50,6 @@ export async function POST(request: NextRequest) {
   const name = typeof body.collection_name === 'string' ? body.collection_name.trim() : ''
   const symbol = typeof body.symbol === 'string' ? body.symbol.trim() : ''
   const description = typeof body.description === 'string' ? body.description.slice(0, 4000) : null
-  let treasury: string | null = null
-  if (typeof body.treasury_wallet === 'string' && body.treasury_wallet.trim()) {
-    const t = normalizeSolanaWalletAddress(body.treasury_wallet.trim())
-    if (!t) return jsonError('Invalid treasury wallet', 400)
-    treasury = t
-  }
 
   const supply = Number(body.total_supply)
 
@@ -67,6 +61,10 @@ export async function POST(request: NextRequest) {
 
   const mintConfig = parseMintDetailsConfig({ ...body, total_supply: supply })
   if ('error' in mintConfig) return jsonError(mintConfig.error, 400)
+
+  const royaltySplits = mintConfig.royalty_splits ?? [{ address: creator, share: 100 }]
+  const mintFundSplits = mintConfig.mint_fund_splits ?? [{ address: creator, share: 100 }]
+  const treasury = mintConfig.treasury_wallet ?? creator
 
   const logoUrl = typeof body.logo_url === 'string' ? body.logo_url.trim().slice(0, 2000) : null
   const bannerUrl = typeof body.banner_url === 'string' ? body.banner_url.trim().slice(0, 2000) : null
@@ -113,6 +111,8 @@ export async function POST(request: NextRequest) {
       image_url: imageUrl,
       creator_wallet: creator,
       treasury_wallet: treasury,
+      royalty_splits: royaltySplits,
+      mint_fund_splits: mintFundSplits,
       mint_standard: 'token_metadata',
       total_supply: mintConfig.total_supply,
       minted_count: 0,

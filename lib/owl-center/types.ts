@@ -1,6 +1,7 @@
 import type { Gen2ClusterPresaleSummary } from '@/lib/gen2-presale/cluster-balance'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { PresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import type { WalletSplit } from '@/lib/owl-center/wallet-splits'
 
 export type { Gen2ClusterPresaleSummary }
 
@@ -84,6 +85,10 @@ export type OwlCenterLaunchPublic = {
   assets_ready: boolean
   marketplace_ready: boolean
   treasury_wallet: string | null
+  /** Secondary royalty recipients (share % must sum to 100). Locked after CM deploy. */
+  royalty_splits: WalletSplit[] | null
+  /** Mint proceeds recipients (share % must sum to 100). */
+  mint_fund_splits: WalletSplit[] | null
   creator_presale_enabled: boolean
   creator_wl_enabled: boolean
   creator_mint_price: number | null

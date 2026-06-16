@@ -70,6 +70,7 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       <MintDetailsConfigFields
         values={{ ...values, total_supply: String(launch.total_supply) }}
         onChange={(next) => setValues({ ...next, total_supply: String(launch.total_supply) })}
+        defaultWallet={launch.creator_wallet?.trim() ?? ''}
         royaltiesLocked={isLaunchRoyaltyLocked(launch)}
       />
       <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">

@@ -44,15 +44,16 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Poll until a submitted signature reaches confirmed/finalized (no re-sign). */
-export async function pollTransactionSignatureConfirmed(
+/** Poll until a submitted signature reaches the requested commitment (no re-sign). */
+export async function pollTransactionSignatureStatus(
   rpcUrl: string,
   signature: string,
-  options?: { maxWaitMs?: number; intervalMs?: number }
+  options?: { maxWaitMs?: number; intervalMs?: number; minCommitment?: 'processed' | 'confirmed' }
 ): Promise<boolean> {
   const conn = new Connection(rpcUrl, 'confirmed')
-  const maxWaitMs = Math.max(5000, options?.maxWaitMs ?? 55000)
-  const intervalMs = Math.max(800, options?.intervalMs ?? 2000)
+  const maxWaitMs = Math.max(2000, options?.maxWaitMs ?? 12000)
+  const intervalMs = Math.max(200, options?.intervalMs ?? 350)
+  const minCommitment = options?.minCommitment ?? 'confirmed'
   const start = Date.now()
 
   while (Date.now() - start < maxWaitMs) {
@@ -60,10 +61,10 @@ export async function pollTransactionSignatureConfirmed(
       const res = await conn.getSignatureStatuses([signature])
       const status = res?.value?.[0]
       if (status?.err) return false
-      if (
-        status?.confirmationStatus === 'confirmed' ||
-        status?.confirmationStatus === 'finalized'
-      ) {
+      const level = status?.confirmationStatus
+      if (minCommitment === 'processed') {
+        if (level === 'processed' || level === 'confirmed' || level === 'finalized') return true
+      } else if (level === 'confirmed' || level === 'finalized') {
         return true
       }
     } catch {
@@ -72,6 +73,18 @@ export async function pollTransactionSignatureConfirmed(
     await sleep(intervalMs)
   }
   return false
+}
+
+/** @deprecated Use pollTransactionSignatureStatus */
+export async function pollTransactionSignatureConfirmed(
+  rpcUrl: string,
+  signature: string,
+  options?: { maxWaitMs?: number; intervalMs?: number }
+): Promise<boolean> {
+  return pollTransactionSignatureStatus(rpcUrl, signature, {
+    ...options,
+    minCommitment: 'confirmed',
+  })
 }
 
 /** Poll for mint accounts we generated before send — they exist only after a successful mintV2. */
@@ -222,7 +235,7 @@ export async function recoverCandyMachineMintFromPlannedSigners(params: {
   lastError?: unknown
 }): Promise<RecoveredCandyMachineMint | null> {
   const planned = params.nftMints.map((m) => String(m.publicKey))
-  let mintedNftMints = await detectPlannedMintAccounts(params.rpcUrl, planned)
+  let mintedNftMints = await detectPlannedMintAccounts(params.rpcUrl, planned, { attempts: 5, delayMs: 500 })
   const sigFromError = extractTxSignatureFromUnknownError(params.lastError)
 
   let txSignature =
@@ -238,8 +251,8 @@ export async function recoverCandyMachineMintFromPlannedSigners(params: {
 
   if (mintedNftMints.length === 0 && !txSignature) {
     mintedNftMints = await detectPlannedMintAccounts(params.rpcUrl, planned, {
-      attempts: 6,
-      delayMs: 2000,
+      attempts: 4,
+      delayMs: 600,
     })
   }
 
@@ -256,8 +269,8 @@ export async function recoverCandyMachineMintFromPlannedSigners(params: {
 
   if (txSignature && mintedNftMints.length === 0) {
     mintedNftMints = await detectPlannedMintAccounts(params.rpcUrl, planned, {
-      attempts: 6,
-      delayMs: 2000,
+      attempts: 4,
+      delayMs: 600,
     })
   }
 

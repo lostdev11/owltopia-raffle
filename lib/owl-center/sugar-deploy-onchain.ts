@@ -26,6 +26,7 @@ import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
 
 import { publicSimpleCandyGuardGuards } from '@/lib/owl-center/sugar-public-simple-guards'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
+import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import {
   sugarConfigLineNameLength,
   sugarConfigLinePrefixName,
@@ -43,7 +44,7 @@ export const OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY = 250
 export type OnchainSugarDeployInput = {
   launch: Pick<
     OwlCenterLaunchPublic,
-    'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'mint_mode' | 'mint_network' | 'seller_fee_basis_points'
+    'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'royalty_splits' | 'mint_mode' | 'mint_network' | 'seller_fee_basis_points'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -133,6 +134,14 @@ export async function deployPublicSimpleCandyMachineOnchain(
     creatorAddress = publicKey(creatorCheck.pubkey)
   }
 
+  const metaplexCreators = walletSplitsToMetaplexCreators(launch.royalty_splits, String(creatorAddress)).map(
+    (row) => ({
+      address: publicKey(row.address),
+      share: row.share,
+      verified: false,
+    })
+  )
+
   const candyMachine = generateSigner(umi)
   const collectionMint = generateSigner(umi)
   const guardBase = generateSigner(umi)
@@ -146,7 +155,7 @@ export async function deployPublicSimpleCandyMachineOnchain(
       symbol: (launch.symbol ?? 'COL').slice(0, 10),
       isCollection: true,
       collectionDetails: collectionDetails('V1', { size: supply }),
-      creators: [{ address: creatorAddress, share: 100, verified: false }],
+      creators: metaplexCreators,
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 
     const createCm = await createCandyMachineV2(umi, {
@@ -159,7 +168,11 @@ export async function deployPublicSimpleCandyMachineOnchain(
       sellerFeeBasisPoints: percentAmount(royaltyPercent),
       maxEditionSupply: 0,
       isMutable: true,
-      creators: [{ address: creatorAddress, percentageShare: 100, verified: false }],
+      creators: metaplexCreators.map((row) => ({
+        address: row.address,
+        percentageShare: row.share,
+        verified: row.verified,
+      })),
       configLineSettings: some({
         prefixName: sugarConfigLinePrefixName(collectionName, maxNameLength(configLines)),
         nameLength: maxNameLength(configLines),

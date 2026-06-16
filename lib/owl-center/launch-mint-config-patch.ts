@@ -1,5 +1,6 @@
 import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
+import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import type { updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 
@@ -25,6 +26,9 @@ export const MINT_CONFIG_BODY_KEYS = new Set([
   'phase_schedule',
   'royalty_percent',
   'seller_fee_basis_points',
+  'royalty_splits',
+  'mint_fund_splits',
+  'treasury_wallet',
 ])
 
 export function bodyHasMintConfigFields(body: Record<string, unknown>): boolean {
@@ -55,7 +59,26 @@ export function buildMintDetailsPatchFromBody(
     }
   }
 
-  return {
+  if (isLaunchRoyaltyLocked(launch)) {
+    const royaltySplits = parseWalletSplitsFromBody(body, 'royalty_splits', 'Secondary royalty split')
+    if (royaltySplits && 'error' in royaltySplits) return royaltySplits
+    if (royaltySplits && !walletSplitsEqual(royaltySplits, launch.royalty_splits)) {
+      return {
+        error:
+          'Secondary royalty split is locked after Candy Machine deploy. Recipient wallets are baked into the Candy Machine at deploy.',
+      }
+    }
+
+    const mintFundSplits = parseWalletSplitsFromBody(body, 'mint_fund_splits', 'Mint funds split')
+    if (mintFundSplits && 'error' in mintFundSplits) return mintFundSplits
+    if (mintFundSplits && !walletSplitsEqual(mintFundSplits, launch.mint_fund_splits)) {
+      return {
+        error: 'Mint funds split is locked after Candy Machine deploy.',
+      }
+    }
+  }
+
+  const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {
     total_supply: parsed.total_supply,
     presale_supply: parsed.presale_supply,
     wl_supply: parsed.wl_supply,
@@ -74,4 +97,14 @@ export function buildMintDetailsPatchFromBody(
     creator_launch_date: parsed.launch_deadline_at,
     seller_fee_basis_points: parsed.seller_fee_basis_points,
   }
+
+  if (body.royalty_splits !== undefined) {
+    patch.royalty_splits = parsed.royalty_splits
+  }
+  if (body.mint_fund_splits !== undefined || body.treasury_wallet !== undefined) {
+    patch.mint_fund_splits = parsed.mint_fund_splits
+    patch.treasury_wallet = parsed.treasury_wallet
+  }
+
+  return patch
 }

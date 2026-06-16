@@ -67,9 +67,9 @@ export function mintProgressSubtext(
 
   if (progress?.phase === 'chain') {
     if (progress.total > 1) {
-      return 'One wallet approval mints all NFTs in a single transaction. Keep this tab open until success.'
+      return 'One wallet approval mints all NFTs in one transaction. Finishes within 30 seconds after you approve.'
     }
-    return 'Approve once in Phantom or Solflare. Keep this tab open until your mint succeeds.'
+    return 'Approve once in Phantom or Solflare. The site finishes within 30 seconds after you approve.'
   }
 
   if (step === 'confirming_transaction' || step === 'sending_transaction') {

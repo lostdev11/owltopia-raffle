@@ -4,6 +4,7 @@ import type { AssetUploadProgress } from '@/lib/owl-center/asset-upload-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { publicSimpleSugarGuardsConfig } from '@/lib/owl-center/sugar-public-simple-guards'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
+import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 export type SugarDeployConfigLine = { name: string; uri: string }
@@ -45,6 +46,7 @@ export function buildSugarDeployPackageFromJob(
     | 'symbol'
     | 'total_supply'
     | 'creator_wallet'
+    | 'royalty_splits'
     | 'seller_fee_basis_points'
     | 'reveal_mode'
     | 'placeholder_metadata_uri'
@@ -95,6 +97,7 @@ export function buildSugarDeployPackageFromJob(
 
   const creator = launch.creator_wallet?.trim() || 'REPLACE_WITH_DEPLOYER_WALLET'
   const sellerFeeBasisPoints = launchSellerFeeBasisPoints(launch)
+  const metaplexCreators = walletSplitsToMetaplexCreators(launch.royalty_splits, creator)
 
   const nameLength = sugarConfigLineNameLength(configLines)
   const prefixName = sugarConfigLinePrefixName(launch.name ?? 'Collection', nameLength)
@@ -107,7 +110,7 @@ export function buildSugarDeployPackageFromJob(
     sellerFeeBasisPoints,
     isMutable: true,
     isSequential: false,
-    creators: [{ address: creator, share: 100 }],
+    creators: metaplexCreators,
     uploadMethod: 'bundlr',
     ruleSet: null,
     awsConfig: null,

@@ -104,7 +104,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     ? body.mintedNftMints.filter((x): x is string => typeof x === 'string' && x.length > 0)
     : []
 
-  const eligibilityPre = await buildSimpleMintEligibility(slug, wallet)
+  const eligibilityPre = await buildSimpleMintEligibility(slug, wallet, { skipChainReconcile: true })
   if (!eligibilityPre) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   if (eligibilityPre.active_phase !== phase) {
     return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   const [eligibility, launchPublic] = await Promise.all([
-    buildSimpleMintEligibility(slug, wallet),
+    buildSimpleMintEligibility(slug, wallet, { skipChainReconcile: true }),
     getOwlCenterLaunchBySlug(slug),
   ])
 

@@ -26,6 +26,7 @@ import {
   formatTotalMintCostHint,
 } from '@/lib/owl-center/platform-mint-fee'
 import { formatRoyaltyPercentLabel, percentToBasisPoints } from '@/lib/owl-center/royalty'
+import { formatWalletSplitsSummary, walletSplitPayloadFromForm } from '@/lib/owl-center/wallet-splits'
 
 const STEPS = ['Collection info', 'Supply & mint', 'Assets & metadata', 'Review'] as const
 
@@ -44,7 +45,6 @@ export function LaunchSubmissionWizard() {
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
   const [creatorWallet, setCreatorWallet] = useState('')
-  const [treasuryWallet, setTreasuryWallet] = useState('')
 
   const [totalSupply, setTotalSupply] = useState('1000')
   const [mintDetails, setMintDetails] = useState(() => defaultMintDetailsFormValues())
@@ -95,7 +95,6 @@ export function LaunchSubmissionWizard() {
         symbol: symbol.trim(),
         description: description.trim() || null,
         creator_wallet: creatorWallet.trim(),
-        treasury_wallet: treasuryWallet.trim() || null,
         ...mintDetailsPayloadFromForm({ ...mintDetails, total_supply: totalSupply }),
         logo_url: assets.logo_url.trim() || null,
         banner_url: assets.banner_url.trim() || null,
@@ -196,14 +195,9 @@ export function LaunchSubmissionWizard() {
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
                 />
               </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Treasury wallet
-                <input
-                  value={treasuryWallet}
-                  onChange={(e) => setTreasuryWallet(e.target.value)}
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
-                />
-              </label>
+              <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+                Royalty and mint fund splits are configured in the next step. Default is 100% to this wallet.
+              </p>
             </div>
           </CommandCard>
         ) : null}
@@ -227,6 +221,7 @@ export function LaunchSubmissionWizard() {
               </label>
               <MintDetailsConfigFields
                 values={{ ...mintDetails, total_supply: totalSupply }}
+                defaultWallet={creatorWallet.trim()}
                 onChange={(next) => {
                   setMintDetails(next)
                   setTotalSupply(next.total_supply)
@@ -267,6 +262,14 @@ export function LaunchSubmissionWizard() {
               <li>
                 <span className="text-[#5C6773]">Secondary royalty</span>{' '}
                 {formatRoyaltyPercentLabel(percentToBasisPoints(Number(mintDetails.royalty_percent) || 5))}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">Royalty split</span>{' '}
+                {formatWalletSplitsSummary(walletSplitPayloadFromForm(mintDetails.royalty_splits) ?? null)}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">Mint funds split</span>{' '}
+                {formatWalletSplitsSummary(walletSplitPayloadFromForm(mintDetails.mint_fund_splits) ?? null)}
               </li>
               <li>
                 <span className="text-[#5C6773]">Platform fee</span> {formatOwlCenterPlatformMintFeeLabel()}

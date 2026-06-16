@@ -14,7 +14,13 @@ import {
   owlCenterMintWrongPhaseHint,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
-import { recordMintSessionConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
+import {
+  createMintSessionDeadline,
+  MINT_SESSION_MAX_MS,
+  MintSessionTimeoutError,
+  raceMintSessionBudget,
+} from '@/lib/owl-center/mint-time-budget'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -175,24 +181,27 @@ export function Gen2MintPanel({
     }
 
     const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
-    let confirmedCount = 0
-    let confirmedLastSig: string | null = null
-    let confirmedMintAddresses: string[] = []
+    const sessionDeadline = createMintSessionDeadline()
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
-      const minted = await mintGen2FromCandyMachine({
-        walletAdapter: adapter,
-        candyMachineId: getGen2CandyMachineId(launch),
-        collectionMint: getGen2CollectionMint(launch),
-        quantity: n,
-        phase,
-        launch,
-        onMintProgress: (_current, total) => {
-          setStep('awaiting_signature')
-          setMintProgress({ current: 0, total, phase: 'chain' })
-        },
-      })
+      const minted = await raceMintSessionBudget(
+        sessionDeadline,
+        mintGen2FromCandyMachine({
+          walletAdapter: adapter,
+          candyMachineId: getGen2CandyMachineId(launch),
+          collectionMint: getGen2CollectionMint(launch),
+          quantity: n,
+          phase,
+          launch,
+          sessionDeadline,
+          onMintProgress: (_current, total) => {
+            setStep('awaiting_signature')
+            setMintProgress({ current: 0, total, phase: 'chain' })
+          },
+        }),
+        'Mint timed out after 30 seconds — check Collectibles in your wallet, then refresh.'
+      )
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
       const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
@@ -200,12 +209,10 @@ export function Gen2MintPanel({
         throw new Error(minted.error || 'mint_failed')
       }
 
-      setStep('recording_mint')
-      setMintProgress({ current: 0, total: 1, phase: 'record' })
-      const recorded = await recordMintSessionConfirms(
-        sigs,
-        mintPks,
-        async ({ txSignature, quantity, mintedNftMints }) => {
+      finalizeMintSessionOptimistic({
+        minted,
+        requestedQuantity: n,
+        confirmBatch: async ({ txSignature, quantity, mintedNftMints }) => {
           const conf = await fetch('/api/owl-center/gen2/confirm-mint', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -223,47 +230,26 @@ export function Gen2MintPanel({
             throw new Error(cj.error || 'Confirm route failed')
           }
         },
-        () => {
-          confirmedCount = mintPks.length
-          confirmedMintAddresses = mintPks
-          setMintedCount(mintPks.length)
-          setMintProgress({ current: 1, total: 1, phase: 'record' })
-        }
-      )
-      confirmedLastSig = recorded.lastSig
-      confirmedMintAddresses = mintPks
-
-      const outcome = resolveMintSessionOutcome(minted, n)
-      if ('error' in outcome) {
-        throw new Error(outcome.error)
-      }
-      setLastSig(outcome.lastSig)
-      setMintedAddresses(outcome.mintedAddresses)
-      setMintedCount(outcome.mintedCount)
-      setSuccessWarning(outcome.warning)
-      setMintProgress(null)
-      setStep('success')
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
+          setLastSig(lastSig)
+          setMintedAddresses(mintedAddresses)
+          setMintedCount(mintedCount)
+          setSuccessWarning(warning)
+          setMintProgress(null)
+          setStep('success')
+        },
+        onRecordWarning: (message) => {
+          setSuccessWarning((prev) => prev ?? message)
+        },
+      })
       onRefresh()
       void loadElig()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const low = msg.toLowerCase()
-      if (confirmedCount > 0 && confirmedLastSig) {
-        setLastSig(confirmedLastSig)
-        setMintedAddresses(confirmedMintAddresses)
-        setMintedCount(confirmedCount)
-        setSuccessWarning(
-          low.includes('confirm')
-            ? `${msg} — your NFT${confirmedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
-            : msg
-        )
-        setMintProgress(null)
-        setStep('success')
-        onRefresh()
-        void loadElig()
-        return
-      }
-      if (low.includes('user rejected') || low.includes('cancel')) {
+      if (e instanceof MintSessionTimeoutError || low.includes('timed out')) {
+        setErr('Mint timed out — if you approved in your wallet, check Collectibles. Otherwise tap Mint again.')
+      } else if (low.includes('user rejected') || low.includes('cancel')) {
         setErr('Mint transaction rejected in wallet')
       } else if (low.includes('confirm route failed') || low.includes('confirm_failed')) {
         setErr('Transaction succeeded but database record failed — copy your signature from the wallet and contact support.')

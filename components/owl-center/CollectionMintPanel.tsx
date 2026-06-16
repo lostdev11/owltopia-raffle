@@ -12,7 +12,14 @@ import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
-import { recordMintSessionConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
+import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
+import {
+  createMintSessionDeadline,
+  MINT_SESSION_MAX_MS,
+  MintSessionTimeoutError,
+  raceMintSessionBudget,
+} from '@/lib/owl-center/mint-time-budget'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { collectionMintDisabledHint } from '@/lib/owl-center/mint-button-hint'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
@@ -201,6 +208,16 @@ export function CollectionMintPanel({
     [walletStr, candyMachineId, mintNetwork, finalizeRecoveredMint]
   )
 
+  useEffect(() => {
+    if (!isMintInProgress(step)) return
+    const timer = window.setTimeout(() => {
+      if (walletStr && candyMachineId) {
+        void checkWalletForMint({ silent: true })
+      }
+    }, MINT_SESSION_MAX_MS)
+    return () => window.clearTimeout(timer)
+  }, [step, walletStr, candyMachineId, checkWalletForMint])
+
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
@@ -225,34 +242,37 @@ export function CollectionMintPanel({
     }
 
     const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
-    let confirmedCount = 0
-    let confirmedLastSig: string | null = null
-    let confirmedMintAddresses: string[] = []
+    const sessionDeadline = createMintSessionDeadline()
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
-      const minted = await mintGen2FromCandyMachine({
-        walletAdapter: adapter,
-        candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
-        collectionMint: getLaunchCollectionMint(launch, mintNetwork),
-        quantity: n,
-        phase: 'PUBLIC',
-        launch,
-        mintNetwork,
-        collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
-        platformFeeLamports:
-          elig?.platform_mint_fee_lamports_estimate != null
-            ? BigInt(elig.platform_mint_fee_lamports_estimate)
-            : undefined,
-        prefetchedWalletBalanceLamports:
-          elig?.wallet_sol_balance_lamports != null
-            ? BigInt(elig.wallet_sol_balance_lamports)
-            : undefined,
-        onMintProgress: (_current, total) => {
-          setStep('awaiting_signature')
-          setMintProgress({ current: 0, total, phase: 'chain' })
-        },
-      })
+      const minted = await raceMintSessionBudget(
+        sessionDeadline,
+        mintGen2FromCandyMachine({
+          walletAdapter: adapter,
+          candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
+          collectionMint: getLaunchCollectionMint(launch, mintNetwork),
+          quantity: n,
+          phase: 'PUBLIC',
+          launch,
+          mintNetwork,
+          sessionDeadline,
+          collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+          platformFeeLamports:
+            elig?.platform_mint_fee_lamports_estimate != null
+              ? BigInt(elig.platform_mint_fee_lamports_estimate)
+              : undefined,
+          prefetchedWalletBalanceLamports:
+            elig?.wallet_sol_balance_lamports != null
+              ? BigInt(elig.wallet_sol_balance_lamports)
+              : undefined,
+          onMintProgress: (_current, total) => {
+            setStep('awaiting_signature')
+            setMintProgress({ current: 0, total, phase: 'chain' })
+          },
+        }),
+        'Mint timed out after 30 seconds — check Collectibles in your wallet, then refresh.'
+      )
 
       if (!minted.ok && minted.plannedMintB58s?.length) {
         lastPlannedMintB58sRef.current = minted.plannedMintB58s
@@ -264,12 +284,10 @@ export function CollectionMintPanel({
         throw new Error(minted.error || 'mint_failed')
       }
 
-      setStep('recording_mint')
-      setMintProgress({ current: 0, total: 1, phase: 'record' })
-      const recorded = await recordMintSessionConfirms(
-        sigs,
-        mintPks,
-        async ({ txSignature, quantity, mintedNftMints }) => {
+      finalizeMintSessionOptimistic({
+        minted,
+        requestedQuantity: n,
+        confirmBatch: async ({ txSignature, quantity, mintedNftMints }) => {
           await postCollectionConfirmMintWithRetry(slug, {
             wallet: walletStr,
             txSignature,
@@ -279,43 +297,25 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        () => {
-          confirmedCount = mintPks.length
-          confirmedMintAddresses = mintPks
-          setMintedCount(mintPks.length)
-          setMintProgress({ current: 1, total: 1, phase: 'record' })
-        }
-      )
-      confirmedLastSig = recorded.lastSig
-      confirmedMintAddresses = mintPks
-
-      const outcome = resolveMintSessionOutcome(minted, n)
-      if ('error' in outcome) {
-        throw new Error(outcome.error)
-      }
-      setLastSig(outcome.lastSig)
-      setMintedAddresses(outcome.mintedAddresses)
-      setMintedCount(outcome.mintedCount)
-      setSuccessWarning(outcome.warning)
-      setMintProgress(null)
-      setStep('success')
-      await Promise.all([loadElig(), onRefresh()])
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
+          setLastSig(lastSig)
+          setMintedAddresses(mintedAddresses)
+          setMintedCount(mintedCount)
+          setSuccessWarning(warning)
+          setMintProgress(null)
+          setStep('success')
+        },
+        onRecordWarning: (message) => {
+          setSuccessWarning((prev) => prev ?? message)
+        },
+      })
+      void Promise.all([loadElig(), onRefresh()])
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'mint_failed'
       const low = msg.toLowerCase()
-      if (confirmedCount > 0 && confirmedLastSig) {
-        setLastSig(confirmedLastSig)
-        setMintedAddresses(confirmedMintAddresses)
-        setMintedCount(confirmedCount)
-        setSuccessWarning(
-          low.includes('confirm')
-            ? `${msg} — your NFT${confirmedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
-            : msg
-        )
-        setMintProgress(null)
-        setStep('success')
-        await Promise.all([loadElig(), onRefresh()])
-        return
+      if (e instanceof MintSessionTimeoutError || low.includes('timed out')) {
+        const recovered = await checkWalletForMint({ silent: true })
+        if (recovered) return
       }
       if (isLikelyWalletMintDisconnectError(msg) && walletStr && candyMachineId) {
         const recovered = await checkWalletForMint({ silent: true })
@@ -421,6 +421,16 @@ export function CollectionMintPanel({
               disabled={mintButtonDisabled}
               onClick={() => {
                 preloadConfetti()
+                if (connected && adapter?.publicKey && elig?.is_eligible && cmConfigured) {
+                  void warmGen2MintPrep({
+                    walletAdapter: adapter,
+                    candyMachineId,
+                    collectionMint: getLaunchCollectionMint(launch, mintNetwork)?.trim() ?? '',
+                    phase: 'PUBLIC',
+                    launch,
+                    mintNetwork,
+                  })
+                }
                 void runMint()
               }}
             >

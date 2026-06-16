@@ -13,7 +13,8 @@ export type CollectionConfirmMintResponse = {
   duplicate_tx?: boolean
 }
 
-const CONFIRM_RETRY_DELAYS_MS = [0, 350, 900, 2200] as const
+const CONFIRM_RETRY_DELAYS_MS = [0, 300, 700, 1500] as const
+const CONFIRM_HARD_MAX_MS = 12_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -26,9 +27,12 @@ export async function postCollectionConfirmMintWithRetry(
 ): Promise<CollectionConfirmMintResponse> {
   let lastError = 'confirm_failed'
   let lastJson: CollectionConfirmMintResponse = {}
+  const started = Date.now()
 
   for (const delayMs of CONFIRM_RETRY_DELAYS_MS) {
+    if (Date.now() - started >= CONFIRM_HARD_MAX_MS) break
     if (delayMs > 0) await sleep(delayMs)
+    if (Date.now() - started >= CONFIRM_HARD_MAX_MS) break
 
     try {
       const res = await fetch(`/api/owl-center/collections/${encodeURIComponent(slug)}/confirm-mint`, {

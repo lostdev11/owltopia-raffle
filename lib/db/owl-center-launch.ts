@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 import type {
   OwlCenterLaunchPublic,
   OwlCenterMintMode,
@@ -82,6 +83,8 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     assets_ready: Boolean(data.assets_ready),
     marketplace_ready: Boolean(data.marketplace_ready),
     treasury_wallet: data.treasury_wallet != null ? String(data.treasury_wallet) : null,
+    royalty_splits: parseWalletSplitsFromDb(data.royalty_splits),
+    mint_fund_splits: parseWalletSplitsFromDb(data.mint_fund_splits),
     creator_presale_enabled: Boolean(data.creator_presale_enabled),
     creator_wl_enabled: Boolean(data.creator_wl_enabled),
     creator_mint_price:
@@ -253,6 +256,9 @@ export async function updateOwlCenterLaunchByIdAdmin(
     creator_launch_date: string | null
     generator_project_id: string | null
     seller_fee_basis_points: number
+    treasury_wallet: string | null
+    royalty_splits: import('@/lib/owl-center/wallet-splits').WalletSplit[] | null
+    mint_fund_splits: import('@/lib/owl-center/wallet-splits').WalletSplit[] | null
     reveal_mode: OwlCenterRevealMode | null
     reveal_status: OwlCenterRevealStatus
     reveal_at: string | null

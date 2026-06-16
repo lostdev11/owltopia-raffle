@@ -32,13 +32,16 @@ async function walletPublicMintCount(launchId: string, wallet: string): Promise<
 
 export async function buildSimpleMintEligibility(
   slug: string,
-  walletRaw: string | null
+  walletRaw: string | null,
+  opts?: { skipChainReconcile?: boolean }
 ): Promise<SimpleMintEligibilityResponse | null> {
   let launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch || launch.mint_mode !== 'public_simple') return null
 
-  await maybeReconcileLaunchMintsFromChain(launch)
-  launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
+  if (!opts?.skipChainReconcile) {
+    await maybeReconcileLaunchMintsFromChain(launch)
+    launch = (await getOwlCenterLaunchBySlug(slug)) ?? launch
+  }
 
   const mint_network = resolveLaunchMintNetwork(launch)
   const platform_treasury_wallet = getOwlCenterPlatformTreasuryWallet()

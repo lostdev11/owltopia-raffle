@@ -18,15 +18,26 @@ import {
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
-import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, MINT_SOLANA_SEND_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
+import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS } from '@/lib/owl-center/platform-mint-fee'
+import { friendlySolanaRpcErrorMessage, MINT_PREP_SOLANA_RPC_RETRY, MINT_SOLANA_RPC_RETRY, MINT_SOLANA_SEND_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
+import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import {
   extractTxSignatureFromUnknownError,
-  pollTransactionSignatureConfirmed,
+  pollTransactionSignatureStatus,
   recoverCandyMachineMint,
   recoverCandyMachineMintFromPlannedSigners,
 } from '@/lib/solana/recover-candy-machine-mint'
-import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
+import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
+import {
+  createMintSessionDeadline,
+  MINT_RECOVERY_RESERVE_MS,
+  MINT_SEND_MIN_MS,
+  mintSessionRemainingMs,
+  MintSessionTimeoutError,
+  sleepMs,
+  withMintSessionBudget,
+} from '@/lib/owl-center/mint-time-budget'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
@@ -79,7 +90,7 @@ function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boole
  */
 function mintPriorityFeeMicroLamports(): number {
   const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
-  if (!raw) return 250_000
+  if (!raw) return 400_000
   const n = Number(raw)
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 250_000
 }
@@ -106,7 +117,7 @@ async function loadCollectionUpdateAuthority(
     return { ok: true, updateAuthorityB58: cached.updateAuthorityB58 }
   }
   try {
-    const md = await withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_SOLANA_RPC_RETRY)
+    const md = await withSolanaRpcRetry(() => fetchMetadata(umi, collectionMetadata), MINT_PREP_SOLANA_RPC_RETRY)
     const updateAuthorityB58 = String(md.updateAuthority)
     mintMetadataCache.set(collectionMintB58, {
       expires: Date.now() + MINT_PREP_CACHE_TTL_MS,
@@ -129,7 +140,7 @@ async function loadGuardMintPlan(
   if (cached && cached.expires > Date.now()) {
     return { ok: true, plan: cached.plan }
   }
-  const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_SOLANA_RPC_RETRY)
+  const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_PREP_SOLANA_RPC_RETRY)
   if (!planRes.ok) return planRes
   mintPlanCache.set(key, { expires: Date.now() + MINT_PREP_CACHE_TTL_MS, plan: planRes.plan })
   return planRes
@@ -159,6 +170,8 @@ export type MintGen2Params = {
   platformFeeLamports?: bigint
   /** Skip redundant getBalance when eligibility already fetched wallet SOL. */
   prefetchedWalletBalanceLamports?: bigint
+  /** Automated mint steps must finish before this deadline (default 30s). */
+  sessionDeadline?: MintSessionDeadline
   /** Called before each on-chain mint (1-indexed current, total quantity). */
   onMintProgress?: (current: number, total: number) => void
 }
@@ -323,6 +336,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     collectPlatformMintFee,
     platformFeeLamports: platformFeeLamportsOverride,
     prefetchedWalletBalanceLamports,
+    sessionDeadline: sessionDeadlineParam,
     onMintProgress,
   } = params
   if (!walletAdapter.publicKey) {
@@ -343,25 +357,31 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
   }
 
   try {
+    const sessionDeadline = sessionDeadlineParam ?? createMintSessionDeadline()
     const umi = createOwlCenterUmi(walletAdapter, getLaunchSolanaRpcUrl(network))
     const candyMachine = publicKey(cmId)
     const collectionMintPk = publicKey(colMint)
     const collectionMetadata = findMetadataPda(umi, { mint: collectionMintPk })
     const collectionMasterEdition = findMasterEditionPda(umi, { mint: collectionMintPk })
 
-    const [metadataRes, planRes, feeQuote] = await Promise.all([
-      loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
-      loadGuardMintPlan(umi, candyMachine, cmId, phase),
-      collectPlatformMintFee
-        ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
-          ? Promise.resolve({
-              ok: true as const,
-              lamports: platformFeeLamportsOverride,
-              solUsdPrice: 0,
-            })
-          : resolveOwlCenterPlatformMintFeeLamports()
-        : Promise.resolve({ ok: true as const, lamports: 0n, solUsdPrice: 0 }),
-    ])
+    const [metadataRes, planRes, feeQuote] = await withMintSessionBudget(
+      sessionDeadline,
+      () =>
+        Promise.all([
+          loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
+          loadGuardMintPlan(umi, candyMachine, cmId, phase),
+          collectPlatformMintFee
+            ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
+              ? Promise.resolve({
+                  ok: true as const,
+                  lamports: platformFeeLamportsOverride,
+                  solUsdPrice: 0,
+                })
+              : resolveOwlCenterPlatformMintFeeLamports()
+            : Promise.resolve({ ok: true as const, lamports: 0n, solUsdPrice: 0 }),
+        ]),
+      'Mint setup timed out — refresh and tap Mint again.'
+    )
 
     if (!metadataRes.ok) {
       return { ok: false, error: metadataRes.error }
@@ -411,27 +431,44 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     if (collectPlatformMintFee && platformFeeLamports > 0n) {
-      prepTasks.push(
-        withSolanaRpcRetry(
-          () =>
-            assertOwlCenterPlatformMintFeeSolBalance(
-              walletB58,
-              network,
-              platformFeeLamports,
-              getLaunchSolanaRpcUrl(network),
-              quantity,
-              prefetchedWalletBalanceLamports
-            ),
-          MINT_SOLANA_RPC_RETRY
-        ).then((feeBal) => {
-          if (!feeBal.ok) throw new Error(feeBal.error)
-        })
-      )
+      const totalFee = platformFeeLamports * BigInt(quantity)
+      const needed = totalFee + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(quantity)
+      if (prefetchedWalletBalanceLamports != null) {
+        if (prefetchedWalletBalanceLamports < needed) {
+          const feeSol = Number(totalFee) / 1_000_000_000
+          const haveSol = Number(prefetchedWalletBalanceLamports) / 1_000_000_000
+          return {
+            ok: false,
+            error: `Not enough SOL — need ~${(feeSol + 0.02 * quantity).toFixed(3)} SOL for ${quantity} mint${quantity === 1 ? '' : 's'} (you have ~${haveSol.toFixed(3)} SOL).`,
+          }
+        }
+      } else {
+        prepTasks.push(
+          withSolanaRpcRetry(
+            () =>
+              assertOwlCenterPlatformMintFeeSolBalance(
+                walletB58,
+                network,
+                platformFeeLamports,
+                getLaunchSolanaRpcUrl(network),
+                quantity,
+                prefetchedWalletBalanceLamports
+              ),
+            MINT_SOLANA_RPC_RETRY
+          ).then((feeBal) => {
+            if (!feeBal.ok) throw new Error(feeBal.error)
+          })
+        )
+      }
     }
 
     if (prepTasks.length > 0) {
       try {
-        await Promise.all(prepTasks)
+        await withMintSessionBudget(
+          sessionDeadline,
+          () => Promise.all(prepTasks),
+          'Mint setup timed out — refresh and tap Mint again.'
+        )
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
@@ -490,11 +527,22 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     let lastMintError: unknown
     let submittedSig: string | null = null
+    const sendMs = Math.max(
+      MINT_SEND_MIN_MS,
+      mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+    )
     try {
-      const res = await withSolanaRpcRetry(
-        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
-        MINT_SOLANA_SEND_RETRY
-      )
+      const res = await Promise.race([
+        withSolanaRpcRetry(
+          () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
+          MINT_SOLANA_SEND_RETRY
+        ),
+        sleepMs(sendMs).then(() => {
+          throw new MintSessionTimeoutError(
+            'Mint timed out waiting for your wallet or the network — check Collectibles in Phantom or Solflare.'
+          )
+        }),
+      ])
       const sig = res.signature as string | Uint8Array
       const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
       return {
@@ -507,33 +555,52 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       submittedSig = extractTxSignatureFromUnknownError(e)
     }
 
-    if (submittedSig) {
-      await pollTransactionSignatureConfirmed(rpcUrl, submittedSig, { maxWaitMs: 35000, intervalMs: 1000 })
+    const pollMs = Math.min(5000, mintSessionRemainingMs(sessionDeadline))
+    if (submittedSig && pollMs > 0) {
+      await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
+        maxWaitMs: pollMs,
+        intervalMs: 300,
+        minCommitment: 'processed',
+      })
     }
 
-    const recoveredEarly = await recoverCandyMachineMintFromPlannedSigners({
-      rpcUrl,
-      walletB58,
-      candyMachineB58: cmId,
-      nftMints,
-      lastError: lastMintError,
-    })
-    if (recoveredEarly?.mintedNftMints.length) {
-      return {
-        ok: true,
-        txSignatures: recoveredEarly.txSignatures.length ? recoveredEarly.txSignatures : submittedSig ? [submittedSig] : [],
-        mintedNftMints: recoveredEarly.mintedNftMints,
+    if (mintSessionRemainingMs(sessionDeadline) > 400) {
+      const recoveredEarly = await recoverCandyMachineMintFromPlannedSigners({
+        rpcUrl,
+        walletB58,
+        candyMachineB58: cmId,
+        nftMints,
+        lastError: lastMintError,
+      })
+      if (recoveredEarly?.mintedNftMints.length) {
+        return {
+          ok: true,
+          txSignatures: recoveredEarly.txSignatures.length ? recoveredEarly.txSignatures : submittedSig ? [submittedSig] : [],
+          mintedNftMints: recoveredEarly.mintedNftMints,
+        }
       }
     }
 
     const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
-    const recovered = await recoverCandyMachineMint({
-      rpcUrl,
-      walletB58: walletAdapter.publicKey.toBase58(),
-      candyMachineB58: cmId,
-      nftMints,
-      lastError: lastMintError,
-    })
+    if (lastMintError instanceof MintSessionTimeoutError && mintSessionRemainingMs(sessionDeadline) <= 0) {
+      return {
+        ok: false,
+        error: msg,
+        plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
+        txSignatures: submittedSig ? [submittedSig] : undefined,
+      }
+    }
+
+    const recovered =
+      mintSessionRemainingMs(sessionDeadline) > 400
+        ? await recoverCandyMachineMint({
+            rpcUrl,
+            walletB58: walletAdapter.publicKey.toBase58(),
+            candyMachineB58: cmId,
+            nftMints,
+            lastError: lastMintError,
+          })
+        : null
 
     if (recovered && (recovered.mintedNftMints.length > 0 || recovered.txSignatures.length > 0)) {
       return {
@@ -560,6 +627,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
+    if (e instanceof MintSessionTimeoutError) {
+      return { ok: false, error: msg }
+    }
     const low = msg.toLowerCase()
     if (low.includes('could not find candy machine') || low.includes('account does not exist')) {
       return { ok: false, error: 'Candy Machine fetch failed — check RPC cluster and Candy Machine ID.' }

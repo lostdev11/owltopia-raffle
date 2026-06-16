@@ -14,6 +14,7 @@ import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPan
 import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 
 export default function AdminOwlCenterDemoPage() {
   const { connected } = useWallet()
@@ -89,6 +90,8 @@ export default function AdminOwlCenterDemoPage() {
           assets_ready: Boolean(demo.assets_ready),
           marketplace_ready: Boolean(demo.marketplace_ready),
           treasury_wallet: demo.treasury_wallet != null ? String(demo.treasury_wallet) : null,
+          royalty_splits: parseWalletSplitsFromDb(demo.royalty_splits),
+          mint_fund_splits: parseWalletSplitsFromDb(demo.mint_fund_splits),
           creator_presale_enabled: Boolean(demo.creator_presale_enabled),
           creator_wl_enabled: Boolean(demo.creator_wl_enabled),
           creator_mint_price: demo.creator_mint_price != null ? Number(demo.creator_mint_price) : null,

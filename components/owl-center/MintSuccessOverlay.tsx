@@ -237,28 +237,11 @@ export function MintSuccessOverlay({
     }
     setActiveIndex(0)
     setActiveArtLoaded(false)
-    setRevealComplete(false)
+    setRevealComplete(true)
     scrollRef.current?.scrollTo({ left: 0 })
-  }, [open, mints.join(',')])
-
-  useEffect(() => {
-    if (!open) return
-    preloadConfetti()
-    if (mints.length === 0) {
-      setRevealComplete(true)
-      return
-    }
-    if (activeArtLoaded) {
-      const timer = window.setTimeout(() => setRevealComplete(true), 400)
-      return () => window.clearTimeout(timer)
-    }
-  }, [open, mints.length, activeArtLoaded])
-
-  useEffect(() => {
-    if (!open || !revealComplete) return
     preloadConfetti()
     fireMintConfetti()
-  }, [open, revealComplete])
+  }, [open, mints.join(',')])
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current
@@ -279,9 +262,7 @@ export function MintSuccessOverlay({
   if (!open) return null
 
   const heading = multi
-    ? revealComplete
-      ? `You minted ${n} NFTs!`
-      : `Revealing your ${n} mints…`
+    ? `You minted ${n} NFTs!`
     : revealComplete
       ? 'You minted your NFT!'
       : 'Revealing your mint…'

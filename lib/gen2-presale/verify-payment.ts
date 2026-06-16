@@ -267,8 +267,8 @@ export async function fetchParsedTransactionWithPoll(
   signature: string,
   options?: { maxWaitMs?: number; intervalMs?: number }
 ): Promise<ParsedTransactionWithMeta | null> {
-  const maxWaitMs = Math.max(2000, options?.maxWaitMs ?? 14000)
-  const intervalMs = Math.max(200, options?.intervalMs ?? 350)
+  const maxWaitMs = Math.max(1500, options?.maxWaitMs ?? 8000)
+  const intervalMs = Math.max(150, options?.intervalMs ?? 250)
   const start = Date.now()
 
   while (Date.now() - start < maxWaitMs) {

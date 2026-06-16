@@ -7,6 +7,16 @@ import {
   launchSellerFeeBasisPoints,
   percentToBasisPoints,
 } from '@/lib/owl-center/royalty'
+import {
+  defaultWalletSplitFormRows,
+  parseWalletSplitFormRows,
+  parseWalletSplitsFromBody,
+  primaryWalletFromSplits,
+  walletSplitFormRowsFromLaunch,
+  type WalletSplit,
+  type WalletSplitFormRow,
+} from '@/lib/owl-center/wallet-splits'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export type MintDetailsFormValues = {
   total_supply: string
@@ -25,6 +35,8 @@ export type MintDetailsFormValues = {
   wl_start: string
   /** Secondary royalty percent (0–100) — locked after Candy Machine deploy. */
   royalty_percent: string
+  royalty_splits: WalletSplitFormRow[]
+  mint_fund_splits: WalletSplitFormRow[]
 }
 
 export type ParsedMintDetailsConfig = {
@@ -47,6 +59,9 @@ export type ParsedMintDetailsConfig = {
   creator_mint_price: number
   creator_mint_currency: 'SOL' | 'USDC'
   seller_fee_basis_points: number
+  royalty_splits: WalletSplit[] | null
+  mint_fund_splits: WalletSplit[] | null
+  treasury_wallet: string | null
 }
 
 function pickNum(v: unknown, fallback: number): number {
@@ -159,6 +174,20 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     seller_fee_basis_points = percentToBasisPoints(pct)
   }
 
+  const royaltySplits = parseWalletSplitsFromBody(body, 'royalty_splits', 'Secondary royalty split')
+  if (royaltySplits && 'error' in royaltySplits) return { error: royaltySplits.error }
+
+  const mintFundSplits = parseWalletSplitsFromBody(body, 'mint_fund_splits', 'Mint funds split')
+  if (mintFundSplits && 'error' in mintFundSplits) return { error: mintFundSplits.error }
+
+  let treasury_wallet: string | null = null
+  if (typeof body.treasury_wallet === 'string' && body.treasury_wallet.trim()) {
+    treasury_wallet = normalizeSolanaWalletAddress(body.treasury_wallet.trim())
+    if (!treasury_wallet) return { error: 'Invalid treasury wallet' }
+  } else if (mintFundSplits?.length) {
+    treasury_wallet = primaryWalletFromSplits(mintFundSplits)
+  }
+
   return {
     total_supply,
     public_price,
@@ -179,6 +208,9 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     creator_mint_price: public_price,
     creator_mint_currency: currency,
     seller_fee_basis_points,
+    royalty_splits: royaltySplits,
+    mint_fund_splits: mintFundSplits,
+    treasury_wallet,
   }
 }
 
@@ -188,6 +220,8 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     currency === 'USDC'
       ? String(launch.public_price_usdc ?? launch.creator_mint_price ?? 0)
       : String(launch.creator_mint_price ?? 0)
+
+  const splitForms = walletSplitFormRowsFromLaunch(launch)
 
   return {
     total_supply: String(launch.total_supply),
@@ -205,6 +239,8 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     wl_supply: String(launch.wl_supply || ''),
     wl_start: launch.phase_schedule?.WHITELIST ? isoToDatetimeLocalShort(launch.phase_schedule.WHITELIST) : '',
     royalty_percent: String(basisPointsToPercent(launchSellerFeeBasisPoints(launch))),
+    royalty_splits: splitForms.royalty_splits,
+    mint_fund_splits: splitForms.mint_fund_splits,
   }
 }
 
@@ -216,6 +252,9 @@ function isoToDatetimeLocalShort(iso: string): string {
 }
 
 export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Record<string, unknown> {
+  const royaltySplits = parseWalletSplitFormRows(values.royalty_splits, 'Secondary royalty split')
+  const mintFundSplits = parseWalletSplitFormRows(values.mint_fund_splits, 'Mint funds split')
+
   return {
     total_supply: Number(values.total_supply),
     mint_price: Number(values.public_price),
@@ -239,6 +278,36 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     wl_start: values.wl_start.trim() || null,
     public_start: values.public_start.trim() || null,
     royalty_percent: values.royalty_percent.trim() ? Number(values.royalty_percent) : undefined,
+    royalty_splits: 'error' in royaltySplits ? values.royalty_splits : royaltySplits,
+    mint_fund_splits: 'error' in mintFundSplits ? values.mint_fund_splits : mintFundSplits,
+    treasury_wallet:
+      'error' in mintFundSplits ? undefined : primaryWalletFromSplits(mintFundSplits),
+  }
+}
+
+export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormValues>): MintDetailsFormValues {
+  const creator = partial?.royalty_splits?.[0]?.address ?? ''
+  const treasury = partial?.mint_fund_splits?.[0]?.address ?? creator
+
+  return {
+    total_supply: '1000',
+    public_price: '1',
+    wl_price: '',
+    currency: 'SOL',
+    wallet_mint_limit: '5',
+    launch_date: '',
+    public_start: '',
+    presale_enabled: false,
+    presale_supply: '',
+    presale_overage_supply: '13',
+    presale_start: '',
+    wl_enabled: false,
+    wl_supply: '',
+    wl_start: '',
+    royalty_percent: '5',
+    royalty_splits: defaultWalletSplitFormRows(creator),
+    mint_fund_splits: defaultWalletSplitFormRows(treasury),
+    ...partial,
   }
 }
 
