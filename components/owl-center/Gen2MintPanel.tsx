@@ -93,7 +93,7 @@ export function Gen2MintPanel({
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
-  const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
+  const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
@@ -103,7 +103,7 @@ export function Gen2MintPanel({
   const dismissSuccess = useCallback(() => {
     setStep('idle')
     setLastSig(null)
-    setLastMintAddress(null)
+    setMintedAddresses([])
     setMintedCount(0)
     setSuccessWarning(null)
     setMintProgress(null)
@@ -132,7 +132,7 @@ export function Gen2MintPanel({
   const runMint = async () => {
     setErr(null)
     setLastSig(null)
-    setLastMintAddress(null)
+    setMintedAddresses([])
     setMintedCount(0)
     setSuccessWarning(null)
     setMintProgress(null)
@@ -163,7 +163,7 @@ export function Gen2MintPanel({
     const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
     let confirmedCount = 0
     let confirmedLastSig: string | null = null
-    let confirmedLastMint: string | null = null
+    let confirmedMintAddresses: string[] = []
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
@@ -211,19 +211,20 @@ export function Gen2MintPanel({
         },
         () => {
           confirmedCount = mintPks.length
+          confirmedMintAddresses = mintPks
           setMintedCount(mintPks.length)
           setMintProgress({ current: 1, total: 1, phase: 'record' })
         }
       )
       confirmedLastSig = recorded.lastSig
-      confirmedLastMint = recorded.lastMintAddress
+      confirmedMintAddresses = mintPks
 
       const outcome = resolveMintSessionOutcome(minted, n)
       if ('error' in outcome) {
         throw new Error(outcome.error)
       }
       setLastSig(outcome.lastSig)
-      if (outcome.lastMintAddress) setLastMintAddress(outcome.lastMintAddress)
+      setMintedAddresses(outcome.mintedAddresses)
       setMintedCount(outcome.mintedCount)
       setSuccessWarning(outcome.warning)
       setMintProgress(null)
@@ -235,7 +236,7 @@ export function Gen2MintPanel({
       const low = msg.toLowerCase()
       if (confirmedCount > 0 && confirmedLastSig) {
         setLastSig(confirmedLastSig)
-        if (confirmedLastMint) setLastMintAddress(confirmedLastMint)
+        setMintedAddresses(confirmedMintAddresses)
         setMintedCount(confirmedCount)
         setSuccessWarning(
           low.includes('confirm')
@@ -301,9 +302,9 @@ export function Gen2MintPanel({
     <>
       <MintProgressOverlay open={isMintInProgress(step)} step={step} progress={mintProgress} />
       <MintSuccessOverlay
-        open={step === 'success' && Boolean(lastSig || lastMintAddress)}
+        open={step === 'success' && Boolean(lastSig || mintedAddresses.length > 0)}
         quantity={mintedCount}
-        mintAddress={lastMintAddress}
+        mintAddresses={mintedAddresses}
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}

@@ -119,14 +119,8 @@ export function OwlCenterPageClient() {
               )}
               {!balanceLoading && !hasCredits && !balanceError && (
                 <p className="mt-4 text-sm text-[#A9CBB9]">
-                  No presale credits on this wallet yet. If you bought spots, try{' '}
-                  <Link
-                    href="/gen2-presale"
-                    className="font-semibold text-[#00FF9C] underline-offset-2 hover:underline"
-                  >
-                    Gen2 presale
-                  </Link>{' '}
-                  to sync or record a payment.
+                  No presale credits on this wallet yet. If you bought spots with a different wallet, connect that
+                  wallet or link it in the Gen2 mint page Wallets section.
                 </p>
               )}
             </div>
@@ -149,13 +143,12 @@ export function OwlCenterPageClient() {
             variant="outline"
             className="h-12 min-h-[48px] w-full touch-manipulation border-[#00FF9C]/40 bg-transparent text-base font-semibold text-[#EAFBF4] hover:bg-[#00E58B]/10 sm:w-auto"
           >
-            <Link href="/gen2-presale">Gen2 presale &amp; balance</Link>
+            <Link href="/owl-center/collection/gen2">Gen2 mint page</Link>
           </Button>
         </div>
 
         <p className="mt-8 text-center text-xs text-[#A9CBB9]/80 sm:text-left">
-          We will announce when Owl Center mint is live. Until then, presale purchases stay closed once supply is sold
-          out.
+          We will announce when Owl Center mint is live. Presale purchases are closed.
         </p>
       </main>
     </div>

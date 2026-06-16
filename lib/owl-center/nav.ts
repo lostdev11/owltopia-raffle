@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Coins, Home, Layers, PenLine, Rocket, Sparkles, Upload } from 'lucide-react'
+import { Coins, Home, Layers, PenLine, Rocket, Upload } from 'lucide-react'
 
 export type OwlCenterNavItem = {
   href: string
@@ -28,14 +28,6 @@ export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
     description: 'Check allocation and mint Owltopia Gen2',
     icon: Rocket,
     matchPrefix: '/owl-center/collection/gen2',
-  },
-  {
-    href: '/gen2-presale',
-    label: 'Gen2 Presale',
-    shortLabel: 'Presale',
-    description: 'Buy presale spots and view balance',
-    icon: Sparkles,
-    matchPrefix: '/gen2-presale',
   },
   {
     href: '/owl-center/drops',

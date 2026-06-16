@@ -18,7 +18,12 @@ import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevne
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
-import { recoverCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
+import {
+  extractTxSignatureFromUnknownError,
+  pollTransactionSignatureConfirmed,
+  recoverCandyMachineMint,
+  recoverCandyMachineMintFromPlannedSigners,
+} from '@/lib/solana/recover-candy-machine-mint'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
 /** mintV2 with guards comfortably fits in 800k CU (Metaplex-recommended ceiling). */
@@ -136,8 +141,6 @@ function isBlockhashExpiredError(error: unknown): boolean {
 function friendlyBlockhashExpiredError(): string {
   return 'Transaction expired before it landed on-chain — common on mobile if the wallet prompt sits open. Tap Mint again to finish; NFTs that already minted are safe in your wallet.'
 }
-
-const MINT_TX_MAX_ATTEMPTS = 3
 
 function computeUnitsForBatch(quantity: number, includeAllowListRoute = false): number {
   const routeExtra = includeAllowListRoute ? ESTIMATED_COMPUTE_UNITS_ALLOWLIST_ROUTE : 0
@@ -386,35 +389,52 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       return { ok: true as const, builder }
     }
 
-    let lastMintError: unknown
-    for (let attempt = 0; attempt < MINT_TX_MAX_ATTEMPTS; attempt++) {
-      const built = buildBatchMintBuilder()
-      if (!built.ok) {
-        return { ok: false, error: built.error }
-      }
+    const rpcUrl = getLaunchSolanaRpcUrl(network)
 
-      try {
-        const res = await withSolanaRpcRetry(
-          () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
-          MINT_SOLANA_RPC_RETRY
-        )
-        const sig = res.signature as string | Uint8Array
-        const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
-        return {
-          ok: true,
-          txSignatures: [sigStr],
-          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
-        }
-      } catch (e) {
-        lastMintError = e
-        if (!isBlockhashExpiredError(e) || attempt >= MINT_TX_MAX_ATTEMPTS - 1) {
-          break
-        }
+    const built = buildBatchMintBuilder()
+    if (!built.ok) {
+      return { ok: false, error: built.error }
+    }
+
+    let lastMintError: unknown
+    let submittedSig: string | null = null
+    try {
+      const res = await withSolanaRpcRetry(
+        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
+        MINT_SOLANA_RPC_RETRY
+      )
+      const sig = res.signature as string | Uint8Array
+      const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
+      return {
+        ok: true,
+        txSignatures: [sigStr],
+        mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+      }
+    } catch (e) {
+      lastMintError = e
+      submittedSig = extractTxSignatureFromUnknownError(e)
+    }
+
+    if (submittedSig) {
+      await pollTransactionSignatureConfirmed(rpcUrl, submittedSig)
+    }
+
+    const recoveredEarly = await recoverCandyMachineMintFromPlannedSigners({
+      rpcUrl,
+      walletB58,
+      candyMachineB58: cmId,
+      nftMints,
+      lastError: lastMintError,
+    })
+    if (recoveredEarly?.mintedNftMints.length) {
+      return {
+        ok: true,
+        txSignatures: recoveredEarly.txSignatures.length ? recoveredEarly.txSignatures : submittedSig ? [submittedSig] : [],
+        mintedNftMints: recoveredEarly.mintedNftMints,
       }
     }
 
     const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
-    const rpcUrl = getLaunchSolanaRpcUrl(network)
     const recovered = await recoverCandyMachineMint({
       rpcUrl,
       walletB58: walletAdapter.publicKey.toBase58(),

@@ -4,6 +4,8 @@ export type MintSessionOutcome = {
   mintedCount: number
   lastSig: string | null
   lastMintAddress: string | null
+  /** All NFT mint addresses from this session (same order as on-chain batch). */
+  mintedAddresses: string[]
   /** Set when some mints succeeded but the batch did not finish. */
   warning: string | null
 }
@@ -36,6 +38,7 @@ export function resolveMintSessionOutcome(
     mintedCount,
     lastSig,
     lastMintAddress,
+    mintedAddresses: mints,
     warning,
   }
 }

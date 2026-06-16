@@ -16,8 +16,6 @@ import { StatusBadge } from '@/components/owl-center/StatusBadge'
 
 import {
 
-  owlCenterBtnDisabled,
-
   owlCenterBtnGhost,
 
   owlCenterBtnPrimary,
@@ -34,17 +32,13 @@ function hrefForLaunch(slug: string): string {
 
 
 
-function ctaLabel(launch: OwlCenterLaunchPublic, presaleSoldOut: boolean): string {
+function ctaLabel(launch: OwlCenterLaunchPublic): string {
 
   if (launch.active_phase === 'TRADING_ACTIVE') return 'Trade Now'
 
   if (launch.active_phase === 'SOLD_OUT') return 'View Collection'
 
-  if (launch.active_phase === 'PRESALE') {
-
-    return presaleSoldOut && launch.slug === 'gen2' ? 'Presale sold out' : 'Enter Presale'
-
-  }
+  if (launch.active_phase === 'PRESALE') return launch.slug === 'gen2' ? 'Mint Gen2' : 'Enter Presale'
 
   if (launch.active_phase === 'WHITELIST' || launch.active_phase === 'PUBLIC' || launch.active_phase === 'AIRDROP') {
 
@@ -64,17 +58,7 @@ function ctaHref(launch: OwlCenterLaunchPublic): string {
 
     return launch.magic_eden_url || launch.tensor_url || hrefForLaunch(launch.slug)
 
-  if (launch.slug === 'gen2' && launch.active_phase === 'PRESALE') return '/gen2-presale'
-
   return hrefForLaunch(launch.slug)
-
-}
-
-
-
-function isPresaleCtaDisabled(launch: OwlCenterLaunchPublic, presaleSoldOut: boolean): boolean {
-
-  return launch.slug === 'gen2' && launch.active_phase === 'PRESALE' && presaleSoldOut
 
 }
 
@@ -98,9 +82,7 @@ export function CollectionCard({
 
   const internal = href.startsWith('/')
 
-  const presaleDisabled = isPresaleCtaDisabled(launch, presaleSoldOut)
-
-  const label = ctaLabel(launch, presaleSoldOut)
+  const label = ctaLabel(launch)
 
 
 
@@ -154,23 +136,7 @@ export function CollectionCard({
 
         <div className="mt-auto flex flex-wrap gap-2 pt-2">
 
-          {presaleDisabled ? (
-
-            <span
-
-              className={`${owlCenterBtnDisabled} w-full sm:w-auto`}
-
-              aria-disabled="true"
-
-              title="All presale spots have been claimed"
-
-            >
-
-              {label}
-
-            </span>
-
-          ) : internal ? (
+          {internal ? (
 
             <Link href={href} className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
 

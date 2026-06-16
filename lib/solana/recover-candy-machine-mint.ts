@@ -44,6 +44,36 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Poll until a submitted signature reaches confirmed/finalized (no re-sign). */
+export async function pollTransactionSignatureConfirmed(
+  rpcUrl: string,
+  signature: string,
+  options?: { maxWaitMs?: number; intervalMs?: number }
+): Promise<boolean> {
+  const conn = new Connection(rpcUrl, 'confirmed')
+  const maxWaitMs = Math.max(5000, options?.maxWaitMs ?? 55000)
+  const intervalMs = Math.max(800, options?.intervalMs ?? 2000)
+  const start = Date.now()
+
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await conn.getSignatureStatuses([signature])
+      const status = res?.value?.[0]
+      if (status?.err) return false
+      if (
+        status?.confirmationStatus === 'confirmed' ||
+        status?.confirmationStatus === 'finalized'
+      ) {
+        return true
+      }
+    } catch {
+      // transient RPC — keep polling
+    }
+    await sleep(intervalMs)
+  }
+  return false
+}
+
 /** Poll for mint accounts we generated before send — they exist only after a successful mintV2. */
 export async function detectPlannedMintAccounts(
   rpcUrl: string,
