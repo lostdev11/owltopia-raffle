@@ -84,7 +84,32 @@ export type MintGen2Result =
       txSignatures: string[]
       mintedNftMints: string[]
     }
-  | { ok: false; error: string }
+  | {
+      ok: false
+      error: string
+      /** On-chain mints that succeeded before a later tx failed (e.g. blockhash expired). */
+      txSignatures?: string[]
+      mintedNftMints?: string[]
+    }
+
+const BLOCKHASH_EXPIRED_PATTERNS = [
+  'block height exceeded',
+  'blockhash not found',
+  'blockhash expired',
+  'transaction expired',
+  'signature has expired',
+] as const
+
+function isBlockhashExpiredError(error: unknown): boolean {
+  const low = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  return BLOCKHASH_EXPIRED_PATTERNS.some((p) => low.includes(p))
+}
+
+function friendlyBlockhashExpiredError(): string {
+  return 'Transaction expired before it landed on-chain — common on mobile if the wallet prompt sits open. Tap Mint again to finish; NFTs that already minted are safe in your wallet.'
+}
+
+const MINT_TX_MAX_ATTEMPTS = 3
 
 /**
  * Prepare + sign + confirm Candy Machine `mintV2` txs via Phantom / Solflare (wallet-standard adapter).
@@ -232,8 +257,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     const txSignatures: string[] = []
     const mintedNftMints: string[] = []
 
-    for (let i = 0; i < quantity; i++) {
-      const nftMint = generateSigner(umi)
+    const buildMintBuilder = (nftMint: ReturnType<typeof generateSigner>) => {
       let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: MINT_COMPUTE_UNIT_LIMIT }))
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
@@ -241,7 +265,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       if (collectPlatformMintFee && platformFeeLamports > 0n) {
         const feeRes = appendOwlCenterPlatformMintFeeSol(umi, platformFeeLamports, builder)
         if (!feeRes.ok) {
-          return { ok: false, error: feeRes.error }
+          return feeRes
         }
         builder = feeRes.builder
       }
@@ -258,14 +282,57 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
         })
       )
-      const res = await withSolanaRpcRetry(
-        () => builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
-        MINT_SOLANA_RPC_RETRY
-      )
-      const sig = res.signature as string | Uint8Array
-      const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
-      txSignatures.push(sigStr)
-      mintedNftMints.push(String(nftMint.publicKey))
+      return { ok: true as const, builder }
+    }
+
+    for (let i = 0; i < quantity; i++) {
+      const nftMint = generateSigner(umi)
+      let sent = false
+      let lastMintError: unknown
+
+      for (let attempt = 0; attempt < MINT_TX_MAX_ATTEMPTS; attempt++) {
+        const built = buildMintBuilder(nftMint)
+        if (!built.ok) {
+          return txSignatures.length
+            ? {
+                ok: false,
+                error: built.error,
+                txSignatures,
+                mintedNftMints,
+              }
+            : { ok: false, error: built.error }
+        }
+
+        try {
+          const res = await withSolanaRpcRetry(
+            () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
+            MINT_SOLANA_RPC_RETRY
+          )
+          const sig = res.signature as string | Uint8Array
+          const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
+          txSignatures.push(sigStr)
+          mintedNftMints.push(String(nftMint.publicKey))
+          sent = true
+          break
+        } catch (e) {
+          lastMintError = e
+          if (!isBlockhashExpiredError(e) || attempt >= MINT_TX_MAX_ATTEMPTS - 1) {
+            break
+          }
+        }
+      }
+
+      if (!sent) {
+        const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
+        const error = isBlockhashExpiredError(lastMintError)
+          ? friendlyBlockhashExpiredError()
+          : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
+            friendlySolanaRpcErrorMessage(lastMintError) ??
+            msg
+        return txSignatures.length
+          ? { ok: false, error, txSignatures, mintedNftMints }
+          : { ok: false, error }
+      }
     }
 
     return { ok: true, txSignatures, mintedNftMints }
@@ -277,6 +344,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
     if (low.includes('user rejected') || low.includes('cancel')) {
       return { ok: false, error: 'Mint transaction rejected in wallet' }
+    }
+    if (isBlockhashExpiredError(e)) {
+      return { ok: false, error: friendlyBlockhashExpiredError() }
     }
     const simulationHint = friendlyMintSimulationError(msg, collectPlatformMintFee)
     if (simulationHint) {

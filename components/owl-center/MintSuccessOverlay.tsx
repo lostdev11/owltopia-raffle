@@ -17,6 +17,8 @@ export type MintSuccessOverlayProps = {
   preferMainnet?: boolean
   transactionSignature: string
   explorerUrl: string
+  /** Shown when some mints succeeded but the batch did not finish. */
+  warning?: string | null
   onClose: () => void
 }
 
@@ -38,6 +40,7 @@ export function MintSuccessOverlay({
   preferMainnet = false,
   transactionSignature,
   explorerUrl,
+  warning,
   onClose,
 }: MintSuccessOverlayProps) {
   const [imageLoading, setImageLoading] = useState(false)
@@ -136,9 +139,11 @@ export function MintSuccessOverlay({
       : 'Revealing your mint…'
     : n === 1
       ? revealComplete
-        ? 'Mint successful!'
+        ? 'You minted your NFT!'
         : 'Revealing your mint…'
-      : `${n} mints successful!`
+      : revealComplete
+        ? 'You minted your NFTs!'
+        : `Revealing your ${n} mints…`
 
   return (
     <div
@@ -245,6 +250,11 @@ export function MintSuccessOverlay({
 
         {revealComplete ? (
           <>
+            {warning ? (
+              <p className="mint-reveal-copy border border-[#FFD769]/40 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+                {warning}
+              </p>
+            ) : null}
             <p className="mint-reveal-copy mint-reveal-copy-delay-1 text-sm leading-relaxed text-[#9BA8B4]">
               Your NFT{n === 1 ? '' : 's'} {n === 1 ? 'is' : 'are'} now in your connected wallet.
               {mint ? ' Phantom and Solflare usually catch up within a few seconds.' : ' Open Phantom or Solflare and check Collectibles.'}

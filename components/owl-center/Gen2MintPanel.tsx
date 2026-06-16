@@ -12,6 +12,7 @@ import {
   owlCenterMintWrongPhaseHint,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
+import { recordMintConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -100,6 +101,7 @@ export function Gen2MintPanel({
   const [lastSig, setLastSig] = useState<string | null>(null)
   const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
   const [mintedCount, setMintedCount] = useState(0)
+  const [successWarning, setSuccessWarning] = useState<string | null>(null)
 
   const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
 
@@ -108,6 +110,7 @@ export function Gen2MintPanel({
     setLastSig(null)
     setLastMintAddress(null)
     setMintedCount(0)
+    setSuccessWarning(null)
   }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
@@ -130,6 +133,7 @@ export function Gen2MintPanel({
     setLastSig(null)
     setLastMintAddress(null)
     setMintedCount(0)
+    setSuccessWarning(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
       setStep('error')
@@ -155,54 +159,92 @@ export function Gen2MintPanel({
     }
 
     const n = Math.min(qty, elig.max_mintable, remaining)
+    let confirmedCount = 0
+    let confirmedLastSig: string | null = null
+    let confirmedLastMint: string | null = null
     try {
-      for (let i = 0; i < n; i++) {
-        setStep('preparing_mint')
-        const minted = await mintGen2FromCandyMachine({
-          walletAdapter: adapter,
-          candyMachineId: getGen2CandyMachineId(launch),
-          collectionMint: getGen2CollectionMint(launch),
-          quantity: 1,
-          phase,
-          launch,
-        })
-        if (!minted.ok) {
-          throw new Error(minted.error || 'mint_failed')
-        }
-        const sig = minted.txSignatures[0]
-        const mintPk = minted.mintedNftMints[0]
-        setStep('confirming_transaction')
-        setStep('recording_mint')
-        const conf = await fetch('/api/owl-center/gen2/confirm-mint', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wallet: walletStr,
-            txSignature: sig,
-            quantity: 1,
-            phase,
-            mintedNftMints: mintPk ? [mintPk] : [],
-            network: isDevnetMintEnabled() ? 'devnet' : 'mainnet',
-          }),
-        })
-        const cj = (await conf.json()) as { error?: string }
-        if (!conf.ok) {
-          throw new Error(cj.error || 'Confirm route failed')
-        }
-        setLastSig(sig)
-        if (mintPk) setLastMintAddress(mintPk)
-        setMintedCount((c) => c + 1)
+      setStep('preparing_mint')
+      const minted = await mintGen2FromCandyMachine({
+        walletAdapter: adapter,
+        candyMachineId: getGen2CandyMachineId(launch),
+        collectionMint: getGen2CollectionMint(launch),
+        quantity: n,
+        phase,
+        launch,
+      })
+
+      const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
+      const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
+      if (!minted.ok && sigs.length === 0) {
+        throw new Error(minted.error || 'mint_failed')
       }
+
+      setStep('recording_mint')
+      const recorded = await recordMintConfirms(
+        sigs.map((txSignature, i) => ({
+          txSignature,
+          mintedNftMint: mintPks[i] ?? null,
+        })),
+        async ({ txSignature, mintedNftMint }) => {
+          const conf = await fetch('/api/owl-center/gen2/confirm-mint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              wallet: walletStr,
+              txSignature,
+              quantity: 1,
+              phase,
+              mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
+              network: isDevnetMintEnabled() ? 'devnet' : 'mainnet',
+            }),
+          })
+          const cj = (await conf.json()) as { error?: string }
+          if (!conf.ok) {
+            throw new Error(cj.error || 'Confirm route failed')
+          }
+        },
+        (count) => {
+          confirmedCount = count
+          setMintedCount(count)
+        }
+      )
+      confirmedLastSig = recorded.lastSig
+      confirmedLastMint = recorded.lastMintAddress
+
+      const outcome = resolveMintSessionOutcome(minted, n)
+      if ('error' in outcome) {
+        throw new Error(outcome.error)
+      }
+      setLastSig(outcome.lastSig)
+      if (outcome.lastMintAddress) setLastMintAddress(outcome.lastMintAddress)
+      setMintedCount(outcome.mintedCount)
+      setSuccessWarning(outcome.warning)
       setStep('success')
       onRefresh()
       void loadElig()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const low = msg.toLowerCase()
+      if (confirmedCount > 0 && confirmedLastSig) {
+        setLastSig(confirmedLastSig)
+        if (confirmedLastMint) setLastMintAddress(confirmedLastMint)
+        setMintedCount(confirmedCount)
+        setSuccessWarning(
+          low.includes('confirm')
+            ? `${msg} — your NFT${confirmedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
+            : msg
+        )
+        setStep('success')
+        onRefresh()
+        void loadElig()
+        return
+      }
       if (low.includes('user rejected') || low.includes('cancel')) {
         setErr('Mint transaction rejected in wallet')
       } else if (low.includes('confirm route failed') || low.includes('confirm_failed')) {
         setErr('Transaction succeeded but database record failed — copy your signature from the wallet and contact support.')
+      } else if (low.includes('block height') || low.includes('blockhash') || low.includes('expired')) {
+        setErr('Transaction expired before it landed — tap Mint again. Any NFTs that already minted are in your wallet.')
       } else {
         setErr(msg)
       }
@@ -254,6 +296,7 @@ export function Gen2MintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        warning={successWarning}
         onClose={dismissSuccess}
       />
       <MintPanelShell embedded={embedded} label="mint_console">
