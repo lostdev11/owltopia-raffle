@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MintProgressOverlay } from '@/components/owl-center/MintProgressOverlay'
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import {
@@ -13,6 +14,7 @@ import {
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
 import { recordMintConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -24,16 +26,7 @@ import {
   owlCenterSolanaExplorerTxUrl,
 } from '@/lib/solana/network'
 
-export type MintUiStep =
-  | 'idle'
-  | 'checking_eligibility'
-  | 'preparing_mint'
-  | 'awaiting_signature'
-  | 'sending_transaction'
-  | 'confirming_transaction'
-  | 'recording_mint'
-  | 'success'
-  | 'error'
+export type { MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 
 function stepLabel(s: MintUiStep): string {
   switch (s) {
@@ -102,6 +95,7 @@ export function Gen2MintPanel({
   const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
   const [mintedCount, setMintedCount] = useState(0)
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
+  const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
 
   const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
 
@@ -111,6 +105,7 @@ export function Gen2MintPanel({
     setLastMintAddress(null)
     setMintedCount(0)
     setSuccessWarning(null)
+    setMintProgress(null)
   }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
@@ -134,6 +129,7 @@ export function Gen2MintPanel({
     setLastMintAddress(null)
     setMintedCount(0)
     setSuccessWarning(null)
+    setMintProgress(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
       setStep('error')
@@ -164,6 +160,7 @@ export function Gen2MintPanel({
     let confirmedLastMint: string | null = null
     try {
       setStep('preparing_mint')
+      setMintProgress({ current: 0, total: n, phase: 'chain' })
       const minted = await mintGen2FromCandyMachine({
         walletAdapter: adapter,
         candyMachineId: getGen2CandyMachineId(launch),
@@ -171,6 +168,10 @@ export function Gen2MintPanel({
         quantity: n,
         phase,
         launch,
+        onMintProgress: (current, total) => {
+          setStep('awaiting_signature')
+          setMintProgress({ current, total, phase: 'chain' })
+        },
       })
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
@@ -180,6 +181,7 @@ export function Gen2MintPanel({
       }
 
       setStep('recording_mint')
+      setMintProgress({ current: 0, total: sigs.length, phase: 'record' })
       const recorded = await recordMintConfirms(
         sigs.map((txSignature, i) => ({
           txSignature,
@@ -206,6 +208,7 @@ export function Gen2MintPanel({
         (count) => {
           confirmedCount = count
           setMintedCount(count)
+          setMintProgress({ current: count, total: sigs.length, phase: 'record' })
         }
       )
       confirmedLastSig = recorded.lastSig
@@ -219,6 +222,7 @@ export function Gen2MintPanel({
       if (outcome.lastMintAddress) setLastMintAddress(outcome.lastMintAddress)
       setMintedCount(outcome.mintedCount)
       setSuccessWarning(outcome.warning)
+      setMintProgress(null)
       setStep('success')
       onRefresh()
       void loadElig()
@@ -234,6 +238,7 @@ export function Gen2MintPanel({
             ? `${msg} — your NFT${confirmedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
             : msg
         )
+        setMintProgress(null)
         setStep('success')
         onRefresh()
         void loadElig()
@@ -248,6 +253,7 @@ export function Gen2MintPanel({
       } else {
         setErr(msg)
       }
+      setMintProgress(null)
       setStep('error')
     }
   }
@@ -289,6 +295,7 @@ export function Gen2MintPanel({
 
   return (
     <>
+      <MintProgressOverlay open={isMintInProgress(step)} step={step} progress={mintProgress} />
       <MintSuccessOverlay
         open={step === 'success' && Boolean(lastSig)}
         quantity={mintedCount}
@@ -456,9 +463,7 @@ export function Gen2MintPanel({
                 mintClosed ||
                 !connected ||
                 !elig?.is_eligible ||
-                step === 'recording_mint' ||
-                step === 'sending_transaction' ||
-                step === 'awaiting_signature'
+                isMintInProgress(step)
               }
               onClick={() => {
                 preloadConfetti()

@@ -75,6 +75,8 @@ export type MintGen2Params = {
   mintNetwork?: OwlMintNetwork
   /** When true, transfer Owltopia platform SOL fee to treasury in the same tx as each mint. */
   collectPlatformMintFee?: boolean
+  /** Called before each on-chain mint (1-indexed current, total quantity). */
+  onMintProgress?: (current: number, total: number) => void
 }
 
 export type MintGen2Result =
@@ -124,8 +126,17 @@ const MINT_TX_MAX_ATTEMPTS = 3
  * TODO: Collection authority / delegate flows if CM uses a separate update authority.
  */
 export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<MintGen2Result> {
-  const { walletAdapter, candyMachineId, collectionMint, quantity, phase, launch, mintNetwork, collectPlatformMintFee } =
-    params
+  const {
+    walletAdapter,
+    candyMachineId,
+    collectionMint,
+    quantity,
+    phase,
+    launch,
+    mintNetwork,
+    collectPlatformMintFee,
+    onMintProgress,
+  } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
   }
@@ -286,6 +297,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     for (let i = 0; i < quantity; i++) {
+      onMintProgress?.(i + 1, quantity)
       const nftMint = generateSigner(umi)
       let sent = false
       let lastMintError: unknown

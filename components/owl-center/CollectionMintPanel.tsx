@@ -5,12 +5,14 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { MintProgressOverlay } from '@/components/owl-center/MintProgressOverlay'
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { recordMintConfirms, resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
+import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -23,16 +25,6 @@ import {
 import { mintGen2FromCandyMachine } from '@/lib/solana/gen2-mint'
 import { preloadConfetti } from '@/lib/confetti'
 import { owlCenterSolanaExplorerTxUrl } from '@/lib/solana/network'
-
-type MintUiStep =
-  | 'idle'
-  | 'preparing_mint'
-  | 'awaiting_signature'
-  | 'sending_transaction'
-  | 'confirming_transaction'
-  | 'recording_mint'
-  | 'success'
-  | 'error'
 
 function stepLabel(s: MintUiStep): string {
   switch (s) {
@@ -81,6 +73,7 @@ export function CollectionMintPanel({
   const [lastMintAddress, setLastMintAddress] = useState<string | null>(null)
   const [mintedCount, setMintedCount] = useState(0)
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
+  const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
 
   const cmConfigured = Boolean(
     getLaunchCandyMachineId(launch, mintNetwork)?.trim() && getLaunchCollectionMint(launch, mintNetwork)?.trim()
@@ -105,6 +98,7 @@ export function CollectionMintPanel({
     setLastMintAddress(null)
     setMintedCount(0)
     setSuccessWarning(null)
+    setMintProgress(null)
   }, [])
 
   const runMint = async () => {
@@ -113,6 +107,7 @@ export function CollectionMintPanel({
     setLastMintAddress(null)
     setMintedCount(0)
     setSuccessWarning(null)
+    setMintProgress(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
       setStep('error')
@@ -135,6 +130,7 @@ export function CollectionMintPanel({
     let confirmedLastMint: string | null = null
     try {
       setStep('preparing_mint')
+      setMintProgress({ current: 0, total: n, phase: 'chain' })
       const minted = await mintGen2FromCandyMachine({
         walletAdapter: adapter,
         candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
@@ -144,6 +140,10 @@ export function CollectionMintPanel({
         launch,
         mintNetwork,
         collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+        onMintProgress: (current, total) => {
+          setStep('awaiting_signature')
+          setMintProgress({ current, total, phase: 'chain' })
+        },
       })
 
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
@@ -153,6 +153,7 @@ export function CollectionMintPanel({
       }
 
       setStep('recording_mint')
+      setMintProgress({ current: 0, total: sigs.length, phase: 'record' })
       const recorded = await recordMintConfirms(
         sigs.map((txSignature, i) => ({
           txSignature,
@@ -171,6 +172,7 @@ export function CollectionMintPanel({
         (count) => {
           confirmedCount = count
           setMintedCount(count)
+          setMintProgress({ current: count, total: sigs.length, phase: 'record' })
         }
       )
       confirmedLastSig = recorded.lastSig
@@ -184,6 +186,7 @@ export function CollectionMintPanel({
       if (outcome.lastMintAddress) setLastMintAddress(outcome.lastMintAddress)
       setMintedCount(outcome.mintedCount)
       setSuccessWarning(outcome.warning)
+      setMintProgress(null)
       setStep('success')
       await Promise.all([loadElig(), onRefresh()])
     } catch (e) {
@@ -198,6 +201,7 @@ export function CollectionMintPanel({
             ? `${msg} — your NFT${confirmedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
             : msg
         )
+        setMintProgress(null)
         setStep('success')
         await Promise.all([loadElig(), onRefresh()])
         return
@@ -211,6 +215,7 @@ export function CollectionMintPanel({
               ? 'Transaction expired before it landed — tap Mint again. Any NFTs that already minted are in your wallet.'
               : msg
       )
+      setMintProgress(null)
       setStep('error')
     }
   }
@@ -236,6 +241,7 @@ export function CollectionMintPanel({
 
   return (
     <>
+      <MintProgressOverlay open={isMintInProgress(step)} step={step} progress={mintProgress} />
       <MintSuccessOverlay
         open={step === 'success' && Boolean(lastSig)}
         quantity={mintedCount}
@@ -289,7 +295,7 @@ export function CollectionMintPanel({
 
             <DeployButton
               className="w-full sm:w-auto"
-              disabled={!connected || !elig?.is_eligible || step === 'recording_mint' || !cmConfigured}
+              disabled={!connected || !elig?.is_eligible || isMintInProgress(step) || !cmConfigured}
               onClick={() => {
                 preloadConfetti()
                 void runMint()
