@@ -21,6 +21,7 @@ import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import {
   ADMIN_NAV_GROUP,
   COMMUNITY_NAV_GROUP,
+  CREATE_RAFFLE_NAV_ITEM,
   DASHBOARD_NAV_ITEM,
   OWLS_NAV_GROUP,
   filterAdminNavItems,
@@ -98,7 +99,6 @@ export function Header() {
 
   // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
   const showOwlVision = isAdmin === true || adminSessionActive === true
-  const showCreateRaffle = connected
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const desktopNavButtonClass =
@@ -107,9 +107,9 @@ export function Header() {
   const adminNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...ADMIN_NAV_GROUP,
-      items: filterAdminNavItems({ showOwlVision, showCreateRaffle }),
+      items: filterAdminNavItems({ showOwlVision }),
     }),
-    [showOwlVision, showCreateRaffle]
+    [showOwlVision]
   )
 
   const mobileNavGroups = useMemo(
@@ -121,6 +121,10 @@ export function Header() {
   const dashboardActive =
     pathname === DASHBOARD_NAV_ITEM.href || pathname.startsWith(`${DASHBOARD_NAV_ITEM.href}/`)
   const DashboardIcon = DASHBOARD_NAV_ITEM.icon
+
+  const createRaffleActive =
+    pathname === CREATE_RAFFLE_NAV_ITEM.href || pathname.startsWith(`${CREATE_RAFFLE_NAV_ITEM.href}/`)
+  const CreateRaffleIcon = CREATE_RAFFLE_NAV_ITEM.icon
 
   return (
     <header className="w-full bg-black border-b border-green-500/20 text-white">
@@ -147,6 +151,18 @@ export function Header() {
                   >
                     <DashboardIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">{DASHBOARD_NAV_ITEM.label}</span>
+                  </Button>
+                </Link>
+              )}
+              {connected && (
+                <Link href={CREATE_RAFFLE_NAV_ITEM.href}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(desktopNavButtonClass, createRaffleActive && 'bg-white/10 text-white')}
+                  >
+                    <CreateRaffleIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">{CREATE_RAFFLE_NAV_ITEM.label}</span>
                   </Button>
                 </Link>
               )}
@@ -210,6 +226,24 @@ export function Header() {
                     {DASHBOARD_NAV_ITEM.description ? (
                       <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
                         {DASHBOARD_NAV_ITEM.description}
+                      </span>
+                    ) : null}
+                  </span>
+                </Link>
+                <Link
+                  href={CREATE_RAFFLE_NAV_ITEM.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={cn(
+                    'flex gap-3 px-4 py-3 rounded-lg min-h-[48px] touch-manipulation hover:bg-white/10 active:bg-white/15',
+                    createRaffleActive && 'bg-white/10'
+                  )}
+                >
+                  <CreateRaffleIcon className="h-5 w-5 shrink-0 text-amber-400/90" aria-hidden />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{CREATE_RAFFLE_NAV_ITEM.label}</span>
+                    {CREATE_RAFFLE_NAV_ITEM.description ? (
+                      <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                        {CREATE_RAFFLE_NAV_ITEM.description}
                       </span>
                     ) : null}
                   </span>

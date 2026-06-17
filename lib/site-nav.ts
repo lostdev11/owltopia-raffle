@@ -144,6 +144,14 @@ export const DASHBOARD_NAV_ITEM: SiteNavItem = {
   icon: LayoutDashboard,
 }
 
+/** Available to any connected wallet (raffle creation is open to all hosts), shown next to Dashboard. */
+export const CREATE_RAFFLE_NAV_ITEM: SiteNavItem = {
+  href: '/admin/raffles/new',
+  label: 'Create Raffle',
+  description: 'Start a new raffle listing',
+  icon: Plus,
+}
+
 export const ADMIN_NAV_GROUP: SiteNavGroup = {
   id: 'admin',
   label: 'Admin',
@@ -164,12 +172,6 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       description: 'Manage community giveaways',
       icon: Gift,
     },
-    {
-      href: '/admin/raffles/new',
-      label: 'Create Raffle',
-      description: 'Start a new raffle listing',
-      icon: Plus,
-    },
   ],
 }
 
@@ -179,13 +181,7 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   )
 }
 
-export function filterAdminNavItems(options: {
-  showOwlVision: boolean
-  showCreateRaffle: boolean
-}): SiteNavItem[] {
-  const { showOwlVision, showCreateRaffle } = options
-  return ADMIN_NAV_GROUP.items.filter((item) => {
-    if (item.href === '/admin/raffles/new') return showCreateRaffle
-    return showOwlVision
-  })
+/** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */
+export function filterAdminNavItems(options: { showOwlVision: boolean }): SiteNavItem[] {
+  return options.showOwlVision ? [...ADMIN_NAV_GROUP.items] : []
 }
