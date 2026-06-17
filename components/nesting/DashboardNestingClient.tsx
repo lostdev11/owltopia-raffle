@@ -94,7 +94,7 @@ import {
   nestingMutedActionButtonClass,
 } from '@/lib/nesting/ui-classes'
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
-import { cn, isAndroidDevice, isMobileDevice, isSolanaMobileEnvironment } from '@/lib/utils'
+import { cn, isMobileDevice, isSolanaMobileEnvironment } from '@/lib/utils'
 import { nestingMobileConnectHint } from '@/lib/nesting/mobile-hints'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { decimalToRawBigint } from '@/lib/nesting/token-amount'
@@ -2344,9 +2344,7 @@ export function DashboardNestingClient() {
           <p className="text-xs text-muted-foreground leading-relaxed">
             {isSolanaMobileEnvironment()
               ? 'On Seeker, if nothing happens in a few seconds, tap Connect wallet and choose Solana Mobile, or use Phantom/Solflare.'
-              : isAndroidDevice()
-                ? 'On Android, the wallet can take a moment after you return from the wallet app. If this sticks, refresh once or reconnect.'
-                : 'If this takes more than a few seconds, refresh the page or reconnect your wallet.'}
+              : 'The wallet can take a moment after you return from the wallet app. If this sticks, refresh once or tap Connect and open in Phantom or Solflare.'}
           </p>
         ) : null}
       </main>

@@ -13,12 +13,11 @@ import {
   WalletNotReadyError,
   WalletPublicKeyError,
   WalletReadyState,
-  isIosAndRedirectable,
 } from '@solana/wallet-adapter-base'
 import { PublicKey } from '@solana/web3.js'
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare'
 import type { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
-import { isMobileDevice } from '@/lib/utils'
+import { isMobileDevice, isSolflareBrowser, markWalletBrowseRedirectPending } from '@/lib/utils'
 
 export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
   override async connect(): Promise<void> {
@@ -30,13 +29,16 @@ export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
       ) {
         throw new WalletNotReadyError()
       }
-      // iOS: open in Solflare in-wallet browser (unchanged)
+      // Mobile web without extension: open in Solflare in-wallet browser (iOS + Android Chrome).
+      // Deep-link connect on Android Chrome often lands on about:blank or fails to return.
       if (
         this.readyState === WalletReadyState.Loadable &&
-        isIosAndRedirectable()
+        isMobileDevice() &&
+        !isSolflareBrowser()
       ) {
         const url = encodeURIComponent(window.location.href)
         const ref = encodeURIComponent(window.location.origin)
+        markWalletBrowseRedirectPending()
         window.location.href = `https://solflare.com/ul/v1/browse/${url}?ref=${ref}`
         return
       }
@@ -47,23 +49,9 @@ export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
         throw new WalletLoadError((error as Error)?.message, error as Error)
       }
       const network = (this as unknown as { _config: { network?: WalletAdapterNetwork } })._config?.network
-      // Extension / desktop: same as base adapter — only `network`. Passing redirect_link here makes the
-      // SDK use app/deeplink flow and breaks the browser extension connect path on desktop.
-      // Mobile web without extension (Loadable): redirect_link so the app can return with callback params.
-      const params: Record<string, string> = {}
-      if (
-        typeof window !== 'undefined' &&
-        this.readyState === WalletReadyState.Loadable &&
-        isMobileDevice()
-      ) {
-        params.redirect_link = window.location.href
-      }
       let wallet
       try {
-        wallet =
-          Object.keys(params).length > 0
-            ? new SolflareClass({ network, params })
-            : new SolflareClass({ network })
+        wallet = new SolflareClass({ network })
       } catch (error) {
         throw new WalletConfigError((error as Error)?.message, error as Error)
       }

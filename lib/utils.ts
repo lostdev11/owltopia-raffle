@@ -140,9 +140,29 @@ export function isSolanaMobileEnvironment(): boolean {
   return isSolanaMobileWebShell() || isLikelySeekerDevice()
 }
 
+/** iPhone / iPad (not Seeker Android). */
+export function isIosDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  const ua = clientUserAgent()
+  return /iphone|ipad|ipod/i.test(ua) && !isAndroidDevice()
+}
+
+/** User-facing mobile browser name for hints (Chrome, Safari, etc.). */
+export function mobileWebBrowserLabel(): string {
+  if (typeof window === 'undefined') return 'your browser'
+  if (isAndroidDevice()) return 'Chrome'
+  if (isIosDevice()) return 'Safari'
+  return 'your browser'
+}
+
 /** Android phones + Seeker / Solana Mobile — prioritize refresh + OS/wallet update hints. */
 export function isAndroidOrSolanaMobileClient(): boolean {
   return isAndroidDevice() || isSolanaMobileEnvironment()
+}
+
+/** Shown in connect UI — same guidance on iOS Safari and Android Chrome. */
+export function mobileWalletInAppBrowserHint(): string {
+  return 'For the smoothest experience, open this site in your wallet\'s browser. Everything stays in the app—no switching back and forth.'
 }
 
 /**
@@ -166,15 +186,82 @@ export function isPhantomBrowser(): boolean {
   return userAgent.toLowerCase().includes('phantom')
 }
 
+/** Phantom, Solflare, or Solana Mobile in-app / Web Shell — wallet is injectable. */
+export function isMobileWalletInjectedContext(): boolean {
+  return isPhantomBrowser() || isSolflareBrowser() || isSolanaMobileEnvironment()
+}
+
+/** Returning from a mobile wallet deep-link callback (Solflare data/nonce, Phantom session keys). */
+export function hasMobileWalletCallbackParams(): boolean {
+  if (typeof window === 'undefined') return false
+  const urlParams = new URLSearchParams(window.location.search)
+  const hashParams = new URLSearchParams(window.location.hash.substring(1))
+  return (
+    urlParams.has('phantom_encryption_public_key') ||
+    urlParams.has('dapp_encryption_public_key') ||
+    urlParams.has('data') ||
+    urlParams.has('nonce') ||
+    hashParams.has('phantom_encryption_public_key') ||
+    hashParams.has('dapp_encryption_public_key') ||
+    hashParams.has('data') ||
+    hashParams.has('nonce')
+  )
+}
+
+/**
+ * autoConnect on mobile only when a wallet can actually attach (in-app browser, Seeker, or deep-link return).
+ * Avoids immediate connect failures on Android Chrome where Phantom/Solflare are not injected.
+ */
+export function shouldMobileAutoConnect(): boolean {
+  if (!isMobileDevice()) return false
+  if (isMobileWalletInjectedContext()) return true
+  if (hasMobileWalletCallbackParams()) return true
+  return false
+}
+
+/** Set before navigating to Phantom/Solflare in-app browser so connect-failure UI does not flash. */
+export function markWalletBrowseRedirectPending(): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem('wallet_browse_redirect_pending', '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearWalletBrowseRedirectPending(): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.removeItem('wallet_browse_redirect_pending')
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isWalletBrowseRedirectPending(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return sessionStorage.getItem('wallet_browse_redirect_pending') === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Android/iOS mobile browser (Chrome, Safari) — not inside a wallet in-app browser. */
+export function isMobileWebBrowser(): boolean {
+  return isMobileDevice() && !isMobileWalletInjectedContext()
+}
+
 /**
  * Gets the Phantom deep link URL for the current page
+ * @see https://docs.phantom.com/phantom-deeplinks/other-methods/browse
  */
 export function getPhantomDeepLink(): string {
   if (typeof window === 'undefined') return ''
-  
-  const currentUrl = window.location.href
-  // Use Phantom's universal link format
-  return `https://phantom.app/ul/v1/${encodeURIComponent(currentUrl)}`
+
+  const currentUrl = encodeURIComponent(window.location.href)
+  const ref = encodeURIComponent(window.location.origin)
+  return `https://phantom.app/ul/browse/${currentUrl}?ref=${ref}`
 }
 
 /**
@@ -182,7 +269,8 @@ export function getPhantomDeepLink(): string {
  */
 export function redirectToPhantomBrowser(): void {
   if (typeof window === 'undefined') return
-  
+
+  markWalletBrowseRedirectPending()
   const deepLink = getPhantomDeepLink()
   
   // Try to open in Phantom browser
@@ -226,6 +314,7 @@ export function isSolflareBrowser(): boolean {
  */
 export function redirectToSolflareBrowser(): void {
   if (typeof window === 'undefined') return
+  markWalletBrowseRedirectPending()
   const url = encodeURIComponent(window.location.href)
   const ref = encodeURIComponent(window.location.origin)
   window.location.href = `https://solflare.com/ul/v1/browse/${url}?ref=${ref}`

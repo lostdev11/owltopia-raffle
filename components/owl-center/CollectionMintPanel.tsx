@@ -16,7 +16,7 @@ import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-cl
 import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
 import {
   createMintSessionDeadline,
-  MINT_SESSION_MAX_MS,
+  MINT_SESSION_OUTER_MAX_MS,
   MintSessionTimeoutError,
   raceMintSessionBudget,
 } from '@/lib/owl-center/mint-time-budget'
@@ -214,7 +214,7 @@ export function CollectionMintPanel({
       if (walletStr && candyMachineId) {
         void checkWalletForMint({ silent: true })
       }
-    }, MINT_SESSION_MAX_MS)
+    }, MINT_SESSION_OUTER_MAX_MS)
     return () => window.clearTimeout(timer)
   }, [step, walletStr, candyMachineId, checkWalletForMint])
 
@@ -243,11 +243,12 @@ export function CollectionMintPanel({
 
     const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
     const sessionDeadline = createMintSessionDeadline()
+    const outerDeadline = createMintSessionDeadline(MINT_SESSION_OUTER_MAX_MS)
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
       const minted = await raceMintSessionBudget(
-        sessionDeadline,
+        outerDeadline,
         mintGen2FromCandyMachine({
           walletAdapter: adapter,
           candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
@@ -271,7 +272,7 @@ export function CollectionMintPanel({
             setMintProgress({ current: 0, total, phase: 'chain' })
           },
         }),
-        'Mint timed out after 30 seconds — check Collectibles in your wallet, then refresh.'
+        'Mint timed out — check Collectibles in your wallet, then refresh.'
       )
 
       if (!minted.ok && minted.plannedMintB58s?.length) {

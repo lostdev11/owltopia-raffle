@@ -14,18 +14,20 @@ import {
 } from '@/components/ui/dialog'
 import {
   isMobileDevice,
-  isAndroidDevice,
-  isPhantomBrowser,
-  isPhantomExtensionAvailable,
-  isSolflareBrowser,
+  isMobileWalletInjectedContext,
+  isMobileWebBrowser,
   isSolanaMobileEnvironment,
+  isWalletBrowseRedirectPending,
+  clearWalletBrowseRedirectPending,
+  mobileWalletInAppBrowserHint,
+  mobileWebBrowserLabel,
   redirectToPhantomBrowser,
   redirectToSolflareBrowser,
 } from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 
-const ANDROID_REDIRECT_GUARD_KEY = 'android_wallet_redirect_in_flight'
-const ANDROID_REDIRECT_GUARD_WINDOW_MS = 5000
+const MOBILE_REDIRECT_GUARD_KEY = 'mobile_wallet_redirect_in_flight'
+const MOBILE_REDIRECT_GUARD_WINDOW_MS = 5000
 
 function normalizeCompareUrl(value: string): string {
   const trimmed = value.trim()
@@ -38,11 +40,11 @@ function normalizeCompareUrl(value: string): string {
   }
 }
 
-function isAndroidErrorPageHref(href: string): boolean {
+function isMobileWalletErrorPageHref(href: string): boolean {
   return href === 'about:blank' || href === 'chrome-error://chromewebdata/'
 }
 
-function guardedAndroidRedirect(nextUrl: string): boolean {
+function guardedMobileRedirect(nextUrl: string): boolean {
   if (typeof window === 'undefined') return false
   const currentHref = window.location.href
   const from = normalizeCompareUrl(currentHref)
@@ -50,13 +52,13 @@ function guardedAndroidRedirect(nextUrl: string): boolean {
   if (!to || from === to) return false
 
   const now = Date.now()
-  const lastRaw = sessionStorage.getItem(ANDROID_REDIRECT_GUARD_KEY)
+  const lastRaw = sessionStorage.getItem(MOBILE_REDIRECT_GUARD_KEY)
   const last = lastRaw ? Number(lastRaw) : 0
-  if (Number.isFinite(last) && last > 0 && now - last < ANDROID_REDIRECT_GUARD_WINDOW_MS) {
+  if (Number.isFinite(last) && last > 0 && now - last < MOBILE_REDIRECT_GUARD_WINDOW_MS) {
     return false
   }
 
-  sessionStorage.setItem(ANDROID_REDIRECT_GUARD_KEY, String(now))
+  sessionStorage.setItem(MOBILE_REDIRECT_GUARD_KEY, String(now))
   window.location.href = nextUrl
   return true
 }
@@ -67,12 +69,14 @@ export function WalletConnectButton() {
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
   const [showMobileInAppDialog, setShowMobileInAppDialog] = useState(false)
+  const [showMobileWebConnectHint, setShowMobileWebConnectHint] = useState(false)
   const [remountKey, setRemountKey] = useState(0)
   const [showCancelButton, setShowCancelButton] = useState(false)
   const buttonRef = useRef<HTMLDivElement>(null)
   const connectingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const connectingStartTimeRef = useRef<number | null>(null)
   const cancelButtonTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const connectAttemptedRef = useRef(false)
 
   const clearWalletSelectionStorage = useCallback(() => {
     try {
@@ -158,6 +162,35 @@ export function WalletConnectButton() {
     }
   }, [connecting, connected, disconnect, clearWalletSelectionStorage])
 
+  // After a failed connect in mobile Safari/Chrome, nudge toward in-app browser (same path on iOS + Android).
+  useEffect(() => {
+    if (!mounted || connected) {
+      connectAttemptedRef.current = false
+      return
+    }
+    if (connecting) {
+      connectAttemptedRef.current = true
+      return
+    }
+    if (
+      connectAttemptedRef.current &&
+      isMobileWebBrowser() &&
+      !isWalletBrowseRedirectPending()
+    ) {
+      connectAttemptedRef.current = false
+      setShowMobileWebConnectHint(true)
+    }
+  }, [mounted, connecting, connected])
+
+  // Phantom on mobile web: open in-app browser (same as Solflare adapter on iOS/Android).
+  useEffect(() => {
+    if (!mounted || !connecting || connected) return
+    if (!isMobileWebBrowser()) return
+    const walletName = wallet?.adapter?.name ?? ''
+    if (!walletName.toLowerCase().includes('phantom')) return
+    redirectToPhantomBrowser()
+  }, [mounted, connecting, connected, wallet])
+
   // Manual cancel handler
   const handleCancelConnection = useCallback(async () => {
     console.log('User cancelled stuck wallet connection')
@@ -190,18 +223,20 @@ export function WalletConnectButton() {
 
   useEffect(() => {
     setMounted(true)
+    if (isMobileWalletInjectedContext()) {
+      clearWalletBrowseRedirectPending()
+    }
     // Do not clear localStorage wallet selection on desktop mount: autoConnect is false on desktop,
     // and clearing here raced with Strict Mode remounts / duplicate buttons and could disrupt connect.
 
-    // Check on mount if we're on a blank page from a previous mobile wallet connection attempt (Android fix)
-    // This handles all mobile wallets: Solflare, Phantom, Coinbase, Trust, etc.
-    if (isAndroidDevice()) {
+    // Check on mount if we're on a blank page from a previous mobile wallet connection attempt
+    if (isMobileDevice()) {
       const checkBlankPage = () => {
         // Only check if document is ready
         if (document.readyState === 'loading') return
         
         const currentHref = window.location.href
-        const isBlankPage = isAndroidErrorPageHref(currentHref)
+        const isBlankPage = isMobileWalletErrorPageHref(currentHref)
         
         if (isBlankPage) {
           // Check for stored redirect URL from any mobile wallet
@@ -229,7 +264,7 @@ export function WalletConnectButton() {
             if (process.env.NODE_ENV === 'development') {
               console.log(`Detected blank page on mount (${walletName || 'unknown wallet'}), redirecting to stored URL:`, storedUrl)
             }
-            guardedAndroidRedirect(storedUrl)
+            guardedMobileRedirect(storedUrl)
             return
           }
           
@@ -238,10 +273,10 @@ export function WalletConnectButton() {
             if (window.history.length > 1) {
               window.history.back()
             } else {
-              guardedAndroidRedirect(window.location.origin)
+              guardedMobileRedirect(window.location.origin)
             }
           } catch (e) {
-            guardedAndroidRedirect(window.location.origin)
+            guardedMobileRedirect(window.location.origin)
           }
         }
       }
@@ -296,10 +331,10 @@ export function WalletConnectButton() {
         hashParams.has('redirect_uri') // Generic callback
       
       if (hasCallback) {
-        // On Android, ensure we're not on a blank page before cleaning
-        if (isAndroidDevice()) {
+        // On mobile, ensure we're not on a blank page before cleaning
+        if (isMobileDevice()) {
           const currentHref = window.location.href
-          const isBlankPage = isAndroidErrorPageHref(currentHref)
+          const isBlankPage = isMobileWalletErrorPageHref(currentHref)
           
           if (isBlankPage) {
             // If we're on blank page but have callback params, redirect to stored URL
@@ -336,7 +371,7 @@ export function WalletConnectButton() {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Redirecting from blank page with callback params (${walletName || 'unknown wallet'}) to:`, storedUrlObj.toString())
               }
-              guardedAndroidRedirect(storedUrlObj.toString())
+              guardedMobileRedirect(storedUrlObj.toString())
               return
             }
           }
@@ -388,10 +423,9 @@ export function WalletConnectButton() {
     }
   }, [mounted, connected])
 
-  // Handle all mobile wallet connections on Android - ensure proper deep linking
-  // Fix for Android blank page issue when connecting any mobile wallet
+  // Store redirect URL + recover blank pages when returning from wallet apps (iOS + Android).
   useEffect(() => {
-    if (!mounted || !isMobileDevice() || !isAndroidDevice()) return
+    if (!mounted || !isMobileDevice()) return
 
     // List of mobile wallets that use deep links on Android
     const mobileWalletNames = ['Solflare', 'Phantom', 'Backpack', 'Coinbase', 'Trust', 'Solana Mobile']
@@ -427,7 +461,7 @@ export function WalletConnectButton() {
             // Check if we're on a blank page or error page
             setTimeout(() => {
               const currentHref = window.location.href
-              const isBlankPage = isAndroidErrorPageHref(currentHref)
+              const isBlankPage = isMobileWalletErrorPageHref(currentHref)
               
               // Get stored URL (try wallet-specific first, then generic)
               let storedUrl = sessionStorage.getItem(storageKey)
@@ -440,7 +474,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Detected blank page after ${walletName} connection, redirecting to:`, storedUrl)
                 }
-                guardedAndroidRedirect(storedUrl)
+                guardedMobileRedirect(storedUrl)
                 return
               }
               
@@ -483,7 +517,7 @@ export function WalletConnectButton() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log(`Redirecting to stored URL with callback params (${walletName}):`, storedUrlObj.toString())
                 }
-                guardedAndroidRedirect(storedUrlObj.toString())
+                guardedMobileRedirect(storedUrlObj.toString())
               }
             }, 500) // Small delay to allow page to load
           }
@@ -500,11 +534,11 @@ export function WalletConnectButton() {
               storedUrl = sessionStorage.getItem('mobile_wallet_redirect_url')
             }
             
-            if (storedUrl && isAndroidErrorPageHref(currentHref)) {
+            if (storedUrl && isMobileWalletErrorPageHref(currentHref)) {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`Detected blank/error page on focus (${walletName}), redirecting to:`, storedUrl)
               }
-              guardedAndroidRedirect(storedUrl)
+              guardedMobileRedirect(storedUrl)
             }
           }, 500)
         }
@@ -643,8 +677,7 @@ export function WalletConnectButton() {
           setVisible(true)
           return
         }
-        // If not already in a wallet browser, offer in-app first so connection stays in-app
-        if (!isSolflareBrowser() && !isPhantomBrowser()) {
+        if (isMobileWebBrowser()) {
           setShowMobileInAppDialog(true)
           return
         }
@@ -660,8 +693,6 @@ export function WalletConnectButton() {
       if (!isMobileDevice()) return
       if (e.button !== 0 && e.button !== undefined) return
       if (!mounted || connected || connecting) return
-      // Desktop: WalletMultiButton click opens the modal; pointerup here can duplicate work or confuse ordering.
-      if (!isMobileDevice()) return
       const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
       if (currentUrl) {
         const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
@@ -672,7 +703,7 @@ export function WalletConnectButton() {
         setVisible(true)
         return
       }
-      if (!isSolflareBrowser() && !isPhantomBrowser()) {
+      if (isMobileWebBrowser()) {
         setShowMobileInAppDialog(true)
         return
       }
@@ -686,21 +717,19 @@ export function WalletConnectButton() {
     (e: React.TouchEvent) => {
       if (!isMobileDevice()) return
       if (!mounted || connected || connecting) return
-      if (isMobileDevice()) {
-        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
-        if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
-          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
-          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
-        }
-        if (isSolanaMobileEnvironment()) {
-          setVisible(true)
-          return
-        }
-        if (!isSolflareBrowser() && !isPhantomBrowser()) {
-          setShowMobileInAppDialog(true)
-          return
-        }
+      const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+      if (currentUrl) {
+        const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
+        keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+        sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+      }
+      if (isSolanaMobileEnvironment()) {
+        setVisible(true)
+        return
+      }
+      if (isMobileWebBrowser()) {
+        setShowMobileInAppDialog(true)
+        return
       }
       setVisible(true)
     },
@@ -784,8 +813,8 @@ export function WalletConnectButton() {
           <DialogHeader>
             <DialogTitle>Connect wallet</DialogTitle>
             <DialogDescription className="pt-2">
-              For the smoothest experience, open this site in your wallet&apos;s browser. Everything stays in the app—no
-              switching back and forth. On Seeker, choose <strong>Solana Mobile</strong> in the wallet list instead.
+              {mobileWalletInAppBrowserHint()} On Seeker, choose <strong>Solana Mobile</strong> in the wallet list
+              instead.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-3">
@@ -816,6 +845,37 @@ export function WalletConnectButton() {
               className="w-full"
             >
               Continue in this browser
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMobileWebConnectHint} onOpenChange={setShowMobileWebConnectHint}>
+        <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
+          <DialogHeader>
+            <DialogTitle>Couldn&apos;t connect in {mobileWebBrowserLabel()}</DialogTitle>
+            <DialogDescription className="pt-2">
+              {mobileWalletInAppBrowserHint()} On Seeker, choose <strong>Solana Mobile</strong> in the wallet list.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            <Button
+              onClick={() => {
+                redirectToSolflareBrowser()
+                setShowMobileWebConnectHint(false)
+              }}
+              className="w-full bg-[#02050a] hover:bg-[#02050a]/90 text-[#ffef46] border border-[#ffef46]/30"
+            >
+              Open in Solflare
+            </Button>
+            <Button
+              onClick={() => {
+                redirectToPhantomBrowser()
+                setShowMobileWebConnectHint(false)
+              }}
+              className="w-full bg-purple-600 hover:bg-purple-700"
+            >
+              Open in Phantom
             </Button>
           </div>
         </DialogContent>

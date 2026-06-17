@@ -18,7 +18,7 @@ import {
   createDefaultWalletNotFoundHandler,
 } from '@solana-mobile/wallet-adapter-mobile'
 
-import { isMobileDevice } from '@/lib/utils'
+import { isMobileDevice, shouldMobileAutoConnect } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
 import { resolvePublicSolanaRpcUrl, resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
@@ -39,7 +39,7 @@ interface WalletContextProviderProps {
 function WalletContextProviderInner({ children }: WalletContextProviderProps) {
   const useDevnetCluster = walletAdapterShouldUseDevnet()
   const network = useDevnetCluster ? WalletAdapterNetwork.Devnet : WalletAdapterNetwork.Mainnet
-  const shouldAutoConnect = typeof window !== 'undefined' && isMobileDevice()
+  const shouldAutoConnect = typeof window !== 'undefined' && shouldMobileAutoConnect()
   const endpoint = useMemo(() => {
     if (useDevnetCluster) {
       return isDevnetMintEnabled() ? getSolanaRpcUrl() : resolvePublicSolanaRpcUrl()

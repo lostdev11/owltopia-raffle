@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  isAndroidOrSolanaMobileClient,
   isLikelySeekerDevice,
+  isMobileDevice,
   isSolanaMobileWebShell,
 } from '@/lib/utils'
 
-const ANDROID_TIPS_DISMISSED_KEY = 'owl_android_wallet_tips_dismissed'
+const SEEKER_TIPS_DISMISSED_KEY = 'owl_seeker_wallet_tips_dismissed'
 const POLL_MS = 5 * 60_000
 
 const CLIENT_BUILD_ID =
@@ -42,36 +42,26 @@ export function MobileClientUpdateBanner() {
   const [mounted, setMounted] = useState(false)
   const [staleBuild, setStaleBuild] = useState(false)
   const [serverBuildId, setServerBuildId] = useState<string | null>(null)
-  const [showAndroidTips, setShowAndroidTips] = useState(false)
+  const [showSeekerTips, setShowSeekerTips] = useState(false)
 
   const isMobileClient = useMemo(() => {
     if (!mounted) return false
-    return isAndroidOrSolanaMobileClient()
+    return isMobileDevice()
   }, [mounted])
 
-  const androidTipsLine = useMemo(() => {
+  const seekerTipsLine = useMemo(() => {
     if (!mounted) return null
-    if (isSolanaMobileWebShell() || isLikelySeekerDevice()) {
-      return (
-        <>
-          On <strong>Seeker</strong>, keep system updates and Seed Vault current. After we ship a site update,
-          pull down to refresh or reopen this page. Use <strong>Solana Mobile</strong> in the wallet list to connect.
-        </>
-      )
-    }
-    if (isAndroidOrSolanaMobileClient()) {
-      return (
-        <>
-          On <strong>Android</strong>, update Chrome and your wallet app (Phantom, Solflare, etc.). If connect or sign
-          fails, refresh this page or open it in your wallet&apos;s in-app browser.
-        </>
-      )
-    }
-    return null
+    if (!isSolanaMobileWebShell() && !isLikelySeekerDevice()) return null
+    return (
+      <>
+        On <strong>Seeker</strong>, keep system updates and Seed Vault current. After we ship a site update, pull down
+        to refresh or reopen this page. Use <strong>Solana Mobile</strong> in the wallet list to connect.
+      </>
+    )
   }, [mounted])
 
   const checkBuild = useCallback(async () => {
-    if (!isAndroidOrSolanaMobileClient()) return
+    if (!isMobileDevice()) return
     try {
       const res = await fetch('/api/app-build', { cache: 'no-store' })
       const data = (await res.json().catch(() => ({}))) as { buildId?: string }
@@ -93,14 +83,14 @@ export function MobileClientUpdateBanner() {
   useEffect(() => {
     if (!mounted || !isMobileClient) return
 
-    let dismissed = false
-    try {
-      dismissed = sessionStorage.getItem(ANDROID_TIPS_DISMISSED_KEY) === '1'
-    } catch {
-      /* ignore */
-    }
-    if (!dismissed && androidTipsLine) {
-      setShowAndroidTips(true)
+    if (seekerTipsLine) {
+      let dismissed = false
+      try {
+        dismissed = sessionStorage.getItem(SEEKER_TIPS_DISMISSED_KEY) === '1'
+      } catch {
+        /* ignore */
+      }
+      if (!dismissed) setShowSeekerTips(true)
     }
 
     void checkBuild()
@@ -114,19 +104,19 @@ export function MobileClientUpdateBanner() {
       clearInterval(id)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [mounted, isMobileClient, androidTipsLine, checkBuild])
+  }, [mounted, isMobileClient, seekerTipsLine, checkBuild])
 
-  const dismissAndroidTips = useCallback(() => {
-    setShowAndroidTips(false)
+  const dismissSeekerTips = useCallback(() => {
+    setShowSeekerTips(false)
     try {
-      sessionStorage.setItem(ANDROID_TIPS_DISMISSED_KEY, '1')
+      sessionStorage.setItem(SEEKER_TIPS_DISMISSED_KEY, '1')
     } catch {
       /* ignore */
     }
   }, [])
 
   if (!mounted || !isMobileClient) return null
-  if (!staleBuild && !showAndroidTips) return null
+  if (!staleBuild && !(showSeekerTips && seekerTipsLine)) return null
 
   if (staleBuild) {
     return (
@@ -159,7 +149,7 @@ export function MobileClientUpdateBanner() {
     )
   }
 
-  if (!showAndroidTips || !androidTipsLine) return null
+  if (!showSeekerTips || !seekerTipsLine) return null
 
   return (
     <BannerShell
@@ -171,13 +161,13 @@ export function MobileClientUpdateBanner() {
         'pt-[max(0.375rem,env(safe-area-inset-top,0px))]'
       )}
     >
-      <p className="text-sm leading-snug flex-1 min-w-0">{androidTipsLine}</p>
+      <p className="text-sm leading-snug flex-1 min-w-0">{seekerTipsLine}</p>
       <Button
         type="button"
         variant="outline"
         size="sm"
         className="shrink-0 min-h-11 touch-manipulation border-emerald-500/40 text-emerald-50 hover:bg-emerald-900/50"
-        onClick={dismissAndroidTips}
+        onClick={dismissSeekerTips}
       >
         Got it
       </Button>

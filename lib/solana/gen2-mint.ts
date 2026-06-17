@@ -32,10 +32,10 @@ import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
   createMintSessionDeadline,
   MINT_RECOVERY_RESERVE_MS,
-  MINT_SEND_MIN_MS,
   mintSessionRemainingMs,
   MintSessionTimeoutError,
-  sleepMs,
+  pauseMintSessionDeadline,
+  resumeMintSessionDeadline,
   withMintSessionBudget,
 } from '@/lib/owl-center/mint-time-budget'
 
@@ -95,7 +95,7 @@ function mintPriorityFeeMicroLamports(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 250_000
 }
 
-const MINT_PREP_CACHE_TTL_MS = 45_000
+const MINT_PREP_CACHE_TTL_MS = 90_000
 
 type CachedMintMetadata = { expires: number; updateAuthorityB58: string }
 type CachedMintPlan = { expires: number; plan: Gen2GuardMintPlan }
@@ -476,6 +476,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     const nftMints = Array.from({ length: quantity }, () => generateSigner(umi))
     onMintProgress?.(quantity, quantity)
+    pauseMintSessionDeadline(sessionDeadline)
 
     const buildBatchMintBuilder = () => {
       const computeUnits = computeUnitsForBatch(quantity, allowListRoutePlan.includeRoute)
@@ -522,27 +523,18 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     const built = buildBatchMintBuilder()
     if (!built.ok) {
+      resumeMintSessionDeadline(sessionDeadline)
       return { ok: false, error: built.error }
     }
 
     let lastMintError: unknown
     let submittedSig: string | null = null
-    const sendMs = Math.max(
-      MINT_SEND_MIN_MS,
-      mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
-    )
     try {
-      const res = await Promise.race([
-        withSolanaRpcRetry(
-          () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
-          MINT_SOLANA_SEND_RETRY
-        ),
-        sleepMs(sendMs).then(() => {
-          throw new MintSessionTimeoutError(
-            'Mint timed out waiting for your wallet or the network — check Collectibles in Phantom or Solflare.'
-          )
-        }),
-      ])
+      const res = await withSolanaRpcRetry(
+        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
+        MINT_SOLANA_SEND_RETRY
+      )
+      resumeMintSessionDeadline(sessionDeadline)
       const sig = res.signature as string | Uint8Array
       const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
       return {
@@ -551,6 +543,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         mintedNftMints: nftMints.map((m) => String(m.publicKey)),
       }
     } catch (e) {
+      resumeMintSessionDeadline(sessionDeadline)
       lastMintError = e
       submittedSig = extractTxSignatureFromUnknownError(e)
     }

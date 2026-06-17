@@ -1,6 +1,6 @@
 /** Client fetch helper — avoids indefinite "Warming up your nest" when heal/RPC is slow. */
 
-import { isAndroidDevice, isMobileDevice, isSolanaMobileEnvironment } from '@/lib/utils'
+import { isMobileDevice, isMobileWebBrowser, isSolanaMobileEnvironment } from '@/lib/utils'
 
 export const NESTING_POSITIONS_FETCH_TIMEOUT_MS = 28_000
 export const NESTING_CLAIM_FETCH_TIMEOUT_MS = 55_000
@@ -74,11 +74,8 @@ function mobileBrowserFallbackHint(): string {
   if (isSolanaMobileEnvironment()) {
     return ' On Seeker, try Chrome or Brave with Solana Mobile in the wallet list, or Phantom/Solflare if the built-in wallet does not connect.'
   }
-  if (isAndroidDevice()) {
-    return ' On Android, try Chrome with Phantom/Solflare, or pick Solana Mobile in the wallet list.'
-  }
-  if (isMobileDevice()) {
-    return ' Try opening the site in your phone\'s browser (Safari or Chrome), not only inside the wallet app.'
+  if (isMobileWebBrowser()) {
+    return ' Tap Connect wallet and choose Open in Phantom or Open in Solflare. If the page looks stuck, refresh once.'
   }
   return ''
 }
