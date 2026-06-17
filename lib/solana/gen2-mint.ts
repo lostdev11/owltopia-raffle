@@ -32,6 +32,7 @@ import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
   createMintSessionDeadline,
   MINT_RECOVERY_RESERVE_MS,
+  MINT_SEND_MIN_MS,
   mintSessionRemainingMs,
   MintSessionTimeoutError,
   pauseMintSessionDeadline,
@@ -530,31 +531,55 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     let lastMintError: unknown
     let submittedSig: string | null = null
     try {
-      const res = await withSolanaRpcRetry(
-        () => built.builder.sendAndConfirm(umi, { confirm: { commitment: 'processed' } }),
-        MINT_SOLANA_SEND_RETRY
-      )
+      // Send only — do NOT use UMI sendAndConfirm. Mint RPC is a same-origin HTTP proxy with no
+      // websocket, so its signatureSubscribe confirm never fires and it blocks until blockhash
+      // expiry (~60s) before throwing a false "timeout" even though the mint already landed.
+      // We confirm via HTTP getSignatureStatuses polling instead, which returns in ~1–3s.
+      const sigBytes = await withSolanaRpcRetry(async () => {
+        const ready = await built.builder.setLatestBlockhash(umi, { commitment: 'confirmed' })
+        return ready.send(umi, { skipPreflight: false })
+      }, MINT_SOLANA_SEND_RETRY)
       resumeMintSessionDeadline(sessionDeadline)
-      const sig = res.signature as string | Uint8Array
-      const sigStr = typeof sig === 'string' ? sig : bs58.encode(sig)
-      return {
-        ok: true,
-        txSignatures: [sigStr],
-        mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+      submittedSig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
+
+      const confirmMs = Math.max(
+        MINT_SEND_MIN_MS,
+        mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+      )
+      const confirmed = await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
+        maxWaitMs: confirmMs,
+        intervalMs: 400,
+        minCommitment: 'confirmed',
+      })
+      if (confirmed) {
+        return {
+          ok: true,
+          txSignatures: [submittedSig],
+          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+        }
       }
+      // Sent but not confirmed within budget — fall through to on-chain recovery below.
+      lastMintError = lastMintError ?? new Error('Mint confirmation is taking longer than usual.')
     } catch (e) {
       resumeMintSessionDeadline(sessionDeadline)
       lastMintError = e
-      submittedSig = extractTxSignatureFromUnknownError(e)
+      submittedSig = submittedSig ?? extractTxSignatureFromUnknownError(e)
     }
 
-    const pollMs = Math.min(5000, mintSessionRemainingMs(sessionDeadline))
+    const pollMs = Math.min(4000, mintSessionRemainingMs(sessionDeadline))
     if (submittedSig && pollMs > 0) {
-      await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
+      const lateConfirmed = await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
         maxWaitMs: pollMs,
-        intervalMs: 300,
-        minCommitment: 'processed',
+        intervalMs: 350,
+        minCommitment: 'confirmed',
       })
+      if (lateConfirmed) {
+        return {
+          ok: true,
+          txSignatures: [submittedSig],
+          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+        }
+      }
     }
 
     if (mintSessionRemainingMs(sessionDeadline) > 400) {
