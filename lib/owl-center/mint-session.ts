@@ -12,7 +12,7 @@ export type MintSessionOutcome = {
 
 export function resolveMintSessionOutcome(
   minted: MintGen2Result,
-  requestedQuantity: number
+  _requestedQuantity?: number
 ): MintSessionOutcome | { error: string } {
   const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
   const mints = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
@@ -25,21 +25,14 @@ export function resolveMintSessionOutcome(
   const lastMintAddress = mints.length ? mints[mints.length - 1]! : null
   const mintedCount = mints.length || sigs.length
 
-  let warning: string | null = null
-  if (!minted.ok) {
-    const remaining = Math.max(0, requestedQuantity - mintedCount)
-    warning =
-      remaining > 0
-        ? `${minted.error} ${remaining} mint${remaining === 1 ? '' : 's'} left — tap Mint again to continue.`
-        : minted.error
-  }
-
+  // Consumers just want it to work — we celebrate whatever minted and let them tap Mint again
+  // for any remainder. No alarming "wallet reported an error / X left" copy on the success screen.
   return {
     mintedCount,
     lastSig,
     lastMintAddress,
     mintedAddresses: mints,
-    warning,
+    warning: null,
   }
 }
 

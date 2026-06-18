@@ -101,7 +101,6 @@ export function Gen2MintPanel({
   const [lastSig, setLastSig] = useState<string | null>(null)
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
-  const [successWarning, setSuccessWarning] = useState<string | null>(null)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
 
   const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
@@ -111,7 +110,6 @@ export function Gen2MintPanel({
     setLastSig(null)
     setMintedAddresses([])
     setMintedCount(0)
-    setSuccessWarning(null)
     setMintProgress(null)
   }, [])
 
@@ -154,7 +152,6 @@ export function Gen2MintPanel({
     setLastSig(null)
     setMintedAddresses([])
     setMintedCount(0)
-    setSuccessWarning(null)
     setMintProgress(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
@@ -231,16 +228,12 @@ export function Gen2MintPanel({
             throw new Error(cj.error || 'Confirm route failed')
           }
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
-          setSuccessWarning(warning)
           setMintProgress(null)
           setStep('success')
-        },
-        onRecordWarning: (message) => {
-          setSuccessWarning((prev) => prev ?? message)
         },
       })
       onRefresh()
@@ -249,13 +242,17 @@ export function Gen2MintPanel({
       const msg = e instanceof Error ? e.message : String(e)
       const low = msg.toLowerCase()
       if (e instanceof MintSessionTimeoutError || low.includes('timed out')) {
-        setErr('Mint timed out — if you approved in your wallet, check Collectibles. Otherwise tap Mint again.')
+        setErr('That took longer than expected — check Collectibles in your wallet, then tap Mint to try again.')
       } else if (low.includes('user rejected') || low.includes('cancel')) {
-        setErr('Mint transaction rejected in wallet')
-      } else if (low.includes('confirm route failed') || low.includes('confirm_failed')) {
-        setErr('Transaction succeeded but database record failed — copy your signature from the wallet and contact support.')
-      } else if (low.includes('block height') || low.includes('blockhash') || low.includes('expired')) {
-        setErr('Transaction expired before it landed — tap Mint again. Any NFTs that already minted are in your wallet.')
+        setErr('Mint cancelled in your wallet.')
+      } else if (
+        low.includes('confirm route failed') ||
+        low.includes('confirm_failed') ||
+        low.includes('block height') ||
+        low.includes('blockhash') ||
+        low.includes('expired')
+      ) {
+        setErr('That didn’t go through — tap Mint to try again.')
       } else {
         setErr(msg)
       }
@@ -309,7 +306,6 @@ export function Gen2MintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
-        warning={successWarning}
         onClose={dismissSuccess}
       />
       <MintPanelShell embedded={embedded} label="mint_console">
@@ -394,7 +390,7 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
-              {elig.gen1_snapshot.gen1_nft_count} detected). Approve once in your wallet — multiple NFTs mint in one transaction when quantity is above 1.
+              {elig.gen1_snapshot.gen1_nft_count} detected). Approve once in your wallet to mint your selected quantity.
             </p>
           ) : null}
 
@@ -478,15 +474,14 @@ export function Gen2MintPanel({
             </DeployButton>
           </div>
 
-          <div className="border border-[#1A222B] bg-[#0B0F14] px-3 py-2 font-mono text-[11px] text-[#9BA8B4]">
-            <p>
-              state=<span className="text-[#00FF9C]">{stepLabel(step)}</span>
-            </p>
-            {err ? <p className="mt-1 text-[#FF9C9C]">{err}</p> : null}
-          </div>
+          {err ? (
+            <div className="border border-[#FF9C9C]/30 bg-[#FF9C9C]/5 px-3 py-2 text-sm text-[#FF9C9C]">
+              {err}
+            </div>
+          ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: one approval mints your selected quantity in a single transaction. Server records credits after on-chain success.
+            Phantom / Solflare: approve once to mint your selected quantity.
           </p>
         </div>
     </MintPanelShell>

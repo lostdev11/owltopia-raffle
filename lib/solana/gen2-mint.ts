@@ -1,6 +1,13 @@
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import bs58 from 'bs58'
-import { publicKey, generateSigner, transactionBuilder } from '@metaplex-foundation/umi'
+import {
+  generateSigner,
+  publicKey,
+  signAllTransactions,
+  transactionBuilder,
+  type Transaction,
+  type TransactionBuilder,
+} from '@metaplex-foundation/umi'
 import { fetchMetadata, findMetadataPda, findMasterEditionPda } from '@metaplex-foundation/mpl-token-metadata'
 import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox'
@@ -23,10 +30,10 @@ import { friendlySolanaRpcErrorMessage, MINT_PREP_SOLANA_RPC_RETRY, MINT_SOLANA_
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import {
+  detectPlannedMintAccounts,
   extractTxSignatureFromUnknownError,
+  findRecentCandyMachineMintSignature,
   pollTransactionSignatureStatus,
-  recoverCandyMachineMint,
-  recoverCandyMachineMintFromPlannedSigners,
 } from '@/lib/solana/recover-candy-machine-mint'
 import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
@@ -476,16 +483,28 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     const nftMints = Array.from({ length: quantity }, () => generateSigner(umi))
-    onMintProgress?.(quantity, quantity)
-    pauseMintSessionDeadline(sessionDeadline)
+    const plannedB58s = nftMints.map((m) => String(m.publicKey))
+    const rpcUrl = getLaunchSolanaRpcUrl(network)
 
-    const buildBatchMintBuilder = () => {
-      const computeUnits = computeUnitsForBatch(quantity, allowListRoutePlan.includeRoute)
-      let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: computeUnits }))
+    // One transaction per NFT. A single legacy tx cannot fit more than one mintV2 — each
+    // references ~25 accounts and nearly fills the 1232-byte limit, so batching several mints
+    // into one tx silently overflows and fails (works at qty 1, fails at qty >= 2). We build N
+    // single-mint txs and sign them all in ONE wallet prompt (UMI groups signing by signer, so
+    // the wallet's signAllTransactions is invoked once).
+    const includeAllowListRoute = allowListRoutePlan.includeRoute && Boolean(plan.candyGuard)
+
+    const buildSingleMintBuilder = (
+      nftMint: (typeof nftMints)[number],
+      withRoute: boolean
+    ): { ok: true; builder: TransactionBuilder } | { ok: false; error: string } => {
+      const routeInThisTx = withRoute && includeAllowListRoute
+      let builder = transactionBuilder().add(
+        setComputeUnitLimit(umi, { units: computeUnitsForBatch(1, routeInThisTx) })
+      )
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
-      if (allowListRoutePlan.includeRoute && plan.candyGuard) {
+      if (routeInThisTx && allowListRoutePlan.includeRoute && plan.candyGuard) {
         builder = appendGen2AllowListRouteInstruction(umi, builder, {
           candyMachine,
           candyGuard: plan.candyGuard.publicKey,
@@ -495,154 +514,164 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         })
       }
       if (collectPlatformMintFee && platformFeeLamports > 0n) {
-        const totalFee = platformFeeLamports * BigInt(quantity)
-        const feeRes = appendOwlCenterPlatformMintFeeSol(umi, totalFee, builder)
-        if (!feeRes.ok) {
-          return feeRes
-        }
+        const feeRes = appendOwlCenterPlatformMintFeeSol(umi, platformFeeLamports, builder)
+        if (!feeRes.ok) return feeRes
         builder = feeRes.builder
       }
-      for (const nftMint of nftMints) {
-        builder = builder.add(
-          mintV2(umi, {
-            candyMachine,
-            candyGuard: plan.candyGuard?.publicKey,
-            nftMint,
-            collectionMint: collectionMintPk,
-            collectionUpdateAuthority,
-            collectionMetadata,
-            collectionMasterEdition,
-            mintArgs: plan.mintArgs,
-            ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
-          })
-        )
-      }
-      return { ok: true as const, builder }
-    }
-
-    const rpcUrl = getLaunchSolanaRpcUrl(network)
-
-    const built = buildBatchMintBuilder()
-    if (!built.ok) {
-      resumeMintSessionDeadline(sessionDeadline)
-      return { ok: false, error: built.error }
-    }
-
-    let lastMintError: unknown
-    let submittedSig: string | null = null
-    try {
-      // Send only — do NOT use UMI sendAndConfirm. Mint RPC is a same-origin HTTP proxy with no
-      // websocket, so its signatureSubscribe confirm never fires and it blocks until blockhash
-      // expiry (~60s) before throwing a false "timeout" even though the mint already landed.
-      // We confirm via HTTP getSignatureStatuses polling instead, which returns in ~1–3s.
-      const sigBytes = await withSolanaRpcRetry(async () => {
-        const ready = await built.builder.setLatestBlockhash(umi, { commitment: 'confirmed' })
-        return ready.send(umi, { skipPreflight: false })
-      }, MINT_SOLANA_SEND_RETRY)
-      resumeMintSessionDeadline(sessionDeadline)
-      submittedSig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
-
-      const confirmMs = Math.max(
-        MINT_SEND_MIN_MS,
-        mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+      builder = builder.add(
+        mintV2(umi, {
+          candyMachine,
+          candyGuard: plan.candyGuard?.publicKey,
+          nftMint,
+          collectionMint: collectionMintPk,
+          collectionUpdateAuthority,
+          collectionMetadata,
+          collectionMasterEdition,
+          mintArgs: plan.mintArgs,
+          ...(plan.groupLabel ? { group: plan.groupLabel } : {}),
+        })
       )
-      const confirmed = await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
-        maxWaitMs: confirmMs,
-        intervalMs: 400,
-        minCommitment: 'confirmed',
+      return { ok: true, builder }
+    }
+
+    const builders: TransactionBuilder[] = []
+    for (let i = 0; i < quantity; i++) {
+      // The allowlist `route` proof PDA only needs creating once, so it rides in the first tx.
+      const res = buildSingleMintBuilder(nftMints[i]!, i === 0)
+      if (!res.ok) return { ok: false, error: res.error }
+      builders.push(res.builder)
+    }
+
+    onMintProgress?.(quantity, quantity)
+    pauseMintSessionDeadline(sessionDeadline)
+    let signedTransactions: Transaction[]
+    try {
+      const blockhash = await withSolanaRpcRetry(
+        () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
+        MINT_SOLANA_SEND_RETRY
+      )
+      const toSign = builders.map((b) => {
+        const withBlockhash = b.setBlockhash(blockhash)
+        return { transaction: withBlockhash.build(umi), signers: withBlockhash.getSigners(umi) }
       })
-      if (confirmed) {
-        return {
-          ok: true,
-          txSignatures: [submittedSig],
-          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
-        }
-      }
-      // Sent but not confirmed within budget — fall through to on-chain recovery below.
-      lastMintError = lastMintError ?? new Error('Mint confirmation is taking longer than usual.')
+      signedTransactions = await signAllTransactions(toSign)
+      resumeMintSessionDeadline(sessionDeadline)
     } catch (e) {
       resumeMintSessionDeadline(sessionDeadline)
-      lastMintError = e
-      submittedSig = submittedSig ?? extractTxSignatureFromUnknownError(e)
+      const msg = e instanceof Error ? e.message : String(e)
+      const low = msg.toLowerCase()
+      if (low.includes('user rejected') || low.includes('cancel')) {
+        return { ok: false, error: 'Mint transaction rejected in wallet' }
+      }
+      return { ok: false, error: friendlySolanaRpcErrorMessage(e) ?? msg }
     }
 
-    const pollMs = Math.min(4000, mintSessionRemainingMs(sessionDeadline))
-    if (submittedSig && pollMs > 0) {
-      const lateConfirmed = await pollTransactionSignatureStatus(rpcUrl, submittedSig, {
-        maxWaitMs: pollMs,
-        intervalMs: 350,
-        minCommitment: 'confirmed',
+    // Send + confirm via HTTP polling (the mint RPC proxy has no websocket, so UMI
+    // sendAndConfirm would block until blockhash expiry even after the tx lands).
+    let firstSendError: unknown = null
+    const sendOneMint = async (tx: Transaction): Promise<{ sig: string | null; confirmed: boolean }> => {
+      let sig: string | null = null
+      try {
+        const sigBytes = await withSolanaRpcRetry(
+          () => umi.rpc.sendTransaction(tx, { skipPreflight: false }),
+          MINT_SOLANA_SEND_RETRY
+        )
+        sig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
+        const confirmMs = Math.max(
+          MINT_SEND_MIN_MS,
+          mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+        )
+        const confirmed = await pollTransactionSignatureStatus(rpcUrl, sig, {
+          maxWaitMs: confirmMs,
+          intervalMs: 400,
+          minCommitment: 'confirmed',
+        })
+        return { sig, confirmed }
+      } catch (e) {
+        firstSendError = firstSendError ?? e
+        return { sig: sig ?? extractTxSignatureFromUnknownError(e), confirmed: false }
+      }
+    }
+
+    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(quantity)
+    if (includeAllowListRoute) {
+      // The first tx creates the allowlist proof PDA; the rest depend on it, so it must land
+      // before they are sent.
+      sendResults[0] = await sendOneMint(signedTransactions[0]!)
+      const rest = await Promise.all(signedTransactions.slice(1).map((tx) => sendOneMint(tx)))
+      rest.forEach((r, i) => {
+        sendResults[i + 1] = r
       })
-      if (lateConfirmed) {
-        return {
-          ok: true,
-          txSignatures: [submittedSig],
-          mintedNftMints: nftMints.map((m) => String(m.publicKey)),
+    } else {
+      const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
+      all.forEach((r, i) => {
+        sendResults[i] = r
+      })
+    }
+
+    const confirmedSigs: string[] = []
+    const confirmedMints: string[] = []
+    for (let i = 0; i < quantity; i++) {
+      const r = sendResults[i]
+      if (r?.confirmed && r.sig) {
+        confirmedSigs.push(r.sig)
+        confirmedMints.push(plannedB58s[i]!)
+      }
+    }
+
+    // Mobile wallets (Phantom/Solflare) often disconnect after the mint actually lands.
+    // Verify the exact mint pubkeys WE generated this attempt — never a stale earlier mint.
+    const pendingIdx = Array.from({ length: quantity }, (_, i) => i).filter(
+      (i) => !(sendResults[i]?.confirmed && sendResults[i]?.sig)
+    )
+    if (pendingIdx.length > 0 && mintSessionRemainingMs(sessionDeadline) > 400) {
+      const pendingB58s = pendingIdx.map((i) => plannedB58s[i]!)
+      const onChain = new Set(
+        await detectPlannedMintAccounts(rpcUrl, pendingB58s, { attempts: 3, delayMs: 600 })
+      )
+      for (const i of pendingIdx) {
+        const b58 = plannedB58s[i]!
+        if (!onChain.has(b58)) continue
+        const sig =
+          sendResults[i]?.sig ??
+          (await findRecentCandyMachineMintSignature(rpcUrl, walletB58, cmId, [b58]))
+        if (sig) {
+          confirmedSigs.push(sig)
+          confirmedMints.push(b58)
         }
       }
     }
 
-    if (mintSessionRemainingMs(sessionDeadline) > 400) {
-      const recoveredEarly = await recoverCandyMachineMintFromPlannedSigners({
-        rpcUrl,
-        walletB58,
-        candyMachineB58: cmId,
-        nftMints,
-        lastError: lastMintError,
-      })
-      if (recoveredEarly?.mintedNftMints.length) {
-        return {
-          ok: true,
-          txSignatures: recoveredEarly.txSignatures.length ? recoveredEarly.txSignatures : submittedSig ? [submittedSig] : [],
-          mintedNftMints: recoveredEarly.mintedNftMints,
-        }
-      }
+    if (confirmedMints.length >= quantity) {
+      return { ok: true, txSignatures: confirmedSigs, mintedNftMints: confirmedMints }
     }
 
-    const msg = lastMintError instanceof Error ? lastMintError.message : String(lastMintError ?? 'mint_failed')
-    if (lastMintError instanceof MintSessionTimeoutError && mintSessionRemainingMs(sessionDeadline) <= 0) {
-      return {
-        ok: false,
-        error: msg,
-        plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
-        txSignatures: submittedSig ? [submittedSig] : undefined,
-      }
-    }
-
-    const recovered =
-      mintSessionRemainingMs(sessionDeadline) > 400
-        ? await recoverCandyMachineMint({
-            rpcUrl,
-            walletB58: walletAdapter.publicKey.toBase58(),
-            candyMachineB58: cmId,
-            nftMints,
-            lastError: lastMintError,
-          })
-        : null
-
-    if (recovered && (recovered.mintedNftMints.length > 0 || recovered.txSignatures.length > 0)) {
+    if (confirmedMints.length > 0) {
+      // Some mints landed, some did not (e.g. blockhash expiry on a later tx). Celebrate the
+      // successes; the UI prompts the user to tap Mint again for the remainder.
       return {
         ok: false,
         error:
           'Your wallet reported an error, but your mint appears on-chain — saving it now. Open your wallet Collectibles if the reveal is slow.',
-        txSignatures: recovered.txSignatures,
-        mintedNftMints: recovered.mintedNftMints,
-        plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
+        txSignatures: confirmedSigs,
+        mintedNftMints: confirmedMints,
+        plannedMintB58s: plannedB58s.filter((b) => !confirmedMints.includes(b)),
       }
     }
 
-    const error = isBlockhashExpiredError(lastMintError)
+    const msg =
+      firstSendError instanceof Error ? firstSendError.message : String(firstSendError ?? 'mint_failed')
+    if (firstSendError instanceof MintSessionTimeoutError) {
+      return { ok: false, error: msg, plannedMintB58s: plannedB58s }
+    }
+    const error = isBlockhashExpiredError(firstSendError)
       ? friendlyBlockhashExpiredError()
-      : isTransactionTooLargeError(lastMintError)
+      : isTransactionTooLargeError(firstSendError)
         ? friendlyTransactionTooLargeError(quantity)
         : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
-          friendlySolanaRpcErrorMessage(lastMintError) ??
+          friendlySolanaRpcErrorMessage(firstSendError) ??
           msg
-    return {
-      ok: false,
-      error,
-      plannedMintB58s: nftMints.map((m) => String(m.publicKey)),
-    }
+    return { ok: false, error, plannedMintB58s: plannedB58s }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (e instanceof MintSessionTimeoutError) {

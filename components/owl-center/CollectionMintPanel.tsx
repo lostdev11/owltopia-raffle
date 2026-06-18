@@ -83,7 +83,6 @@ export function CollectionMintPanel({
   const [lastSig, setLastSig] = useState<string | null>(null)
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
-  const [successWarning, setSuccessWarning] = useState<string | null>(null)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
   const [recoveringMint, setRecoveringMint] = useState(false)
   const lastPlannedMintB58sRef = useRef<string[]>([])
@@ -126,12 +125,11 @@ export function CollectionMintPanel({
     setLastSig(null)
     setMintedAddresses([])
     setMintedCount(0)
-    setSuccessWarning(null)
     setMintProgress(null)
   }, [])
 
   const finalizeRecoveredMint = useCallback(
-    async (recovered: RecoveredCandyMachineMint, warning?: string | null) => {
+    async (recovered: RecoveredCandyMachineMint) => {
       if (!walletStr || recovered.txSignatures.length === 0) return false
 
       const sigs = recovered.txSignatures
@@ -166,7 +164,6 @@ export function CollectionMintPanel({
       setLastSig(confirmedLastSig ?? sigs[sigs.length - 1] ?? null)
       setMintedAddresses(mintPks.length ? mintPks : [])
       setMintedCount(confirmedCount || mintPks.length || 1)
-      setSuccessWarning(warning ?? null)
       setErr(null)
       setMintProgress(null)
       setStep('success')
@@ -188,17 +185,10 @@ export function CollectionMintPanel({
           plannedMintB58s: lastPlannedMintB58sRef.current,
         })
         if (recovered?.txSignatures.length) {
-          return finalizeRecoveredMint(
-            recovered,
-            'Recovered your mint from on-chain history (Phantom/Solflare sometimes disconnect before the site finishes).'
-          )
+          return finalizeRecoveredMint(recovered)
         }
         if (!options?.silent) {
-          setErr((prev) =>
-            prev
-              ? `${prev} No recent mint found in your wallet — check Collectibles, then try again.`
-              : 'No recent mint found in your wallet history. Check Collectibles in Phantom or Solflare.'
-          )
+          setErr('No mint found yet — check Collectibles in your wallet, then tap Mint to try again.')
         }
         return false
       } finally {
@@ -223,7 +213,6 @@ export function CollectionMintPanel({
     setLastSig(null)
     setMintedAddresses([])
     setMintedCount(0)
-    setSuccessWarning(null)
     setMintProgress(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
@@ -298,16 +287,12 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
-          setSuccessWarning(warning)
           setMintProgress(null)
           setStep('success')
-        },
-        onRecordWarning: (message) => {
-          setSuccessWarning((prev) => prev ?? message)
         },
       })
       void Promise.all([loadElig(), onRefresh()])
@@ -324,12 +309,15 @@ export function CollectionMintPanel({
       }
       setErr(
         low.includes('user rejected') || low.includes('cancel')
-          ? 'Mint transaction rejected in wallet'
-          : low.includes('platform mint fee') || low.includes('confirm_failed') || low.includes('database record failed')
-            ? `${msg} — your NFT may still have minted on-chain. Refresh the page; if the counter is still wrong, contact support with your wallet signature.`
-            : low.includes('block height') || low.includes('blockhash') || low.includes('expired')
-              ? 'Transaction expired before it landed — tap Mint again. Any NFTs that already minted are in your wallet.'
-              : msg
+          ? 'Mint cancelled in your wallet.'
+          : low.includes('platform mint fee') ||
+              low.includes('confirm_failed') ||
+              low.includes('database record failed') ||
+              low.includes('block height') ||
+              low.includes('blockhash') ||
+              low.includes('expired')
+            ? 'That didn’t go through — tap Mint to try again.'
+            : msg
       )
       setMintProgress(null)
       setStep('error')
@@ -380,7 +368,6 @@ export function CollectionMintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
-        warning={successWarning}
         onClose={dismissSuccess}
       />
       <CommandCard label={`MINT // public · ${mintNetwork}`}>

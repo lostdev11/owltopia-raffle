@@ -1,5 +1,9 @@
-/** Automated mint work (prep + on-chain send/confirm) after the user taps Mint. Wallet approval is paused out of this budget. */
-export const MINT_SESSION_MAX_MS = 15_000
+/**
+ * Automated mint work (prep + on-chain send/confirm) after the user taps Mint. Wallet approval is
+ * paused out of this budget. Multi-NFT mints send one tx per NFT, so allow a little extra room for
+ * confirming several signatures.
+ */
+export const MINT_SESSION_MAX_MS = 20_000
 
 /** Absolute safety ceiling for the full tap-to-finish flow (includes slow wallet approval on mobile). */
 export const MINT_SESSION_OUTER_MAX_MS = 60_000
