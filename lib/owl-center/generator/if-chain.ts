@@ -48,8 +48,17 @@ export function isIfChainStepSatisfied(
   return present.length === 1
 }
 
+/**
+ * A chain is directional: only the first step is the trigger. The chain fires
+ * (constraining the downstream steps) when a trigger trait is selected — NOT when
+ * a downstream consequence trait happens to be picked. Treating any member as the
+ * trigger lets a common downstream trait force the rare trigger trait, which blows
+ * up the trigger's rarity (e.g. a rare hat appearing on most of the supply).
+ */
 export function isIfChainActive(steps: IfChainStep[], selection: TraitSelection): boolean {
-  return flattenIfChainSteps(steps).some((id) => selectionHasTrait(selection, id))
+  const trigger = steps[0]
+  if (!trigger) return false
+  return trigger.traitIds.some((id) => selectionHasTrait(selection, id))
 }
 
 export function isIfChainFullySatisfied(

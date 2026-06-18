@@ -126,8 +126,13 @@ export function getCategoryPool(
       if (steps.length < 2) continue
       if (!isIfChainActive(steps, selection)) continue
 
+      // The trigger (first step) layer always rolls on its own weight — the chain
+      // only constrains the downstream steps once the trigger trait is selected.
+      const triggerCategoryId = ifChainStepCategoryId(steps[0], traitById)
+      if (categoryId === triggerCategoryId) continue
+
       const stepForCat = steps.find(
-        (step) => ifChainStepCategoryId(step, traitById) === categoryId
+        (step, idx) => idx > 0 && ifChainStepCategoryId(step, traitById) === categoryId
       )
       if (!stepForCat) continue
 
@@ -265,14 +270,68 @@ export function pickWeightedRandom<T extends { weight: number }>(items: T[]): T 
 
 const MAX_SELECTION_ATTEMPTS = 500
 
+/**
+ * Roll order for generation. Defaults to z-index, but ensures each if_chain
+ * trigger layer is resolved BEFORE its downstream layers so the chain can gate
+ * them on the trigger. Without this, a low-z-index downstream layer (e.g. Body)
+ * would be rolled first and could force the higher-z-index trigger (e.g. Hat).
+ */
+export function chainAwareCategoryOrder(
+  categories: TraitCategory[],
+  rules: CompatibilityRule[],
+  traitById: Map<string, TraitLayer>
+): TraitCategory[] {
+  const sorted = [...categories].sort((a, b) => a.zIndex - b.zIndex)
+
+  const mustComeBefore = new Map<string, Set<string>>()
+  for (const rule of rules) {
+    if (rule.type !== 'if_chain') continue
+    const steps = normalizeIfChainSteps(rule)
+    if (steps.length < 2) continue
+    const triggerCat = ifChainStepCategoryId(steps[0], traitById)
+    if (!triggerCat) continue
+    for (let i = 1; i < steps.length; i++) {
+      const downstreamCat = ifChainStepCategoryId(steps[i], traitById)
+      if (!downstreamCat || downstreamCat === triggerCat) continue
+      const deps = mustComeBefore.get(downstreamCat) ?? new Set<string>()
+      deps.add(triggerCat)
+      mustComeBefore.set(downstreamCat, deps)
+    }
+  }
+
+  if (!mustComeBefore.size) return sorted
+
+  const known = new Set(sorted.map((c) => c.id))
+  const placed = new Set<string>()
+  const remaining = [...sorted]
+  const ordered: TraitCategory[] = []
+
+  while (remaining.length) {
+    let idx = remaining.findIndex((c) => {
+      const deps = mustComeBefore.get(c.id)
+      if (!deps) return true
+      for (const dep of deps) {
+        if (known.has(dep) && !placed.has(dep)) return false
+      }
+      return true
+    })
+    if (idx === -1) idx = 0 // dependency cycle — fall back to z-index order
+    const [cat] = remaining.splice(idx, 1)
+    ordered.push(cat)
+    placed.add(cat.id)
+  }
+
+  return ordered
+}
+
 /** Pick one random valid selection, respecting if_pool pools and combo rules. */
 export function randomSelection(
   categories: TraitCategory[],
   allTraits: TraitLayer[],
   rules: CompatibilityRule[]
 ): TraitSelection | null {
-  const sorted = [...categories].sort((a, b) => a.zIndex - b.zIndex)
   const traitById = new Map(allTraits.map((t) => [t.id, t]))
+  const sorted = chainAwareCategoryOrder(categories, rules, traitById)
 
   for (let attempt = 0; attempt < MAX_SELECTION_ATTEMPTS; attempt++) {
     const selection: TraitSelection = {}

@@ -32,6 +32,7 @@
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
+    "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",
     "audit:owl-tiers": "npx --yes tsx scripts/audit-owl-holder-fee-tiers.ts",
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
     "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",
