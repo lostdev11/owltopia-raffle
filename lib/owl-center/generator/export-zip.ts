@@ -9,8 +9,22 @@ function triggerDownload(blob: Blob, filename: string) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  a.rel = 'noopener'
+  a.style.display = 'none'
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  // Keep the object URL alive long enough for the browser to start reading a
+  // large blob. Revoking synchronously cancels downloads of big ZIPs.
+  window.setTimeout(() => {
+    a.remove()
+    URL.revokeObjectURL(url)
+  }, 60_000)
+}
+
+export type SugarZipProgress = {
+  phase: 'compositing' | 'zipping'
+  completed: number
+  total: number
 }
 
 function sugarZipFilename(project: GeneratorProject, batchLength: number, filename?: string): string {
@@ -23,7 +37,8 @@ function sugarZipFilename(project: GeneratorProject, batchLength: number, filena
 export async function buildSugarZipBlob(
   project: GeneratorProject,
   batch: GeneratedNft[],
-  filename?: string
+  filename?: string,
+  onProgress?: (p: SugarZipProgress) => void
 ): Promise<{ blob: Blob; filename: string; count: number }> {
   const zip = new JSZip()
   const assets = zip.folder('assets')
@@ -31,11 +46,13 @@ export async function buildSugarZipBlob(
 
   const { collectionName, symbol, description } = project
 
+  let done = 0
   for (const nft of batch) {
     const png = nft.oneOfOneImageSrc
       ? await dataUrlToBlob(nft.oneOfOneImageSrc)
       : await compositeTraitsToBlob(nft.traits, project.categories)
-    assets.file(`${nft.index}.png`, png)
+    // PNGs are already compressed — STORE avoids re-deflating (less CPU/memory).
+    assets.file(`${nft.index}.png`, png, { compression: 'STORE' })
     assets.file(
       `${nft.index}.json`,
       JSON.stringify(
@@ -54,6 +71,8 @@ export async function buildSugarZipBlob(
         2
       )
     )
+    done += 1
+    onProgress?.({ phase: 'compositing', completed: done, total: batch.length })
   }
 
   assets.file(
@@ -90,7 +109,16 @@ export async function buildSugarZipBlob(
     ].join('\n') + '\n'
   )
 
-  const blob = await zip.generateAsync({ type: 'blob' })
+  const blob = await zip.generateAsync(
+    { type: 'blob', compression: 'STORE', streamFiles: true },
+    (meta) => {
+      onProgress?.({
+        phase: 'zipping',
+        completed: Math.round(meta.percent),
+        total: 100,
+      })
+    }
+  )
   const outName = sugarZipFilename(project, batch.length, filename)
   return { blob, filename: outName, count: batch.length }
 }
@@ -98,9 +126,10 @@ export async function buildSugarZipBlob(
 export async function exportBatchAsSugarZip(
   project: GeneratorProject,
   batch: GeneratedNft[],
-  filename?: string
+  filename?: string,
+  onProgress?: (p: SugarZipProgress) => void
 ): Promise<{ blob: Blob; filename: string; count: number }> {
-  const built = await buildSugarZipBlob(project, batch, filename)
+  const built = await buildSugarZipBlob(project, batch, filename, onProgress)
   triggerDownload(built.blob, built.filename)
   return built
 }

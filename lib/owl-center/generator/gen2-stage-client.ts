@@ -1,4 +1,4 @@
-import { buildSugarZipBlob } from '@/lib/owl-center/generator/export-zip'
+import { buildSugarZipBlob, type SugarZipProgress } from '@/lib/owl-center/generator/export-zip'
 import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
 import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
 import {
@@ -11,7 +11,8 @@ import type { GeneratorProject } from '@/lib/owl-center/generator/types'
 /** Build a full-supply Sugar ZIP blob (no browser download). */
 export async function buildFullSupplySugarZip(
   project: GeneratorProject,
-  targetSupply: number
+  targetSupply: number,
+  onProgress?: (p: SugarZipProgress) => void
 ): Promise<{ blob: Blob; filename: string; count: number }> {
   const entries = oneOfOnesForProject(project)
   const generativeCount = generativeCountForSupply(targetSupply, entries.length)
@@ -26,7 +27,12 @@ export async function buildFullSupplySugarZip(
     project.oneOfOnePlacement,
     project.id
   )
-  return buildSugarZipBlob(project, batch, `${project.name || 'gen2'}-supply-${targetSupply}`)
+  return buildSugarZipBlob(
+    project,
+    batch,
+    `${project.name || 'gen2'}-supply-${targetSupply}`,
+    onProgress
+  )
 }
 
 export async function stageSugarZipToLaunch(

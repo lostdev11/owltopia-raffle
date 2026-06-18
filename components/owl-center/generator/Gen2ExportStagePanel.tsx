@@ -78,7 +78,13 @@ export function Gen2ExportStagePanel({
     setMsg(null)
     setProgress('Building Sugar ZIP…')
     try {
-      const built = await buildFullSupplySugarZip(project, supply)
+      const built = await buildFullSupplySugarZip(project, supply, (p) => {
+        if (p.phase === 'compositing') {
+          setProgress(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+        } else {
+          setProgress(`Packaging ZIP… ${p.completed}%`)
+        }
+      })
       setProgress(`Staging ${built.count.toLocaleString()} files to Gen2…`)
       const staged = await stageSugarZipToLaunch(link.launch_id, built.blob, built.filename)
       if (!staged.ok) throw new Error(staged.error)

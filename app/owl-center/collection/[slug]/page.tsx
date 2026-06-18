@@ -5,7 +5,7 @@ import { notFound, redirect } from 'next/navigation'
 import { CollectionMintPageClient } from '@/components/owl-center/CollectionMintPageClient'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { OG_IMAGE_CACHE_VERSION, PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 
 type Props = { params: Promise<{ slug: string }> }
 
@@ -15,9 +15,33 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: `Owltopia Gen2 | Owl Center | ${PLATFORM_NAME}` }
   }
   const launch = await getOwlCenterLaunchBySlug(slug)
+  const title = launch ? `${launch.name} | Owl Center | ${PLATFORM_NAME}` : `Collection | ${PLATFORM_NAME}`
+  const description = launch?.description ?? `Mint ${launch?.name ?? 'collection'} on Owl Center`
+
+  const site = getSiteBaseUrl().replace(/\/$/, '')
+  const canonicalUrl = `${site}/owl-center/collection/${encodeURIComponent(slug)}`
+  // Per-collection OG art (the collection PFP) — overrides the platform raffle fallback.
+  const ogImageUrl = `${canonicalUrl}/opengraph-image?v=${OG_IMAGE_CACHE_VERSION}`
+  const ogAlt = launch ? `${launch.name} on Owl Center` : PLATFORM_NAME
+
   return {
-    title: launch ? `${launch.name} | Owl Center | ${PLATFORM_NAME}` : `Collection | ${PLATFORM_NAME}`,
-    description: launch?.description ?? `Mint ${launch?.name ?? 'collection'} on Owl Center`,
+    title,
+    description,
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      type: 'website',
+      url: canonicalUrl,
+      siteName: PLATFORM_NAME,
+      title,
+      description,
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: ogAlt, type: 'image/png' }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: ogAlt }],
+    },
   }
 }
 

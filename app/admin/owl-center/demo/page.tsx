@@ -126,6 +126,22 @@ export default function AdminOwlCenterDemoPage() {
             demo.reveal_progress && typeof demo.reveal_progress === 'object' && !Array.isArray(demo.reveal_progress)
               ? (demo.reveal_progress as OwlCenterLaunchPublic['reveal_progress'])
               : {},
+          freeze_enabled: Boolean(demo.freeze_enabled),
+          unfreeze_date: demo.unfreeze_date != null ? String(demo.unfreeze_date) : null,
+          freeze_status:
+            demo.freeze_status === 'pending' ||
+            demo.freeze_status === 'frozen' ||
+            demo.freeze_status === 'thawing' ||
+            demo.freeze_status === 'thawed' ||
+            demo.freeze_status === 'failed'
+              ? demo.freeze_status
+              : 'disabled',
+          freeze_authority: demo.freeze_authority != null ? String(demo.freeze_authority) : null,
+          freeze_thawed_at: demo.freeze_thawed_at != null ? String(demo.freeze_thawed_at) : null,
+          freeze_progress:
+            demo.freeze_progress && typeof demo.freeze_progress === 'object' && !Array.isArray(demo.freeze_progress)
+              ? (demo.freeze_progress as OwlCenterLaunchPublic['freeze_progress'])
+              : {},
         })
         setCm(demo.candy_machine_id != null ? String(demo.candy_machine_id) : '')
         setCol(demo.collection_mint != null ? String(demo.collection_mint) : '')

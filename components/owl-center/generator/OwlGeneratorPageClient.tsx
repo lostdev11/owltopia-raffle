@@ -542,7 +542,13 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
         project.oneOfOnePlacement,
         project.id
       )
-      const built = await exportBatchAsSugarZip(project, batch)
+      const built = await exportBatchAsSugarZip(project, batch, undefined, (p) => {
+        if (p.phase === 'compositing') {
+          setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+        } else {
+          setMessage(`Packaging ZIP… ${p.completed}%`)
+        }
+      })
       setLastExportZip({ blob: built.blob, filename: built.filename })
       setMessage(`Exported ${built.count} Sugar-ready asset(s) (${label})`)
       return built.count

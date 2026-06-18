@@ -3,6 +3,8 @@ import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin
 import { parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 import type {
+  OwlCenterFreezeProgress,
+  OwlCenterFreezeStatus,
   OwlCenterLaunchPublic,
   OwlCenterMintMode,
   OwlCenterPhase,
@@ -39,6 +41,26 @@ function parseRevealProgress(raw: unknown): OwlCenterRevealProgress {
     last_run_at: typeof o.last_run_at === 'string' ? o.last_run_at : undefined,
     refreshed_count: typeof o.refreshed_count === 'number' ? o.refreshed_count : undefined,
     skipped_count: typeof o.skipped_count === 'number' ? o.skipped_count : undefined,
+    error: typeof o.error === 'string' ? o.error : undefined,
+    attempts: typeof o.attempts === 'number' ? o.attempts : undefined,
+  }
+}
+
+function parseFreezeStatus(raw: unknown): OwlCenterFreezeStatus {
+  const s = String(raw ?? 'disabled')
+  if (s === 'pending' || s === 'frozen' || s === 'thawing' || s === 'thawed' || s === 'failed') {
+    return s
+  }
+  return 'disabled'
+}
+
+function parseFreezeProgress(raw: unknown): OwlCenterFreezeProgress {
+  if (!raw || typeof raw !== 'object') return {}
+  const o = raw as Record<string, unknown>
+  return {
+    last_run_at: typeof o.last_run_at === 'string' ? o.last_run_at : undefined,
+    thawed_count: typeof o.thawed_count === 'number' ? o.thawed_count : undefined,
+    remaining_count: typeof o.remaining_count === 'number' ? o.remaining_count : undefined,
     error: typeof o.error === 'string' ? o.error : undefined,
     attempts: typeof o.attempts === 'number' ? o.attempts : undefined,
   }
@@ -112,6 +134,12 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     placeholder_metadata_uri:
       data.placeholder_metadata_uri != null ? String(data.placeholder_metadata_uri) : null,
     reveal_progress: parseRevealProgress(data.reveal_progress),
+    freeze_enabled: Boolean(data.freeze_enabled),
+    unfreeze_date: data.unfreeze_date != null ? String(data.unfreeze_date) : null,
+    freeze_status: parseFreezeStatus(data.freeze_status),
+    freeze_authority: data.freeze_authority != null ? String(data.freeze_authority) : null,
+    freeze_thawed_at: data.freeze_thawed_at != null ? String(data.freeze_thawed_at) : null,
+    freeze_progress: parseFreezeProgress(data.freeze_progress),
   }
 }
 

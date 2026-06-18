@@ -45,6 +45,25 @@ export type OwlCenterRevealProgress = {
   attempts?: number
 }
 
+/** Metaplex Core mint standard for Owl Center launches. */
+export type OwlCenterMintStandard = 'token_metadata' | 'core'
+
+export type OwlCenterFreezeStatus =
+  | 'disabled'
+  | 'pending'
+  | 'frozen'
+  | 'thawing'
+  | 'thawed'
+  | 'failed'
+
+export type OwlCenterFreezeProgress = {
+  last_run_at?: string
+  thawed_count?: number
+  remaining_count?: number
+  error?: string
+  attempts?: number
+}
+
 export type OwlCenterLaunchPublic = {
   id: string
   slug: string
@@ -109,6 +128,15 @@ export type OwlCenterLaunchPublic = {
   reveal_payment_tx_signature: string | null
   placeholder_metadata_uri: string | null
   reveal_progress: OwlCenterRevealProgress
+  /** Metaplex Core "Freeze Collection" — minted assets are frozen until creator thaws (Core only). */
+  freeze_enabled: boolean
+  /** Optional date after which assets become eligible to thaw (also thaws on sellout). */
+  unfreeze_date: string | null
+  freeze_status: OwlCenterFreezeStatus
+  /** Delegate pubkey holding the FreezeDelegate authority for the collection. */
+  freeze_authority: string | null
+  freeze_thawed_at: string | null
+  freeze_progress: OwlCenterFreezeProgress
 }
 
 export type SimpleMintEligibilityResponse = {

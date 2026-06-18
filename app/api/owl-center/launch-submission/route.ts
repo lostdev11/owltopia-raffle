@@ -5,6 +5,7 @@ import { getSessionFromRequest } from '@/lib/auth-server'
 import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
 import { attachGeneratorStagedJobToLaunch } from '@/lib/owl-center/attach-generator-staged-job'
 import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
+import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-center/asset-validation'
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
@@ -62,6 +63,9 @@ export async function POST(request: NextRequest) {
   const mintConfig = parseMintDetailsConfig({ ...body, total_supply: supply })
   if ('error' in mintConfig) return jsonError(mintConfig.error, 400)
 
+  const standardFreeze = parseStandardFreezeConfig(body)
+  if ('error' in standardFreeze) return jsonError(standardFreeze.error, 400)
+
   const royaltySplits = mintConfig.royalty_splits ?? [{ address: creator, share: 100 }]
   const mintFundSplits = mintConfig.mint_fund_splits ?? [{ address: creator, share: 100 }]
   const treasury = mintConfig.treasury_wallet ?? creator
@@ -113,7 +117,10 @@ export async function POST(request: NextRequest) {
       treasury_wallet: treasury,
       royalty_splits: royaltySplits,
       mint_fund_splits: mintFundSplits,
-      mint_standard: 'token_metadata',
+      mint_standard: standardFreeze.mint_standard,
+      freeze_enabled: standardFreeze.freeze_enabled,
+      unfreeze_date: standardFreeze.unfreeze_date,
+      freeze_status: standardFreeze.freeze_enabled ? 'pending' : 'disabled',
       total_supply: mintConfig.total_supply,
       minted_count: 0,
       active_phase: 'PRESALE',

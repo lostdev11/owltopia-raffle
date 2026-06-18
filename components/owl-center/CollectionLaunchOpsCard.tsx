@@ -6,6 +6,7 @@ import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigP
 import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
+import { MintShareLinkPanel } from '@/components/owl-center/MintShareLinkPanel'
 import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import {
   creatorHashListApiPath,
@@ -64,6 +65,16 @@ export function CollectionLaunchOpsCard({
 
   return (
     <CommandCard label={cardLabel} id="launch-ops" className={className}>
+      {launch.slug ? (
+        <MintShareLinkPanel
+          embedded
+          first
+          anchorId="mint-share-link"
+          slug={launch.slug}
+          collectionName={launch.name}
+        />
+      ) : null}
+
       {showMintConfig ? (
         <LaunchMintConfigPanel
           embedded
