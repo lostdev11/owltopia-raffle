@@ -372,6 +372,65 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     }
   }
 
+  // Chain ordering cycles — two (or more) chains whose trigger/downstream layers
+  // form a loop (e.g. base → eyes AND eyes → base). The engine stays correct and
+  // order-independent, but no single roll order can give BOTH triggers their full
+  // weight, so the trigger rolled later appears less often. Warn so it's expected.
+  {
+    const catById = new Map(project.categories.map((c) => [c.id, c]))
+    const edges = new Map<string, Set<string>>()
+    const addEdge = (from?: string, to?: string) => {
+      if (!from || !to || from === to) return
+      const set = edges.get(from) ?? new Set<string>()
+      set.add(to)
+      edges.set(from, set)
+    }
+    for (const rule of project.rules) {
+      if (rule.type === 'skip_layer') {
+        const triggerCat = rule.whenTraitId ? traitById.get(rule.whenTraitId)?.categoryId : undefined
+        addEdge(triggerCat, rule.targetCategoryId)
+        continue
+      }
+      if (rule.type !== 'if_chain') continue
+      const steps = normalizeIfChainSteps(rule)
+      if (steps.length < 2) continue
+      const triggerCat = ifChainStepCategoryId(steps[0], traitById)
+      for (let i = 1; i < steps.length; i++) {
+        addEdge(triggerCat, ifChainStepCategoryId(steps[i], traitById))
+      }
+    }
+
+    const WHITE = 0,
+      GRAY = 1,
+      BLACK = 2
+    const color = new Map<string, number>()
+    let cycleNode: string | null = null
+    const visit = (node: string): boolean => {
+      color.set(node, GRAY)
+      for (const next of edges.get(node) ?? []) {
+        const c = color.get(next) ?? WHITE
+        if (c === GRAY) {
+          cycleNode = next
+          return true
+        }
+        if (c === WHITE && visit(next)) return true
+      }
+      color.set(node, BLACK)
+      return false
+    }
+    for (const node of edges.keys()) {
+      if ((color.get(node) ?? WHITE) === WHITE && visit(node)) break
+    }
+    if (cycleNode) {
+      const name = catById.get(cycleNode)?.name ?? 'a layer'
+      issues.push({
+        severity: 'warning',
+        code: 'chain_order_cycle',
+        message: `Chains form a loop around "${name}" (two layers each trigger a change in the other). Combos stay valid, but one trigger trait will appear less often than its weight. Use a one-way Skip-layer or IF rule if you need exact rarity.`,
+      })
+    }
+  }
+
   for (const cat of project.categories) {
     const count = project.traits.filter((t) => t.categoryId === cat.id).length
     if (count === 0) {

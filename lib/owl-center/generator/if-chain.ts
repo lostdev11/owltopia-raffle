@@ -112,6 +112,52 @@ export function isIfChainFullySatisfied(
   })
 }
 
+/**
+ * Reverse chain guard: the chain's TRIGGER trait cannot be selected because a
+ * downstream step's layer has ALREADY rolled a trait the chain would forbid.
+ *
+ * Mirrors the reverse handling of skip_layer / if_pool so if_chain stays
+ * order-independent. Without this, when roll order is forced wrong — e.g. two
+ * chains form a dependency cycle between two layers (X-ray base → eyes vs.
+ * galaxy eyes → black base) and the topo-sort falls back to z-index — the engine
+ * would still pick the trigger, fail final validation, and discard the combo.
+ * Repeated, that zeroes out the rare trigger trait (the "0 combos" bug).
+ */
+export function ifChainTriggerBlockedByDownstream(
+  steps: IfChainStep[],
+  selection: TraitSelection,
+  traitById: Map<string, TraitLayer>,
+  categories: TraitCategory[]
+): boolean {
+  if (steps.length < 2) return false
+  const catById = new Map(categories.map((c) => [c.id, c]))
+  const triggerCat = ifChainStepCategoryId(steps[0], traitById)
+
+  for (let i = 1; i < steps.length; i++) {
+    const step = steps[i]
+    const stepCat = ifChainStepCategoryId(step, traitById)
+    if (!stepCat || stepCat === triggerCat) continue
+
+    const picked = getCategorySelectionIds(selection, stepCat)
+    if (!picked.length) continue // not rolled yet — nothing to conflict with
+
+    const mode = ifChainStepMode(catById.get(stepCat), step)
+    const stepIds = mode === 'all' ? ifChainStepStackTraitIds(step, traitById) : step.traitIds
+    const allowed = new Set(stepIds)
+
+    if (mode === 'all') {
+      // Every stacked trait must already be present and nothing extra outside the set.
+      const hasAll = stepIds.every((id) => picked.includes(id))
+      const onlyAllowed = picked.every((id) => allowed.has(id))
+      if (!hasAll || !onlyAllowed) return true
+    } else if (picked.some((id) => !allowed.has(id))) {
+      // single / one_of — the filled layer must sit entirely within the allowed set.
+      return true
+    }
+  }
+  return false
+}
+
 /** Another chain step has traits selected outside that step's allowed set. */
 export function ifChainStepBlockedByOtherSteps(
   step: IfChainStep,

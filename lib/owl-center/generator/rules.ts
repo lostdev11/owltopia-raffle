@@ -5,6 +5,7 @@ import {
   ifChainStepCategoryId,
   ifChainStepMode,
   ifChainStepStackTraitIds,
+  ifChainTriggerBlockedByDownstream,
   isIfChainActive,
   isIfChainFullySatisfied,
   normalizeIfChainSteps,
@@ -160,7 +161,17 @@ export function getCategoryPool(
       // The trigger (first step) layer always rolls on its own weight — the chain
       // only constrains the downstream steps once the trigger trait is selected.
       const triggerCategoryId = ifChainStepCategoryId(steps[0], traitById)
-      if (categoryId === triggerCategoryId) continue
+      if (categoryId === triggerCategoryId) {
+        // Reverse guard — don't offer a trigger we can't satisfy because a
+        // downstream layer already rolled an incompatible trait (keeps if_chain
+        // order-independent like skip_layer / if_pool, so a forced roll order from
+        // a chain cycle can't zero out the trigger trait).
+        if (ifChainTriggerBlockedByDownstream(steps, selection, traitById, categories ?? [])) {
+          const triggerIds = new Set(steps[0].traitIds)
+          pool = pool.filter((t) => !triggerIds.has(t.id))
+        }
+        continue
+      }
 
       const stepForCat = steps.find(
         (step, idx) => idx > 0 && ifChainStepCategoryId(step, traitById) === categoryId
