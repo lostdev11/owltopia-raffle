@@ -17,12 +17,16 @@ import {
   isMobileWalletInjectedContext,
   isMobileWebBrowser,
   isSolanaMobileEnvironment,
+  isSolflareBrowser,
+  isPhantomBrowser,
+  isBackpackBrowser,
   isWalletBrowseRedirectPending,
   clearWalletBrowseRedirectPending,
   mobileWalletInAppBrowserHint,
   mobileWebBrowserLabel,
   redirectToPhantomBrowser,
   redirectToSolflareBrowser,
+  redirectToBackpackBrowser,
 } from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 
@@ -64,7 +68,7 @@ function guardedMobileRedirect(nextUrl: string): boolean {
 }
 
 export function WalletConnectButton() {
-  const { publicKey, connected, disconnect, wallet, connecting } = useWallet()
+  const { publicKey, connected, disconnect, wallet, connecting, select, connect, wallets } = useWallet()
   const { setVisible } = useWalletModal()
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
@@ -77,6 +81,7 @@ export function WalletConnectButton() {
   const connectingStartTimeRef = useRef<number | null>(null)
   const cancelButtonTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const connectAttemptedRef = useRef(false)
+  const autoSelectedInWalletBrowserRef = useRef(false)
 
   const clearWalletSelectionStorage = useCallback(() => {
     try {
@@ -190,6 +195,50 @@ export function WalletConnectButton() {
     if (!walletName.toLowerCase().includes('phantom')) return
     redirectToPhantomBrowser()
   }, [mounted, connecting, connected, wallet])
+
+  // Inside a wallet's in-app browser (e.g. after the Solflare/Phantom/Backpack browse redirect),
+  // localStorage from the outer browser (Chrome/Safari) does not carry over, so no wallet is selected
+  // and autoConnect has nothing to restore. Auto-select the matching injected wallet so the user does
+  // not have to tap connect and re-pick the wallet after the round-trip.
+  useEffect(() => {
+    if (!mounted || connected || connecting || wallet) return
+    if (autoSelectedInWalletBrowserRef.current) return
+    if (!isMobileDevice() || !isMobileWalletInjectedContext()) return
+
+    let targetName: string | null = null
+    if (isSolflareBrowser()) targetName = 'Solflare'
+    else if (isPhantomBrowser()) targetName = 'Phantom'
+    else if (isBackpackBrowser()) targetName = 'Backpack'
+    if (!targetName) return
+
+    // Phantom/Backpack appear via Wallet Standard injection; effect re-runs as `wallets` populates.
+    const match = wallets.find(
+      (w) => w.adapter.name.toLowerCase() === targetName!.toLowerCase()
+    )
+    if (!match) return
+
+    autoSelectedInWalletBrowserRef.current = true
+    try {
+      select(match.adapter.name)
+    } catch {
+      autoSelectedInWalletBrowserRef.current = false
+    }
+  }, [mounted, connected, connecting, wallet, wallets, select])
+
+  // Fallback: if auto-select set a wallet but autoConnect did not fire (Android timing), connect once.
+  // connect() is a no-op while already connecting/connected, so a redundant call is safe.
+  useEffect(() => {
+    if (!mounted || !autoSelectedInWalletBrowserRef.current) return
+    if (!wallet || connected || connecting) return
+    const t = setTimeout(() => {
+      if (!connected && !connecting) {
+        connect().catch(() => {
+          /* surfaced via WalletProvider onError */
+        })
+      }
+    }, 600)
+    return () => clearTimeout(t)
+  }, [mounted, wallet, connected, connecting, connect])
 
   // Manual cancel handler
   const handleCancelConnection = useCallback(async () => {
@@ -837,6 +886,15 @@ export function WalletConnectButton() {
               Open in Phantom
             </Button>
             <Button
+              onClick={() => {
+                redirectToBackpackBrowser()
+                setShowMobileInAppDialog(false)
+              }}
+              className="w-full bg-[#e33e3f] hover:bg-[#e33e3f]/90 text-white"
+            >
+              Open in Backpack
+            </Button>
+            <Button
               variant="outline"
               onClick={() => {
                 setShowMobileInAppDialog(false)
@@ -876,6 +934,15 @@ export function WalletConnectButton() {
               className="w-full bg-purple-600 hover:bg-purple-700"
             >
               Open in Phantom
+            </Button>
+            <Button
+              onClick={() => {
+                redirectToBackpackBrowser()
+                setShowMobileWebConnectHint(false)
+              }}
+              className="w-full bg-[#e33e3f] hover:bg-[#e33e3f]/90 text-white"
+            >
+              Open in Backpack
             </Button>
           </div>
         </DialogContent>

@@ -186,9 +186,25 @@ export function isPhantomBrowser(): boolean {
   return userAgent.toLowerCase().includes('phantom')
 }
 
-/** Phantom, Solflare, or Solana Mobile in-app / Web Shell — wallet is injectable. */
+/**
+ * Detects if user is in Backpack browser (mobile)
+ */
+export function isBackpackBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+
+  // Check user agent for Backpack browser
+  const userAgent = navigator.userAgent || ''
+  return userAgent.toLowerCase().includes('backpack')
+}
+
+/** Phantom, Solflare, Backpack, or Solana Mobile in-app / Web Shell — wallet is injectable. */
 export function isMobileWalletInjectedContext(): boolean {
-  return isPhantomBrowser() || isSolflareBrowser() || isSolanaMobileEnvironment()
+  return (
+    isPhantomBrowser() ||
+    isSolflareBrowser() ||
+    isBackpackBrowser() ||
+    isSolanaMobileEnvironment()
+  )
 }
 
 /** Returning from a mobile wallet deep-link callback (Solflare data/nonce, Phantom session keys). */
@@ -318,4 +334,16 @@ export function redirectToSolflareBrowser(): void {
   const url = encodeURIComponent(window.location.href)
   const ref = encodeURIComponent(window.location.origin)
   window.location.href = `https://solflare.com/ul/v1/browse/${url}?ref=${ref}`
+}
+
+/**
+ * Opens the current page in Backpack's in-app browser so connection stays in-app (no redirect out and back).
+ * @see https://docs.backpack.app/deeplinks/other-methods/browse
+ */
+export function redirectToBackpackBrowser(): void {
+  if (typeof window === 'undefined') return
+  markWalletBrowseRedirectPending()
+  const url = encodeURIComponent(window.location.href)
+  const ref = encodeURIComponent(window.location.origin)
+  window.location.href = `https://backpack.app/ul/v1/browse/${url}?ref=${ref}`
 }
