@@ -671,6 +671,13 @@ export function Gen2MintPageClient() {
           onRefresh={refreshMintCheck}
         />
 
+        <Link
+          href="/owl-center/collection/gen2/wallet-checker"
+          className="inline-flex min-h-[44px] touch-manipulation items-center font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] underline-offset-4 hover:underline"
+        >
+          Check another wallet's eligibility →
+        </Link>
+
       </section>
 
 
