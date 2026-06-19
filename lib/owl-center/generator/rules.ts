@@ -4,9 +4,11 @@ import {
   ifChainStepBlockedByOtherSteps,
   ifChainStepCategoryId,
   ifChainStepMode,
+  ifChainStepStackTraitIds,
   isIfChainActive,
   isIfChainFullySatisfied,
   normalizeIfChainSteps,
+  withoutStackedNoneTraits,
 } from '@/lib/owl-center/generator/if-chain'
 import {
   getCategorySelectionIds,
@@ -69,6 +71,21 @@ export function activeIfPoolRules(
   )
 }
 
+/** Active skip_layer rules forcing this category empty given the current partial selection. */
+export function activeSkipLayerRules(
+  categoryId: string,
+  selection: TraitSelection,
+  rules: CompatibilityRule[]
+): CompatibilityRule[] {
+  return rules.filter(
+    (r) =>
+      r.type === 'skip_layer' &&
+      r.targetCategoryId === categoryId &&
+      r.whenTraitId &&
+      selectionHasTrait(selection, r.whenTraitId)
+  )
+}
+
 function intersectPool(pool: TraitLayer[], allowedIds: Set<string>): TraitLayer[] {
   const next = pool.filter((t) => allowedIds.has(t.id))
   return next
@@ -87,6 +104,20 @@ export function getCategoryPool(
 ): TraitLayer[] {
   const traitById = new Map(allTraits.map((t) => [t.id, t]))
   let pool = allTraits.filter((t) => t.categoryId === categoryId)
+
+  // skip_layer — when the trigger trait is selected, this whole layer stays empty.
+  if (activeSkipLayerRules(categoryId, selection, rules).length) return []
+
+  // Reverse skip_layer — if a layer this trait would force empty is already filled,
+  // the trigger trait can't be picked (keeps it order-independent like if_pool).
+  for (const rule of rules) {
+    if (rule.type !== 'skip_layer' || !rule.whenTraitId || !rule.targetCategoryId) continue
+    const whenTrait = traitById.get(rule.whenTraitId)
+    if (!whenTrait || whenTrait.categoryId !== categoryId) continue
+    if (getCategorySelectionIds(selection, rule.targetCategoryId).length > 0) {
+      pool = pool.filter((t) => t.id !== rule.whenTraitId)
+    }
+  }
 
   const active = activeIfPoolRules(categoryId, selection, rules)
   if (active.length) {
@@ -138,7 +169,9 @@ export function getCategoryPool(
 
       const cat = catById?.get(categoryId)
       const mode = ifChainStepMode(cat, stepForCat)
-      const allowed = new Set(stepForCat.traitIds)
+      // For stack-all steps, the "No Trait" sentinel never stacks with real traits.
+      const stepTraitIds = mode === 'all' ? ifChainStepStackTraitIds(stepForCat, traitById) : stepForCat.traitIds
+      const allowed = new Set(stepTraitIds)
 
       if (ifChainStepBlockedByOtherSteps(stepForCat, steps, selection, traitById)) {
         pool = pool.filter((t) => !allowed.has(t.id))
@@ -147,10 +180,10 @@ export function getCategoryPool(
 
       pool = pool.filter((t) => allowed.has(t.id))
 
-      const presentInStep = stepForCat.traitIds.filter((id) => selectionHasTrait(selection, id))
-      if (mode === 'all' && presentInStep.length > 0 && presentInStep.length < stepForCat.traitIds.length) {
+      const presentInStep = stepTraitIds.filter((id) => selectionHasTrait(selection, id))
+      if (mode === 'all' && presentInStep.length > 0 && presentInStep.length < stepTraitIds.length) {
         const missing = new Set(
-          stepForCat.traitIds.filter((id) => !selectionHasTrait(selection, id))
+          stepTraitIds.filter((id) => !selectionHasTrait(selection, id))
         )
         pool = pool.filter((t) => missing.has(t.id))
         if (!pool.length) return []
@@ -205,6 +238,16 @@ export function validateSelection(
   categories?: TraitCategory[]
 ): string | null {
   for (const rule of rules) {
+    if (rule.type === 'skip_layer') {
+      if (!rule.whenTraitId || !rule.targetCategoryId) continue
+      if (!selectionHasTrait(selection, rule.whenTraitId)) continue
+      if (getCategorySelectionIds(selection, rule.targetCategoryId).length > 0) {
+        const whenName = traitById?.get(rule.whenTraitId)?.name ?? 'trigger trait'
+        return rule.label ?? `When "${whenName}" is selected, this layer must be empty`
+      }
+      continue
+    }
+
     if (rule.type === 'if_pool') {
       if (!rule.whenTraitId || !rule.targetCategoryId) continue
       if (!selectionHasTrait(selection, rule.whenTraitId)) continue
@@ -284,18 +327,26 @@ export function chainAwareCategoryOrder(
   const sorted = [...categories].sort((a, b) => a.zIndex - b.zIndex)
 
   const mustComeBefore = new Map<string, Set<string>>()
+  const addDep = (downstreamCat: string | undefined, triggerCat: string | undefined) => {
+    if (!downstreamCat || !triggerCat || downstreamCat === triggerCat) return
+    const deps = mustComeBefore.get(downstreamCat) ?? new Set<string>()
+    deps.add(triggerCat)
+    mustComeBefore.set(downstreamCat, deps)
+  }
+
   for (const rule of rules) {
+    if (rule.type === 'skip_layer') {
+      const triggerCat = rule.whenTraitId ? traitById.get(rule.whenTraitId)?.categoryId : undefined
+      addDep(rule.targetCategoryId, triggerCat)
+      continue
+    }
     if (rule.type !== 'if_chain') continue
     const steps = normalizeIfChainSteps(rule)
     if (steps.length < 2) continue
     const triggerCat = ifChainStepCategoryId(steps[0], traitById)
     if (!triggerCat) continue
     for (let i = 1; i < steps.length; i++) {
-      const downstreamCat = ifChainStepCategoryId(steps[i], traitById)
-      if (!downstreamCat || downstreamCat === triggerCat) continue
-      const deps = mustComeBefore.get(downstreamCat) ?? new Set<string>()
-      deps.add(triggerCat)
-      mustComeBefore.set(downstreamCat, deps)
+      addDep(ifChainStepCategoryId(steps[i], traitById), triggerCat)
     }
   }
 
@@ -351,7 +402,8 @@ export function randomSelection(
 
       const activeIfPool = activeIfPoolRules(cat.id, selection, rules)
       if (cat.allowMultiple && activeIfPool.length) {
-        selection[cat.id] = pool.map((t) => t.id)
+        const ids = withoutStackedNoneTraits(pool.map((t) => t.id), traitById)
+        selection[cat.id] = ids.length ? ids : null
         continue
       }
 

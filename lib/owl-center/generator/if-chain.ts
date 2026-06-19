@@ -9,6 +9,30 @@ export type IfChainStep = {
 
 export type IfChainStepMode = 'single' | 'one_of' | 'all'
 
+/** Matches the creator's "empty layer" sentinel trait (e.g. "No Trait", "None"). */
+const NONE_TRAIT_PATTERN = /^(no[\s_-]?trait|none)$/i
+
+/** A "No Trait"/"None" sentinel means the layer renders nothing — it must never stack with a real trait. */
+export function isNoneTrait(trait: TraitLayer | undefined): boolean {
+  if (!trait) return false
+  return NONE_TRAIT_PATTERN.test(trait.name.trim())
+}
+
+export function isNoneTraitId(traitId: string, traitById: Map<string, TraitLayer>): boolean {
+  return isNoneTrait(traitById.get(traitId))
+}
+
+/**
+ * Drop the "No Trait" sentinel from a stacked set when real traits are present —
+ * an owl can't have both "No Trait" and a real trait in the same layer. If every
+ * id is a sentinel, keep them as-is (the layer is genuinely empty).
+ */
+export function withoutStackedNoneTraits(traitIds: string[], traitById: Map<string, TraitLayer>): string[] {
+  if (traitIds.length <= 1) return traitIds
+  const real = traitIds.filter((id) => !isNoneTraitId(id, traitById))
+  return real.length ? real : traitIds
+}
+
 export function normalizeIfChainSteps(rule: CompatibilityRule): IfChainStep[] {
   if (rule.chainSteps?.length) {
     return rule.chainSteps.filter((s) => s.traitIds.length > 0)
@@ -37,14 +61,27 @@ export function ifChainStepMode(_category: TraitCategory | undefined, step: IfCh
   return 'one_of'
 }
 
+/** Traits actually stacked for an `all` step — never includes the "No Trait" sentinel when real traits exist. */
+export function ifChainStepStackTraitIds(
+  step: IfChainStep,
+  traitById: Map<string, TraitLayer>
+): string[] {
+  return withoutStackedNoneTraits(step.traitIds, traitById)
+}
+
 export function isIfChainStepSatisfied(
   step: IfChainStep,
   selection: TraitSelection,
-  category: TraitCategory | undefined
+  category: TraitCategory | undefined,
+  traitById?: Map<string, TraitLayer>
 ): boolean {
-  const present = step.traitIds.filter((id) => selectionHasTrait(selection, id))
   const mode = ifChainStepMode(category, step)
-  if (mode === 'all') return present.length === step.traitIds.length
+  if (mode === 'all') {
+    const stackIds = traitById ? ifChainStepStackTraitIds(step, traitById) : step.traitIds
+    const present = stackIds.filter((id) => selectionHasTrait(selection, id))
+    return present.length === stackIds.length
+  }
+  const present = step.traitIds.filter((id) => selectionHasTrait(selection, id))
   return present.length === 1
 }
 
@@ -71,7 +108,7 @@ export function isIfChainFullySatisfied(
   return steps.every((step) => {
     const catId = ifChainStepCategoryId(step, traitById)
     const cat = catId ? catById.get(catId) : undefined
-    return isIfChainStepSatisfied(step, selection, cat)
+    return isIfChainStepSatisfied(step, selection, cat, traitById)
   })
 }
 
@@ -116,7 +153,7 @@ export function ifChainForcedAllTraits(
     if (!step) continue
 
     const cat = catById.get(categoryId)
-    if (ifChainStepMode(cat, step) === 'all') return step.traitIds
+    if (ifChainStepMode(cat, step) === 'all') return ifChainStepStackTraitIds(step, traitById)
   }
 
   return null
@@ -133,8 +170,9 @@ export function formatIfChainLabel(
     .map((step) => {
       const catId = ifChainStepCategoryId(step, traitById)
       const cat = catId && catById ? catById.get(catId) : undefined
-      const names = step.traitIds.map((id) => traitById.get(id)?.name ?? id.slice(0, 8))
       const mode = ifChainStepMode(cat, step)
+      const labelIds = mode === 'all' ? ifChainStepStackTraitIds(step, traitById) : step.traitIds
+      const names = labelIds.map((id) => traitById.get(id)?.name ?? id.slice(0, 8))
       const joiner = mode === 'all' ? ' + ' : mode === 'one_of' ? ' / ' : ''
       return `${catId ? categoryName(catId) : 'Layer'}: ${names.join(joiner)}`
     })

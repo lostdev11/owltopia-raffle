@@ -1,5 +1,5 @@
 import type { CompatibilityRule, GeneratorProject } from '@/lib/owl-center/generator/types'
-import { ifChainStepCategoryId, normalizeIfChainSteps } from '@/lib/owl-center/generator/if-chain'
+import { ifChainStepCategoryId, ifChainStepMode, isNoneTraitId, normalizeIfChainSteps } from '@/lib/owl-center/generator/if-chain'
 import { chainTraitIds, comboTraitIds } from '@/lib/owl-center/generator/rules'
 
 export type RuleLintSeverity = 'error' | 'warning' | 'info'
@@ -147,6 +147,19 @@ function lintIfChainRule(
       catsInStep.add(t.categoryId)
     }
 
+    if (
+      ifChainStepMode(undefined, step) === 'all' &&
+      step.traitIds.some((id) => isNoneTraitId(id, traitById)) &&
+      step.traitIds.some((id) => !isNoneTraitId(id, traitById))
+    ) {
+      issues.push({
+        severity: 'warning',
+        code: 'if_chain_stack_all_with_none',
+        message: '"No Trait" can\'t stack (+) with real traits — it will be ignored in this step. Use a pick-one (/) step if the layer can be empty.',
+        ruleId: rule.id,
+      })
+    }
+
     if (seenCategories.has(catId)) {
       issues.push({
         severity: 'error',
@@ -156,6 +169,47 @@ function lintIfChainRule(
       })
     }
     seenCategories.add(catId)
+  }
+}
+
+function lintSkipLayerRule(
+  rule: CompatibilityRule,
+  traitById: Map<string, GeneratorProject['traits'][number]>,
+  issues: RuleLintIssue[]
+): void {
+  if (!rule.whenTraitId) {
+    issues.push({
+      severity: 'error',
+      code: 'skip_missing_trigger',
+      message: 'Skip-layer rule needs a trigger trait',
+      ruleId: rule.id,
+    })
+    return
+  }
+  if (!rule.targetCategoryId) {
+    issues.push({
+      severity: 'error',
+      code: 'skip_missing_category',
+      message: 'Skip-layer rule needs a layer to leave empty',
+      ruleId: rule.id,
+    })
+    return
+  }
+  const whenTrait = traitById.get(rule.whenTraitId)
+  if (!whenTrait) {
+    issues.push({
+      severity: 'error',
+      code: 'missing_trait',
+      message: 'Skip-layer trigger trait was removed',
+      ruleId: rule.id,
+    })
+  } else if (whenTrait.categoryId === rule.targetCategoryId) {
+    issues.push({
+      severity: 'error',
+      code: 'skip_same_layer',
+      message: 'Skip-layer trigger and target layer must be different',
+      ruleId: rule.id,
+    })
   }
 }
 
@@ -172,6 +226,11 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
 
     if (rule.type === 'if_chain') {
       lintIfChainRule(rule, traitById, project, issues)
+      continue
+    }
+
+    if (rule.type === 'skip_layer') {
+      lintSkipLayerRule(rule, traitById, issues)
       continue
     }
 
@@ -193,6 +252,20 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
           ruleId: rule.id,
         })
       }
+    }
+
+    if (
+      (rule.type === 'require' || rule.type === 'lock_set') &&
+      ids.some((id) => isNoneTraitId(id, traitById)) &&
+      ids.some((id) => !isNoneTraitId(id, traitById))
+    ) {
+      issues.push({
+        severity: 'warning',
+        code: 'require_none_use_skip',
+        message:
+          'Requiring a "No Trait" links it both ways (every owl with that empty layer is forced to the trigger too). To leave a layer empty when a trait is present, use a Skip-layer rule instead.',
+        ruleId: rule.id,
+      })
     }
 
     if (rule.type !== 'exclude') {
@@ -225,9 +298,11 @@ export function lintGeneratorProject(project: GeneratorProject): RuleLintIssue[]
     const key =
       rule.type === 'if_pool'
         ? `if_pool:${rule.whenTraitId}:${rule.targetCategoryId}:${ruleTraitKey(rule.allowedTraitIds ?? [])}`
-        : rule.type === 'if_chain'
-          ? `if_chain:${ruleTraitKey(normalizeIfChainSteps(rule).flatMap((s) => s.traitIds))}`
-          : `${rule.type}:${ruleTraitKey(comboTraitIds(rule))}`
+        : rule.type === 'skip_layer'
+          ? `skip_layer:${rule.whenTraitId}:${rule.targetCategoryId}`
+          : rule.type === 'if_chain'
+            ? `if_chain:${ruleTraitKey(normalizeIfChainSteps(rule).flatMap((s) => s.traitIds))}`
+            : `${rule.type}:${ruleTraitKey(comboTraitIds(rule))}`
     if (seenRules.has(key)) {
       issues.push({
         severity: 'warning',

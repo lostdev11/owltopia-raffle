@@ -17,16 +17,16 @@ export type TraitLayer = {
   imageSrc: string
 }
 
-export type CompatibilityRuleType = 'require' | 'exclude' | 'lock_set' | 'if_pool' | 'if_chain'
+export type CompatibilityRuleType = 'require' | 'exclude' | 'lock_set' | 'if_pool' | 'if_chain' | 'skip_layer'
 
 export type CompatibilityRule = {
   id: string
   type: CompatibilityRuleType
   /** Combo rules (require | exclude | lock_set) — two or more trait ids. */
   traitIds?: string[]
-  /** if_pool — when this trait is selected… */
+  /** if_pool / skip_layer — when this trait is selected… */
   whenTraitId?: string
-  /** if_pool — …only roll from these traits in this category. */
+  /** if_pool — …only roll from these traits in this category. skip_layer — …leave this category empty. */
   targetCategoryId?: string
   allowedTraitIds?: string[]
   /** if_chain — ordered layer steps (preferred). */

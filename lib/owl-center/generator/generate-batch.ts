@@ -1,12 +1,8 @@
 import { attributesForSelection, getCategorySelectionIds } from '@/lib/owl-center/generator/selection'
-import { buildDna, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
-import type { GeneratedNft, GeneratorProject, TraitLayer, TraitSelection } from '@/lib/owl-center/generator/types'
+import { buildDna, getCategoryPool, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
+import type { GeneratedNft, GeneratorProject, TraitSelection } from '@/lib/owl-center/generator/types'
 
 const MAX_ATTEMPTS = 500
-
-function traitsByCategory(traits: TraitLayer[], categoryId: string): TraitLayer[] {
-  return traits.filter((t) => t.categoryId === categoryId)
-}
 
 export function generateBatch(
   project: GeneratorProject,
@@ -26,8 +22,10 @@ export function generateBatch(
 
       if (requireAll) {
         const hasEmpty = categories.some((c) => {
-          const pool = traitsByCategory(traits, c.id)
-          return pool.length > 0 && getCategorySelectionIds(selection!, c.id).length === 0
+          if (getCategorySelectionIds(selection!, c.id).length > 0) return false
+          // Empty is only a problem if the layer could actually have been filled —
+          // a layer forced empty by a skip_layer / if_pool rule is intentional.
+          return getCategoryPool(c.id, selection!, traits, rules, categories).length > 0
         })
         if (hasEmpty) continue
       }

@@ -448,6 +448,24 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     [project, updateProject]
   )
 
+  const addSkipLayerRule = useCallback(
+    (whenTraitId: string, targetCategoryId: string) => {
+      if (!project || !whenTraitId || !targetCategoryId) return
+      const whenTrait = project.traits.find((t) => t.id === whenTraitId)
+      const targetCat = project.categories.find((c) => c.id === targetCategoryId)
+      if (whenTrait && whenTrait.categoryId === targetCategoryId) return
+      const rule: CompatibilityRule = {
+        id: uid(),
+        type: 'skip_layer',
+        whenTraitId,
+        targetCategoryId,
+        label: `IF ${whenTrait?.name ?? 'trait'} → skip ${targetCat?.name ?? 'layer'}`,
+      }
+      updateProject({ rules: [...project.rules, rule] })
+    },
+    [project, updateProject]
+  )
+
   const addIfChainRule = useCallback(
     (chainStepGroups: { traitIds: string[]; stackAll?: boolean }[]) => {
       const steps = chainStepGroups.filter((s) => s.traitIds.length > 0)
@@ -969,6 +987,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
             project={project}
             onAddRule={addRule}
             onAddIfPoolRule={addIfPoolRule}
+            onAddSkipLayerRule={addSkipLayerRule}
             onAddIfChainRule={addIfChainRule}
             onRemoveRule={(id) => updateProject({ rules: project.rules.filter((r) => r.id !== id) })}
           />
@@ -1127,6 +1146,7 @@ function RulesSection({
   project,
   onAddRule,
   onAddIfPoolRule,
+  onAddSkipLayerRule,
   onAddIfChainRule,
   onRemoveRule,
 }: {
@@ -1138,6 +1158,7 @@ function RulesSection({
     allowedTraitIds: string[],
     options?: { alsoReverse?: boolean }
   ) => void
+  onAddSkipLayerRule: (whenTraitId: string, targetCategoryId: string) => void
   onAddIfChainRule: (chainStepGroups: { traitIds: string[]; stackAll?: boolean }[]) => void
   onRemoveRule: (id: string) => void
 }) {
@@ -1147,6 +1168,8 @@ function RulesSection({
   const [ifTargetCategory, setIfTargetCategory] = useState<string | null>(null)
   const [ifAllowed, setIfAllowed] = useState<string[]>([])
   const [ifAlsoReverse, setIfAlsoReverse] = useState(true)
+  const [skipTrigger, setSkipTrigger] = useState<string | null>(null)
+  const [skipTargetCategory, setSkipTargetCategory] = useState<string | null>(null)
   const [chainStepGroups, setChainStepGroups] = useState<
     { traitIds: string[]; stackAll?: boolean }[]
   >([])
@@ -1161,8 +1184,11 @@ function RulesSection({
     ? project.traits.filter((t) => t.categoryId === ifTargetCategory)
     : []
 
-  const comboRules = project.rules.filter((r) => r.type !== 'if_pool' && r.type !== 'if_chain')
+  const comboRules = project.rules.filter(
+    (r) => r.type !== 'if_pool' && r.type !== 'if_chain' && r.type !== 'skip_layer'
+  )
   const ifPoolRules = project.rules.filter((r) => r.type === 'if_pool')
+  const skipLayerRules = project.rules.filter((r) => r.type === 'skip_layer')
   const ifChainRules = project.rules.filter((r) => r.type === 'if_chain')
 
   const chainUsedCategories = new Set([
@@ -1441,6 +1467,117 @@ function RulesSection({
                   {' · '}
                   IF {traitLabel(r.whenTraitId!)} → {categoryLabel(r.targetCategoryId!)}:{' '}
                   {(r.allowedTraitIds ?? []).map(traitLabel).join(', ')}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Remove rule"
+                  className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center text-[#9BA8B4] hover:text-red-400"
+                  onClick={() => onRemoveRule(r.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </CommandCard>
+
+      <CommandCard label="RULES // skip layer (leave empty)">
+        <p className="mb-4 text-sm text-[#9BA8B4]">
+          <strong className="font-normal text-[#E8EEF2]">IF</strong> a trigger trait is selected,{' '}
+          <strong className="font-normal text-[#E8EEF2]">leave another layer empty</strong> — e.g. OWL x ray → no
+          Mouth. One-directional, so it never forces the trigger back. Use this instead of a Require with a “No Trait”.
+        </p>
+
+        {project.traits.length >= 1 && project.categories.length >= 2 ? (
+          <div className="space-y-4">
+            <div>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">1. Trigger trait (IF)</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {project.traits.map((t) => {
+                  const cat = project.categories.find((c) => c.id === t.categoryId)?.name
+                  const active = skipTrigger === t.id
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={cn(
+                        'min-h-[44px] touch-manipulation border px-3 text-xs',
+                        active
+                          ? 'border-[#00FF9C]/45 bg-[#00FF9C]/12 text-[#E8FDF4]'
+                          : 'border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/30'
+                      )}
+                      onClick={() => {
+                        setSkipTrigger(t.id)
+                        if (skipTargetCategory === t.categoryId) setSkipTargetCategory(null)
+                      }}
+                    >
+                      {cat}: {t.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">2. Layer to skip</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {project.categories.map((cat) => {
+                  const triggerCat = skipTrigger
+                    ? project.traits.find((t) => t.id === skipTrigger)?.categoryId
+                    : null
+                  const disabled = !skipTrigger || cat.id === triggerCat
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      disabled={disabled}
+                      className={cn(
+                        'min-h-[44px] touch-manipulation border px-3 font-mono text-[10px] font-bold uppercase tracking-widest',
+                        skipTargetCategory === cat.id
+                          ? 'border-[#00FF9C]/45 bg-[#00FF9C]/12 text-[#E8FDF4]'
+                          : 'border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/30',
+                        disabled && 'cursor-not-allowed opacity-40'
+                      )}
+                      onClick={() => setSkipTargetCategory(cat.id)}
+                    >
+                      {cat.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <DeployButton
+              variant="ghost"
+              className="gap-2"
+              disabled={!skipTrigger || !skipTargetCategory}
+              onClick={() => {
+                if (!skipTrigger || !skipTargetCategory) return
+                onAddSkipLayerRule(skipTrigger, skipTargetCategory)
+                setSkipTrigger(null)
+                setSkipTargetCategory(null)
+              }}
+            >
+              <Link2 className="h-4 w-4" aria-hidden />
+              Add skip-layer rule
+            </DeployButton>
+          </div>
+        ) : (
+          <p className="font-mono text-xs text-[#5C6773]">Add traits and at least 2 layers to create skip rules.</p>
+        )}
+
+        {skipLayerRules.length ? (
+          <ul className="mt-6 space-y-2">
+            {skipLayerRules.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 border border-[#1A222B] bg-[#0F1419]/80 px-3 py-2 text-sm"
+              >
+                <span className="text-[#C5D0D8]">
+                  <span className="font-mono text-[10px] uppercase text-[#00C97A]">skip layer</span>
+                  {' · '}
+                  IF {traitLabel(r.whenTraitId!)} → skip {categoryLabel(r.targetCategoryId!)}
                 </span>
                 <button
                   type="button"
