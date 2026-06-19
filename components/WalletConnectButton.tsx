@@ -83,6 +83,31 @@ export function WalletConnectButton() {
   const connectAttemptedRef = useRef(false)
   const autoSelectedInWalletBrowserRef = useRef(false)
 
+  // Opening the wallet-adapter modal while a Radix Dialog is still closing leaves the page
+  // unscrollable: the wallet modal captures `body`'s computed `overflow` on mount and restores
+  // that value on unmount. Radix (react-remove-scroll) keeps `body { overflow: hidden }` until
+  // its close finishes, so the wallet modal would capture `hidden` and re-apply it permanently.
+  // Wait for Radix to release the scroll lock (or fall back after a short timeout) before opening.
+  const openWalletModalAfterScrollUnlock = useCallback(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const start = Date.now()
+    const tryOpen = () => {
+      const body = document.body
+      const stillLocked =
+        body.hasAttribute('data-scroll-locked') ||
+        window.getComputedStyle(body).overflow === 'hidden'
+      if (!stillLocked || Date.now() - start > 600) {
+        setVisible(true)
+        return
+      }
+      window.setTimeout(tryOpen, 50)
+    }
+    window.setTimeout(tryOpen, 50)
+  }, [setVisible])
+
   const clearWalletSelectionStorage = useCallback(() => {
     try {
       if (typeof window === 'undefined') return
@@ -898,7 +923,7 @@ export function WalletConnectButton() {
               variant="outline"
               onClick={() => {
                 setShowMobileInAppDialog(false)
-                setVisible(true)
+                openWalletModalAfterScrollUnlock()
               }}
               className="w-full"
             >
@@ -990,7 +1015,7 @@ export function WalletConnectButton() {
               onClick={() => {
                 setShowPhantomRedirectDialog(false)
                 // Open wallet selection modal so they can choose other wallets
-                setVisible(true)
+                openWalletModalAfterScrollUnlock()
               }}
               className="w-full sm:w-auto"
             >
