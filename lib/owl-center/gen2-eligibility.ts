@@ -10,7 +10,7 @@ import {
   overageReservedGiftedMints,
 } from '@/lib/gen2-presale/presale-participation'
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
-import { getOwltopiaGen1Snapshot } from '@/lib/owl-center/owltopia-gen1'
+import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -129,7 +129,7 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   }
 
   if (phase === 'AIRDROP') {
-    const gen1 = await getOwltopiaGen1Snapshot(w)
+    const gen1 = await resolveGen1SnapshotForMint(w)
     const minted_in_phase = await sumPhaseMintedForWallet(launch.id, w, 'AIRDROP', network)
     const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
     const airdropRemaining = Math.max(0, launch.airdrop_supply - airdropMintedGlobal)
@@ -149,20 +149,24 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
         gen1_nft_count: gen1.gen1_nft_count,
         collection_configured: gen1.collection_configured,
         holder_check_available: gen1.holder_check_available,
+        delegated_from: gen1.delegated_from,
+        delegated_away_to: gen1.delegated_away_to,
       },
       is_eligible: max > 0,
       max_mintable: Math.max(0, max),
       reason: !gen1.collection_configured
         ? 'gen1_collection_not_configured'
-        : !gen1.is_holder
-          ? 'not_gen1_holder'
-          : gen1Remaining <= 0
-            ? 'gen1_mint_limit'
-            : airdropRemaining <= 0
-              ? 'gen1_pool_exhausted'
-              : max <= 0
-                ? 'gen1_mint_limit'
-                : null,
+        : gen1.delegated_away_to
+          ? 'gen1_delegated_away'
+          : !gen1.is_holder
+            ? 'not_gen1_holder'
+            : gen1Remaining <= 0
+              ? 'gen1_mint_limit'
+              : airdropRemaining <= 0
+                ? 'gen1_pool_exhausted'
+                : max <= 0
+                  ? 'gen1_mint_limit'
+                  : null,
       price_usdc: 0,
     }
   }

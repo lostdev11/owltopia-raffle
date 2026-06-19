@@ -30,6 +30,7 @@
     "test:batch-cart-invariants": "npx --yes tsx scripts/test-batch-cart-invariants.ts",
     "test:pending-verification-store": "npx --yes tsx scripts/test-pending-verification-store.ts",
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
+    "test:gen2-gen1-delegations": "npx --yes tsx scripts/test-gen2-gen1-delegations.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",

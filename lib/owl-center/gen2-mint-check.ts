@@ -21,7 +21,7 @@ import {
   getGen1ClusterSummary,
   getWlClusterSummary,
 } from '@/lib/owl-center/gen2-mint-check-cluster'
-import { getOwltopiaGen1Snapshot } from '@/lib/owl-center/owltopia-gen1'
+import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
@@ -42,6 +42,10 @@ import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 type WlRow = { wallet: string; allowed_mints: number; used_mints: number; community?: string | null }
+
+function shortWallet(w: string): string {
+  return w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w
+}
 
 async function getWlRow(wallet: string): Promise<WlRow | null> {
   const db = getSupabaseAdmin()
@@ -183,7 +187,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     if (phase === 'AIRDROP') {
-      const [gen1, gen1Cluster] = await Promise.all([getOwltopiaGen1Snapshot(w), getGen1ClusterSummary(w)])
+      const [gen1, gen1Cluster] = await Promise.all([resolveGen1SnapshotForMint(w), getGen1ClusterSummary(w)])
       const minted_in_phase = await sumPhaseMintedForWallet(launch.id, w, 'AIRDROP', network)
       const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
       const airdropRemaining = Math.max(0, launch.airdrop_supply - airdropMintedGlobal)
@@ -204,23 +208,30 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const isActive = isPhaseMintLive(phase)
       const gen1Reason = !gen1.collection_configured
         ? 'gen1_collection_not_configured'
-        : gen1OnLinked
-          ? 'gen1_on_linked_wallet'
-          : !gen1.is_holder
-            ? 'not_gen1_holder'
-            : reserved_mints <= 0
-              ? minted_in_phase >= gen1.gen1_nft_count
-                ? 'gen1_mint_limit'
-                : airdropRemaining <= 0
-                  ? 'gen1_pool_exhausted'
-                  : 'gen1_mint_limit'
-              : null
+        : gen1.delegated_away_to
+          ? 'gen1_delegated_away'
+          : gen1OnLinked
+            ? 'gen1_on_linked_wallet'
+            : !gen1.is_holder
+              ? 'not_gen1_holder'
+              : reserved_mints <= 0
+                ? minted_in_phase >= gen1.gen1_nft_count
+                  ? 'gen1_mint_limit'
+                  : airdropRemaining <= 0
+                    ? 'gen1_pool_exhausted'
+                    : 'gen1_mint_limit'
+                : null
       const gen1Gate = applyPhaseScheduleGate(
         isActive,
         scheduleOpen,
         maxFromGen1 > 0 && isActive && !launch.is_paused,
         gen1Reason
       )
+      const delegationNote = gen1.delegated_from
+        ? `Minting on behalf of ${shortWallet(gen1.delegated_from)} via admin wallet switch`
+        : gen1.delegated_away_to
+          ? `Gen1 mint delegated to ${shortWallet(gen1.delegated_away_to)} — connect that wallet to mint`
+          : null
       phases.push({
         phase,
         label,
@@ -233,15 +244,19 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         max_mintable: isActive ? maxFromGen1 : reserved_mints,
         reserved_mints,
         phase_note:
-          reserved_mints > 0 && (!isActive || launch.is_paused)
+          delegationNote ??
+          (reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
-            : null,
+            : null),
         reason: gen1Gate.reason,
         gen1: {
-          ...gen1,
+          is_holder: gen1.is_holder,
+          gen1_nft_count: gen1.gen1_nft_count,
           minted_in_phase,
           cluster_gen1_nft_count: gen1Cluster.cluster_gen1_nft_count,
           gen1_on_linked_wallet: gen1OnLinked,
+          delegated_from: gen1.delegated_from,
+          delegated_away_to: gen1.delegated_away_to,
         },
       })
       continue

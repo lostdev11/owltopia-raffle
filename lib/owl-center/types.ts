@@ -217,6 +217,10 @@ export type Gen2EligibilityResponse = {
     gen1_nft_count: number
     collection_configured?: boolean
     holder_check_available?: boolean
+    /** Admin wallet switch: minting on behalf of this source wallet. */
+    delegated_from?: string | null
+    /** Admin wallet switch: this wallet handed its Gen1 mint to another wallet. */
+    delegated_away_to?: string | null
   }
   /** SOL lamports for paid phases (WL/PUBLIC); null during presale redemption (fees only). */
   unit_lamports_estimate: string | null
@@ -249,6 +253,10 @@ export type Gen2MintCheckPhasePreview = {
     minted_in_phase: number
     cluster_gen1_nft_count?: number
     gen1_on_linked_wallet?: boolean
+    /** Admin wallet switch: minting on behalf of this source wallet. */
+    delegated_from?: string | null
+    /** Admin wallet switch: this wallet handed its Gen1 mint to another wallet. */
+    delegated_away_to?: string | null
   }
   presale?: Gen2PresaleBalanceSlice & {
     mint_cap?: number

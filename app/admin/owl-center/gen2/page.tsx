@@ -15,6 +15,7 @@ import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintC
 import { AdminOwlCenterViewModePanel } from '@/components/admin/AdminOwlCenterViewModePanel'
 import { AdminWlCommunityManager } from '@/components/admin/AdminWlCommunityManager'
 import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
+import { AdminGen1WalletSwitch } from '@/components/admin/AdminGen1WalletSwitch'
 import { PhaseScheduleEditor } from '@/components/owl-center/PhaseScheduleEditor'
 import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
 import {
@@ -382,6 +383,10 @@ export default function AdminOwlCenterPage() {
                 must be paid presale participants with credits remaining.
               </p>
               <AdminWalletBulkUpload connected={connected} />
+            </CommandCard>
+
+            <CommandCard id="gen1-wallet-switch" label="gen1_wallet_switch.sys">
+              <AdminGen1WalletSwitch connected={connected} />
             </CommandCard>
 
             <CommandCard id="wl-audit" label="wl_allocation_audit.sys">

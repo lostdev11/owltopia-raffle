@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { parseWalletUploadText } from '@/lib/admin/parse-wallet-upload'
+import { applyGen1Delegations } from '@/lib/db/gen2-gen1-delegations'
 import {
   bulkUpsertGen1Snapshot,
   getGen1SnapshotSummary,
@@ -56,9 +57,12 @@ export async function POST(request: NextRequest) {
       if (!scan.ok) {
         return NextResponse.json({ error: scan.error }, { status: 502 })
       }
+      // Substitute delegated source wallets with their mint wallets so the merkle
+      // allowlist gates the wallet that actually mints (admin "switch wallet for mint").
+      const holders = await applyGen1Delegations(scan.holders)
       const result = replace
-        ? await replaceGen1Snapshot(scan.holders, 'chain')
-        : await bulkUpsertGen1Snapshot(scan.holders, 'chain')
+        ? await replaceGen1Snapshot(holders, 'chain')
+        : await bulkUpsertGen1Snapshot(holders, 'chain')
 
       console.info('[admin/gen1-snapshot] chain scan', {
         admin: session.wallet,
@@ -85,15 +89,18 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'text is required (wallets list or CSV)' }, { status: 400 })
       }
       const parsed = parseWalletUploadText(text, { defaultAllowedMints: 1 })
-      const rows = parsed.rows
+      const parsedRows = parsed.rows
         .filter((r) => r.allowed_mints > 0)
         .map((r) => ({ wallet: r.wallet, gen1_nft_count: r.allowed_mints }))
-      if (!rows.length) {
+      if (!parsedRows.length) {
         return NextResponse.json(
           { error: 'No valid wallets parsed', parse_errors: parsed.errors },
           { status: 400 }
         )
       }
+
+      // Substitute delegated source wallets with their mint wallets (admin "switch wallet for mint").
+      const rows = await applyGen1Delegations(parsedRows)
 
       const result = replace
         ? await replaceGen1Snapshot(rows, 'csv')
@@ -101,7 +108,7 @@ export async function POST(request: NextRequest) {
 
       console.info('[admin/gen1-snapshot] csv upload', {
         admin: session.wallet,
-        parsed: rows.length,
+        parsed: parsedRows.length,
         upserted: result.upserted,
         failed: result.failed.length,
         replace,
@@ -110,7 +117,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         mode: 'csv',
         replace,
-        parsed: rows.length,
+        parsed: parsedRows.length,
         skipped_duplicates: parsed.skipped_duplicates,
         parse_errors: parsed.errors,
         ...result,
