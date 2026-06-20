@@ -35,6 +35,7 @@
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",
     "test:if-chain-cycle": "npx --yes tsx scripts/verify-if-chain-cycle.ts",
+    "test:if-chain-dense": "npx --yes tsx scripts/verify-wings-dense.ts",
     "audit:owl-tiers": "npx --yes tsx scripts/audit-owl-holder-fee-tiers.ts",
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
     "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",

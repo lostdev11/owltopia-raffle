@@ -1,5 +1,5 @@
 import { attributesForSelection } from '@/lib/owl-center/generator/selection'
-import { buildDna, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
+import { buildDna, diagnoseTrait, randomSelection, traitsForSelection } from '@/lib/owl-center/generator/rules'
 import type { GeneratedNft, GeneratorProject } from '@/lib/owl-center/generator/types'
 
 export type TraitSimStat = {
@@ -72,7 +72,12 @@ function buildWarnings(project: GeneratorProject, result: Omit<SupplySimulationR
 
   for (const stat of result.traitStats) {
     if (stat.count === 0 && project.traits.find((t) => t.id === stat.traitId)?.weight) {
-      warnings.push(`${stat.categoryName}: "${stat.traitName}" never appeared — may be blocked by rules.`)
+      const diag = diagnoseTrait(project.categories, project.traits, project.rules, stat.traitId)
+      warnings.push(
+        diag.satisfiable
+          ? `${stat.categoryName}: "${stat.traitName}" is valid but never rolled — it's very rare under current rules. Raise its weight, loosen its chain, or increase supply.`
+          : `${stat.categoryName}: "${stat.traitName}" can't appear — blocked by a rule: ${diag.reason}. Fix or remove the conflicting rule.`
+      )
     } else if (
       generated >= 50 &&
       stat.expectedPercent > 2 &&

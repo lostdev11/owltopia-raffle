@@ -329,6 +329,14 @@ const MAX_SELECTION_ATTEMPTS = 500
  * trigger layer is resolved BEFORE its downstream layers so the chain can gate
  * them on the trigger. Without this, a low-z-index downstream layer (e.g. Body)
  * would be rolled first and could force the higher-z-index trigger (e.g. Hat).
+ *
+ * Edges are split into HARD and SOFT. A stack-all chain step force-sets its whole
+ * layer to an exact stack, so it MUST roll after its trigger (otherwise the layer
+ * pre-rolls a single trait, never matches, and the trigger gets dropped — zeroing
+ * it out). That's a hard edge. Pick-one / single steps and skip_layer can recover
+ * via their reverse guards, so they're soft. When a dependency cycle forces us to
+ * drop an edge, we drop a SOFT edge first and only break a HARD edge as a last
+ * resort, so stack-all triggers keep generating.
  */
 export function chainAwareCategoryOrder(
   categories: TraitCategory[],
@@ -337,18 +345,24 @@ export function chainAwareCategoryOrder(
 ): TraitCategory[] {
   const sorted = [...categories].sort((a, b) => a.zIndex - b.zIndex)
 
-  const mustComeBefore = new Map<string, Set<string>>()
-  const addDep = (downstreamCat: string | undefined, triggerCat: string | undefined) => {
+  const hardBefore = new Map<string, Set<string>>()
+  const softBefore = new Map<string, Set<string>>()
+  const addDep = (
+    downstreamCat: string | undefined,
+    triggerCat: string | undefined,
+    hard: boolean
+  ) => {
     if (!downstreamCat || !triggerCat || downstreamCat === triggerCat) return
-    const deps = mustComeBefore.get(downstreamCat) ?? new Set<string>()
+    const map = hard ? hardBefore : softBefore
+    const deps = map.get(downstreamCat) ?? new Set<string>()
     deps.add(triggerCat)
-    mustComeBefore.set(downstreamCat, deps)
+    map.set(downstreamCat, deps)
   }
 
   for (const rule of rules) {
     if (rule.type === 'skip_layer') {
       const triggerCat = rule.whenTraitId ? traitById.get(rule.whenTraitId)?.categoryId : undefined
-      addDep(rule.targetCategoryId, triggerCat)
+      addDep(rule.targetCategoryId, triggerCat, false)
       continue
     }
     if (rule.type !== 'if_chain') continue
@@ -357,33 +371,106 @@ export function chainAwareCategoryOrder(
     const triggerCat = ifChainStepCategoryId(steps[0], traitById)
     if (!triggerCat) continue
     for (let i = 1; i < steps.length; i++) {
-      addDep(ifChainStepCategoryId(steps[i], traitById), triggerCat)
+      const step = steps[i]
+      addDep(ifChainStepCategoryId(step, traitById), triggerCat, ifChainStepMode(undefined, step) === 'all')
     }
   }
 
-  if (!mustComeBefore.size) return sorted
+  if (!hardBefore.size && !softBefore.size) return sorted
 
   const known = new Set(sorted.map((c) => c.id))
   const placed = new Set<string>()
   const remaining = [...sorted]
   const ordered: TraitCategory[] = []
 
-  while (remaining.length) {
-    let idx = remaining.findIndex((c) => {
-      const deps = mustComeBefore.get(c.id)
-      if (!deps) return true
-      for (const dep of deps) {
-        if (known.has(dep) && !placed.has(dep)) return false
+  const depsSatisfied = (deps: Set<string> | undefined): boolean => {
+    if (!deps) return true
+    for (const dep of deps) {
+      if (known.has(dep) && !placed.has(dep)) return false
+    }
+    return true
+  }
+  // How many edges from `map` we'd violate by placing this category now (i.e. its
+  // own unplaced, known dependencies). Used to break cycles as cheaply as possible.
+  const unplacedDepCount = (map: Map<string, Set<string>>, catId: string): number => {
+    const deps = map.get(catId)
+    if (!deps) return 0
+    let count = 0
+    for (const dep of deps) if (known.has(dep) && !placed.has(dep)) count++
+    return count
+  }
+  // Pick the remaining category that breaks the fewest edges of `map`, preferring
+  // earlier z-index (remaining is z-index sorted) on ties.
+  const pickFewestBroken = (map: Map<string, Set<string>>): number => {
+    let best = 0
+    let bestBroken = Infinity
+    for (let i = 0; i < remaining.length; i++) {
+      const broken = unplacedDepCount(map, remaining[i].id)
+      if (broken < bestBroken) {
+        bestBroken = broken
+        best = i
+        if (broken === 0) break
       }
-      return true
-    })
-    if (idx === -1) idx = 0 // dependency cycle — fall back to z-index order
+    }
+    return best
+  }
+
+  while (remaining.length) {
+    // 1) Prefer a category whose hard AND soft deps are all placed.
+    let idx = remaining.findIndex(
+      (c) => depsSatisfied(hardBefore.get(c.id)) && depsSatisfied(softBefore.get(c.id))
+    )
+    // 2) Cycle: among categories whose HARD deps are satisfied, break the FEWEST
+    //    soft edges (keeps heavy trigger layers from being demoted behind the many
+    //    layers they gate, which would shrink their effective rarity).
+    if (idx === -1) {
+      const hardOk = remaining
+        .map((c, i) => ({ i, c }))
+        .filter(({ c }) => depsSatisfied(hardBefore.get(c.id)))
+      if (hardOk.length) {
+        idx = hardOk.reduce((best, cur) =>
+          unplacedDepCount(softBefore, cur.c.id) < unplacedDepCount(softBefore, best.c.id) ? cur : best
+        ).i
+      }
+    }
+    // 3) Hard cycle: break the fewest hard edges possible.
+    if (idx === -1) idx = pickFewestBroken(hardBefore)
     const [cat] = remaining.splice(idx, 1)
     ordered.push(cat)
     placed.add(cat.id)
   }
 
   return ordered
+}
+
+/** Roll a single category's value against the current partial selection + rules. */
+function rollCategoryValue(
+  cat: TraitCategory,
+  selection: TraitSelection,
+  allTraits: TraitLayer[],
+  rules: CompatibilityRule[],
+  sorted: TraitCategory[],
+  traitById: Map<string, TraitLayer>
+): string | string[] | null {
+  const pool = getCategoryPool(cat.id, selection, allTraits, rules, sorted)
+  if (!pool.length) return null
+
+  const chainAll = ifChainForcedAllTraits(cat.id, selection, rules, traitById, sorted)
+  if (chainAll?.length) return chainAll
+
+  const activeIfPool = activeIfPoolRules(cat.id, selection, rules)
+  if (cat.allowMultiple && activeIfPool.length) {
+    const ids = withoutStackedNoneTraits(pool.map((t) => t.id), traitById)
+    return ids.length ? ids : null
+  }
+
+  if (cat.allowMultiple) {
+    const picked = pickWeightedRandom(pool)
+    return picked ? [picked.id] : null
+  }
+
+  const picked = pickWeightedRandom(pool)
+  return picked?.id ?? null
 }
 
 /** Pick one random valid selection, respecting if_pool pools and combo rules. */
@@ -397,38 +484,70 @@ export function randomSelection(
 
   for (let attempt = 0; attempt < MAX_SELECTION_ATTEMPTS; attempt++) {
     const selection: TraitSelection = {}
-
     for (const cat of sorted) {
-      const pool = getCategoryPool(cat.id, selection, allTraits, rules, sorted)
-      if (!pool.length) {
-        selection[cat.id] = null
-        continue
-      }
-
-      const chainAll = ifChainForcedAllTraits(cat.id, selection, rules, traitById, sorted)
-      if (chainAll?.length) {
-        selection[cat.id] = chainAll
-        continue
-      }
-
-      const activeIfPool = activeIfPoolRules(cat.id, selection, rules)
-      if (cat.allowMultiple && activeIfPool.length) {
-        const ids = withoutStackedNoneTraits(pool.map((t) => t.id), traitById)
-        selection[cat.id] = ids.length ? ids : null
-        continue
-      }
-
-      if (cat.allowMultiple) {
-        const picked = pickWeightedRandom(pool)
-        selection[cat.id] = picked ? [picked.id] : null
-        continue
-      }
-
-      const picked = pickWeightedRandom(pool)
-      selection[cat.id] = picked?.id ?? null
+      selection[cat.id] = rollCategoryValue(cat, selection, allTraits, rules, sorted, traitById)
     }
-
     if (!validateSelection(selection, rules, traitById, sorted)) return selection
   }
   return null
+}
+
+export type TraitDiagnosis = {
+  traitId: string
+  /** True if at least one valid full combo containing the trait was constructed. */
+  satisfiable: boolean
+  /** When unsatisfiable, the most common rule that blocked it (human-readable). */
+  reason?: string
+}
+
+/**
+ * Explain why a trait may be hard/impossible to generate. Pins the trait into its
+ * layer, rolls the rest under the rules, and reports whether ANY valid combo
+ * exists with it — and if not, which rule blocked it most often. This separates
+ * genuine rule contradictions ("never satisfiable") from merely rare traits.
+ */
+export function diagnoseTrait(
+  categories: TraitCategory[],
+  allTraits: TraitLayer[],
+  rules: CompatibilityRule[],
+  traitId: string,
+  attempts = 400
+): TraitDiagnosis {
+  const traitById = new Map(allTraits.map((t) => [t.id, t]))
+  const seed = traitById.get(traitId)
+  if (!seed) return { traitId, satisfiable: false, reason: 'Trait no longer exists' }
+
+  const sorted = chainAwareCategoryOrder(categories, rules, traitById)
+  const seedCat = categories.find((c) => c.id === seed.categoryId)
+  const reasonCounts = new Map<string, number>()
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const selection: TraitSelection = {}
+    selection[seed.categoryId] = seedCat?.allowMultiple ? [seed.id] : seed.id
+
+    for (const cat of sorted) {
+      if (cat.id === seed.categoryId) continue
+      selection[cat.id] = rollCategoryValue(cat, selection, allTraits, rules, sorted, traitById)
+    }
+
+    // A skip_layer / if_pool rule may have wiped the seed's own layer.
+    if (!selectionHasTrait(selection, seed.id)) {
+      reasonCounts.set('Another rule forces this layer empty', (reasonCounts.get('Another rule forces this layer empty') ?? 0) + 1)
+      continue
+    }
+
+    const reason = validateSelection(selection, rules, traitById, sorted)
+    if (!reason) return { traitId, satisfiable: true }
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1)
+  }
+
+  let topReason: string | undefined
+  let topCount = -1
+  for (const [reason, count] of reasonCounts) {
+    if (count > topCount) {
+      topCount = count
+      topReason = reason
+    }
+  }
+  return { traitId, satisfiable: false, reason: topReason ?? 'No valid combo could include this trait' }
 }
