@@ -214,7 +214,10 @@ export async function exportFullSupplyStreaming(
   // Open the save target first (while the click gesture is still valid).
   let sink: ZipSink
   let close: (() => Promise<void>) | null = null
-  let chunks: Uint8Array[] | null = null
+  // Fallback path keeps each chunk as a Blob (browser-managed / often disk-backed)
+  // rather than on the JS heap, so even browsers without the File System Access
+  // API can assemble a large single ZIP without exhausting memory mid-export.
+  let blobParts: Blob[] | null = null
   const streamedToDisk = supportsFileSystemAccess()
 
   if (streamedToDisk) {
@@ -222,9 +225,9 @@ export async function exportFullSupplyStreaming(
     sink = opened.sink
     close = opened.close
   } else {
-    chunks = []
+    blobParts = []
     sink = (chunk) => {
-      chunks!.push(chunk)
+      blobParts!.push(new Blob([chunk as BlobPart]))
     }
   }
 
@@ -253,9 +256,9 @@ export async function exportFullSupplyStreaming(
   const filename = sugarZipFilename(project, batch.length)
   if (close) {
     await close()
-  } else if (chunks) {
+  } else if (blobParts) {
     onProgress?.({ phase: 'zipping', completed: 100, total: 100 })
-    triggerDownload(new Blob(chunks as BlobPart[], { type: 'application/zip' }), filename)
+    triggerDownload(new Blob(blobParts, { type: 'application/zip' }), filename)
   }
 
   return { filename, count: batch.length, streamedToDisk }

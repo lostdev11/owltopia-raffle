@@ -97,6 +97,9 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
   const [exportFullBusy, setExportFullBusy] = useState(false)
   const [lastExportZip, setLastExportZip] = useState<{ blob: Blob; filename: string } | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  // Dedicated export feedback so progress AND errors are always visible right
+  // next to the export buttons (the shared banner renders off-screen at the top).
+  const [exportStatus, setExportStatus] = useState<string | null>(null)
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
   const [cloudUpdatedAt, setCloudUpdatedAt] = useState<string | null>(null)
   const [cloudBusy, setCloudBusy] = useState(false)
@@ -574,13 +577,17 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     if (!project) return
     setExportBusy(true)
     setMessage(null)
+    setExportStatus('Preparing preview batch…')
     try {
       const entries = oneOfOnesForProject(project)
       const totalRequested = Math.min(50, Math.max(1, batchSize))
       const generativeCount = Math.max(0, totalRequested - entries.length)
-      await exportMergedBatch(generativeCount, `${totalRequested} preview batch`)
+      const count = await exportMergedBatch(generativeCount, `${totalRequested} preview batch`)
+      setExportStatus(count != null ? `Exported ${count.toLocaleString()} preview asset(s).` : null)
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Export failed')
+      const msg = e instanceof Error ? e.message : 'Export failed'
+      setMessage(msg)
+      setExportStatus(msg)
     } finally {
       setExportBusy(false)
     }
@@ -590,15 +597,19 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     if (!project) return
     setExportFullBusy(true)
     setMessage(null)
+    const report = (m: string) => {
+      setMessage(m)
+      setExportStatus(m)
+    }
     try {
       const entries = oneOfOnesForProject(project)
       const generativeCount = generativeCountForSupply(targetSupply, entries.length)
       if (generativeCount <= 0 && !entries.length) {
-        setMessage('Set target supply or add 1/1 images before exporting')
+        report('Set target supply or add 1/1 images before exporting')
         return
       }
       if (generativeCount > 0 && !project.traits.length) {
-        setMessage('Add trait layers before exporting generative pieces')
+        report('Add trait layers before exporting generative pieces')
         return
       }
 
@@ -609,7 +620,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
       const result = await exportFullSupplyStreaming(
         project,
         async () => {
-          setMessage(`Building ${generativeCount.toLocaleString()} unique combos…`)
+          report(`Building ${generativeCount.toLocaleString()} unique combos…`)
           // Best-effort: if the rules can't yield the full target, export what we
           // can (and report it) instead of dead-stopping with a hidden error.
           const generative =
@@ -618,7 +629,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                   requireAllCategories: true,
                   bestEffort: true,
                   onProgress: (completed, total) =>
-                    setMessage(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
+                    report(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
                 })
               : []
           cappedBelowTarget = generative.length < generativeCount
@@ -626,16 +637,16 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
         },
         (p) => {
           if (p.phase === 'compositing') {
-            setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+            report(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
           } else {
-            setMessage(`Packaging ZIP… ${p.completed}%`)
+            report(`Packaging ZIP… ${p.completed}%`)
           }
         }
       )
 
       setLastExportZip(null)
       const where = result.streamedToDisk ? ` to ${result.filename}` : ''
-      setMessage(
+      report(
         cappedBelowTarget
           ? `Rules only allow ${result.count.toLocaleString()} unique combos (target was ${targetSupply.toLocaleString()}). Exported all ${result.count.toLocaleString()}${where}. Relax IF rules / add traits to reach ${targetSupply.toLocaleString()}.`
           : result.streamedToDisk
@@ -650,9 +661,9 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     } catch (e) {
       // Cancelling the save dialog is not an error.
       if (e instanceof DOMException && e.name === 'AbortError') {
-        setMessage('Full export cancelled')
+        report('Full export cancelled')
       } else {
-        setMessage(e instanceof Error ? e.message : 'Full export failed')
+        report(e instanceof Error ? e.message : 'Full export failed')
       }
     } finally {
       setExportFullBusy(false)
@@ -1134,9 +1145,12 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                 ? `Exporting ${targetSupply.toLocaleString()}…`
                 : `Download full supply (${targetSupply.toLocaleString()})`}
             </DeployButton>
-            {message && (exportBusy || exportFullBusy || /export|render|packag|build|combo|unique|saved|supply|cancel|fail/i.test(message)) ? (
-              <p className="mt-3 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/8 px-3 py-2 text-xs text-[#C5D0D8]">
-                {message}
+            {exportStatus ? (
+              <p
+                className="mt-3 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/8 px-3 py-2 text-xs text-[#C5D0D8]"
+                aria-live="polite"
+              >
+                {exportStatus}
               </p>
             ) : null}
             {lintBlocked ? (
