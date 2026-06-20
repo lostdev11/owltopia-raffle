@@ -70,11 +70,14 @@ export async function generateBatchAsync(
   count: number,
   options?: {
     requireAllCategories?: boolean
+    /** Return whatever unique pieces could be made instead of throwing when the rules cap uniqueness. */
+    bestEffort?: boolean
     onProgress?: (completed: number, total: number) => void
   }
 ): Promise<GeneratedNft[]> {
   const { categories, traits, rules } = project
   const requireAll = options?.requireAllCategories ?? false
+  const bestEffort = options?.bestEffort ?? false
   const seen = new Set<string>()
   const out: GeneratedNft[] = []
 
@@ -109,6 +112,8 @@ export async function generateBatchAsync(
     }
 
     if (out.length <= i) {
+      // The rules can't produce any more unique combos.
+      if (bestEffort) break
       throw new Error(
         `Could only generate ${out.length} unique piece(s). Add traits, relax rules, or lower target supply.`
       )

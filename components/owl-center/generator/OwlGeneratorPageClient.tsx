@@ -605,18 +605,23 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
       // Stream the export to disk (one PNG in memory at a time) so a 2k supply
       // doesn't crash the tab mid-download. Combos are generated asynchronously
       // (with progress) AFTER the save dialog so the click gesture stays valid.
+      let cappedBelowTarget = false
       const result = await exportFullSupplyStreaming(
         project,
         async () => {
           setMessage(`Building ${generativeCount.toLocaleString()} unique combos…`)
+          // Best-effort: if the rules can't yield the full target, export what we
+          // can (and report it) instead of dead-stopping with a hidden error.
           const generative =
             generativeCount > 0
               ? await generateBatchAsync(project, generativeCount, {
                   requireAllCategories: true,
+                  bestEffort: true,
                   onProgress: (completed, total) =>
                     setMessage(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
                 })
               : []
+          cappedBelowTarget = generative.length < generativeCount
           return mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
         },
         (p) => {
@@ -629,10 +634,13 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
       )
 
       setLastExportZip(null)
+      const where = result.streamedToDisk ? ` to ${result.filename}` : ''
       setMessage(
-        result.streamedToDisk
-          ? `Saved ${result.count.toLocaleString()} pieces to ${result.filename}.`
-          : `Exported ${result.count.toLocaleString()} Sugar-ready asset(s) (full supply)`
+        cappedBelowTarget
+          ? `Rules only allow ${result.count.toLocaleString()} unique combos (target was ${targetSupply.toLocaleString()}). Exported all ${result.count.toLocaleString()}${where}. Relax IF rules / add traits to reach ${targetSupply.toLocaleString()}.`
+          : result.streamedToDisk
+            ? `Saved ${result.count.toLocaleString()} pieces${where}.`
+            : `Exported ${result.count.toLocaleString()} Sugar-ready asset(s) (full supply)`
       )
       saveExportMetaToSession({
         exported_count: result.count,
@@ -1126,7 +1134,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                 ? `Exporting ${targetSupply.toLocaleString()}…`
                 : `Download full supply (${targetSupply.toLocaleString()})`}
             </DeployButton>
-            {message && (exportBusy || exportFullBusy || /export|render|packag|build|combo/i.test(message)) ? (
+            {message && (exportBusy || exportFullBusy || /export|render|packag|build|combo|unique|saved|supply|cancel|fail/i.test(message)) ? (
               <p className="mt-3 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/8 px-3 py-2 text-xs text-[#C5D0D8]">
                 {message}
               </p>
