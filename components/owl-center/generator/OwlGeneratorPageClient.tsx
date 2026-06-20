@@ -27,7 +27,7 @@ import {
   createEmptyProject,
   ensureDefaultCategories,
 } from '@/lib/owl-center/generator/demo-project'
-import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
+import { exportBatchAsSugarZip, exportFullSupplyStreaming } from '@/lib/owl-center/generator/export-zip'
 import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
 import { generateBatch, generateBatchAsync } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
@@ -602,36 +602,50 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
         return
       }
 
-      // Generate asynchronously (yields to the browser) so large supplies don't
-      // freeze the tab while building unique combos.
-      setMessage(`Building ${generativeCount.toLocaleString()} unique combos…`)
-      const generative =
-        generativeCount > 0
-          ? await generateBatchAsync(project, generativeCount, {
-              requireAllCategories: true,
-              onProgress: (completed, total) =>
-                setMessage(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
-            })
-          : []
-      const batch = mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
-
-      const built = await exportBatchAsSugarZip(project, batch, undefined, (p) => {
-        if (p.phase === 'compositing') {
-          setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
-        } else {
-          setMessage(`Packaging ZIP… ${p.completed}%`)
+      // Stream the export to disk (one PNG in memory at a time) so a 2k supply
+      // doesn't crash the tab mid-download. Combos are generated asynchronously
+      // (with progress) AFTER the save dialog so the click gesture stays valid.
+      const result = await exportFullSupplyStreaming(
+        project,
+        async () => {
+          setMessage(`Building ${generativeCount.toLocaleString()} unique combos…`)
+          const generative =
+            generativeCount > 0
+              ? await generateBatchAsync(project, generativeCount, {
+                  requireAllCategories: true,
+                  onProgress: (completed, total) =>
+                    setMessage(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
+                })
+              : []
+          return mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
+        },
+        (p) => {
+          if (p.phase === 'compositing') {
+            setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+          } else {
+            setMessage(`Packaging ZIP… ${p.completed}%`)
+          }
         }
-      })
+      )
 
-      setLastExportZip({ blob: built.blob, filename: built.filename })
-      setMessage(`Exported ${built.count.toLocaleString()} Sugar-ready asset(s) (full supply)`)
+      setLastExportZip(null)
+      setMessage(
+        result.streamedToDisk
+          ? `Saved ${result.count.toLocaleString()} pieces to ${result.filename}.`
+          : `Exported ${result.count.toLocaleString()} Sugar-ready asset(s) (full supply)`
+      )
       saveExportMetaToSession({
-        exported_count: built.count,
+        exported_count: result.count,
         full_supply: true,
         exported_at: new Date().toISOString(),
       })
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Full export failed')
+      // Cancelling the save dialog is not an error.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setMessage('Full export cancelled')
+      } else {
+        setMessage(e instanceof Error ? e.message : 'Full export failed')
+      }
     } finally {
       setExportFullBusy(false)
     }
