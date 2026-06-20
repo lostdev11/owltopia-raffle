@@ -543,10 +543,6 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
   const exportMergedBatch = useCallback(
     async (generativeCount: number, label: string): Promise<number | null> => {
       if (!project) return null
-      if (lintBlocked) {
-        setMessage('Fix linter errors before exporting')
-        return null
-      }
       const entries = oneOfOnesForProject(project)
       if (generativeCount > 0 && !project.traits.length) {
         setMessage('Add trait layers before exporting generative pieces')
@@ -571,7 +567,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
       setMessage(`Exported ${built.count} Sugar-ready asset(s) (${label})`)
       return built.count
     },
-    [project, lintBlocked]
+    [project]
   )
 
   const handleExport = useCallback(async () => {
@@ -592,10 +588,6 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
 
   const handleExportFullSupply = useCallback(async () => {
     if (!project) return
-    if (lintBlocked) {
-      setMessage('Fix linter errors before exporting')
-      return
-    }
     setExportFullBusy(true)
     setMessage(null)
     try {
@@ -643,7 +635,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
     } finally {
       setExportFullBusy(false)
     }
-  }, [project, targetSupply, lintBlocked])
+  }, [project, targetSupply])
 
   const handleLaunchHandoff = useCallback(() => {
     if (!project) return
@@ -1100,7 +1092,7 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
             </label>
             <DeployButton
               className="mt-4 w-full"
-              disabled={exportBusy || exportFullBusy || (!project.traits.length && !oneOfOnes.length) || lintBlocked}
+              disabled={exportBusy || exportFullBusy || (!project.traits.length && !oneOfOnes.length)}
               onClick={() => void handleExport()}
             >
               {exportBusy ? 'Exporting…' : 'Download Sugar ZIP (preview batch)'}
@@ -1111,7 +1103,6 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
               disabled={
                 exportBusy ||
                 exportFullBusy ||
-                lintBlocked ||
                 (!project.traits.length && !oneOfOnes.length) ||
                 (generativeCountForSupply(targetSupply, oneOfOnes.length) <= 0 && !oneOfOnes.length)
               }
@@ -1121,6 +1112,16 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
                 ? `Exporting ${targetSupply.toLocaleString()}…`
                 : `Download full supply (${targetSupply.toLocaleString()})`}
             </DeployButton>
+            {message && (exportBusy || exportFullBusy || /export|render|packag|build|combo/i.test(message)) ? (
+              <p className="mt-3 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/8 px-3 py-2 text-xs text-[#C5D0D8]">
+                {message}
+              </p>
+            ) : null}
+            {lintBlocked ? (
+              <p className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                Heads up: the rule linter still reports errors. You can still download to inspect the art, but fix them before launching to mint.
+              </p>
+            ) : null}
             {!gen2Mode ? (
               <DeployButton
                 variant="ghost"
