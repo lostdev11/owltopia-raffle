@@ -1,8 +1,14 @@
 import JSZip from 'jszip'
 
-import { compositeTraitsToBlob } from '@/lib/owl-center/generator/composite'
+import { clearCompositeImageCache, compositeTraitsToBlob } from '@/lib/owl-center/generator/composite'
 import { dataUrlToBlob } from '@/lib/owl-center/generator/one-of-one'
 import type { GeneratedNft, GeneratorProject } from '@/lib/owl-center/generator/types'
+
+// Hand control back to the browser so progress repaints and the main thread
+// doesn't lock up while compositing a large (e.g. 2,000-piece) supply.
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -46,33 +52,45 @@ export async function buildSugarZipBlob(
 
   const { collectionName, symbol, description } = project
 
+  // One reusable canvas for every generative composite — avoids allocating a
+  // fresh 1024×1024 canvas per NFT, which is what made 2,000-piece exports
+  // exhaust memory and silently stall before any download started.
+  const scratchCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : undefined
+
   let done = 0
-  for (const nft of batch) {
-    const png = nft.oneOfOneImageSrc
-      ? await dataUrlToBlob(nft.oneOfOneImageSrc)
-      : await compositeTraitsToBlob(nft.traits, project.categories)
-    // PNGs are already compressed — STORE avoids re-deflating (less CPU/memory).
-    assets.file(`${nft.index}.png`, png, { compression: 'STORE' })
-    assets.file(
-      `${nft.index}.json`,
-      JSON.stringify(
-        {
-          name: `${collectionName} #${nft.index}`,
-          symbol,
-          description: `${description} Token ${nft.index}.`,
-          image: `${nft.index}.png`,
-          attributes: nft.attributes,
-          properties: {
-            files: [{ uri: `${nft.index}.png`, type: 'image/png' }],
-            category: 'image',
+  try {
+    for (const nft of batch) {
+      const png = nft.oneOfOneImageSrc
+        ? await dataUrlToBlob(nft.oneOfOneImageSrc)
+        : await compositeTraitsToBlob(nft.traits, project.categories, 1024, scratchCanvas)
+      // PNGs are already compressed — STORE avoids re-deflating (less CPU/memory).
+      assets.file(`${nft.index}.png`, png, { compression: 'STORE' })
+      assets.file(
+        `${nft.index}.json`,
+        JSON.stringify(
+          {
+            name: `${collectionName} #${nft.index}`,
+            symbol,
+            description: `${description} Token ${nft.index}.`,
+            image: `${nft.index}.png`,
+            attributes: nft.attributes,
+            properties: {
+              files: [{ uri: `${nft.index}.png`, type: 'image/png' }],
+              category: 'image',
+            },
           },
-        },
-        null,
-        2
+          null,
+          2
+        )
       )
-    )
-    done += 1
-    onProgress?.({ phase: 'compositing', completed: done, total: batch.length })
+      done += 1
+      onProgress?.({ phase: 'compositing', completed: done, total: batch.length })
+      // Yield periodically so the progress UI repaints and mobile browsers
+      // don't kill an apparently unresponsive tab during a large export.
+      if (done % 25 === 0) await yieldToBrowser()
+    }
+  } finally {
+    clearCompositeImageCache()
   }
 
   assets.file(
