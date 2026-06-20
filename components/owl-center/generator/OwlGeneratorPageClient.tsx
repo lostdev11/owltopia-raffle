@@ -27,9 +27,9 @@ import {
   createEmptyProject,
   ensureDefaultCategories,
 } from '@/lib/owl-center/generator/demo-project'
-import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
+import { exportBatchAsSugarZip, exportFullSupplyChunked } from '@/lib/owl-center/generator/export-zip'
 import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
-import { generateBatch } from '@/lib/owl-center/generator/generate-batch'
+import { generateBatch, generateBatchAsync } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
 import {
   DEFAULT_ONE_OF_ONE_TRAIT_TYPE,
@@ -592,6 +592,10 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
 
   const handleExportFullSupply = useCallback(async () => {
     if (!project) return
+    if (lintBlocked) {
+      setMessage('Fix linter errors before exporting')
+      return
+    }
     setExportFullBusy(true)
     setMessage(null)
     try {
@@ -601,20 +605,59 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
         setMessage('Set target supply or add 1/1 images before exporting')
         return
       }
-      const count = await exportMergedBatch(generativeCount, `full supply ${targetSupply.toLocaleString()}`)
-      if (count != null) {
-        saveExportMetaToSession({
-          exported_count: count,
-          full_supply: true,
-          exported_at: new Date().toISOString(),
-        })
+      if (generativeCount > 0 && !project.traits.length) {
+        setMessage('Add trait layers before exporting generative pieces')
+        return
       }
+
+      // Generate asynchronously (yields to the browser) so large supplies don't
+      // freeze the tab while building unique combos.
+      setMessage(`Building ${generativeCount.toLocaleString()} unique combos…`)
+      const generative =
+        generativeCount > 0
+          ? await generateBatchAsync(project, generativeCount, {
+              requireAllCategories: true,
+              onProgress: (completed, total) =>
+                setMessage(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
+            })
+          : []
+      const batch = mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
+
+      const result = await exportFullSupplyChunked(project, batch, {
+        chunkSize: 500,
+        onProgress: (p) => {
+          const partLabel = p.part ? ` (part ${p.part.index}/${p.part.total})` : ''
+          if (p.phase === 'compositing') {
+            setMessage(
+              `Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces${partLabel}…`
+            )
+          } else {
+            setMessage(`Packaging ZIP${partLabel}… ${p.completed}%`)
+          }
+        },
+      })
+
+      setLastExportZip(
+        result.lastBlob && result.lastFilename
+          ? { blob: result.lastBlob, filename: result.lastFilename }
+          : null
+      )
+      setMessage(
+        result.parts > 1
+          ? `Exported ${result.count.toLocaleString()} pieces as ${result.parts} ZIP parts — merge the assets folders for Sugar.`
+          : `Exported ${result.count.toLocaleString()} Sugar-ready asset(s) (full supply)`
+      )
+      saveExportMetaToSession({
+        exported_count: result.count,
+        full_supply: true,
+        exported_at: new Date().toISOString(),
+      })
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Full export failed')
     } finally {
       setExportFullBusy(false)
     }
-  }, [project, targetSupply, exportMergedBatch])
+  }, [project, targetSupply, lintBlocked])
 
   const handleLaunchHandoff = useCallback(() => {
     if (!project) return
