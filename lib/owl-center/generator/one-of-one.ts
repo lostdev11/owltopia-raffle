@@ -112,8 +112,25 @@ export function generativeCountForSupply(totalSupply: number, oneOfOneCount: num
   return Math.max(0, totalSupply - oneOfOneCount)
 }
 
+/**
+ * Decode a data: URL to a Blob WITHOUT fetch(). The production CSP allows
+ * `data:` under img-src but not connect-src, so `fetch(dataUrl)` is blocked and
+ * throws "Failed to fetch" — which previously broke any export containing 1/1s.
+ */
 export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl)
-  if (!res.ok) throw new Error('Failed to read 1/1 image')
-  return res.blob()
+  const comma = dataUrl.indexOf(',')
+  if (!dataUrl.startsWith('data:') || comma === -1) {
+    throw new Error('Invalid 1/1 image data URL')
+  }
+  const header = dataUrl.slice(5, comma)
+  const mime = header.split(';')[0] || 'image/png'
+  const data = dataUrl.slice(comma + 1)
+
+  if (/;base64/i.test(header)) {
+    const binary = atob(data)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return new Blob([bytes], { type: mime })
+  }
+  return new Blob([decodeURIComponent(data)], { type: mime })
 }
