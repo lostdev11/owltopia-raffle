@@ -27,7 +27,7 @@ import {
   createEmptyProject,
   ensureDefaultCategories,
 } from '@/lib/owl-center/generator/demo-project'
-import { exportBatchAsSugarZip, exportFullSupplyChunked } from '@/lib/owl-center/generator/export-zip'
+import { exportBatchAsSugarZip } from '@/lib/owl-center/generator/export-zip'
 import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
 import { generateBatch, generateBatchAsync } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
@@ -623,32 +623,18 @@ export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolea
           : []
       const batch = mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
 
-      const result = await exportFullSupplyChunked(project, batch, {
-        chunkSize: 500,
-        onProgress: (p) => {
-          const partLabel = p.part ? ` (part ${p.part.index}/${p.part.total})` : ''
-          if (p.phase === 'compositing') {
-            setMessage(
-              `Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces${partLabel}…`
-            )
-          } else {
-            setMessage(`Packaging ZIP${partLabel}… ${p.completed}%`)
-          }
-        },
+      const built = await exportBatchAsSugarZip(project, batch, undefined, (p) => {
+        if (p.phase === 'compositing') {
+          setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+        } else {
+          setMessage(`Packaging ZIP… ${p.completed}%`)
+        }
       })
 
-      setLastExportZip(
-        result.lastBlob && result.lastFilename
-          ? { blob: result.lastBlob, filename: result.lastFilename }
-          : null
-      )
-      setMessage(
-        result.parts > 1
-          ? `Exported ${result.count.toLocaleString()} pieces as ${result.parts} ZIP parts — merge the assets folders for Sugar.`
-          : `Exported ${result.count.toLocaleString()} Sugar-ready asset(s) (full supply)`
-      )
+      setLastExportZip({ blob: built.blob, filename: built.filename })
+      setMessage(`Exported ${built.count.toLocaleString()} Sugar-ready asset(s) (full supply)`)
       saveExportMetaToSession({
-        exported_count: result.count,
+        exported_count: built.count,
         full_supply: true,
         exported_at: new Date().toISOString(),
       })

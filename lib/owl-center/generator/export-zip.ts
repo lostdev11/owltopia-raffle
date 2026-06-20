@@ -31,8 +31,6 @@ export type SugarZipProgress = {
   phase: 'compositing' | 'zipping'
   completed: number
   total: number
-  /** Present for multi-part (chunked) exports so the UI can show "part 2 / 5". */
-  part?: { index: number; total: number }
 }
 
 function safeProjectName(project: GeneratorProject, filename?: string): string {
@@ -164,85 +162,3 @@ export async function exportBatchAsSugarZip(
   return built
 }
 
-export type ChunkedExportResult = {
-  count: number
-  parts: number
-  lastBlob: Blob | null
-  lastFilename: string | null
-}
-
-/**
- * Export a large supply as several smaller ZIP parts, each downloaded as it's
- * built. Holding ~2,000 full-size PNGs in one in-memory ZIP routinely exhausts
- * browser memory (especially on mobile, where most users are) and the download
- * silently never fires. Splitting keeps peak memory bounded while preserving
- * globally sequential indices, so the parts merge into one `assets/` folder for
- * Sugar. `collection.json` + the full `traits.csv` ship in part 1.
- */
-export async function exportFullSupplyChunked(
-  project: GeneratorProject,
-  batch: GeneratedNft[],
-  options?: { chunkSize?: number; onProgress?: (p: SugarZipProgress) => void }
-): Promise<ChunkedExportResult> {
-  const chunkSize = Math.max(1, options?.chunkSize ?? 500)
-  const onProgress = options?.onProgress
-  const total = batch.length
-  const partCount = Math.ceil(total / chunkSize)
-  const baseName = safeProjectName(project)
-
-  const scratchCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : undefined
-
-  let completed = 0
-  let lastBlob: Blob | null = null
-  let lastFilename: string | null = null
-
-  try {
-    for (let part = 0; part < partCount; part++) {
-      const slice = batch.slice(part * chunkSize, part * chunkSize + chunkSize)
-      const zip = new JSZip()
-      const assets = zip.folder('assets')
-      if (!assets) throw new Error('Zip folder failed')
-
-      for (const nft of slice) {
-        await addNftToAssets(assets, nft, project, scratchCanvas)
-        completed += 1
-        onProgress?.({
-          phase: 'compositing',
-          completed,
-          total,
-          part: { index: part + 1, total: partCount },
-        })
-        if (completed % 25 === 0) await yieldToBrowser()
-      }
-
-      // Ship the collection manifest + full trait sheet only in the first part.
-      if (part === 0) {
-        assets.file('collection.json', collectionJson(project))
-        assets.file('traits.csv', traitsCsv(project, batch))
-      }
-
-      const blob = await zip.generateAsync(
-        { type: 'blob', compression: 'STORE', streamFiles: true },
-        (meta) => {
-          onProgress?.({
-            phase: 'zipping',
-            completed: Math.round(meta.percent),
-            total: 100,
-            part: { index: part + 1, total: partCount },
-          })
-        }
-      )
-      const partName = `${baseName}-supply-${total}-part-${part + 1}of${partCount}.zip`
-      triggerDownload(blob, partName)
-      lastBlob = blob
-      lastFilename = partName
-
-      // Let the previous blob/object URL settle before building the next part.
-      await yieldToBrowser()
-    }
-  } finally {
-    clearCompositeImageCache()
-  }
-
-  return { count: total, parts: partCount, lastBlob, lastFilename }
-}
