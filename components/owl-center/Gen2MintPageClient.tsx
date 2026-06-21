@@ -246,7 +246,7 @@ export function Gen2MintPageClient() {
 
     return (
 
-      <OwlCenterShell title="Owltopia Gen2" subtitle="Loading launch telemetry…">
+      <OwlCenterShell title="Owltopia Gen2" subtitle="Loading…">
 
         <p className="font-mono text-sm text-[#FF9C9C]">{loadErr ?? 'Loading…'}</p>
 
@@ -366,10 +366,10 @@ export function Gen2MintPageClient() {
 
           <p className="mt-3 max-w-xl text-xs text-[#5C6773]">
             {userHasWlSpots
-              ? 'You have WL spots — jump to Whitelist below. Mint from Overview when WL is live.'
+              ? 'You have whitelist spots. Mint opens when your phase is live.'
               : presaleSoldOut
-                ? 'Presale is sold out. Check Whitelist or Allocation for reserved spots, then mint when your phase is live.'
-                : 'Use Whitelist for WL spots, Allocation for all phases, then mint when your phase is active.'}
+                ? 'Presale sold out. Check your spots below.'
+                : 'Check your spots below, then mint when your phase is live.'}
           </p>
 
         </div>
@@ -414,7 +414,7 @@ export function Gen2MintPageClient() {
 
           title="Overview"
 
-          hint="Supply, phase order, and global presale redemption progress."
+          hint="Supply and mint phases."
 
         />
 
@@ -438,7 +438,7 @@ export function Gen2MintPageClient() {
 
 
 
-        <CommandCard label="supply_and_phases">
+        <CommandCard label="Supply & phases">
 
           {mintCountdown ? (
             <div className="mb-6">
@@ -476,7 +476,7 @@ export function Gen2MintPageClient() {
 
               WL <span className="text-[#00FF9C]">{phases.whitelist}</span>{' '}
 
-              <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.whitelist)} · FCFS</span>
+              <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.whitelist)} · first come, first served</span>
 
               {userMintPhase === 'WHITELIST' ? (
                 <span className="ml-1 text-[#00FF9C]">· your mint</span>
@@ -515,7 +515,7 @@ export function Gen2MintPageClient() {
 
               <MintAllocationBar
 
-                label="Presale mints redeemed (657 cap)"
+                label="Presale minted (657 max)"
 
                 minted={presale_pool.presale_mints_recorded}
 
@@ -608,7 +608,7 @@ export function Gen2MintPageClient() {
         <SectionHeading
           id="whitelist"
           title="Whitelist"
-          hint="Your WL mint spots — assigned by admins, FCFS when the phase opens. This is the quick view; full phase breakdown is under Allocation."
+          hint="Your whitelist spots. First come, first served when the phase opens."
         />
         <Gen2WlStatusCard
           check={mintCheck}
@@ -628,7 +628,7 @@ export function Gen2MintPageClient() {
 
           title="Linked wallets"
 
-          hint="Paid from more than one wallet? Link them here so Allocation shows all presale credits. Mint from each wallet in your app."
+          hint="Paid from more than one wallet? Link them to see all your spots."
 
         />
 
@@ -660,7 +660,7 @@ export function Gen2MintPageClient() {
 
           title="Your allocation"
 
-          hint="Full breakdown for every phase. For WL only, use the Whitelist section above."
+          hint="Your spots across every phase."
 
         />
 
@@ -684,9 +684,9 @@ export function Gen2MintPageClient() {
 
       <section className="mb-6 space-y-4">
 
-        <SectionHeading id="activity" title="Activity" hint="Recent mints recorded by Owl Center." />
+        <SectionHeading id="activity" title="Activity" hint="Recent mints." />
 
-        <CommandCard label="activity_terminal">
+        <CommandCard label="Activity">
 
           <ActivityLog lines={terminal} />
 

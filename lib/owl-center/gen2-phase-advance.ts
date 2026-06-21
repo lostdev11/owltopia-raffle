@@ -1,15 +1,85 @@
 import { getOwlCenterLaunchBySlugAdmin, updateOwlCenterLaunchAdmin } from '@/lib/db/owl-center-launch'
-import { getPhaseStartsAt, OWL_CENTER_SCHEDULED_PHASES } from '@/lib/owl-center/phase-schedule'
+import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
+import { getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
+import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import type { OwlCenterLaunchPublic, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
+import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 const GEN2_SLUG = 'gen2'
 
 const TERMINAL_PHASES: ReadonlySet<OwlCenterPhase> = new Set(['SOLD_OUT', 'TRADING_ACTIVE'])
 
-function phaseIndex(phase: OwlCenterPhase): number {
-  const i = OWL_CENTER_SCHEDULED_PHASES.indexOf(phase)
-  return i >= 0 ? i : -1
+/**
+ * Sequential mint phases that auto-advance. A phase flips to the next when it is "done"
+ * (its supply pool sells out OR its open window elapses) AND the next phase's scheduled
+ * open floor has been reached. PUBLIC is last — it does not auto-advance here; the mint
+ * RPC flips to SOLD_OUT when TOTAL supply is exhausted.
+ *
+ * Launch design (fixed clock + airdrop backstop). Times are offsets from the launch base
+ * (`launch_deadline_at` = 16:00 UTC on the 26th):
+ * - 16:00–16:25 AIRDROP (Gen1, free)        — 25-min self-mint window or sellout
+ * - 16:25–16:50 PRESALE (free, prepaid)      — 25-min self-mint window or sellout
+ * - 16:50–17:00 PRESALE_OVERAGE (free, +13)  — 10-min self-mint window or sellout
+ * - 17:00–18:00 WHITELIST ($30)              — opens at +1h floor, 1-hour window or sellout
+ * - 18:00+      PUBLIC ($40)                  — opens at +2h floor, absorbs remaining supply
+ * The early windows cascade so WHITELIST opens ~17:00 and PUBLIC ~18:00. Sellout advances
+ * earlier within the early block, but the WHITELIST/PUBLIC open floors hold those phases to
+ * their wall-clock times. Anyone eligible for Gen1/Presale who does not self-mint in their
+ * window is handled off-chain by the team's airdrop backstop (mint + send within 7 days).
+ */
+export const GEN2_SEQUENTIAL_PHASES: readonly OwlCenterPhase[] = [
+  'AIRDROP',
+  'PRESALE',
+  'PRESALE_OVERAGE',
+  'WHITELIST',
+  'PUBLIC',
+]
+
+const MINUTE_MS = 60 * 1000
+const ONE_HOUR_MS = 60 * MINUTE_MS
+
+/**
+ * @deprecated Per-phase windows are now defined by {@link gen2PhaseWindowMs}.
+ * Kept as the WHITELIST window length (1h) for back-compat / dashboard hints.
+ */
+export const GEN2_PHASE_MAX_DURATION_MS = ONE_HOUR_MS
+
+/**
+ * How long a phase stays open if it never sells out (fixed clock). The early windows
+ * (25 + 25 + 10 = 60 min) cascade so WHITELIST opens ~17:00; WHITELIST runs 1h to ~18:00.
+ * Sellout can advance earlier within the early block, but the WHITELIST/PUBLIC open floors
+ * hold those phases to their wall-clock times. PUBLIC/terminal never window-advance here.
+ */
+export function gen2PhaseWindowMs(phase: OwlCenterPhase): number {
+  switch (phase) {
+    case 'AIRDROP':
+      return 25 * MINUTE_MS
+    case 'PRESALE':
+      return 25 * MINUTE_MS
+    case 'PRESALE_OVERAGE':
+      return 10 * MINUTE_MS
+    case 'WHITELIST':
+      return ONE_HOUR_MS
+    default:
+      return Number.POSITIVE_INFINITY
+  }
+}
+
+/**
+ * Earliest a phase may open, as an offset from the launch base (`launch_deadline_at`,
+ * i.e. 16:00 UTC). A phase will not be entered before this floor even if the prior phase
+ * is already done. Null = no floor (open as soon as the prior phase finishes).
+ */
+export function gen2PhaseOpenFloorOffsetMs(phase: OwlCenterPhase): number | null {
+  switch (phase) {
+    case 'WHITELIST':
+      return ONE_HOUR_MS // +1h → ~17:00 UTC
+    case 'PUBLIC':
+      return 2 * ONE_HOUR_MS // +2h → ~18:00 UTC
+    default:
+      return null
+  }
 }
 
 function parseIsoMs(iso: string | null | undefined): number | null {
@@ -18,21 +88,34 @@ function parseIsoMs(iso: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null
 }
 
-/**
- * Latest scheduled phase whose start time has passed (walks phase order).
- * Returns null when mint has not opened yet or no phase has a scheduled start.
- */
-export function resolveScheduledActivePhase(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>,
-  nowMs: number = Date.now()
-): OwlCenterPhase | null {
-  let latest: OwlCenterPhase | null = null
-  for (const phase of OWL_CENTER_SCHEDULED_PHASES) {
-    const startMs = parseIsoMs(getPhaseStartsAt(launch, phase))
-    if (startMs == null || nowMs < startMs) continue
-    latest = phase
+function nextSequentialPhase(phase: OwlCenterPhase): OwlCenterPhase | null {
+  const idx = GEN2_SEQUENTIAL_PHASES.indexOf(phase)
+  if (idx < 0) return null
+  return GEN2_SEQUENTIAL_PHASES[idx + 1] ?? null
+}
+
+/** Supply pool cap for a phase (the number that, once minted, counts as "sold out"). */
+export function gen2PhasePoolCap(
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'public_supply'
+  >,
+  phase: OwlCenterPhase
+): number {
+  switch (phase) {
+    case 'AIRDROP':
+      return launch.airdrop_supply
+    case 'PRESALE':
+      return launch.presale_supply
+    case 'PRESALE_OVERAGE':
+      return launch.presale_overage_supply
+    case 'WHITELIST':
+      return launch.wl_supply
+    case 'PUBLIC':
+      return launch.public_supply
+    default:
+      return 0
   }
-  return latest
 }
 
 /** Maps auto-advanced mint phase → launch status column. */
@@ -53,6 +136,48 @@ export function statusForAutoAdvancedPhase(phase: OwlCenterPhase): OwlCenterStat
   }
 }
 
+export type Gen2PhaseDecision =
+  | { advance: false; reason: string }
+  | { advance: true; to: OwlCenterPhase; trigger: 'sold_out' | 'window_elapsed' }
+
+/**
+ * Pure decision: should the current phase advance now?
+ * - Not yet started (now < activation) → no.
+ * - Current phase "done" = pool sold out (minted >= cap) OR open longer than its window.
+ * - If done but the next phase has an open floor not yet reached → hold (awaiting floor).
+ * - If done and floor reached (or none) → advance, carrying the trigger reason.
+ * - Otherwise hold (window still open).
+ */
+export function decideGen2PhaseTransition(input: {
+  currentPhase: OwlCenterPhase
+  activationMs: number | null
+  mintedInPhase: number
+  poolCap: number
+  nowMs: number
+  /** Window length for the current phase; defaults to {@link gen2PhaseWindowMs}. */
+  maxDurationMs?: number
+  /** Absolute earliest the NEXT phase may open. Null/undefined = no floor. */
+  nextFloorMs?: number | null
+}): Gen2PhaseDecision {
+  const maxDurationMs = input.maxDurationMs ?? gen2PhaseWindowMs(input.currentPhase)
+  const next = nextSequentialPhase(input.currentPhase)
+  if (!next) return { advance: false, reason: 'final_phase' }
+  if (input.activationMs == null || !Number.isFinite(input.activationMs)) {
+    return { advance: false, reason: 'no_activation_time' }
+  }
+  if (input.nowMs < input.activationMs) return { advance: false, reason: 'phase_not_started' }
+
+  const soldOut = input.poolCap > 0 && input.mintedInPhase >= input.poolCap
+  const windowElapsed = Number.isFinite(maxDurationMs) && input.nowMs >= input.activationMs + maxDurationMs
+  if (!soldOut && !windowElapsed) return { advance: false, reason: 'window_open' }
+
+  // Current phase is done, but the next phase has not reached its scheduled open time.
+  if (input.nextFloorMs != null && input.nowMs < input.nextFloorMs) {
+    return { advance: false, reason: 'awaiting_next_floor' }
+  }
+  return { advance: true, to: next, trigger: soldOut ? 'sold_out' : 'window_elapsed' }
+}
+
 export type Gen2PhaseAdvanceResult =
   | { ok: true; advanced: false; reason: string; active_phase: OwlCenterPhase }
   | {
@@ -60,7 +185,8 @@ export type Gen2PhaseAdvanceResult =
       advanced: true
       from_phase: OwlCenterPhase
       to_phase: OwlCenterPhase
-      scheduled_at: string
+      trigger: 'sold_out' | 'window_elapsed'
+      activated_at: string
     }
   | { ok: false; error: string }
 
@@ -71,7 +197,12 @@ export function isGen2AutoPhaseAdvanceEligible(
 }
 
 /**
- * If Gen2 schedule says a later phase is live, bump `active_phase` + `status` (never backward).
+ * Advance Gen2 `active_phase` forward when the current phase has sold out or its open
+ * window has elapsed. Records each phase's activation timestamp in `phase_schedule`
+ * so the per-phase window is measured from when the phase actually opened.
+ *
+ * Only runs while the mint is live (not paused, not kill-switched, Candy Machine configured),
+ * so the per-phase timer does not burn windows before launch.
  */
 export async function advanceGen2PhaseIfScheduled(nowMs: number = Date.now()): Promise<Gen2PhaseAdvanceResult> {
   const launch = await getOwlCenterLaunchBySlugAdmin(GEN2_SLUG)
@@ -86,95 +217,108 @@ export async function advanceGen2PhaseIfScheduled(nowMs: number = Date.now()): P
     }
   }
 
-  const scheduled = resolveScheduledActivePhase(launch, nowMs)
-  if (!scheduled) {
-    return {
-      ok: true,
-      advanced: false,
-      reason: 'mint_not_open_or_no_schedule',
-      active_phase: launch.active_phase,
-    }
+  // Only progress the timeline while the mint is actually live.
+  if (launch.is_paused || !isOwlCenterMintOperational(launch)) {
+    return { ok: true, advanced: false, reason: 'mint_not_operational', active_phase: launch.active_phase }
   }
 
-  const currentIdx = phaseIndex(launch.active_phase)
-  const targetIdx = phaseIndex(scheduled)
-  if (targetIdx < 0) {
-    return { ok: true, advanced: false, reason: 'invalid_target_phase', active_phase: launch.active_phase }
+  const current = launch.active_phase
+  const activationMs = parseIsoMs(getPhaseStartsAt(launch, current))
+
+  // Unknown activation (e.g. manual phase override with no schedule entry): stamp now so
+  // its window starts from this moment, then hold for this cycle.
+  if (activationMs == null) {
+    await updateOwlCenterLaunchAdmin(GEN2_SLUG, {
+      phase_schedule: { ...launch.phase_schedule, [current]: new Date(nowMs).toISOString() } as Record<string, string>,
+    })
+    return { ok: true, advanced: false, reason: 'stamped_activation', active_phase: current }
   }
 
-  if (currentIdx >= 0 && targetIdx <= currentIdx) {
-    return {
-      ok: true,
-      advanced: false,
-      reason: 'already_at_or_past_scheduled_phase',
-      active_phase: launch.active_phase,
-    }
+  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  const mintedInPhase = await sumOwlCenterPhaseMinted(launch.id, current, network)
+  const poolCap = gen2PhasePoolCap(launch, current)
+
+  // Next phase's open floor is measured from the launch base (launch_deadline_at = 16:00 UTC),
+  // so WHITELIST/PUBLIC honor their wall-clock target even if early phases sell out faster.
+  const baseMs = parseIsoMs(launch.launch_deadline_at)
+  const next = nextSequentialPhase(current)
+  const nextFloorOffset = next ? gen2PhaseOpenFloorOffsetMs(next) : null
+  const nextFloorMs = baseMs != null && nextFloorOffset != null ? baseMs + nextFloorOffset : null
+
+  const decision = decideGen2PhaseTransition({
+    currentPhase: current,
+    activationMs,
+    mintedInPhase,
+    poolCap,
+    nowMs,
+    maxDurationMs: gen2PhaseWindowMs(current),
+    nextFloorMs,
+  })
+  if (!decision.advance) {
+    return { ok: true, advanced: false, reason: decision.reason, active_phase: current }
   }
 
-  const nextStatus = statusForAutoAdvancedPhase(scheduled)
+  const nextStatus = statusForAutoAdvancedPhase(decision.to)
   if (!nextStatus) {
-    return { ok: true, advanced: false, reason: 'no_status_mapping', active_phase: launch.active_phase }
+    return { ok: true, advanced: false, reason: 'no_status_mapping', active_phase: current }
   }
 
+  const activatedAt = new Date(nowMs).toISOString()
   const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, {
-    active_phase: scheduled,
+    active_phase: decision.to,
     status: nextStatus,
+    phase_schedule: { ...launch.phase_schedule, [decision.to]: activatedAt } as Record<string, string>,
   })
   if (!updated) return { ok: false, error: 'update_failed' }
 
-  const scheduledAt = getPhaseStartsAt(launch, scheduled) ?? new Date(nowMs).toISOString()
   const db = getSupabaseAdmin()
   await db.from('owl_center_activity_logs').insert({
     launch_id: launch.id,
-    message: `AUTO phase advance ${launch.active_phase} → ${scheduled} (schedule ${scheduledAt})`,
+    message: `AUTO phase advance ${current} → ${decision.to} (${decision.trigger}; minted ${mintedInPhase}/${poolCap})`,
     event_type: 'system',
   })
 
   return {
     ok: true,
     advanced: true,
-    from_phase: launch.active_phase,
-    to_phase: scheduled,
-    scheduled_at: scheduledAt,
+    from_phase: current,
+    to_phase: decision.to,
+    trigger: decision.trigger,
+    activated_at: activatedAt,
   }
 }
 
-/** Test helper: evaluate without writing. */
+/** Dashboard hint (sync, timer-based only — sellout requires a DB read done in the cron). */
 export function previewGen2PhaseAdvance(
   launch: OwlCenterLaunchPublic,
   nowMs: number = Date.now()
 ): { would_advance: boolean; from_phase: OwlCenterPhase; to_phase: OwlCenterPhase | null; reason: string } {
   if (!isGen2AutoPhaseAdvanceEligible(launch)) {
-    return {
-      would_advance: false,
-      from_phase: launch.active_phase,
-      to_phase: null,
-      reason: 'not_eligible',
+    return { would_advance: false, from_phase: launch.active_phase, to_phase: null, reason: 'not_eligible' }
+  }
+  const next = nextSequentialPhase(launch.active_phase)
+  if (!next) {
+    return { would_advance: false, from_phase: launch.active_phase, to_phase: null, reason: 'final_phase' }
+  }
+  if (launch.is_paused) {
+    return { would_advance: false, from_phase: launch.active_phase, to_phase: next, reason: 'mint_paused' }
+  }
+  const activationMs = parseIsoMs(getPhaseStartsAt(launch, launch.active_phase))
+  if (activationMs == null) {
+    return { would_advance: false, from_phase: launch.active_phase, to_phase: next, reason: 'no_activation_time' }
+  }
+  if (nowMs < activationMs) {
+    return { would_advance: false, from_phase: launch.active_phase, to_phase: next, reason: 'phase_not_started' }
+  }
+  const windowMs = gen2PhaseWindowMs(launch.active_phase)
+  if (Number.isFinite(windowMs) && nowMs >= activationMs + windowMs) {
+    const baseMs = parseIsoMs(launch.launch_deadline_at)
+    const floorOffset = gen2PhaseOpenFloorOffsetMs(next)
+    const nextFloorMs = baseMs != null && floorOffset != null ? baseMs + floorOffset : null
+    if (nextFloorMs != null && nowMs < nextFloorMs) {
+      return { would_advance: false, from_phase: launch.active_phase, to_phase: next, reason: 'awaiting_next_floor' }
     }
+    return { would_advance: true, from_phase: launch.active_phase, to_phase: next, reason: 'window_elapsed' }
   }
-  const scheduled = resolveScheduledActivePhase(launch, nowMs)
-  if (!scheduled) {
-    return {
-      would_advance: false,
-      from_phase: launch.active_phase,
-      to_phase: null,
-      reason: 'mint_not_open_or_no_schedule',
-    }
-  }
-  const currentIdx = phaseIndex(launch.active_phase)
-  const targetIdx = phaseIndex(scheduled)
-  if (currentIdx >= 0 && targetIdx <= currentIdx) {
-    return {
-      would_advance: false,
-      from_phase: launch.active_phase,
-      to_phase: scheduled,
-      reason: 'already_at_or_past',
-    }
-  }
-  return {
-    would_advance: true,
-    from_phase: launch.active_phase,
-    to_phase: scheduled,
-    reason: 'schedule_due',
-  }
+  return { would_advance: false, from_phase: launch.active_phase, to_phase: next, reason: 'window_open_or_sellout' }
 }
