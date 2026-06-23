@@ -1,8 +1,8 @@
 /** Supabase Storage bucket for staged Sugar ZIP packages (private). */
 export const OWL_CENTER_STAGING_BUCKET = 'owl-center-asset-staging'
 
-/** Max staged ZIP size (512 MB). */
-export const OWL_CENTER_STAGED_ZIP_MAX_BYTES = 512 * 1024 * 1024
+/** Max staged ZIP size (2 GB). Keep in sync with the bucket file_size_limit (migration 172). */
+export const OWL_CENTER_STAGED_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
 /** Validate synchronously on upload when ZIP is below this (80 MB). */
 export const OWL_CENTER_SYNC_VALIDATE_MAX_BYTES = 80 * 1024 * 1024
