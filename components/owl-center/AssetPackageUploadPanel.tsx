@@ -10,7 +10,10 @@ import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecomme
 import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { readApiJsonResponse } from '@/lib/fetch-api-json'
-import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
+import {
+  stageSugarZipViaDirectUpload,
+  type StageSugarUploadProgress,
+} from '@/lib/owl-center/stage-sugar-zip-client'
 
 type JobResponse = {
   job: OwlCenterAssetUploadJob | null
@@ -41,6 +44,7 @@ export function AssetPackageUploadPanel({
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [pendingEstimateBytes, setPendingEstimateBytes] = useState<number | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<StageSugarUploadProgress | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -81,6 +85,7 @@ export function AssetPackageUploadPanel({
     setErr(null)
     setMsg(null)
     setPendingEstimateBytes(file.size)
+    setUploadProgress({ phase: 'preparing', loaded: 0, total: file.size, percent: 0 })
     try {
       const base = `/api/admin/owl-center/collections/${launchId}/assets/stage`
       const result = await stageSugarZipViaDirectUpload({
@@ -90,6 +95,7 @@ export function AssetPackageUploadPanel({
         prepareBody: {},
         completeUrl: `${base}/complete`,
         completeBody: {},
+        onProgress: setUploadProgress,
       })
       if (!result.ok) throw new Error(result.error || 'stage_failed')
       setMsg('ZIP staged — validation applied to asset package when complete.')
@@ -101,6 +107,7 @@ export function AssetPackageUploadPanel({
       setErr(e instanceof Error ? e.message : 'stage_failed')
     } finally {
       setBusy(false)
+      setUploadProgress(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
@@ -213,7 +220,13 @@ export function AssetPackageUploadPanel({
       <div className="flex flex-wrap gap-3">
         <label className="inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center gap-2 border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-4 font-mono text-xs uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/18">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {busy ? 'Uploading…' : 'Stage Sugar ZIP'}
+          {busy
+            ? uploadProgress?.phase === 'uploading'
+              ? `Uploading… ${uploadProgress.percent}%`
+              : uploadProgress?.phase === 'finalizing'
+                ? 'Finalizing…'
+                : 'Preparing…'
+            : 'Stage Sugar ZIP'}
           <input
             ref={fileRef}
             type="file"
@@ -251,6 +264,44 @@ export function AssetPackageUploadPanel({
           </DeployButton>
         ) : null}
       </div>
+
+      {uploadProgress ? (
+        <div className="mt-4" aria-live="polite">
+          <div className="mb-1 flex items-center justify-between font-mono text-xs text-[#9BA8B4]">
+            <span>
+              {uploadProgress.phase === 'uploading'
+                ? 'Uploading ZIP to staging'
+                : uploadProgress.phase === 'finalizing'
+                  ? 'Finalizing — validating staged ZIP'
+                  : 'Preparing upload'}
+            </span>
+            <span className="text-[#00FF9C]">
+              {uploadProgress.phase === 'uploading'
+                ? `${(uploadProgress.loaded / (1024 * 1024)).toFixed(1)} / ${(uploadProgress.total / (1024 * 1024)).toFixed(1)} MB · ${uploadProgress.percent}%`
+                : `${uploadProgress.percent}%`}
+            </span>
+          </div>
+          <div
+            className="h-2 w-full overflow-hidden rounded-full border border-[#1A222B] bg-[#0F1419]"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={uploadProgress.percent}
+          >
+            <div
+              className={`h-full rounded-full bg-[#00FF9C] transition-[width] duration-200 ease-out ${
+                uploadProgress.phase !== 'uploading' && uploadProgress.percent >= 100 ? 'animate-pulse' : ''
+              }`}
+              style={{ width: `${uploadProgress.percent}%` }}
+            />
+          </div>
+          {uploadProgress.phase === 'finalizing' ? (
+            <p className="mt-1 font-mono text-[11px] text-[#5C6773]">
+              Upload done — server is validating the batch. This can take a moment for large sets.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="mt-4 font-mono text-xs text-[#5C6773]">Loading job status…</p>

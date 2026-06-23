@@ -17,21 +17,65 @@ type PrepareApiPayload = {
   token?: string
 }
 
-async function uploadBlobToSignedUploadUrl(signedUrl: string, blob: Blob): Promise<void> {
-  const form = new FormData()
-  form.append('cacheControl', '3600')
-  form.append('', blob)
+export type StageSugarUploadProgress = {
+  /** Which step of the staging flow we're in. */
+  phase: 'preparing' | 'uploading' | 'finalizing'
+  /** Bytes uploaded so far (only meaningful during `uploading`). */
+  loaded: number
+  /** Total bytes to upload. */
+  total: number
+  /** 0–100 upload completion of the storage transfer. */
+  percent: number
+}
 
-  const res = await fetch(signedUrl, {
-    method: 'PUT',
-    body: form,
-    headers: { 'x-upsert': 'false' },
+/**
+ * Uploads the blob to a Supabase signed upload URL using XMLHttpRequest so we can
+ * surface upload progress (the fetch API does not expose request upload progress).
+ */
+function uploadBlobToSignedUploadUrl(
+  signedUrl: string,
+  blob: Blob,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('cacheControl', '3600')
+    form.append('', blob)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', signedUrl, true)
+    xhr.setRequestHeader('x-upsert', 'false')
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress) return
+      const total = event.lengthComputable && event.total > 0 ? event.total : blob.size
+      onProgress(event.loaded, total)
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve()
+        return
+      }
+      if (xhr.status === 413) {
+        const mb = (blob.size / (1024 * 1024)).toFixed(0)
+        reject(
+          new Error(
+            `Upload rejected — this ZIP (${mb} MB) exceeds your Supabase Storage upload limit. ` +
+              'Raise Project Settings → Storage → "Upload file size limit" (and the bucket file_size_limit), or split the batch.'
+          )
+        )
+        return
+      }
+      const text = (xhr.responseText || '').slice(0, 160).trim()
+      reject(new Error(text || `Direct storage upload failed (${xhr.status})`))
+    }
+    xhr.onerror = () =>
+      reject(new Error('Direct storage upload failed — check your connection (WiFi/mobile data) and retry.'))
+    xhr.onabort = () => reject(new Error('Upload cancelled.'))
+
+    xhr.send(form)
   })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(text.slice(0, 160).trim() || `Direct storage upload failed (${res.status})`)
-  }
 }
 
 /** Stage a Sugar ZIP via signed Supabase upload (bypasses app-server body size limits). */
@@ -42,10 +86,14 @@ export async function stageSugarZipViaDirectUpload(input: {
   prepareBody: Record<string, unknown>
   completeUrl: string
   completeBody: Record<string, unknown>
+  onProgress?: (progress: StageSugarUploadProgress) => void
 }): Promise<
   | { ok: true; job: OwlCenterAssetUploadJob; validation: StageApiPayload['validation'] }
   | { ok: false; error: string }
 > {
+  const total = input.blob.size
+  input.onProgress?.({ phase: 'preparing', loaded: 0, total, percent: 0 })
+
   const prepRes = await fetch(input.prepareUrl, {
     method: 'POST',
     credentials: 'include',
@@ -61,7 +109,12 @@ export async function stageSugarZipViaDirectUpload(input: {
     return { ok: false, error: prep.error || 'prepare_failed' }
   }
 
-  await uploadBlobToSignedUploadUrl(prep.signed_url, input.blob)
+  await uploadBlobToSignedUploadUrl(prep.signed_url, input.blob, (loaded, uploadTotal) => {
+    const percent = uploadTotal > 0 ? Math.min(100, Math.round((loaded / uploadTotal) * 100)) : 0
+    input.onProgress?.({ phase: 'uploading', loaded, total: uploadTotal, percent })
+  })
+
+  input.onProgress?.({ phase: 'finalizing', loaded: total, total, percent: 100 })
 
   const completeRes = await fetch(input.completeUrl, {
     method: 'POST',

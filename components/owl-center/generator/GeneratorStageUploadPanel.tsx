@@ -10,7 +10,10 @@ import { PhaseBRecommendedWorkflow } from '@/components/owl-center/PhaseBRecomme
 import type { ArweaveUploadEstimate } from '@/lib/owl-center/arweave-upload-estimate-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { readApiJsonResponse } from '@/lib/fetch-api-json'
-import { stageSugarZipViaDirectUpload } from '@/lib/owl-center/stage-sugar-zip-client'
+import {
+  stageSugarZipViaDirectUpload,
+  type StageSugarUploadProgress,
+} from '@/lib/owl-center/stage-sugar-zip-client'
 import {
   saveStagedAssetsHandoffToSession,
   type GeneratorStagedAssetsHandoff,
@@ -46,6 +49,7 @@ export function GeneratorStageUploadPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<StageSugarUploadProgress | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const persistStagedHandoff = useCallback(
@@ -101,6 +105,7 @@ export function GeneratorStageUploadPanel({
     setBusy(true)
     setErr(null)
     setMsg(null)
+    setUploadProgress({ phase: 'preparing', loaded: 0, total: source.size, percent: 0 })
     try {
       const result = await stageSugarZipViaDirectUpload({
         blob: source,
@@ -109,6 +114,7 @@ export function GeneratorStageUploadPanel({
         prepareBody: { project_id: projectId },
         completeUrl: '/api/owl-center/generator/stage/complete',
         completeBody: { project_id: projectId },
+        onProgress: setUploadProgress,
       })
       if (!result.ok) throw new Error(result.error || 'stage_failed')
       persistStagedHandoff(result.job)
@@ -122,6 +128,7 @@ export function GeneratorStageUploadPanel({
       setErr(e instanceof Error ? e.message : 'stage_failed')
     } finally {
       setBusy(false)
+      setUploadProgress(null)
     }
   }
 
@@ -209,7 +216,11 @@ export function GeneratorStageUploadPanel({
           {busy ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Staging…
+              {uploadProgress?.phase === 'uploading'
+                ? `Uploading… ${uploadProgress.percent}%`
+                : uploadProgress?.phase === 'finalizing'
+                  ? 'Finalizing…'
+                  : 'Staging…'}
             </>
           ) : (
             <>
@@ -221,6 +232,39 @@ export function GeneratorStageUploadPanel({
       ) : (
         <p className="mt-4 text-xs text-[#5C6773]">Export a Sugar ZIP above to enable one-tap staging.</p>
       )}
+
+      {uploadProgress ? (
+        <div className="mt-4" aria-live="polite">
+          <div className="mb-1 flex items-center justify-between font-mono text-xs text-[#9BA8B4]">
+            <span>
+              {uploadProgress.phase === 'uploading'
+                ? 'Uploading ZIP to staging'
+                : uploadProgress.phase === 'finalizing'
+                  ? 'Finalizing — validating staged ZIP'
+                  : 'Preparing upload'}
+            </span>
+            <span className="text-[#00FF9C]">
+              {uploadProgress.phase === 'uploading'
+                ? `${(uploadProgress.loaded / (1024 * 1024)).toFixed(1)} / ${(uploadProgress.total / (1024 * 1024)).toFixed(1)} MB · ${uploadProgress.percent}%`
+                : `${uploadProgress.percent}%`}
+            </span>
+          </div>
+          <div
+            className="h-2 w-full overflow-hidden rounded-full border border-[#1A222B] bg-[#0F1419]"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={uploadProgress.percent}
+          >
+            <div
+              className={`h-full rounded-full bg-[#00FF9C] transition-[width] duration-200 ease-out ${
+                uploadProgress.phase !== 'uploading' && uploadProgress.percent >= 100 ? 'animate-pulse' : ''
+              }`}
+              style={{ width: `${uploadProgress.percent}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
       {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
