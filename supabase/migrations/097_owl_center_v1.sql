@@ -313,7 +313,7 @@ VALUES (
   'gen2',
   'Owltopia Gen2',
   'OWLGEN2',
-  'Owltopia Gen2 — flagship collection powered by Owl Center. Token Metadata NFTs via Candy Machine V3.',
+  'Owltopia Gen2 — flagship collection powered by Owl Center.',
   '/images/gen2-logo-mark.png',
   'token_metadata',
   2000,

@@ -70,19 +70,13 @@ export function Gen2MintCheckCard({
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
 
-  const pool = check?.presale_pool
   const cluster = check?.wallet_cluster
   const connectedRow = cluster?.wallets.find((w) => w.is_connected_wallet)
 
   return (
     <MintCheckShell embedded={embedded}>
       <div className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-[#9BA8B4]">
-            Allocation is shown for every phase even before it goes live. GEN1 — 1 per Owltopia Gen1 NFT on the minting
-            wallet; Presale — 1 per paid presale spot; WL — admin-assigned spots, first come first served against the 800
-            cap. Connect the wallet that holds your NFT, presale credits, or WL row.
-          </p>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex flex-wrap items-center gap-2">
             {connected && walletStr ? <Gen2WlShareButton wallet={walletStr} mintCheck={check} /> : null}
             {!connected ? (
@@ -103,26 +97,6 @@ export function Gen2MintCheckCard({
           <p className="border border-[#00FF9C]/25 bg-[#00FF9C]/8 px-3 py-2 text-xs text-[#9BA8B4]">
             Presale purchases are sold out. Paid buyers can still redeem credits during the Presale mint phase below.
           </p>
-        ) : null}
-
-        {pool ? (
-          <div className="space-y-3 border border-[#1A222B] bg-[#0F1419] p-4">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773]">Global presale pools</p>
-            <MintAllocationBar
-              label="Presale phase (657)"
-              minted={pool.presale_mints_recorded}
-              total={pool.mint_cap}
-              hint={`${pool.credits_issued} credits issued${pool.credits_overshoot > 0 ? ` · ${pool.credits_overshoot} handled in Presale+13 phase` : ''}`}
-            />
-            {pool.credits_overshoot > 0 ? (
-              <MintAllocationBar
-                label="Presale+13 overshoot"
-                minted={pool.overage_mints_recorded}
-                total={pool.overage_supply}
-                hint="Admin-assigned wallets for spots 658–670"
-              />
-            ) : null}
-          </div>
         ) : null}
 
         {connected && cluster && cluster.linked_count > 0 ? (
