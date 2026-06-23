@@ -23,9 +23,10 @@ const ROOT = path.join(__dirname, '..')
 const STAGING_BUCKET = 'owl-center-asset-staging'
 
 function parseArgs(argv) {
-  const out = { list: false, launchId: null, jobId: null, outName: null }
+  const out = { list: false, launchId: null, jobId: null, outName: null, preUpload: false }
   for (const arg of argv) {
     if (arg === '--list') out.list = true
+    else if (arg === '--pre-upload') out.preUpload = true
     else if (arg.startsWith('--launch-id=')) out.launchId = arg.slice('--launch-id='.length).trim()
     else if (arg.startsWith('--job-id=')) out.jobId = arg.slice('--job-id='.length).trim()
     else if (arg.startsWith('--out=')) out.outName = arg.slice('--out='.length).trim()
@@ -74,7 +75,7 @@ async function listJobs(db) {
   }
 }
 
-async function fetchJob(db, { launchId, jobId }) {
+async function fetchJob(db, { launchId, jobId, preUpload }) {
   if (jobId) {
     const { data, error } = await db.from('owl_center_asset_upload_jobs').select('*').eq('id', jobId).maybeSingle()
     if (error) throw error
@@ -82,17 +83,21 @@ async function fetchJob(db, { launchId, jobId }) {
     return data
   }
   if (!launchId) throw new Error('Pass --launch-id= or --job-id= (or --list)')
-  const { data, error } = await db
+  // Pre-upload mode builds the Sugar folder straight from the staged ZIP, so it
+  // accepts any staged job (no completed Arweave upload required).
+  let query = db
     .from('owl_center_asset_upload_jobs')
     .select('*')
     .eq('launch_id', launchId)
-    .eq('status', 'completed')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  if (!preUpload) query = query.eq('status', 'completed')
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   if (!data) {
-    throw new Error(`No completed upload job for launch ${launchId}. Stage + Push to Arweave first.`)
+    throw new Error(
+      preUpload
+        ? `No staged upload job for launch ${launchId}. Stage a Sugar ZIP first.`
+        : `No completed upload job for launch ${launchId}. Stage + Push to Arweave first.`
+    )
   }
   return data
 }
@@ -206,8 +211,12 @@ async function main() {
 
   const jobRow = await fetchJob(db, args)
   const progress = parseProgress(jobRow.upload_progress)
-  if (!Object.keys(progress.uploaded).length) {
-    throw new Error('Job has no Arweave URIs — complete Push to Arweave first.')
+  const preUpload = args.preUpload || !Object.keys(progress.uploaded).length
+  if (!preUpload && !Object.keys(progress.uploaded).length) {
+    throw new Error('Job has no Arweave URIs — complete Push to Arweave first, or pass --pre-upload to deploy via local `sugar upload`.')
+  }
+  if (preUpload) {
+    console.log('Pre-upload mode: building Sugar folder from staged ZIP. Run `sugar upload` locally before deploy.')
   }
 
   const launch = await fetchLaunch(db, jobRow.launch_id)
@@ -221,26 +230,40 @@ async function main() {
 
   fs.mkdirSync(assetsDir, { recursive: true })
 
+  // Flatten Sugar assets into assets/ regardless of the ZIP's internal layout
+  // (generator exports nest under assets/, but hand-made ZIPs may put files at
+  // the root or under a named folder). Match by basename.
+  let extracted = 0
   for (const [entryPath, file] of Object.entries(zip.files)) {
     if (file.dir) continue
-    const norm = entryPath.replace(/\\/g, '/')
-    if (!norm.startsWith('assets/')) continue
-    const dest = path.join(outDir, norm)
-    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    const base = basename(entryPath)
+    const keep =
+      /^\d+\.(png|json)$/i.test(base) ||
+      /^collection\.(png|json)$/i.test(base) ||
+      /^traits\.csv$/i.test(base)
+    if (!keep) continue
     const buf = Buffer.from(await file.async('arraybuffer'))
-    fs.writeFileSync(dest, buf)
+    fs.writeFileSync(path.join(assetsDir, base), buf)
+    extracted += 1
+  }
+  console.log(`Extracted ${extracted} asset files into collections/${folderName}/assets/`)
+  if (extracted === 0) {
+    throw new Error('No Sugar asset files (N.png / N.json) found in the staged ZIP — check its contents.')
   }
 
   // Patch token metadata JSON with on-chain Arweave image URIs (matches Phase B upload).
-  for (let i = 0; i < 10000; i++) {
-    const pngLink = progress.uploaded[`assets/${i}.png`]
-    const jsonPath = path.join(assetsDir, `${i}.json`)
-    if (!pngLink || !fs.existsSync(jsonPath)) {
-      if (i > 0 && !progress.uploaded[`assets/${i}.png`]) break
-      continue
+  // Skipped in pre-upload mode — `sugar upload` rewrites image URIs itself.
+  if (!preUpload) {
+    for (let i = 0; i < 10000; i++) {
+      const pngLink = progress.uploaded[`assets/${i}.png`]
+      const jsonPath = path.join(assetsDir, `${i}.json`)
+      if (!pngLink || !fs.existsSync(jsonPath)) {
+        if (i > 0 && !progress.uploaded[`assets/${i}.png`]) break
+        continue
+      }
+      const raw = fs.readFileSync(jsonPath, 'utf8')
+      fs.writeFileSync(jsonPath, rewriteMetadataJson(raw, pngLink))
     }
-    const raw = fs.readFileSync(jsonPath, 'utf8')
-    fs.writeFileSync(jsonPath, rewriteMetadataJson(raw, pngLink))
   }
 
   // Generator export has collection.json but often no collection.png — use #0 art for Sugar.
@@ -250,22 +273,30 @@ async function main() {
     console.log('Note: added assets/collection.png from 0.png (generator export omits it).')
   }
 
-  const supply =
-    launch?.total_supply ??
-    Object.keys(progress.uploaded).filter((p) => /assets\/\d+\.png$/i.test(p.replace(/\\/g, '/'))).length
-
-  const tokenCount = Object.keys(progress.uploaded).filter((p) =>
+  // Count token PNGs on disk so pre-upload mode (no Arweave URIs) still works.
+  const diskPngCount = fs
+    .readdirSync(assetsDir)
+    .filter((f) => /^\d+\.png$/i.test(f)).length
+  const uploadedPngCount = Object.keys(progress.uploaded).filter((p) =>
     /assets\/\d+\.png$/i.test(p.replace(/\\/g, '/'))
   ).length
+  const tokenCount = uploadedPngCount || diskPngCount
+
+  const supply = launch?.total_supply ?? tokenCount
+
   const nameLength = Math.max(1, String(Math.max(0, tokenCount - 1)).length)
   const collectionLabel = (launch?.name ?? folderName).trim() || 'Collection'
   const prefixName = `${collectionLabel.slice(0, Math.max(1, 32 - nameLength - 2))} #`
-  const uriLength = Math.max(
-    32,
-    ...Object.values(progress.uploaded)
-      .filter((u) => typeof u === 'string')
-      .map((u) => u.length)
-  )
+  // Bundlr/Arweave gateway URIs are `https://arweave.net/<43-char-tx>` = 63 chars.
+  // In pre-upload mode `sugar upload` writes these, so size the config line for them.
+  const uriLength = preUpload
+    ? 63
+    : Math.max(
+        32,
+        ...Object.values(progress.uploaded)
+          .filter((u) => typeof u === 'string')
+          .map((u) => u.length)
+      )
 
   const config = {
     owlCenter: {
@@ -303,16 +334,20 @@ async function main() {
   }
   fs.writeFileSync(path.join(outDir, 'config.json'), `${JSON.stringify(config, null, 2)}\n`)
 
-  const cache = {
-    program: {
-      candyMachine: '',
-      candyGuard: '',
-      candyMachineCreator: '',
-      collectionMint: '',
-    },
-    items: buildCacheItems(progress.uploaded, assetsDir),
+  // In pre-upload mode we let `sugar upload` create cache.json (it records the
+  // real Arweave links + hashes). Only pre-fill cache for completed Phase B jobs.
+  if (!preUpload) {
+    const cache = {
+      program: {
+        candyMachine: '',
+        candyGuard: '',
+        candyMachineCreator: '',
+        collectionMint: '',
+      },
+      items: buildCacheItems(progress.uploaded, assetsDir),
+    }
+    fs.writeFileSync(path.join(outDir, 'cache.json'), `${JSON.stringify(cache, null, 2)}\n`)
   }
-  fs.writeFileSync(path.join(outDir, 'cache.json'), `${JSON.stringify(cache, null, 2)}\n`)
 
   const readme = `# ${launch?.name ?? folderName} — Sugar deploy (Phase B)
 
@@ -327,7 +362,7 @@ Prepared from Owl Center upload job \`${jobRow.id}\`.
 1. Edit \`config.json\` if \`creators[0].address\` should be your deployer (not creator wallet).
 2. Install [Sugar CLI](https://developers.metaplex.com/candy-machine/sugar).
 3. \`solana config set --url\` your mainnet RPC; fund deployer keypair.
-4. From this folder (mainnet — run `node --env-file=../../.env.local ../../scripts/configure-solana-mainnet-from-env.mjs` first):
+4. From this folder (mainnet — run \`node --env-file=../../.env.local ../../scripts/configure-solana-mainnet-from-env.mjs\` first):
 
 \`\`\`bash
 npm run sugar:deploy -- collections/${folderName}
@@ -337,7 +372,7 @@ This runs \`sugar validate\`, \`sugar deploy\`, and \`sugar guard add\` (require
 
 If deploy asks for collection image upload, set cache \`-1\` \`image_link\` to token \`0\` image URL (collection.png is a copy of 0.png).
 
-5. **Auto-sync** (if `config.json` has `owlCenter.launchId`): `npm run sugar:sync-ids -- collections/${folderName}` — or use **Import cache.json** in admin.
+5. **Auto-sync** (if \`config.json\` has \`owlCenter.launchId\`): \`npm run sugar:sync-ids -- collections/${folderName}\` — or use **Import cache.json** in admin.
 
 6. Mint test: \`/owl-center/collection/${launch?.slug ?? 'YOUR_SLUG'}\`
 
@@ -350,11 +385,20 @@ Regenerate: \`npm run prepare:sugar-deploy -- --launch-id=${jobRow.launch_id ?? 
   console.log(`Prepared Sugar folder: collections/${folderName}`)
   console.log(`  Launch: ${launch?.name ?? '—'} (${launch?.slug ?? jobRow.launch_id ?? '—'})`)
   console.log(`  Supply: ${supply} · Creator in config: ${config.creators[0].address}`)
-  console.log(`  cache.json items: ${Object.keys(cache.items).filter((k) => k !== 'collection').length} tokens`)
+  console.log(`  Token PNGs: ${tokenCount}`)
   console.log('')
   console.log('Next:')
-  console.log(`  npm run sugar:deploy -- collections/${folderName}`)
-  console.log(`  npm run sugar:sync-ids -- collections/${folderName}`)
+  if (preUpload) {
+    console.log(`  cd collections/${folderName}`)
+    console.log('  node --env-file=../../.env.local ../../scripts/configure-solana-mainnet-from-env.mjs')
+    console.log('  sugar validate')
+    console.log('  sugar upload        # uploads assets to Arweave (Bundlr) — needs funded deployer wallet')
+    console.log('  cd ../..')
+    console.log(`  npm run sugar:deploy -- collections/${folderName}   # deploy + guard + sync IDs`)
+  } else {
+    console.log(`  npm run sugar:deploy -- collections/${folderName}`)
+    console.log(`  npm run sugar:sync-ids -- collections/${folderName}`)
+  }
 }
 
 main().catch((e) => {
