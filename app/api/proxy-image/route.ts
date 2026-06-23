@@ -8,7 +8,6 @@ import {
 import { appendArweaveMirrorHttpsUrls } from '@/lib/arweave-proxy-mirrors'
 import {
   arweaveUriToHttps,
-  fullyDecodeURIComponentSafe,
   irysGatewayMirrorHttpsUrls,
   irysUploaderMirrorHttpsUrls,
   isIrysGatewayHttpsUrl,
@@ -44,6 +43,42 @@ function abortWhenAny(signals: AbortSignal[]): AbortController {
     s.addEventListener('abort', () => out.abort(), { once: true })
   }
   return out
+}
+
+/** A value we can hand to `toHttpsImageUrl` / `new URL()` without further decoding. */
+function looksLikeFetchableProxyUrl(s: string): boolean {
+  if (/^(https?|ipfs|ar):\/\//i.test(s)) return true
+  // Bare IPFS CID (toHttpsImageUrl turns these into a gateway URL).
+  if (/^[a-zA-Z0-9]+$/.test(s) && s.length >= 32) return true
+  return false
+}
+
+/**
+ * Decode the `?url=` param WITHOUT destroying meaningful percent-encoding.
+ *
+ * `URL.searchParams.get` already decodes once, so a normal single-encoded URL arrives ready to fetch.
+ * Some hosts (Firebase / GCS download URLs) keep the object path in a single encoded segment, e.g.
+ * `/o/folder%2Ffile.webp`, where the `%2F` MUST stay encoded or the gateway returns 400/404. Fully
+ * decoding (as the old shared helper did) turned those into real slashes and broke the fetch — which
+ * is why Firebase-hosted raffle art showed a blank square in X/Discord link previews.
+ *
+ * We only keep decoding to recover double-encoded callers (e.g. `https%3A%2F%2F…`); we stop as soon as
+ * the value is already a usable URL so significant `%2F` survives.
+ */
+function decodeProxyUrlParam(raw: string): string {
+  let s = raw.trim()
+  for (let i = 0; i < 8; i++) {
+    if (looksLikeFetchableProxyUrl(s)) return s
+    let next: string
+    try {
+      next = decodeURIComponent(s)
+    } catch {
+      return s
+    }
+    if (next === s) return s
+    s = next
+  }
+  return s
 }
 
 class ProxyAttemptError extends Error {
@@ -362,7 +397,7 @@ export async function GET(request: NextRequest) {
     let targetUrl: URL
     let decodedInput = ''
     try {
-      decodedInput = fullyDecodeURIComponentSafe(rawUrl).trim()
+      decodedInput = decodeProxyUrlParam(rawUrl).trim()
       const normalized = toHttpsImageUrl(decodedInput)
       targetUrl = new URL(normalized)
     } catch {
