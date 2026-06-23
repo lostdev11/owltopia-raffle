@@ -354,4 +354,4 @@ ON CONFLICT (slug) DO UPDATE SET
   updated_at = now();
 
 COMMENT ON TABLE owl_center_launches IS 'Owl Center launch registry; public SELECT excludes DRAFT/PENDING_REVIEW.';
-COMMENT ON FUNCTION public.confirm_owl_center_gen2_mint IS 'Service-role only: record mint, bump supply, presale/WL debits; advisory locked per slug.';
+COMMENT ON FUNCTION public.confirm_owl_center_gen2_mint(text, text, text, int, text, text[]) IS 'Service-role only: record mint, bump supply, presale/WL debits; advisory locked per slug.';
