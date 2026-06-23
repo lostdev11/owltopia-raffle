@@ -14,6 +14,7 @@ import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceRe
 import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintChecklist'
 import { AdminOwlCenterViewModePanel } from '@/components/admin/AdminOwlCenterViewModePanel'
 import { AdminWlCommunityManager } from '@/components/admin/AdminWlCommunityManager'
+import { AdminGen2MintMilestones } from '@/components/admin/AdminGen2MintMilestones'
 import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { AdminGen1WalletSwitch } from '@/components/admin/AdminGen1WalletSwitch'
 import { AdminGen1SnapshotPanel } from '@/components/admin/AdminGen1SnapshotPanel'
@@ -332,6 +333,10 @@ export default function AdminOwlCenterPage() {
                 slug={state.launch.slug} · featured={String(state.launch.is_featured)} · mint opens=
                 {state.launch.launch_deadline_at ?? '—'}
               </p>
+            </CommandCard>
+
+            <CommandCard id="mint-milestones" label="mint_milestones.sys">
+              <AdminGen2MintMilestones />
             </CommandCard>
 
             <CommandCard label="wl_ops.sys">

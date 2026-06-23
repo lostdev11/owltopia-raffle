@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 
+import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/evaluate'
+
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
@@ -323,6 +325,18 @@ export async function POST(request: NextRequest) {
 
 
   const [eligibility, launchPublic] = await Promise.all([buildGen2Eligibility(wallet), getOwlCenterLaunchBySlug('gen2')])
+
+
+
+  // Best-effort: evaluate mint milestones against the freshly bumped count.
+  // Never let this break the mint confirmation response.
+  if (launchPublic) {
+    try {
+      await evaluateGen2MintMilestones(launchPublic)
+    } catch (e) {
+      console.error('[confirm-mint] milestone evaluation failed', e)
+    }
+  }
 
 
 

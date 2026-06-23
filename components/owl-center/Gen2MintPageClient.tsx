@@ -19,10 +19,7 @@ import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 
 import { Gen2MintCheckCard } from '@/components/owl-center/Gen2MintCheckCard'
-import { Gen2WlStatusCard } from '@/components/owl-center/Gen2WlStatusCard'
-
-import { OwlCenterLinkedWalletsSection } from '@/components/owl-center/OwlCenterLinkedWalletsSection'
-
+import { Gen2MintMilestonesPanel } from '@/components/owl-center/Gen2MintMilestonesPanel'
 import { Gen2MintPanel } from '@/components/owl-center/Gen2MintPanel'
 
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
@@ -128,7 +125,7 @@ export function Gen2MintPageClient() {
 
   const sessionWallet = publicKey?.toBase58() ?? null
 
-  const [clusterRefresh, setClusterRefresh] = useState(0)
+  const [clusterRefresh] = useState(0)
 
   const { check: mintCheck, loading: mintCheckLoading, error: mintCheckErr, refresh: refreshMintCheck } =
     useGen2MintCheck(sessionWallet, clusterRefresh)
@@ -247,7 +244,7 @@ export function Gen2MintPageClient() {
 
 
 
-  const { launch, supply, phases, prices_lamports, terminal, mint_controls } = state
+  const { launch, supply, terminal, mint_controls } = state
   const mintCountdown = getMintCountdownInfo(launch)
   const mintControls: OwlCenterMintControls = mint_controls ?? {
     disabled: launch.is_paused,
@@ -471,6 +468,10 @@ export function Gen2MintPageClient() {
 
 
 
+        <Gen2MintMilestonesPanel mintedCount={supply.minted} />
+
+
+
         {showSecondaryLinks ? (
 
           <div className="flex flex-wrap gap-3">
@@ -518,54 +519,6 @@ export function Gen2MintPageClient() {
           </div>
 
         ) : null}
-
-      </section>
-
-
-
-      <section className="mb-12 space-y-4">
-        <SectionHeading
-          id="whitelist"
-          title="Whitelist"
-          hint="Your whitelist spots. First come, first served when the phase opens."
-        />
-        <Gen2WlStatusCard
-          check={mintCheck}
-          loading={mintCheckLoading}
-          activePhase={launch.active_phase}
-          wlSupply={phases.whitelist}
-          wlPriceLamports={prices_lamports?.whitelist ?? null}
-          onRefresh={refreshMintCheck}
-        />
-      </section>
-
-      <section className="mb-12 space-y-4">
-
-        <SectionHeading
-
-          id="wallets"
-
-          title="Linked wallets"
-
-          hint="Paid from more than one wallet? Link them to see all your spots."
-
-        />
-
-        <OwlCenterLinkedWalletsSection
-
-          connected={connected}
-
-          sessionWallet={sessionWallet}
-
-          onClusterChange={() => {
-
-            setClusterRefresh((n) => n + 1)
-
-            void load()
-
-          }}
-
-        />
 
       </section>
 

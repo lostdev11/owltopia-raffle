@@ -184,6 +184,64 @@ export type RaffleMilestoneCreateInput = {
   winner_mode: RaffleMilestoneWinnerMode
 }
 
+/** Mint count threshold (`absolute_mints`) or % of total supply (`percent_supply`). */
+export type Gen2MintMilestoneTriggerType = 'absolute_mints' | 'percent_supply'
+
+/** A random minter (weighted by mints) or the top minter wins. */
+export type Gen2MintMilestoneWinnerMode = 'random' | 'top_buyer'
+
+export type Gen2MintMilestoneWinnerSelectionMode = 'auto_random' | 'auto_top_buyer'
+
+export type Gen2MintMilestoneStatus =
+  | 'pending'
+  | 'unlocked'
+  | 'awarded'
+  | 'claimed'
+  | 'returned'
+  | 'void'
+
+export type Gen2MintMilestonePrizeType = 'crypto' | 'nft'
+
+/** Prefunded side prize on an Owl Center launch, unlocked when mint count crosses a threshold. */
+export interface Gen2MintMilestone {
+  id: string
+  launch_id: string
+  sort_order: number
+  trigger_type: Gen2MintMilestoneTriggerType
+  trigger_value: number
+  prize_type: Gen2MintMilestonePrizeType
+  prize_amount: number | null
+  prize_currency: 'SOL' | 'USDC' | null
+  nft_mint_address: string | null
+  nft_token_id: string | null
+  winner_mode: Gen2MintMilestoneWinnerMode
+  status: Gen2MintMilestoneStatus
+  trigger_mint_target: number | null
+  unlocked_at: string | null
+  unlocked_at_minted_count: number | null
+  winner_wallet: string | null
+  winner_selected_at: string | null
+  winner_selection_mode: Gen2MintMilestoneWinnerSelectionMode | null
+  funded_by_wallet: string | null
+  deposit_tx: string | null
+  deposit_verified_at: string | null
+  claim_tx: string | null
+  claimed_at: string | null
+  returned_at: string | null
+  return_tx: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Input when an admin/creator adds a single mint milestone (pre-launch or mid-mint). */
+export type Gen2MintMilestoneCreateInput = {
+  trigger_type: Gen2MintMilestoneTriggerType
+  trigger_value: number
+  prize_amount: number
+  prize_currency: 'SOL' | 'USDC'
+  winner_mode: Gen2MintMilestoneWinnerMode
+}
+
 export interface Raffle {
   id: string
   slug: string
