@@ -25,11 +25,8 @@ import { OwlCenterLinkedWalletsSection } from '@/components/owl-center/OwlCenter
 
 import { Gen2MintPanel } from '@/components/owl-center/Gen2MintPanel'
 
-import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
-
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
 import { MintCountdown } from '@/components/owl-center/MintCountdown'
-import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 import { OwlCenterSectionNav } from '@/components/owl-center/OwlCenterSectionNav'
@@ -49,11 +46,10 @@ import { useGen2MintCheck } from '@/hooks/use-gen2-mint-check'
 import { OWL_CENTER_GEN2_SECTIONS } from '@/lib/owl-center/nav'
 
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
-import type { MintTerminalLine, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
+import type { MintTerminalLine, OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 
-import { cn } from '@/lib/utils'
 
 
 
@@ -122,13 +118,6 @@ function SectionHeading({ id, title, hint }: { id: string; title: string; hint?:
 
   )
 
-}
-
-
-
-function supplyPhaseRowClass(phase: OwlCenterPhase, userMintPhase: OwlCenterPhase | null): string {
-  if (userMintPhase !== phase) return ''
-  return 'rounded border border-[#00FF9C]/45 bg-[#00FF9C]/8 px-2 py-1'
 }
 
 
@@ -258,7 +247,7 @@ export function Gen2MintPageClient() {
 
 
 
-  const { launch, supply, phases, prices_lamports, presale_pool, terminal, mint_controls } = state
+  const { launch, supply, phases, prices_lamports, terminal, mint_controls } = state
   const mintCountdown = getMintCountdownInfo(launch)
   const mintControls: OwlCenterMintControls = mint_controls ?? {
     disabled: launch.is_paused,
@@ -414,7 +403,7 @@ export function Gen2MintPageClient() {
 
           title="Overview"
 
-          hint="Supply and mint phases."
+          hint="Supply, mint phases, and your allocation."
 
         />
 
@@ -448,56 +437,6 @@ export function Gen2MintPageClient() {
 
           <SupplyProgress minted={supply.minted} total={supply.total} />
 
-          <div className="mt-6 grid gap-3 font-mono text-xs text-[#9BA8B4] sm:grid-cols-2">
-
-            <p className={cn(supplyPhaseRowClass('AIRDROP', userMintPhase))}>
-
-              GEN1 <span className="text-[#00FF9C]">{phases.airdrop}</span> <span className="text-[#5C6773]">· free</span>
-
-              {userMintPhase === 'AIRDROP' ? (
-                <span className="ml-1 text-[#00FF9C]">· your mint</span>
-              ) : null}
-
-            </p>
-
-            <p className={cn(supplyPhaseRowClass('PRESALE', userMintPhase))}>
-
-              Presale <span className="text-[#00FF9C]">{phases.presale}</span>{' '}
-
-              <span className="text-[#5C6773]">· free · prepaid buyers</span>
-
-              {userMintPhase === 'PRESALE' ? (
-                <span className="ml-1 text-[#00FF9C]">· your mint</span>
-              ) : null}
-
-            </p>
-
-            <p className={cn(supplyPhaseRowClass('WHITELIST', userMintPhase))}>
-
-              WL <span className="text-[#00FF9C]">{phases.whitelist}</span>{' '}
-
-              <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.whitelist)} · first come, first served</span>
-
-              {userMintPhase === 'WHITELIST' ? (
-                <span className="ml-1 text-[#00FF9C]">· your mint</span>
-              ) : null}
-
-            </p>
-
-            <p className={cn(supplyPhaseRowClass('PUBLIC', userMintPhase))}>
-
-              Public <span className="text-[#00FF9C]">{phases.public}</span>{' '}
-
-              <span className="text-[#5C6773]">· {formatPhasePriceSolOrFree(prices_lamports?.public)}</span>
-
-              {userMintPhase === 'PUBLIC' ? (
-                <span className="ml-1 text-[#00FF9C]">· your mint</span>
-              ) : null}
-
-            </p>
-
-          </div>
-
           <div className="mt-6 border-t border-[#1A222B] pt-6">
 
             <LaunchPhaseTimeline
@@ -509,33 +448,13 @@ export function Gen2MintPageClient() {
 
           </div>
 
-          {presale_pool ? (
-
-            <div className="mt-6 border-t border-[#1A222B] pt-6">
-
-              <MintAllocationBar
-
-                label="Presale minted (657 max)"
-
-                minted={presale_pool.presale_mints_recorded}
-
-                total={presale_pool.mint_cap}
-
-                hint={
-
-                  presale_pool.credits_overshoot > 0
-
-                    ? `${presale_pool.credits_issued} credits · ${presale_pool.credits_overshoot} in Presale+13`
-
-                    : `${presale_pool.credits_issued} presale credits issued`
-
-                }
-
-              />
-
-            </div>
-
-          ) : null}
+          <Gen2MintCheckCard
+            check={mintCheck}
+            loading={mintCheckLoading}
+            err={mintCheckErr}
+            onRefresh={refreshMintCheck}
+            embedded
+          />
 
           <div id="mint" className="scroll-mt-28 md:scroll-mt-24">
             <Gen2MintPanel
@@ -647,36 +566,6 @@ export function Gen2MintPageClient() {
           }}
 
         />
-
-      </section>
-
-
-
-      <section className="mb-12 space-y-4">
-
-        <SectionHeading
-
-          id="allocation"
-
-          title="Your allocation"
-
-          hint="Your spots across every phase."
-
-        />
-
-        <Gen2MintCheckCard
-          check={mintCheck}
-          loading={mintCheckLoading}
-          err={mintCheckErr}
-          onRefresh={refreshMintCheck}
-        />
-
-        <Link
-          href="/owl-center/collection/gen2/wallet-checker"
-          className="inline-flex min-h-[44px] touch-manipulation items-center font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] underline-offset-4 hover:underline"
-        >
-          Check another wallet's eligibility →
-        </Link>
 
       </section>
 

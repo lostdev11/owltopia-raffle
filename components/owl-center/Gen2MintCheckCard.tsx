@@ -1,5 +1,7 @@
 'use client'
 
+import type { ReactNode } from 'react'
+
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -10,6 +12,26 @@ import { owlCenterActivePhaseTag } from '@/lib/owl-center/phase-display'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse } from '@/lib/owl-center/types'
 import { Gen2WlShareButton } from '@/components/owl-center/Gen2WlShareButton'
 import { cn } from '@/lib/utils'
+
+function MintCheckShell({
+  embedded,
+  children,
+}: {
+  embedded?: boolean
+  children: ReactNode
+}) {
+  if (embedded) {
+    return (
+      <div id="allocation" className="mt-6 scroll-mt-28 border-t border-[#1A222B] pt-6 md:scroll-mt-24">
+        <p className="mb-4 font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-[#5C6773]">
+          Your allocation
+        </p>
+        {children}
+      </div>
+    )
+  }
+  return <CommandCard label="mint_allocation_checker.sys">{children}</CommandCard>
+}
 
 function phaseActiveTag(p: Gen2MintCheckPhasePreview, presaleSoldOut: boolean): string | null {
   if (!p.is_active) return null
@@ -36,11 +58,14 @@ export function Gen2MintCheckCard({
   loading,
   err,
   onRefresh,
+  embedded = false,
 }: {
   check: Gen2MintCheckResponse | null
   loading: boolean
   err: string | null
   onRefresh: () => void
+  /** When true, render inline inside Supply & phases (no nested CommandCard). */
+  embedded?: boolean
 }) {
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
@@ -50,7 +75,7 @@ export function Gen2MintCheckCard({
   const connectedRow = cluster?.wallets.find((w) => w.is_connected_wallet)
 
   return (
-    <CommandCard label="mint_allocation_checker.sys">
+    <MintCheckShell embedded={embedded}>
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-[#9BA8B4]">
@@ -273,6 +298,6 @@ export function Gen2MintCheckCard({
           <p className="font-mono text-sm text-[#9BA8B4]">Loading allocation checker…</p>
         ) : null}
       </div>
-    </CommandCard>
+    </MintCheckShell>
   )
 }
