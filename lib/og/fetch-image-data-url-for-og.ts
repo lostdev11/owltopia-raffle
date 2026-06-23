@@ -24,6 +24,28 @@ function isSvg(mime: string, url: string) {
   return false
 }
 
+/** Formats Satori (`next/og`) can embed directly. WebP/AVIF must be transcoded first. */
+const SATORI_SAFE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif'])
+
+/**
+ * Satori cannot decode WebP/AVIF, so embedding that art makes `ImageResponse` throw and the OG route
+ * 500s (LunarDollz art is WebP; pinit art is AVIF). Transcode to PNG with sharp. Returns null on
+ * failure so callers fall back to the art-less branded card instead of crashing.
+ */
+async function transcodeToSatoriPngBase64(buf: ArrayBuffer): Promise<string | null> {
+  try {
+    const { default: sharp } = await import('sharp')
+    // The OG card renders art at 400px; cap at 800px (retina) so the PNG stays small/fast for Satori.
+    const png = await sharp(Buffer.from(buf))
+      .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer()
+    return `data:image/png;base64,${png.toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
 /** When gateways omit Content-Type or send application/octet-stream (common on IPFS). */
 function sniffImageMimeFromBuffer(buf: ArrayBuffer): string | null {
   const u8 = new Uint8Array(buf)
@@ -85,6 +107,11 @@ export async function fetchImageDataUrlForOg(
     }
     if (!mime.startsWith('image/')) return null
     if (isSvg(mime, s)) return null
+
+    // Satori only embeds PNG/JPEG/GIF; transcode anything else (WebP, AVIF, …) to PNG.
+    if (!SATORI_SAFE_MIMES.has(mime)) {
+      return await transcodeToSatoriPngBase64(buf)
+    }
 
     const b64 = Buffer.from(buf).toString('base64')
     return `data:${mime};base64,${b64}`
