@@ -1,4 +1,15 @@
 {
+  "functions": {
+    "app/api/admin/owl-center/collections/[id]/assets/upload-job/process/route.ts": {
+      "memory": 3009
+    },
+    "app/api/cron/owl-center-asset-upload/route.ts": {
+      "memory": 3009
+    },
+    "app/api/owl-center/generator/stage/process/route.ts": {
+      "memory": 3009
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/draw-ended-raffles",

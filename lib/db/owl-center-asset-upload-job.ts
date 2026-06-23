@@ -141,6 +141,28 @@ export async function updateAssetUploadJob(
   return mapJobRow(data as Record<string, unknown>)
 }
 
+/**
+ * Reset jobs wedged in `validating` (e.g. a serverless OOM/timeout killed the
+ * worker before it could mark the job validated/failed) back to `queued` so the
+ * cron worker retries them. Only touches jobs untouched for `olderThanMs`.
+ * Returns the number of jobs requeued.
+ */
+export async function requeueStaleValidatingJobs(olderThanMs = 5 * 60 * 1000): Promise<number> {
+  const db = getSupabaseAdmin()
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString()
+  const { data, error } = await db
+    .from('owl_center_asset_upload_jobs')
+    .update({ status: 'queued', updated_at: new Date().toISOString() })
+    .eq('status', 'validating')
+    .lt('updated_at', cutoff)
+    .select('id')
+  if (error) {
+    console.error('requeueStaleValidatingJobs', error)
+    return 0
+  }
+  return data?.length ?? 0
+}
+
 /** Pick jobs that need validation or Arweave batch work. */
 export async function listAssetUploadJobsForWorker(limit = 3): Promise<OwlCenterAssetUploadJob[]> {
   const db = getSupabaseAdmin()

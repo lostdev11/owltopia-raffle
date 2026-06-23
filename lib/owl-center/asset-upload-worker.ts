@@ -21,6 +21,7 @@ import { ensureIrysFundedForUpload, isIrysUploadConfigured, uploadBufferToArweav
 import {
   getAssetUploadJobById,
   listAssetUploadJobsForWorker,
+  requeueStaleValidatingJobs,
   updateAssetUploadJob,
 } from '@/lib/db/owl-center-asset-upload-job'
 import { syncAssetPackageStatus, upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
@@ -90,13 +91,14 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
   }
 
   try {
-    const { scan, paths, zip } = await scanSugarZipBuffer(zipBuffer, launch?.total_supply)
+    const { scan, paths } = await scanSugarZipBuffer(zipBuffer, launch?.total_supply)
     const file_list = buildUploadFileList(paths)
-    let total_upload_bytes = 0
-    for (const path of paths) {
-      const buf = await readZipFileBuffer(zip, path)
-      if (buf) total_upload_bytes += buf.length
-    }
+    // Do NOT decompress every entry here just to total bytes — for large batches
+    // (~1GB / 2000 files) that doubles peak memory and OOM-kills the function,
+    // leaving the job stuck in `validating`. The Arweave cost estimate falls back
+    // to the staged ZIP size (see uploadBytesFromJob), which is accurate enough for
+    // PNG-heavy Sugar batches that are already compressed.
+    const total_upload_bytes = 0
     const progress: AssetUploadProgress = {
       file_list,
       uploaded: {},
@@ -274,6 +276,14 @@ export async function processArweaveUploadBatch(
       const { uri } = await uploadBufferToArweaveViaIrys(body, contentTypeForPath(entry.path))
       progress.uploaded[entry.path] = uri
       processed += 1
+
+      // Persist periodically so a platform timeout mid-run (large collections in
+      // `full` mode can exceed maxDuration) resumes from the last saved cursor
+      // instead of re-uploading everything.
+      if (processed % 25 === 0) {
+        progress.cursor = cursor
+        await updateAssetUploadJob(jobId, { status: 'uploading', upload_progress: progress })
+      }
     }
 
     progress.cursor = cursor
@@ -370,8 +380,13 @@ export async function processArweaveUploadBatch(
 /** Cron / worker entry: validate queued jobs, then advance uploading jobs. */
 export async function runAssetUploadWorkerTick(): Promise<{
   ok: boolean
+  requeued_stale: number
   results: AssetUploadWorkerResult[]
 }> {
+  // Recover jobs orphaned in `validating` by a prior crashed/timed-out run so
+  // they get retried instead of hanging forever.
+  const requeuedStale = await requeueStaleValidatingJobs()
+
   const jobs = await listAssetUploadJobsForWorker(5)
   const results: AssetUploadWorkerResult[] = []
 
@@ -385,7 +400,7 @@ export async function runAssetUploadWorkerTick(): Promise<{
     }
   }
 
-  return { ok: true, results }
+  return { ok: true, requeued_stale: requeuedStale, results }
 }
 
 export function jobProgressSummary(job: OwlCenterAssetUploadJob): {
