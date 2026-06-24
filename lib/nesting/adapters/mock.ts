@@ -10,8 +10,7 @@ import {
   recordRewardClaim,
   getStakingPositionForWallet,
 } from '@/lib/db/staking-positions'
-import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
-import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
+import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
 export const mockStakingAdapter: StakingMutationAdapter = {
   async stakeIntoPool(input) {
     const { wallet, pool, amount, asset_identifier } = input
@@ -53,25 +52,21 @@ export const mockStakingAdapter: StakingMutationAdapter = {
       throw new Error('Pool not found')
     }
 
-    const transfer = await tryTransferOwlRewardClaim({
-      pool,
-      recipientWallet: input.wallet,
-      claimAmountUi: input.amount,
-    })
-    const { txSig, note } = resolveRewardClaimRecording({
-      poolRewardToken: pool.reward_token,
-      transfer,
-      claimAmountUi: input.amount,
-    })
-
-    await recordRewardClaim({
-      positionId: input.positionId,
+    const { txSig } = await runGuardedOwlRewardClaim({
       wallet: input.wallet,
-      amount: input.amount,
-      newClaimedTotal: input.newClaimedTotal,
-      note,
-      transaction_signature: txSig,
-      execution_path: txSig ? 'onchain_transfer' : note === 'db_only_owl_claim' ? 'database_only' : null,
+      positionIds: [input.positionId],
+      pool,
+      claimAmountUi: input.amount,
+      recordLedger: ({ note, txSig: sig }) =>
+        recordRewardClaim({
+          positionId: input.positionId,
+          wallet: input.wallet,
+          amount: input.amount,
+          newClaimedTotal: input.newClaimedTotal,
+          note,
+          transaction_signature: sig,
+          execution_path: sig ? 'onchain_transfer' : note === 'db_only_owl_claim' ? 'database_only' : null,
+        }),
     })
 
     return {

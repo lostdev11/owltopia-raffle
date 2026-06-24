@@ -1850,6 +1850,9 @@ export function DashboardNestingClient() {
           if (platformFeeActive) {
             setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
             platformFeeSig = await sendStakingPlatformFee(1)
+            // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+            // the user does not think another wallet approval is pending and re-pay the fee.
+            setPosSubPhase(positionId, 'unstake', 'submitting')
           }
           const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
             method: 'POST',
@@ -1902,6 +1905,9 @@ export function DashboardNestingClient() {
           if (platformFeeActive) {
             setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
             platformFeeSig = await sendStakingPlatformFee(1)
+            // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+            // the user does not think another wallet approval is pending and re-pay the fee.
+            setPosSubPhase(positionId, 'claim', 'submitting')
           }
           const result = await fetchNestingJson<{
             error?: string
@@ -2155,6 +2161,9 @@ export function DashboardNestingClient() {
           if (platformFeeActive) {
             setClaimAllTxPhase('awaiting_wallet_signature')
             platformFeeSig = await sendStakingPlatformFee(claimPlans.length)
+            // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+            // the user does not think another wallet approval is pending and re-pay the fee.
+            setClaimAllTxPhase('submitting')
           }
           const result = await fetchNestingJson<{
             error?: string

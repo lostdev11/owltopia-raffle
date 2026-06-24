@@ -14,8 +14,7 @@ import {
   getVaultOwnerForPool,
   transferNestingTokenFromVaultToWallet,
 } from '@/lib/nesting/token-stake-transfer'
-import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
-import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
+import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
 import { thawWalletNftForNesting } from '@/lib/nesting/nft-freeze'
 
 async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoPool']>[0]) {
@@ -133,25 +132,21 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
     const pool = await getStakingPoolById(row.pool_id)
     if (!pool) throw new StakingUserError('Pool not found', 400)
 
-    const transfer = await tryTransferOwlRewardClaim({
-      pool,
-      recipientWallet: input.wallet,
-      claimAmountUi: input.amount,
-    })
-    const { txSig, note } = resolveRewardClaimRecording({
-      poolRewardToken: pool.reward_token,
-      transfer,
-      claimAmountUi: input.amount,
-    })
-
-    await recordRewardClaim({
-      positionId: input.positionId,
+    const { txSig } = await runGuardedOwlRewardClaim({
       wallet: input.wallet,
-      amount: input.amount,
-      newClaimedTotal: input.newClaimedTotal,
-      note,
-      transaction_signature: txSig,
-      execution_path: txSig ? 'onchain_transfer' : note === 'db_only_owl_claim' ? 'database_only' : null,
+      positionIds: [input.positionId],
+      pool,
+      claimAmountUi: input.amount,
+      recordLedger: ({ note, txSig: sig }) =>
+        recordRewardClaim({
+          positionId: input.positionId,
+          wallet: input.wallet,
+          amount: input.amount,
+          newClaimedTotal: input.newClaimedTotal,
+          note,
+          transaction_signature: sig,
+          execution_path: sig ? 'onchain_transfer' : note === 'db_only_owl_claim' ? 'database_only' : null,
+        }),
     })
     return {
       claimed: input.amount,

@@ -1,8 +1,7 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { recordBatchRewardClaims } from '@/lib/db/staking-positions'
 import { BatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
-import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
-import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
+import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
 import { minOwlClaimPayoutRejectedMessage } from '@/lib/nesting/claim-plan'
 import { StakingUserError } from '@/lib/nesting/errors'
@@ -80,39 +79,35 @@ export async function executeBatchOwlClaims(params: {
     throw new StakingUserError(minOwlClaimPayoutRejectedMessage(totalClaimed), 400)
   }
 
-  const transfer = await tryTransferOwlRewardClaim({
+  const { txSig, executionPath } = await runGuardedOwlRewardClaim({
+    wallet: params.wallet,
+    positionIds: params.plans.map((plan) => plan.positionId),
     pool: params.pool,
-    recipientWallet: params.wallet,
     claimAmountUi: totalClaimed,
+    recordLedger: async ({ note, txSig: sig, executionPath: path }) => {
+      try {
+        await persistBatchClaimLedger({
+          wallet: params.wallet,
+          plans: params.plans,
+          note,
+          txSig: sig,
+          executionPath: path,
+        })
+      } catch (e) {
+        if (sig) {
+          throw new BatchClaimLedgerSyncError(sig, e, {
+            total_claimed: totalClaimed,
+            claims: params.plans.map((plan) => ({
+              position_id: plan.positionId,
+              claimed: plan.payoutAmount,
+              claimed_rewards_total: plan.newClaimedTotal,
+            })),
+          })
+        }
+        throw e
+      }
+    },
   })
-  const { txSig, note } = resolveRewardClaimRecording({
-    poolRewardToken: params.pool.reward_token,
-    transfer,
-    claimAmountUi: totalClaimed,
-  })
-  const executionPath = txSig ? ('onchain_transfer' as const) : ('database_only' as const)
-
-  try {
-    await persistBatchClaimLedger({
-      wallet: params.wallet,
-      plans: params.plans,
-      note,
-      txSig,
-      executionPath,
-    })
-  } catch (e) {
-    if (txSig) {
-      throw new BatchClaimLedgerSyncError(txSig, e, {
-        total_claimed: totalClaimed,
-        claims: params.plans.map((plan) => ({
-          position_id: plan.positionId,
-          claimed: plan.payoutAmount,
-          claimed_rewards_total: plan.newClaimedTotal,
-        })),
-      })
-    }
-    throw e
-  }
 
   const claims: BatchOwlClaimResult['claims'] = params.plans.map((plan) => ({
     position_id: plan.positionId,
