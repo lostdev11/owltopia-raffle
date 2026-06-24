@@ -111,20 +111,28 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     ? pickInt(body.wl_supply, Math.min(total_supply - presale_supply, Math.max(0, Math.floor(total_supply * 0.1))), 0, total_supply)
     : 0
 
+  // GEN1 airdrop pool is not editable in the mint-details form, so preserve the
+  // existing value (passed through from the launch row) instead of zeroing it.
+  // Including it in the supply math keeps public from absorbing the airdrop pool.
+  const airdrop_supply = pickInt(body.airdrop_supply, 0, 0, total_supply)
+
   const public_supply_explicit =
     body.public_supply != null && body.public_supply !== ''
       ? pickInt(body.public_supply, total_supply, 0, total_supply)
       : null
 
   let public_supply =
-    public_supply_explicit ?? (presale_enabled ? Math.max(0, total_supply - presale_supply - wl_supply) : total_supply - wl_supply)
+    public_supply_explicit ??
+    (presale_enabled
+      ? Math.max(0, total_supply - presale_supply - wl_supply - airdrop_supply)
+      : Math.max(0, total_supply - wl_supply - airdrop_supply))
 
-  if (presale_supply + wl_supply + public_supply > total_supply) {
-    return { error: 'Phase supplies (presale + WL + public) cannot exceed total supply' }
+  if (presale_supply + wl_supply + public_supply + airdrop_supply > total_supply) {
+    return { error: 'Phase supplies (airdrop + presale + WL + public) cannot exceed total supply' }
   }
 
-  if (presale_supply + wl_supply + public_supply < total_supply) {
-    public_supply += total_supply - (presale_supply + wl_supply + public_supply)
+  if (presale_supply + wl_supply + public_supply + airdrop_supply < total_supply) {
+    public_supply += total_supply - (presale_supply + wl_supply + public_supply + airdrop_supply)
   }
 
   let launch_deadline_at: string | null = null
@@ -202,7 +210,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     presale_overage_supply,
     wl_supply,
     public_supply,
-    airdrop_supply: 0,
+    airdrop_supply,
     public_price_usdc,
     wl_price_usdc,
     creator_mint_price: public_price,

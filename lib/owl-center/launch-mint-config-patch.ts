@@ -46,6 +46,8 @@ export function buildMintDetailsPatchFromBody(
     wl_enabled: body.wl_enabled ?? launch.creator_wl_enabled,
     mint_price: body.mint_price ?? body.public_price ?? launch.creator_mint_price,
     currency: body.currency ?? launch.creator_mint_currency,
+    // Form has no airdrop field; preserve the existing GEN1 pool so saves don't zero it.
+    airdrop_supply: body.airdrop_supply ?? launch.airdrop_supply,
   })
   if ('error' in parsed) return parsed
 
