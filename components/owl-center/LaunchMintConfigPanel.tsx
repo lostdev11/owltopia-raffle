@@ -40,6 +40,12 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
   }, [launch])
 
   async function save() {
+    const priceStr = values.public_price.trim()
+    if (priceStr && (!Number.isFinite(Number(priceStr)) || Number(priceStr) < 0)) {
+      setErr('Enter a valid public mint price (0 or more). Leave blank to keep the current price.')
+      return
+    }
+
     setSaving(true)
     setMsg(null)
     setErr(null)

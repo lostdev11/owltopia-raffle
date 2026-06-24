@@ -255,28 +255,40 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
   const royaltySplits = parseWalletSplitFormRows(values.royalty_splits, 'Secondary royalty split')
   const mintFundSplits = parseWalletSplitFormRows(values.mint_fund_splits, 'Mint funds split')
 
+  // Convert datetime-local values to ISO here (in the browser) so the
+  // local→UTC offset uses the admin's timezone, not the server's (UTC).
+  const launchIso = datetimeLocalToIso(values.launch_date)
+  const presaleIso = datetimeLocalToIso(values.presale_start)
+  const wlIso = datetimeLocalToIso(values.wl_start)
+  const publicIso = datetimeLocalToIso(values.public_start)
+
+  // Leave price keys out when the field is blank so an empty input preserves
+  // the existing price instead of silently overwriting it with 0.
+  const priceFields = values.public_price.trim()
+    ? { mint_price: Number(values.public_price), public_price: Number(values.public_price) }
+    : {}
+
   return {
     total_supply: Number(values.total_supply),
-    mint_price: Number(values.public_price),
-    public_price: Number(values.public_price),
+    ...priceFields,
     wl_price: values.wl_price.trim() ? Number(values.wl_price) : null,
     currency: values.currency,
     wallet_mint_limit: Number(values.wallet_mint_limit),
-    launch_date: values.launch_date.trim() || null,
+    launch_date: launchIso,
     presale_enabled: values.presale_enabled,
     presale_supply: values.presale_supply.trim() ? Number(values.presale_supply) : undefined,
     presale_overage_supply: values.presale_overage_supply.trim() ? Number(values.presale_overage_supply) : undefined,
     wl_enabled: values.wl_enabled,
     wl_supply: values.wl_supply.trim() ? Number(values.wl_supply) : undefined,
     phase_schedule: {
-      ...(values.launch_date.trim() ? { AIRDROP: values.launch_date.trim() } : {}),
-      ...(values.presale_enabled && values.presale_start.trim() ? { PRESALE: values.presale_start.trim() } : {}),
-      ...(values.wl_enabled && values.wl_start.trim() ? { WHITELIST: values.wl_start.trim() } : {}),
-      ...(values.public_start.trim() ? { PUBLIC: values.public_start.trim() } : {}),
+      ...(launchIso ? { AIRDROP: launchIso } : {}),
+      ...(values.presale_enabled && presaleIso ? { PRESALE: presaleIso } : {}),
+      ...(values.wl_enabled && wlIso ? { WHITELIST: wlIso } : {}),
+      ...(publicIso ? { PUBLIC: publicIso } : {}),
     },
-    presale_start: values.presale_start.trim() || null,
-    wl_start: values.wl_start.trim() || null,
-    public_start: values.public_start.trim() || null,
+    presale_start: presaleIso,
+    wl_start: wlIso,
+    public_start: publicIso,
     royalty_percent: values.royalty_percent.trim() ? Number(values.royalty_percent) : undefined,
     royalty_splits: 'error' in royaltySplits ? values.royalty_splits : royaltySplits,
     mint_fund_splits: 'error' in mintFundSplits ? values.mint_fund_splits : mintFundSplits,
