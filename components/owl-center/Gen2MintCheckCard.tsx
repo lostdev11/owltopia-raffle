@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { useWallet } from '@solana/wallet-adapter-react'
 
@@ -42,6 +42,13 @@ function shortWallet(w: string): string {
   return w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w
 }
 
+/** A phase the connected wallet can mint in now or has reserved for a later phase. */
+function phaseHasAllocation(p: Gen2MintCheckPhasePreview): boolean {
+  if (p.reserved_mints > 0) return true
+  if (p.is_eligible && p.max_mintable > 0) return true
+  return false
+}
+
 function phaseHeaderRight(p: Gen2MintCheckPhasePreview, connected: boolean): string {
   if (!connected) return '—'
   if (p.is_active && p.is_eligible && p.max_mintable > 0) {
@@ -69,9 +76,18 @@ export function Gen2MintCheckCard({
 }) {
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
+  const [showAll, setShowAll] = useState(false)
 
   const cluster = check?.wallet_cluster
   const connectedRow = cluster?.wallets.find((w) => w.is_connected_wallet)
+
+  const allPhases = check?.phases ?? []
+  const allocatedPhases = allPhases.filter(phaseHasAllocation)
+  // Once connected, default to only the phases this wallet can mint in. Without a
+  // connection (or with zero allocation) show everything so the section isn't empty.
+  const showFiltered = connected && allocatedPhases.length > 0 && !showAll
+  const visiblePhases = showFiltered ? allocatedPhases : allPhases
+  const hiddenCount = allPhases.length - visiblePhases.length
 
   return (
     <MintCheckShell embedded={embedded}>
@@ -140,7 +156,7 @@ export function Gen2MintCheckCard({
 
         {check ? (
           <ul className="space-y-3">
-            {check.phases.map((p) => {
+            {visiblePhases.map((p) => {
               const active = p.is_active
               const eligible = p.is_eligible
               const canMintNow = connected && active && eligible && p.max_mintable > 0
@@ -268,7 +284,21 @@ export function Gen2MintCheckCard({
               )
             })}
           </ul>
-        ) : loading ? (
+        ) : null}
+
+        {check && connected && allocatedPhases.length > 0 && (showAll || hiddenCount > 0) ? (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="min-h-[44px] w-full touch-manipulation border border-[#1A222B] bg-[#0B0F14] px-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] hover:text-[#9BA8B4]"
+          >
+            {showAll
+              ? 'Show only my phases'
+              : `Show all phases${hiddenCount > 0 ? ` (+${hiddenCount} not eligible)` : ''}`}
+          </button>
+        ) : null}
+
+        {!check && loading ? (
           <p className="font-mono text-sm text-[#9BA8B4]">Loading allocation checker…</p>
         ) : null}
       </div>

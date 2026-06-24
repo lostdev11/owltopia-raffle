@@ -40,6 +40,7 @@ export function Gen2WalletChecker({ initialWallet = '' }: { initialWallet?: stri
   const [check, setCheck] = useState<Gen2MintCheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
   const reqId = useRef(0)
 
   const runCheck = useCallback(async (raw: string) => {
@@ -54,6 +55,7 @@ export function Gen2WalletChecker({ initialWallet = '' }: { initialWallet?: stri
     const id = ++reqId.current
     setLoading(true)
     setErr(null)
+    setShowAll(false)
     setWallet(normalized)
     try {
       const res = await fetch(`/api/owl-center/gen2/mint-check?wallet=${encodeURIComponent(normalized)}`, {
@@ -91,6 +93,11 @@ export function Gen2WalletChecker({ initialWallet = '' }: { initialWallet?: stri
   }, [])
 
   const eligiblePhases = check?.phases.filter((p) => phaseStatus(p) !== 'ineligible') ?? []
+  const hasEligible = eligiblePhases.length > 0
+  // Default to only the phases this wallet qualifies for. If none qualify, fall back to
+  // the full list so the card isn't empty. A toggle lets users expand to every phase.
+  const visiblePhases = showAll || !hasEligible ? (check?.phases ?? []) : eligiblePhases
+  const hiddenCount = (check?.phases.length ?? 0) - visiblePhases.length
 
   return (
     <CommandCard label="wallet_eligibility_checker.sys">
@@ -150,7 +157,7 @@ export function Gen2WalletChecker({ initialWallet = '' }: { initialWallet?: stri
             </div>
 
             <ul className="space-y-3">
-              {check.phases.map((p) => {
+              {visiblePhases.map((p) => {
                 const status = phaseStatus(p)
                 return (
                   <li
@@ -214,6 +221,18 @@ export function Gen2WalletChecker({ initialWallet = '' }: { initialWallet?: stri
                 )
               })}
             </ul>
+
+            {hasEligible && (showAll ? true : hiddenCount > 0) ? (
+              <button
+                type="button"
+                onClick={() => setShowAll((v) => !v)}
+                className="min-h-[44px] w-full touch-manipulation border border-[#1A222B] bg-[#0B0F14] px-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] hover:text-[#9BA8B4]"
+              >
+                {showAll
+                  ? 'Show only my phases'
+                  : `Show all phases${hiddenCount > 0 ? ` (+${hiddenCount} not eligible)` : ''}`}
+              </button>
+            ) : null}
 
             {check.presale_pool ? (
               <div className="space-y-3 border border-[#1A222B] bg-[#0F1419] p-4">

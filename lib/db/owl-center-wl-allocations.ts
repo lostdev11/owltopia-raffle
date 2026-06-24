@@ -19,8 +19,22 @@ export type BulkWlUpsertResult = {
   failed: Array<{ wallet: string; error: string }>
 }
 
-export async function bulkUpsertWlAllocations(rows: BulkWlUpsertRow[]): Promise<BulkWlUpsertResult> {
+export type BulkWlUpsertOptions = {
+  /**
+   * When true, never lower an existing allocation: allowed_mints is raised to
+   * max(existing, requested), and an existing community tag is preserved. Use for
+   * automated/snapshot allowlists (Gen1 / presale / coin holders) so re-running is
+   * idempotent and never clobbers larger admin-set allocations.
+   */
+  raiseOnly?: boolean
+}
+
+export async function bulkUpsertWlAllocations(
+  rows: BulkWlUpsertRow[],
+  options: BulkWlUpsertOptions = {}
+): Promise<BulkWlUpsertResult> {
   const admin = getSupabaseAdmin()
+  const raiseOnly = options.raiseOnly === true
   let upserted = 0
   const failed: BulkWlUpsertResult['failed'] = []
 
@@ -30,15 +44,19 @@ export async function bulkUpsertWlAllocations(rows: BulkWlUpsertRow[]): Promise<
       failed.push({ wallet: row.wallet, error: 'Invalid wallet' })
       continue
     }
-    const allowed = Math.max(0, Math.floor(row.allowed_mints))
+    const requested = Math.max(0, Math.floor(row.allowed_mints))
 
     const { data: existing } = await admin
       .from('owl_center_wl_allocations')
-      .select('used_mints')
+      .select('allowed_mints, used_mints, community')
       .eq('wallet', wallet)
       .maybeSingle()
 
-    const used = Number((existing as { used_mints?: number } | null)?.used_mints ?? 0)
+    const existingRow = existing as { allowed_mints?: number; used_mints?: number; community?: string | null } | null
+    const existingAllowed = Number(existingRow?.allowed_mints ?? 0)
+    const existingCommunity = existingRow?.community ?? null
+    const used = Number(existingRow?.used_mints ?? 0)
+    const allowed = raiseOnly ? Math.max(existingAllowed, requested) : requested
     if (used > allowed) {
       failed.push({
         wallet,
@@ -52,7 +70,12 @@ export async function bulkUpsertWlAllocations(rows: BulkWlUpsertRow[]): Promise<
       allowed_mints: allowed,
       updated_at: new Date().toISOString(),
     }
-    if (row.community !== undefined) {
+    if (raiseOnly) {
+      // Only tag a community when the wallet doesn't already have one.
+      if (existingCommunity == null && row.community !== undefined) {
+        payload.community = row.community?.trim() || null
+      }
+    } else if (row.community !== undefined) {
       payload.community = row.community?.trim() || null
     }
 

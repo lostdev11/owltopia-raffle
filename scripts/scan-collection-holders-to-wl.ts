@@ -23,11 +23,8 @@
 import { loadEnvConfig } from '@next/env'
 import { createClient } from '@supabase/supabase-js'
 
-import { dasAssetBelongsToCollection } from '@/lib/helius/das-asset-collection'
 import { bulkUpsertWlAllocations } from '@/lib/db/owl-center-wl-allocations'
-
-const PAGE_LIMIT = 1000
-const MAX_PAGES = 50
+import { scanCollectionHolders } from '@/lib/owl-center/scan-collection-holders'
 
 function getArg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -39,58 +36,9 @@ function hasFlag(name: string): boolean {
 }
 
 async function scanHolders(collectionAddress: string, heliusApiKey: string): Promise<string[]> {
-  const heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusApiKey)}`
-  const owners = new Set<string>()
-  const seenAssets = new Set<string>()
-  let assetsScanned = 0
-
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await fetch(heliusUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: `coin-holder-scan-${page}`,
-        method: 'getAssetsByGroup',
-        params: {
-          groupKey: 'collection',
-          groupValue: collectionAddress,
-          page,
-          limit: PAGE_LIMIT,
-          options: { showUnverifiedCollections: true },
-        },
-      }),
-    })
-    if (!res.ok) throw new Error(`DAS getAssetsByGroup failed (HTTP ${res.status})`)
-
-    const json: { error?: { message?: string }; result?: { items?: unknown[] } } = await res
-      .json()
-      .catch(() => ({}))
-    if (json.error) throw new Error(`DAS getAssetsByGroup error: ${json.error.message ?? 'unknown'}`)
-
-    const items = json.result?.items
-    if (!Array.isArray(items) || items.length === 0) break
-
-    for (const item of items) {
-      if (!item || typeof item !== 'object') continue
-      const o = item as { id?: string; burnt?: boolean; ownership?: { owner?: string } }
-      if (o.burnt === true) continue
-      if (!dasAssetBelongsToCollection(item, collectionAddress)) continue
-      if (o.id) {
-        if (seenAssets.has(o.id)) continue
-        seenAssets.add(o.id)
-      }
-      const owner = o.ownership?.owner?.trim()
-      if (!owner) continue
-      owners.add(owner)
-      assetsScanned++
-    }
-
-    if (items.length < PAGE_LIMIT) break
-  }
-
-  console.log(`Assets scanned: ${assetsScanned} · distinct holder wallets: ${owners.size}`)
-  return [...owners].sort()
+  const { wallets, assetsScanned } = await scanCollectionHolders(collectionAddress, heliusApiKey)
+  console.log(`Assets scanned: ${assetsScanned} · distinct holder wallets: ${wallets.length}`)
+  return wallets
 }
 
 async function main() {
@@ -101,6 +49,7 @@ async function main() {
   const mints = Math.max(1, Math.floor(Number(getArg('mints') ?? '2')))
   const community = getArg('community') ?? 'owl_coin'
   const commit = hasFlag('commit')
+  const raiseOnly = hasFlag('raise-only')
 
   if (!collection) {
     console.error('Missing --collection=<MINT> (or NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS)')
@@ -120,6 +69,7 @@ async function main() {
 
   console.log(`Collection: ${collection}`)
   console.log(`WL mints per wallet: ${mints} · community tag: ${community}`)
+  console.log(`Allocation mode: ${raiseOnly ? 'RAISE-ONLY (never lower existing)' : 'SET (overwrite allowed_mints)'}`)
   console.log(`Mode: ${commit ? 'COMMIT (writes to owl_center_wl_allocations)' : 'DRY RUN (no writes)'}\n`)
 
   const holders = await scanHolders(collection, heliusApiKey)
@@ -149,7 +99,8 @@ async function main() {
   }
 
   const result = await bulkUpsertWlAllocations(
-    holders.map((wallet) => ({ wallet, allowed_mints: mints, community }))
+    holders.map((wallet) => ({ wallet, allowed_mints: mints, community })),
+    { raiseOnly }
   )
   console.log(`\nUpserted: ${result.upserted} · failed: ${result.failed.length}`)
   for (const f of result.failed.slice(0, 20)) console.log(`  - ${f.wallet}: ${f.error}`)

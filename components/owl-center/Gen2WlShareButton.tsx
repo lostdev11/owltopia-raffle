@@ -70,7 +70,7 @@ export function Gen2WlShareButton({ wallet, mintCheck }: Props) {
         aria-label="Share Gen2 WL status card"
       >
         <Share2 className="h-3.5 w-3.5" aria-hidden />
-        {busy ? '…' : 'Share WL'}
+        {busy ? '…' : 'Share Mint'}
       </button>
       {message ? <span className="font-mono text-[9px] text-[#5C6773]">{message}</span> : null}
     </div>
