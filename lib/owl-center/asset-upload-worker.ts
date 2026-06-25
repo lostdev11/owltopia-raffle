@@ -4,8 +4,9 @@ import { formatSugarBatchScanSummary } from '@/lib/owl-center/scan-sugar-batch'
 import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
 import { uploadBytesFromJob } from '@/lib/owl-center/arweave-upload-estimate-server'
 import {
-  owlCenterAssetUploadBatchSize,
+  owlCenterAssetUploadChunkSize,
   owlCenterAssetUploadConcurrency,
+  owlCenterAssetUploadTimeBudgetMs,
   type ArweaveUploadBatchMode,
 } from '@/lib/owl-center/asset-staging-limits'
 import { downloadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
@@ -275,25 +276,17 @@ export async function processArweaveUploadBatch(
     progress.uploaded = {}
   }
 
-  const batchSize = owlCenterAssetUploadBatchSize(options?.mode ?? 'tick')
+  const mode = options?.mode ?? 'tick'
   const concurrency = owlCenterAssetUploadConcurrency()
+  const chunkSize = owlCenterAssetUploadChunkSize()
+  const timeBudgetMs = owlCenterAssetUploadTimeBudgetMs(mode)
+  const startedAt = Date.now()
   let processed = 0
 
   try {
-    // Build the Irys uploader ONCE per batch (each build runs a node handshake) and
-    // upload files in parallel. Both together are the difference between hours and
-    // minutes for large (~4000-file) collections.
+    // Build the Irys uploader ONCE per invocation (each build runs a node handshake)
+    // and reuse it for every file — rebuilding per file dominated runtime.
     const uploader = await createIrysUploader()
-
-    // Collect the next slice of not-yet-uploaded entries starting at the cursor.
-    const slice: AssetUploadFileEntry[] = []
-    let scan = progress.cursor
-    while (slice.length < batchSize && scan < progress.file_list.length) {
-      const entry = progress.file_list[scan]!
-      scan += 1
-      if (progress.uploaded[entry.path]) continue
-      slice.push(entry)
-    }
 
     // Advance the cursor over contiguous completed (or skippable) entries so a
     // resume re-tries only what actually failed, never re-uploads what succeeded.
@@ -358,12 +351,35 @@ export async function processArweaveUploadBatch(
       throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
     }
 
-    // Phase 1: images / collection / traits (no inter-file dependency).
-    // Phase 2: metadata JSON (each needs its image URI, guaranteed present after phase 1).
-    await runWithConcurrency(slice.filter((e) => e.kind !== 'metadata'), concurrency, uploadEntry)
-    await runWithConcurrency(slice.filter((e) => e.kind === 'metadata'), concurrency, uploadEntry)
+    // Keep uploading chunks from the SAME ZIP download until the collection is
+    // finished or the time budget elapses. This is the fix for the cron tick
+    // re-downloading the whole ~1GB ZIP just to push a handful of files: one
+    // download now serves the entire collection. file_list is globally ordered
+    // (all images, then all metadata — see buildUploadFileList), so by the time
+    // the cursor reaches a metadata entry its image is already uploaded; the
+    // per-chunk phase split below also holds the dependency within a chunk.
+    while (true) {
+      const chunk: AssetUploadFileEntry[] = []
+      let scan = progress.cursor
+      while (chunk.length < chunkSize && scan < progress.file_list.length) {
+        const entry = progress.file_list[scan]!
+        scan += 1
+        if (progress.uploaded[entry.path]) continue
+        chunk.push(entry)
+      }
+      if (chunk.length === 0) break
 
-    advanceCursor()
+      // Phase 1: images / collection / traits (no inter-file dependency).
+      // Phase 2: metadata JSON (each needs its image URI, present after phase 1).
+      await runWithConcurrency(chunk.filter((e) => e.kind !== 'metadata'), concurrency, uploadEntry)
+      await runWithConcurrency(chunk.filter((e) => e.kind === 'metadata'), concurrency, uploadEntry)
+
+      advanceCursor()
+      await updateAssetUploadJob(jobId, { status: 'uploading', upload_progress: progress })
+
+      if (progress.cursor >= progress.file_list.length) break
+      if (Date.now() - startedAt >= timeBudgetMs) break
+    }
 
     const done = progress.cursor >= progress.file_list.length
     if (done) {

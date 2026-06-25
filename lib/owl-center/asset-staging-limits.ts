@@ -9,15 +9,6 @@ export const OWL_CENTER_SYNC_VALIDATE_MAX_BYTES = 80 * 1024 * 1024
 
 export type ArweaveUploadBatchMode = 'tick' | 'full'
 
-/** Files uploaded to Irys per cron tick. Interactive pushes use `full` (all remaining). */
-export function owlCenterAssetUploadBatchSize(mode: ArweaveUploadBatchMode = 'tick'): number {
-  if (mode === 'full') return Number.MAX_SAFE_INTEGER
-  const raw = process.env.OWL_CENTER_ASSET_UPLOAD_BATCH
-  const n = raw ? Number.parseInt(raw, 10) : 15
-  if (!Number.isFinite(n) || n < 1) return 15
-  return Math.min(n, 50)
-}
-
 /**
  * Parallel Irys uploads within a single batch. Each upload is an independent
  * bundler tx against the pre-funded balance, so uploading many at once is the
@@ -25,7 +16,33 @@ export function owlCenterAssetUploadBatchSize(mode: ArweaveUploadBatchMode = 'ti
  */
 export function owlCenterAssetUploadConcurrency(): number {
   const raw = process.env.OWL_CENTER_ASSET_UPLOAD_CONCURRENCY
-  const n = raw ? Number.parseInt(raw, 10) : 12
-  if (!Number.isFinite(n) || n < 1) return 12
+  const n = raw ? Number.parseInt(raw, 10) : 30
+  if (!Number.isFinite(n) || n < 1) return 30
   return Math.min(n, 40)
+}
+
+/**
+ * Files uploaded between DB checkpoints within one ZIP load. The staged ZIP is
+ * downloaded + parsed once per invocation, then we stream chunks of this size
+ * (buffers read lazily at `concurrency`), so memory stays bounded while a single
+ * download serves the whole collection instead of re-downloading per chunk.
+ */
+export function owlCenterAssetUploadChunkSize(): number {
+  const raw = process.env.OWL_CENTER_ASSET_UPLOAD_CHUNK
+  const n = raw ? Number.parseInt(raw, 10) : 250
+  if (!Number.isFinite(n) || n < 1) return 250
+  return Math.min(n, 1000)
+}
+
+/**
+ * Wall-clock budget for one upload invocation. Both the cron tick and the admin
+ * full push keep uploading (from a single ZIP download) until the collection is
+ * done or this budget elapses, then checkpoint and resume next run. Kept under
+ * the route `maxDuration` (300s) with headroom for the final DB writes.
+ */
+export function owlCenterAssetUploadTimeBudgetMs(mode: ArweaveUploadBatchMode = 'tick'): number {
+  const raw = process.env.OWL_CENTER_ASSET_UPLOAD_TIME_BUDGET_MS
+  const n = raw ? Number.parseInt(raw, 10) : NaN
+  if (Number.isFinite(n) && n >= 10_000) return Math.min(n, 290_000)
+  return mode === 'full' ? 280_000 : 230_000
 }
