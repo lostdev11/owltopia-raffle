@@ -57,11 +57,23 @@ export function buildUploadFileList(zipPaths: string[]): AssetUploadFileEntry[] 
   })
 }
 
-export async function scanSugarZipBuffer(
-  zipBuffer: Buffer,
+/**
+ * Load a Sugar ZIP into JSZip. Keep this separate from scanning so callers can
+ * drop the source Buffer reference immediately after — holding the raw ~1GB
+ * Buffer alongside JSZip's own copy is what OOM-killed large (2000-item) batches.
+ */
+export async function loadZipFromBuffer(zipBuffer: Buffer): Promise<JSZip> {
+  return JSZip.loadAsync(zipBuffer)
+}
+
+/**
+ * Validation scan over an already-loaded archive. Reads JSON entries from JSZip
+ * (not the raw buffer), so the source Buffer can already be freed by this point.
+ */
+export async function scanSugarZip(
+  zip: JSZip,
   expectedSupply?: number
-): Promise<{ scan: SugarBatchScanResult; zip: JSZip; paths: string[] }> {
-  const zip = await JSZip.loadAsync(zipBuffer)
+): Promise<{ scan: SugarBatchScanResult; paths: string[] }> {
   const paths = Object.keys(zip.files).filter((p) => !zip.files[p]!.dir)
   const entries: { path: string; jsonText?: string }[] = []
 
@@ -74,6 +86,15 @@ export async function scanSugarZipBuffer(
   }
 
   const scan = scanSugarBatchEntries(entries, { expectedSupply })
+  return { scan, paths }
+}
+
+export async function scanSugarZipBuffer(
+  zipBuffer: Buffer,
+  expectedSupply?: number
+): Promise<{ scan: SugarBatchScanResult; zip: JSZip; paths: string[] }> {
+  const zip = await loadZipFromBuffer(zipBuffer)
+  const { scan, paths } = await scanSugarZip(zip, expectedSupply)
   return { scan, zip, paths }
 }
 

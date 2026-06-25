@@ -12,10 +12,11 @@ import type { AssetUploadProgress, OwlCenterAssetUploadJob } from '@/lib/owl-cen
 import {
   buildUploadFileList,
   contentTypeForPath,
+  loadZipFromBuffer,
   readZipFileBuffer,
   readZipFileText,
   rewriteMetadataJson,
-  scanSugarZipBuffer,
+  scanSugarZip,
 } from '@/lib/owl-center/asset-upload-zip'
 import { ensureIrysFundedForUpload, isIrysUploadConfigured, uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
 import {
@@ -40,9 +41,21 @@ export type AssetUploadWorkerResult = {
   reason?: string
 }
 
+/**
+ * Download + decompress a staged Sugar ZIP, then drop the raw Buffer reference.
+ * JSZip keeps its own copy, so returning only the archive lets the ~1GB source
+ * Buffer be GC'd before we read/upload entries — the fix for the serverless OOM
+ * on large (2000-item / ~1GB) batches (holding Buffer + JSZip copy was ~2GB).
+ */
+async function loadStagedZip(storagePath: string) {
+  const buffer = await downloadStagedSugarZip(storagePath)
+  if (!buffer) return null
+  return loadZipFromBuffer(buffer)
+}
+
 export async function applyValidationScanToLaunch(
   launchId: string,
-  scan: Awaited<ReturnType<typeof scanSugarZipBuffer>>['scan']
+  scan: Awaited<ReturnType<typeof scanSugarZip>>['scan']
 ): Promise<void> {
   const supply = scan.inferredSupply || scan.metadataCount
   const checklist = {
@@ -81,8 +94,8 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
   await updateAssetUploadJob(jobId, { status: 'validating', error_message: null })
 
   const launch = job.launch_id ? await getOwlCenterLaunchByIdAdmin(job.launch_id) : null
-  const zipBuffer = await downloadStagedSugarZip(job.staged_zip_path)
-  if (!zipBuffer) {
+  const zip = await loadStagedZip(job.staged_zip_path)
+  if (!zip) {
     await updateAssetUploadJob(jobId, {
       status: 'failed',
       error_message: 'Could not read staged ZIP from storage.',
@@ -91,7 +104,7 @@ export async function validateAssetUploadJob(jobId: string): Promise<AssetUpload
   }
 
   try {
-    const { scan, paths } = await scanSugarZipBuffer(zipBuffer, launch?.total_supply)
+    const { scan, paths } = await scanSugarZip(zip, launch?.total_supply)
     const file_list = buildUploadFileList(paths)
     // Do NOT decompress every entry here just to total bytes — for large batches
     // (~1GB / 2000 files) that doubles peak memory and OOM-kills the function,
@@ -215,28 +228,26 @@ export async function processArweaveUploadBatch(
   }
 
   const progress = job.upload_progress
+
+  // Load the staged ZIP once per batch and immediately free the raw Buffer (see
+  // loadStagedZip). Re-downloading + re-running the full validation scan on every
+  // batch (old behaviour) doubled peak memory and OOM-killed large collections.
+  const zip = await loadStagedZip(job.staged_zip_path)
+  if (!zip) {
+    await updateAssetUploadJob(jobId, {
+      status: 'failed',
+      error_message: 'Staged ZIP missing during upload.',
+    })
+    return { ok: false, error: 'staged_zip_missing' }
+  }
+
   if (!progress.file_list.length) {
-    const zipBuffer = await downloadStagedSugarZip(job.staged_zip_path)
-    if (!zipBuffer) {
-      await updateAssetUploadJob(jobId, {
-        status: 'failed',
-        error_message: 'Staged ZIP missing during upload.',
-      })
-      return { ok: false, error: 'staged_zip_missing' }
-    }
-    const { paths } = await scanSugarZipBuffer(zipBuffer)
+    const { paths } = await scanSugarZip(zip)
     progress.file_list = buildUploadFileList(paths)
     progress.cursor = 0
     progress.uploaded = {}
   }
 
-  const zipBuffer = await downloadStagedSugarZip(job.staged_zip_path)
-  if (!zipBuffer) {
-    await updateAssetUploadJob(jobId, { status: 'failed', error_message: 'Staged ZIP missing.' })
-    return { ok: false, error: 'staged_zip_missing' }
-  }
-
-  const { zip } = await scanSugarZipBuffer(zipBuffer)
   const batchSize = owlCenterAssetUploadBatchSize(options?.mode ?? 'tick')
   let processed = 0
   let cursor = progress.cursor
