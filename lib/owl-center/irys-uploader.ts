@@ -165,18 +165,32 @@ export async function estimateIrysFolderUploadLamports(
   }
 }
 
-export async function uploadBufferToArweaveViaIrys(
+export type IrysUploaderHandle = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  irys: any
+  payerAddress: string
+}
+
+/**
+ * Build a reusable Irys uploader. Building the client runs an Irys node handshake,
+ * so callers uploading many files MUST build once and reuse — rebuilding per file
+ * (the old uploadBufferToArweaveViaIrys behaviour) dominated upload runtime.
+ */
+export async function createIrysUploader(): Promise<IrysUploaderHandle> {
+  const { irys } = await buildIrysUploader()
+  return { irys, payerAddress: String(irys.address ?? '') }
+}
+
+/** Upload a single buffer using an already-built uploader (no per-file rebuild). */
+export async function uploadBufferWithUploader(
+  handle: IrysUploaderHandle,
   data: Buffer,
   contentType: string
 ): Promise<{ uri: string; id: string }> {
-  const { irys } = await buildIrysUploader()
-  const payerAddress = String(irys.address ?? '')
-
   try {
-    const receipt = await irys.upload(data, {
+    const receipt = await handle.irys.upload(data, {
       tags: [{ name: 'Content-Type', value: contentType }],
     })
-
     const id = String(receipt.id)
     const network = irysNetworkLabel()
     return {
@@ -184,6 +198,14 @@ export async function uploadBufferToArweaveViaIrys(
       uri: normalizeOwlCenterArweaveGatewayUri(`https://arweave.net/${id}`, network),
     }
   } catch (e) {
-    throw new Error(formatIrysUploadError(e, payerAddress))
+    throw new Error(formatIrysUploadError(e, handle.payerAddress))
   }
+}
+
+export async function uploadBufferToArweaveViaIrys(
+  data: Buffer,
+  contentType: string
+): Promise<{ uri: string; id: string }> {
+  const handle = await createIrysUploader()
+  return uploadBufferWithUploader(handle, data, contentType)
 }

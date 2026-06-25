@@ -5,10 +5,15 @@ import { mergeValidationChecklist } from '@/lib/owl-center/asset-validation'
 import { uploadBytesFromJob } from '@/lib/owl-center/arweave-upload-estimate-server'
 import {
   owlCenterAssetUploadBatchSize,
+  owlCenterAssetUploadConcurrency,
   type ArweaveUploadBatchMode,
 } from '@/lib/owl-center/asset-staging-limits'
 import { downloadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
-import type { AssetUploadProgress, OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
+import type {
+  AssetUploadFileEntry,
+  AssetUploadProgress,
+  OwlCenterAssetUploadJob,
+} from '@/lib/owl-center/asset-upload-types'
 import {
   buildUploadFileList,
   contentTypeForPath,
@@ -18,7 +23,12 @@ import {
   rewriteMetadataJson,
   scanSugarZip,
 } from '@/lib/owl-center/asset-upload-zip'
-import { ensureIrysFundedForUpload, isIrysUploadConfigured, uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
+import {
+  createIrysUploader,
+  ensureIrysFundedForUpload,
+  isIrysUploadConfigured,
+  uploadBufferWithUploader,
+} from '@/lib/owl-center/irys-uploader'
 import {
   getAssetUploadJobById,
   listAssetUploadJobsForWorker,
@@ -51,6 +61,23 @@ async function loadStagedZip(storagePath: string) {
   const buffer = await downloadStagedSugarZip(storagePath)
   if (!buffer) return null
   return loadZipFromBuffer(buffer)
+}
+
+/** Run `worker` over `items` with at most `limit` in flight at once. */
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0
+  const runners = Array.from({ length: Math.min(Math.max(1, limit), items.length || 1) }, async () => {
+    while (next < items.length) {
+      const idx = next
+      next += 1
+      await worker(items[idx]!)
+    }
+  })
+  await Promise.all(runners)
 }
 
 export async function applyValidationScanToLaunch(
@@ -249,15 +276,51 @@ export async function processArweaveUploadBatch(
   }
 
   const batchSize = owlCenterAssetUploadBatchSize(options?.mode ?? 'tick')
+  const concurrency = owlCenterAssetUploadConcurrency()
   let processed = 0
-  let cursor = progress.cursor
 
   try {
-    while (processed < batchSize && cursor < progress.file_list.length) {
-      const entry = progress.file_list[cursor]!
-      cursor += 1
+    // Build the Irys uploader ONCE per batch (each build runs a node handshake) and
+    // upload files in parallel. Both together are the difference between hours and
+    // minutes for large (~4000-file) collections.
+    const uploader = await createIrysUploader()
 
+    // Collect the next slice of not-yet-uploaded entries starting at the cursor.
+    const slice: AssetUploadFileEntry[] = []
+    let scan = progress.cursor
+    while (slice.length < batchSize && scan < progress.file_list.length) {
+      const entry = progress.file_list[scan]!
+      scan += 1
       if (progress.uploaded[entry.path]) continue
+      slice.push(entry)
+    }
+
+    // Advance the cursor over contiguous completed (or skippable) entries so a
+    // resume re-tries only what actually failed, never re-uploads what succeeded.
+    const advanceCursor = () => {
+      while (progress.cursor < progress.file_list.length) {
+        const e = progress.file_list[progress.cursor]!
+        if (progress.uploaded[e.path] != null || e.kind === 'other') progress.cursor += 1
+        else break
+      }
+    }
+
+    // Checkpoint periodically so a platform timeout mid-run resumes from saved
+    // state instead of re-uploading (and re-paying for) everything.
+    let sincePersist = 0
+    let persisting = false
+    const checkpoint = async () => {
+      sincePersist += 1
+      if (sincePersist < 50 || persisting) return
+      persisting = true
+      sincePersist = 0
+      advanceCursor()
+      await updateAssetUploadJob(jobId, { status: 'uploading', upload_progress: progress })
+      persisting = false
+    }
+
+    const uploadEntry = async (entry: AssetUploadFileEntry) => {
+      if (progress.uploaded[entry.path]) return
 
       let body: Buffer
       if (entry.kind === 'metadata' && entry.index != null) {
@@ -266,40 +329,43 @@ export async function processArweaveUploadBatch(
         const imageUri =
           progress.uploaded[pngPath] ??
           Object.entries(progress.uploaded).find(([k]) => k.endsWith(`/${entry.index}.png`))?.[1]
-
-        if (!imageUri) {
-          throw new Error(`PNG not uploaded before metadata index ${entry.index}`)
-        }
-
+        if (!imageUri) throw new Error(`PNG not uploaded before metadata index ${entry.index}`)
         const raw = await readZipFileText(zip, entry.path)
         if (!raw) throw new Error(`Missing JSON in ZIP: ${entry.path}`)
-        const rewritten = rewriteMetadataJson(raw, imageUri, pngBasename)
-        body = Buffer.from(rewritten, 'utf8')
+        body = Buffer.from(rewriteMetadataJson(raw, imageUri, pngBasename), 'utf8')
       } else {
         const buf = await readZipFileBuffer(zip, entry.path)
         if (!buf) {
-          if (entry.kind === 'other') continue
+          if (entry.kind === 'other') return
           throw new Error(`Missing file in ZIP: ${entry.path}`)
         }
         body = buf
       }
 
-      const { uri } = await uploadBufferToArweaveViaIrys(body, contentTypeForPath(entry.path))
-      progress.uploaded[entry.path] = uri
-      processed += 1
-
-      // Persist periodically so a platform timeout mid-run (large collections in
-      // `full` mode can exceed maxDuration) resumes from the last saved cursor
-      // instead of re-uploading everything.
-      if (processed % 25 === 0) {
-        progress.cursor = cursor
-        await updateAssetUploadJob(jobId, { status: 'uploading', upload_progress: progress })
+      let lastErr: unknown
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const { uri } = await uploadBufferWithUploader(uploader, body, contentTypeForPath(entry.path))
+          progress.uploaded[entry.path] = uri
+          processed += 1
+          await checkpoint()
+          return
+        } catch (e) {
+          lastErr = e
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+        }
       }
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
     }
 
-    progress.cursor = cursor
+    // Phase 1: images / collection / traits (no inter-file dependency).
+    // Phase 2: metadata JSON (each needs its image URI, guaranteed present after phase 1).
+    await runWithConcurrency(slice.filter((e) => e.kind !== 'metadata'), concurrency, uploadEntry)
+    await runWithConcurrency(slice.filter((e) => e.kind === 'metadata'), concurrency, uploadEntry)
 
-    const done = cursor >= progress.file_list.length
+    advanceCursor()
+
+    const done = progress.cursor >= progress.file_list.length
     if (done) {
       if (!job.launch_id) {
         throw new Error('Arweave upload requires launch_id — submit launch first')
@@ -375,7 +441,7 @@ export async function processArweaveUploadBatch(
       job_id: jobId,
       status: 'uploading',
       processed_files: processed,
-      remaining_files: progress.file_list.length - cursor,
+      remaining_files: progress.file_list.length - progress.cursor,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

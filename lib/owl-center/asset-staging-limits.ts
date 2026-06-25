@@ -17,3 +17,15 @@ export function owlCenterAssetUploadBatchSize(mode: ArweaveUploadBatchMode = 'ti
   if (!Number.isFinite(n) || n < 1) return 15
   return Math.min(n, 50)
 }
+
+/**
+ * Parallel Irys uploads within a single batch. Each upload is an independent
+ * bundler tx against the pre-funded balance, so uploading many at once is the
+ * biggest throughput win (sequential one-at-a-time was the bottleneck).
+ */
+export function owlCenterAssetUploadConcurrency(): number {
+  const raw = process.env.OWL_CENTER_ASSET_UPLOAD_CONCURRENCY
+  const n = raw ? Number.parseInt(raw, 10) : 12
+  if (!Number.isFinite(n) || n < 1) return 12
+  return Math.min(n, 40)
+}
