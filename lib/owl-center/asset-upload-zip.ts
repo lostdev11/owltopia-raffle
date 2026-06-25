@@ -1,8 +1,7 @@
-import JSZip from 'jszip'
-
 import type { AssetUploadFileEntry } from '@/lib/owl-center/asset-upload-types'
 import { scanSugarBatchEntries } from '@/lib/owl-center/scan-sugar-batch'
 import type { SugarBatchScanResult } from '@/lib/owl-center/scan-sugar-batch'
+import { StagedZip } from '@/lib/owl-center/zip-reader'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
 
@@ -58,29 +57,30 @@ export function buildUploadFileList(zipPaths: string[]): AssetUploadFileEntry[] 
 }
 
 /**
- * Load a Sugar ZIP into JSZip. Keep this separate from scanning so callers can
- * drop the source Buffer reference immediately after — holding the raw ~1GB
- * Buffer alongside JSZip's own copy is what OOM-killed large (2000-item) batches.
+ * Open a Sugar ZIP with the low-memory reader (central directory only — no file
+ * is inflated yet). The StagedZip keeps the source buffer and inflates entries
+ * on demand, so peak memory stays bounded even for ~1GB / 2000-item exports
+ * (JSZip's full-archive inflate is what OOM-killed the serverless function).
  */
-export async function loadZipFromBuffer(zipBuffer: Buffer): Promise<JSZip> {
-  return JSZip.loadAsync(zipBuffer)
+export async function loadZipFromBuffer(zipBuffer: Buffer): Promise<StagedZip> {
+  return StagedZip.open(zipBuffer)
 }
 
 /**
- * Validation scan over an already-loaded archive. Reads JSON entries from JSZip
- * (not the raw buffer), so the source Buffer can already be freed by this point.
+ * Validation scan over an opened archive. Reads ONLY the JSON entries (images
+ * are never inflated), one at a time, so memory stays flat during validation.
  */
 export async function scanSugarZip(
-  zip: JSZip,
+  zip: StagedZip,
   expectedSupply?: number
 ): Promise<{ scan: SugarBatchScanResult; paths: string[] }> {
-  const paths = Object.keys(zip.files).filter((p) => !zip.files[p]!.dir)
+  const paths = zip.paths
   const entries: { path: string; jsonText?: string }[] = []
 
   for (const path of paths) {
     const entry: { path: string; jsonText?: string } = { path }
     if (basename(path).toLowerCase().endsWith('.json')) {
-      entry.jsonText = await zip.files[path]!.async('string')
+      entry.jsonText = (await zip.readText(path)) ?? undefined
     }
     entries.push(entry)
   }
@@ -92,22 +92,18 @@ export async function scanSugarZip(
 export async function scanSugarZipBuffer(
   zipBuffer: Buffer,
   expectedSupply?: number
-): Promise<{ scan: SugarBatchScanResult; zip: JSZip; paths: string[] }> {
+): Promise<{ scan: SugarBatchScanResult; zip: StagedZip; paths: string[] }> {
   const zip = await loadZipFromBuffer(zipBuffer)
   const { scan, paths } = await scanSugarZip(zip, expectedSupply)
   return { scan, zip, paths }
 }
 
-export async function readZipFileBuffer(zip: JSZip, path: string): Promise<Buffer | null> {
-  const file = zip.files[path]
-  if (!file || file.dir) return null
-  return Buffer.from(await file.async('arraybuffer'))
+export async function readZipFileBuffer(zip: StagedZip, path: string): Promise<Buffer | null> {
+  return zip.read(path)
 }
 
-export async function readZipFileText(zip: JSZip, path: string): Promise<string | null> {
-  const file = zip.files[path]
-  if (!file || file.dir) return null
-  return file.async('string')
+export async function readZipFileText(zip: StagedZip, path: string): Promise<string | null> {
+  return zip.readText(path)
 }
 
 export function rewriteMetadataJson(

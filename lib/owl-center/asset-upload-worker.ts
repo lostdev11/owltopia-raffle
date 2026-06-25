@@ -53,10 +53,10 @@ export type AssetUploadWorkerResult = {
 }
 
 /**
- * Download + decompress a staged Sugar ZIP, then drop the raw Buffer reference.
- * JSZip keeps its own copy, so returning only the archive lets the ~1GB source
- * Buffer be GC'd before we read/upload entries — the fix for the serverless OOM
- * on large (2000-item / ~1GB) batches (holding Buffer + JSZip copy was ~2GB).
+ * Download a staged Sugar ZIP and open it with the low-memory reader. Only the
+ * central directory is parsed up front; entries are inflated one at a time on
+ * demand (see zip-reader.ts), so a ~1GB / 2000-item export no longer OOM-kills
+ * the serverless function the way JSZip's full-archive inflate did.
  */
 async function loadStagedZip(storagePath: string) {
   const buffer = await downloadStagedSugarZip(storagePath)
@@ -257,9 +257,9 @@ export async function processArweaveUploadBatch(
 
   const progress = job.upload_progress
 
-  // Load the staged ZIP once per batch and immediately free the raw Buffer (see
-  // loadStagedZip). Re-downloading + re-running the full validation scan on every
-  // batch (old behaviour) doubled peak memory and OOM-killed large collections.
+  // Open the staged ZIP once per invocation. The reader holds the source buffer
+  // and inflates entries on demand (low, flat memory), so we avoid the JSZip
+  // full-archive inflate that OOM-killed large (~1GB / 2000-item) collections.
   const zip = await loadStagedZip(job.staged_zip_path)
   if (!zip) {
     await updateAssetUploadJob(jobId, {
