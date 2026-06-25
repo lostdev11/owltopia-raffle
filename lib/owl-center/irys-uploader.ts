@@ -5,6 +5,8 @@ import 'server-only'
  * Requires: npm install @irys/upload @irys/upload-solana
  */
 
+import bs58 from 'bs58'
+
 import { resolveGen2SolUsdPrice } from '@/lib/gen2-presale/sol-usd-price'
 import { lamportsToSolDisplay } from '@/lib/gen2-presale/format-sol'
 import { irysNetworkLabel, isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
@@ -24,14 +26,69 @@ function irysRpcUrl(): string {
   return resolveServerSolanaRpcUrl()
 }
 
+/**
+ * Irys' Solana signer (`Uploader(Solana).withWallet(...)`) only accepts a
+ * **base58-encoded** 64-byte secret key. Passing anything else (a JSON byte
+ * array like the Solana `id.json` / Phantom-array export, a base64 key, or a
+ * value with stray quotes/whitespace) makes the SDK throw the opaque
+ * "The string did not match the expected pattern." DOMException. Normalize the
+ * env value into the base58 form Irys expects, or fail with an actionable error.
+ */
+function normalizeIrysSolanaWalletKey(rawInput: string): string {
+  let raw = rawInput.trim()
+  if (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    raw = raw.slice(1, -1).trim()
+  }
+
+  // Format 1: JSON byte array (Solana id.json / Phantom "export as array").
+  if (raw.startsWith('[')) {
+    let bytes: number[]
+    try {
+      bytes = JSON.parse(raw) as number[]
+    } catch {
+      throw new Error('IRYS_PRIVATE_KEY looks like a JSON array but failed to parse.')
+    }
+    if (!Array.isArray(bytes) || bytes.length < 64) {
+      throw new Error('IRYS_PRIVATE_KEY byte array must contain the full 64-byte secret key.')
+    }
+    return bs58.encode(Uint8Array.from(bytes.slice(0, 64)))
+  }
+
+  // Format 2: already base58 (what Irys wants) — validate it is the 64-byte secret key.
+  try {
+    const decoded = bs58.decode(raw)
+    if (decoded.length === 64) return raw
+    if (decoded.length === 32) {
+      throw new Error(
+        'IRYS_PRIVATE_KEY decodes to 32 bytes (seed only). Provide the full 64-byte secret key (Phantom → Settings → Export Private Key).'
+      )
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('IRYS_PRIVATE_KEY')) throw e
+    // Not valid base58 — fall through to a base64 attempt below.
+  }
+
+  // Format 3: base64-encoded 64-byte secret key.
+  const fromB64 = Buffer.from(raw, 'base64')
+  if (fromB64.length === 64) return bs58.encode(fromB64)
+
+  throw new Error(
+    'IRYS_PRIVATE_KEY is not a valid Solana key. Use a base58 secret key (Phantom → Export Private Key) or a JSON byte array, and remove any surrounding quotes/spaces.'
+  )
+}
+
 async function buildIrysUploader(): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   irys: any
 }> {
-  const key = process.env.IRYS_PRIVATE_KEY?.trim()
-  if (!key) {
+  const rawKey = process.env.IRYS_PRIVATE_KEY?.trim()
+  if (!rawKey) {
     throw new Error('IRYS_PRIVATE_KEY is not configured')
   }
+  const key = normalizeIrysSolanaWalletKey(rawKey)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let Uploader: any
