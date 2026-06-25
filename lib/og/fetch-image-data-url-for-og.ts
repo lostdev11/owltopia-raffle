@@ -10,7 +10,17 @@ const DEFAULT_UA = 'OwltopiaImageBot/1.0 (+https://owltopia.xyz)'
 const DEFAULT_TIMEOUT_MS = 18_000
 /** Proxy-image gateway races can take ~14s; match promo PNG headroom. */
 const PROXY_ROUTE_TIMEOUT_MS = 30_000
-const DEFAULT_MAX_BYTES = 1_500_000
+/**
+ * NFT prize art is frequently large (e.g. roguesnft PNGs ~1.9MB, pinit JPEGs ~10MB). The old 1.5MB
+ * cap rejected these outright, so X raffle cards rendered the branded frame with an EMPTY art box.
+ * Download generously, then downscale via sharp so the embedded data URL stays small/fast for Satori.
+ */
+const DEFAULT_MAX_BYTES = 16_000_000
+/**
+ * Above this, always resize/transcode via sharp before embedding so the base64 data URL Satori
+ * inlines stays small (a 10MB JPEG would otherwise become a ~13MB data URL and choke ImageResponse).
+ */
+const DIRECT_EMBED_MAX_BYTES = 1_200_000
 
 function timeoutForOgFetchUrl(url: string, override?: number): number {
   if (override != null) return override
@@ -108,8 +118,10 @@ export async function fetchImageDataUrlForOg(
     if (!mime.startsWith('image/')) return null
     if (isSvg(mime, s)) return null
 
-    // Satori only embeds PNG/JPEG/GIF; transcode anything else (WebP, AVIF, …) to PNG.
-    if (!SATORI_SAFE_MIMES.has(mime)) {
+    // Satori only embeds PNG/JPEG/GIF, and large art makes the inlined base64 slow/unstable. So
+    // downscale via sharp when the format is unsupported (WebP/AVIF/…) OR the file is large. Returns
+    // null on sharp failure so the OG route falls back to the art-less branded card.
+    if (!SATORI_SAFE_MIMES.has(mime) || buf.byteLength > DIRECT_EMBED_MAX_BYTES) {
       return await transcodeToSatoriPngBase64(buf)
     }
 
