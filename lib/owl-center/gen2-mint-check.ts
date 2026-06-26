@@ -37,7 +37,7 @@ import {
 } from '@/lib/owl-center/presale-mint-pool'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { getPhaseStartsAt, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
+import { getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -205,7 +205,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
           })
         : 0
       const reserved_mints = gen1Remaining
-      const isActive = isPhaseMintLive(phase)
+      // GEN1 stays mintable for its full 7-day window, concurrently with later phases — so it is
+      // "active" whenever the launch is operational and the Gen1 window is still open, even if
+      // active_phase has already advanced to PRESALE/WHITELIST/PUBLIC.
+      const isActive = isPhaseMintLive(phase) || (mint_operational && isGen1AirdropWindowOpen(launch))
       const gen1Reason = !gen1.collection_configured
         ? 'gen1_collection_not_configured'
         : gen1.delegated_away_to

@@ -22,10 +22,10 @@ import {
   getPresaleMintPoolSnapshot,
   sumOwlCenterPhaseMinted,
 } from '@/lib/owl-center/presale-mint-pool'
-import type { Gen2EligibilityResponse, OwlCenterPhase } from '@/lib/owl-center/types'
+import type { Gen2EligibilityResponse, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isOwlCenterMintGloballyDisabled, isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
-import { getPhaseStartsAt, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
+import { getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -61,6 +61,62 @@ async function sumPhaseMintedForWallet(
   return (data ?? []).reduce((s, r) => s + Number((r as { quantity?: number }).quantity ?? 0), 0)
 }
 
+/**
+ * GEN1 (airdrop) eligibility for a connected Gen1 holder. Always reports `active_phase: 'AIRDROP'`
+ * so the caller mints against the on-chain `gen1` guard group. Called both when AIRDROP is the
+ * launch's active phase AND concurrently (for the 7-day Gen1 window) once the launch has advanced
+ * to a later phase — Gen1 holders keep their free claim either way.
+ */
+async function buildGen1AirdropEligibility(
+  launch: OwlCenterLaunchPublic,
+  w: string,
+  network: 'mainnet' | 'devnet',
+  remaining: number,
+  base: Gen2EligibilityResponse
+): Promise<Gen2EligibilityResponse> {
+  const gen1 = await resolveGen1SnapshotForMint(w)
+  const minted_in_phase = await sumPhaseMintedForWallet(launch.id, w, 'AIRDROP', network)
+  const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
+  const airdropRemaining = Math.max(0, launch.airdrop_supply - airdropMintedGlobal)
+  const max = gen1.is_holder
+    ? gen1AirdropMaxMintable({
+        gen1NftCount: gen1.gen1_nft_count,
+        mintedInPhase: minted_in_phase,
+        airdropRemainingGlobal: airdropRemaining,
+        supplyRemaining: remaining,
+      })
+    : 0
+  const gen1Remaining = Math.max(0, gen1.gen1_nft_count - minted_in_phase)
+  return {
+    ...base,
+    active_phase: 'AIRDROP',
+    gen1_snapshot: {
+      is_holder: gen1.is_holder,
+      gen1_nft_count: gen1.gen1_nft_count,
+      collection_configured: gen1.collection_configured,
+      holder_check_available: gen1.holder_check_available,
+      delegated_from: gen1.delegated_from,
+      delegated_away_to: gen1.delegated_away_to,
+    },
+    is_eligible: max > 0,
+    max_mintable: Math.max(0, max),
+    reason: !gen1.collection_configured
+      ? 'gen1_collection_not_configured'
+      : gen1.delegated_away_to
+        ? 'gen1_delegated_away'
+        : !gen1.is_holder
+          ? 'not_gen1_holder'
+          : gen1Remaining <= 0
+            ? 'gen1_mint_limit'
+            : airdropRemaining <= 0
+              ? 'gen1_pool_exhausted'
+              : max <= 0
+                ? 'gen1_mint_limit'
+                : null,
+    price_usdc: 0,
+  }
+}
+
 export async function buildGen2Eligibility(walletRaw: string | null): Promise<Gen2EligibilityResponse | null> {
   const launch = await getOwlCenterLaunchBySlug('gen2')
   if (!launch) return null
@@ -68,6 +124,7 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const w = walletRaw ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
   const phase = launch.active_phase as OwlCenterPhase
+  const nowMs = Date.now()
   const remaining = Math.max(0, launch.total_supply - launch.minted_count)
   const overageSupply = launch.presale_overage_supply ?? 13
 
@@ -118,6 +175,16 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
     return { ...base, is_eligible: false, max_mintable: 0, reason: 'wallet_required' }
   }
 
+  // GEN1 holders keep their free claim for the full 7-day airdrop window, concurrently with later
+  // phases. Take precedence: a connected Gen1 holder with remaining allocation always mints their
+  // free Gen2 first (after exhausting it they fall through to whatever phase is currently active).
+  if (phase !== 'AIRDROP' && isGen1AirdropWindowOpen(launch, nowMs)) {
+    const gen1Concurrent = await buildGen1AirdropEligibility(launch, w, network, remaining, base)
+    if (gen1Concurrent.is_eligible && gen1Concurrent.max_mintable > 0) {
+      return gen1Concurrent
+    }
+  }
+
   if (!isPhaseOpenBySchedule(launch, phase)) {
     return {
       ...base,
@@ -129,46 +196,7 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   }
 
   if (phase === 'AIRDROP') {
-    const gen1 = await resolveGen1SnapshotForMint(w)
-    const minted_in_phase = await sumPhaseMintedForWallet(launch.id, w, 'AIRDROP', network)
-    const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
-    const airdropRemaining = Math.max(0, launch.airdrop_supply - airdropMintedGlobal)
-    const max = gen1.is_holder
-      ? gen1AirdropMaxMintable({
-          gen1NftCount: gen1.gen1_nft_count,
-          mintedInPhase: minted_in_phase,
-          airdropRemainingGlobal: airdropRemaining,
-          supplyRemaining: remaining,
-        })
-      : 0
-    const gen1Remaining = Math.max(0, gen1.gen1_nft_count - minted_in_phase)
-    return {
-      ...base,
-      gen1_snapshot: {
-        is_holder: gen1.is_holder,
-        gen1_nft_count: gen1.gen1_nft_count,
-        collection_configured: gen1.collection_configured,
-        holder_check_available: gen1.holder_check_available,
-        delegated_from: gen1.delegated_from,
-        delegated_away_to: gen1.delegated_away_to,
-      },
-      is_eligible: max > 0,
-      max_mintable: Math.max(0, max),
-      reason: !gen1.collection_configured
-        ? 'gen1_collection_not_configured'
-        : gen1.delegated_away_to
-          ? 'gen1_delegated_away'
-          : !gen1.is_holder
-            ? 'not_gen1_holder'
-            : gen1Remaining <= 0
-              ? 'gen1_mint_limit'
-              : airdropRemaining <= 0
-                ? 'gen1_pool_exhausted'
-                : max <= 0
-                  ? 'gen1_mint_limit'
-                  : null,
-      price_usdc: 0,
-    }
+    return buildGen1AirdropEligibility(launch, w, network, remaining, base)
   }
 
   // GEN1 holder mint is optional — presale/overage open when admin flips the phase, regardless

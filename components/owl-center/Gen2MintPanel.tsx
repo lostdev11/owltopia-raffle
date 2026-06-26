@@ -393,7 +393,7 @@ export function Gen2MintPanel({
             </p>
           ) : null}
 
-          {launch.active_phase === 'AIRDROP' && elig?.gen1_snapshot?.is_holder ? (
+          {elig?.active_phase === 'AIRDROP' && elig?.gen1_snapshot?.is_holder ? (
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
@@ -417,20 +417,20 @@ export function Gen2MintPanel({
 
           {wrongPhaseHint ? <p className="text-sm text-[#9BA8B4]">{wrongPhaseHint}</p> : null}
 
-          {launch.active_phase === 'AIRDROP' && elig?.reason === 'gen1_collection_not_configured' ? (
+          {elig?.active_phase === 'AIRDROP' && elig?.reason === 'gen1_collection_not_configured' ? (
             <p className="text-sm text-[#FF9C9C]">
               Gen1 verification is not configured on the server (missing collection address). Contact Owl Center support.
             </p>
           ) : null}
 
-          {launch.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'not_gen1_holder' ? (
+          {elig?.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'not_gen1_holder' ? (
             <p className="text-sm text-[#FF9C9C]">
               No Owltopia Gen1 NFT detected on this connected wallet. Use the same wallet that holds your Gen1 on mainnet,
               then refresh eligibility.
             </p>
           ) : null}
 
-          {launch.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'gen1_mint_limit' ? (
+          {elig?.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'gen1_mint_limit' ? (
             <p className="text-sm text-[#FF9C9C]">You have already minted your GEN1 allocation for this wallet.</p>
           ) : null}
 

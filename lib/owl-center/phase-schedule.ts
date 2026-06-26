@@ -61,6 +61,24 @@ export function isPhaseOpenBySchedule(
   return nowMs >= startMs
 }
 
+/**
+ * GEN1 (airdrop) holders keep their free-claim right for a fixed 7-day window from when the
+ * AIRDROP phase opened, independent of `active_phase`. This mirrors the on-chain `gen1` candy
+ * guard group (start + 7 days), so Gen1 holders can still self-mint concurrently after the launch
+ * has advanced to PRESALE / WHITELIST / PUBLIC. Off-chain airdrop backstop covers anyone who
+ * still hasn't claimed when this window closes.
+ */
+export const GEN1_AIRDROP_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+export function isGen1AirdropWindowOpen(
+  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>,
+  nowMs: number = Date.now()
+): boolean {
+  const startMs = parseIsoMs(getPhaseStartsAt(launch, 'AIRDROP'))
+  if (startMs == null) return false
+  return nowMs >= startMs && nowMs <= startMs + GEN1_AIRDROP_WINDOW_MS
+}
+
 /** Next future milestone for countdown UI (mint kickoff or next scheduled phase). */
 export function getMintCountdownInfo(
   launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule' | 'active_phase'>,
