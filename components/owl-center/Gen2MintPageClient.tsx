@@ -366,13 +366,13 @@ export function Gen2MintPageClient() {
 
             <Image
 
-              src={launch.image_url?.startsWith('/') ? launch.image_url : '/images/gen2-logo-mark.png'}
+              src="/images/owltopia-gen2-presale-poster.jpg"
 
-              alt={`${launch.name} mark`}
+              alt={`${launch.name} cover`}
 
               fill
 
-              className="object-contain"
+              className="object-cover"
 
               sizes="240px"
 

@@ -96,7 +96,7 @@ async function doInit(confirm: boolean) {
     console.log('freeze escrow initialized:', bs58.encode(res.signature))
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    if (/already in use|already initialized|0x0\b/i.test(msg)) {
+    if (/already in use|already initialized|already exists|FreezeEscrowAlreadyExists|0x1796|0x0\b/i.test(msg)) {
       console.log('freeze escrow already initialized — nothing to do.')
       return
     }
