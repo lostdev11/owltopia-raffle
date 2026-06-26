@@ -31,6 +31,8 @@ export class SolflareWalletAdapterMobile extends SolflareWalletAdapter {
       }
       // Mobile web without extension: open in Solflare in-wallet browser (iOS + Android Chrome).
       // Deep-link connect on Android Chrome often lands on about:blank or fails to return.
+      // isSolflareBrowser() must detect the injected provider (not just the UA) so we do NOT
+      // re-redirect when already inside Solflare's Android in-app browser (which would loop / blank).
       if (
         this.readyState === WalletReadyState.Loadable &&
         isMobileDevice() &&

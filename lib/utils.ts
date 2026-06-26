@@ -315,14 +315,26 @@ export function getSolflareDeepLinkUrl(): string {
 }
 
 /**
- * Detects if user is in Solflare browser (mobile)
+ * Detects if user is in Solflare's in-app browser (mobile).
+ *
+ * iOS Solflare puts "solflare" in the UA, but Solflare's Android in-app browser is a plain
+ * WebView whose UA does NOT contain "solflare". In that case the only reliable signal is the
+ * injected Solflare provider (`window.solflare.isSolflare`), which Solflare's in-app browser
+ * always exposes. Without this, Android users get stuck in a redirect loop into the in-app
+ * browser because the connect flow keeps thinking it's still in plain Chrome.
  */
 export function isSolflareBrowser(): boolean {
   if (typeof window === 'undefined') return false
-  
-  // Check user agent for Solflare browser
+
   const userAgent = navigator.userAgent || ''
-  return userAgent.toLowerCase().includes('solflare')
+  if (userAgent.toLowerCase().includes('solflare')) return true
+
+  // Mobile WebView with the Solflare provider injected ⟹ inside Solflare's in-app browser.
+  // Gated to mobile so a desktop Solflare extension (also sets window.solflare) is not treated
+  // as an in-app browser.
+  if (!isMobileDevice()) return false
+  const provider = (window as { solflare?: { isSolflare?: boolean } }).solflare
+  return Boolean(provider?.isSolflare)
 }
 
 /**

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { isMobileDevice } from '@/lib/utils'
+import { isMobileDevice, isSolflareBrowser } from '@/lib/utils'
 
 const INTERACTIVE_SELECTOR =
   'button, [role="button"], a[href], .wallet-adapter-button, .wallet-connect-wrapper, [class*="wallet-adapter"] button, .wallet-adapter-modal-list li, .wallet-adapter-modal-list .wallet-adapter-button, input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[role="switch"], select'
@@ -23,9 +23,10 @@ const NATIVE_CLICK_WAIT_MS = 300
 export function SolflareTouchFix() {
   useEffect(() => {
     if (typeof navigator === 'undefined' || typeof document === 'undefined') return
-    const ua = (navigator.userAgent || navigator.vendor || '').toLowerCase()
     const isMobile = isMobileDevice()
-    const isSolflare = ua.includes('solflare')
+    // Android Solflare in-app browser has no "solflare" UA token; isSolflareBrowser() also
+    // checks the injected provider so the body class applies there too.
+    const isSolflare = isSolflareBrowser()
 
     if (isSolflare) {
       document.body.classList.add('solflare-browser')

@@ -408,6 +408,34 @@ export function Gen2MintPanel({
           onRefresh()
           void loadElig({ background: true })
         },
+        // Background confirm failed. Soft failures (RPC lag / save timeout) likely DID land —
+        // keep the success overlay and let the unload beacon + reconcile cron settle the DB.
+        // A HARD failure means the chain verify proved no NFT was minted (e.g. bot-tax only /
+        // failed tx) — the optimistic "You minted N!" overlay is wrong, so downgrade it.
+        onRecordWarning: (failure) => {
+          if (!failure.hardFailure) {
+            onRefresh()
+            void loadElig({ background: true })
+            return
+          }
+          void (async () => {
+            // Safety net: a *different* tx may have actually landed the mint. Scan the chain and
+            // finalize it if found (keeps the success overlay) before alarming the user.
+            const recovered = await checkWalletForMint({ silent: true })
+            if (recovered) return
+            // Truly nothing minted — undo the optimistic overlay + debit and prompt a retry.
+            setMintedAddresses([])
+            setMintedCount(0)
+            setLastSig(null)
+            setMintProgress(null)
+            setErr(
+              'That didn’t go through — no NFT was minted (you may have only paid the network fee). Your allocation is intact; tap Mint to try again.'
+            )
+            setStep('error')
+            // Foreground refresh re-reads server truth, restoring eligibility (undoes the debit).
+            void loadElig()
+          })()
+        },
       })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

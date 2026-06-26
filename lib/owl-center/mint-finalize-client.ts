@@ -6,6 +6,33 @@ import {
 import { mintConfirmBackgroundBudgetMs, raceMintSessionBudget, createMintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import type { MintGen2Result } from '@/lib/solana/gen2-mint'
 
+export type MintConfirmFailure = {
+  /** Raw error message from the confirm route / recorder. */
+  message: string
+  /**
+   * True when the server's on-chain verify proved the tx did NOT mint an NFT (bot-tax only / failed
+   * tx). For these, the optimistic "You minted N!" overlay is wrong and must be downgraded. Soft
+   * failures (RPC lag, save timeout) likely DID land and are left to the beacon/cron reconcile.
+   */
+  hardFailure: boolean
+}
+
+/**
+ * Phrases the confirm route returns when the chain verify proves no NFT was minted. Matched
+ * loosely (case-insensitive substring) so a copy tweak on the route doesn't silently re-break the
+ * downgrade. Keep in sync with the `no_nft_minted` / `failed` messages in confirm-mint/route.ts.
+ */
+const HARD_CONFIRM_FAILURE_PATTERNS = [
+  'no nft was minted',
+  'the mint did not go through',
+  'mint transaction failed on-chain',
+]
+
+export function isHardMintConfirmFailure(message: string): boolean {
+  const low = message.toLowerCase()
+  return HARD_CONFIRM_FAILURE_PATTERNS.some((p) => low.includes(p))
+}
+
 export type OptimisticMintFinalizeArgs = {
   minted: MintGen2Result
   requestedQuantity: number
@@ -16,7 +43,8 @@ export type OptimisticMintFinalizeArgs = {
     mintedCount: number
     warning: string | null
   }) => void
-  onRecordWarning?: (message: string) => void
+  /** Fires when the background DB record fails. `hardFailure` flags a proven did-not-mint tx. */
+  onRecordWarning?: (failure: MintConfirmFailure) => void
   /** Fires after the background DB record completes — safe point to reconcile server eligibility. */
   onRecordSuccess?: () => void
 }
@@ -55,9 +83,7 @@ export function finalizeMintSessionOptimistic(args: OptimisticMintFinalizeArgs):
       onRecordSuccess?.()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'confirm_failed'
-      onRecordWarning?.(
-        `${msg} — your NFT${outcome.mintedCount === 1 ? '' : 's'} minted on-chain; refresh if the counter looks wrong.`
-      )
+      onRecordWarning?.({ message: msg, hardFailure: isHardMintConfirmFailure(msg) })
     }
   })()
 }
