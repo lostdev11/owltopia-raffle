@@ -3,7 +3,7 @@ import {
   resolveMintSessionOutcome,
   type MintConfirmBatchPayload,
 } from '@/lib/owl-center/mint-session'
-import { MINT_CONFIRM_BACKGROUND_MAX_MS, raceMintSessionBudget, createMintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
+import { mintConfirmBackgroundBudgetMs, raceMintSessionBudget, createMintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import type { MintGen2Result } from '@/lib/solana/gen2-mint'
 
 export type OptimisticMintFinalizeArgs = {
@@ -44,7 +44,7 @@ export function finalizeMintSessionOptimistic(args: OptimisticMintFinalizeArgs):
     warning: outcome.warning,
   })
 
-  const confirmDeadline = createMintSessionDeadline(MINT_CONFIRM_BACKGROUND_MAX_MS)
+  const confirmDeadline = createMintSessionDeadline(mintConfirmBackgroundBudgetMs(sigs.length))
   void (async () => {
     try {
       await raceMintSessionBudget(

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -16,6 +16,12 @@ import {
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
 import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
+import {
+  attemptOwlCenterMintRecovery,
+  isLikelyWalletMintDisconnectError,
+} from '@/lib/owl-center/mint-recovery-client'
+import { recordMintSessionConfirms, type MintConfirmBatchPayload } from '@/lib/owl-center/mint-session'
+import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import {
   createMintSessionDeadline,
   MINT_SESSION_OUTER_MAX_MS,
@@ -130,8 +136,16 @@ export function Gen2MintPanel({
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [recoveringMint, setRecoveringMint] = useState(false)
+  // Mint pubkeys planned for the last attempt + the phase it ran in — used to recover a mint that
+  // landed on-chain after a mobile wallet (Phantom/Solflare) disconnected before the site finished.
+  const lastPlannedMintB58sRef = useRef<string[]>([])
+  const lastMintPhaseRef = useRef<OwlCenterPhase | null>(null)
+  // True once the wallet has attempted a mint this session — gates the unload reconcile beacon.
+  const mintAttemptedRef = useRef(false)
 
   const mintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  const candyMachineId = getGen2CandyMachineId(launch)?.trim() ?? ''
 
   const dismissSuccess = useCallback(() => {
     setStep('idle')
@@ -142,6 +156,121 @@ export function Gen2MintPanel({
   }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
+
+  const postGen2Confirm = useCallback(
+    async (payload: MintConfirmBatchPayload, phaseForConfirm: OwlCenterPhase) => {
+      const conf = await fetch('/api/owl-center/gen2/confirm-mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet: walletStr,
+          txSignature: payload.txSignature,
+          quantity: payload.quantity,
+          phase: phaseForConfirm,
+          mintedNftMints: payload.mintedNftMints,
+          network: mintNetwork,
+        }),
+        keepalive: true,
+      })
+      const cj = (await conf.json()) as { error?: string }
+      if (!conf.ok) throw new Error(cj.error || 'Confirm route failed')
+    },
+    [walletStr, mintNetwork]
+  )
+
+  const finalizeRecoveredMint = useCallback(
+    async (recovered: RecoveredCandyMachineMint) => {
+      if (!walletStr || recovered.txSignatures.length === 0) return false
+      const sigs = recovered.txSignatures
+      const mintPks = recovered.mintedNftMints
+      const phaseForConfirm = (lastMintPhaseRef.current ?? elig?.active_phase ?? 'PUBLIC') as OwlCenterPhase
+
+      setStep('recording_mint')
+      setMintProgress({ current: 0, total: 1, phase: 'record' })
+      const recorded = await recordMintSessionConfirms(
+        sigs,
+        mintPks,
+        (payload) => postGen2Confirm(payload, phaseForConfirm),
+        () => setMintProgress({ current: 1, total: 1, phase: 'record' })
+      )
+      const count = recorded.confirmedCount || mintPks.length || 1
+      setLastSig(recorded.lastSig ?? sigs[sigs.length - 1] ?? null)
+      setMintedAddresses(mintPks.length ? mintPks : [])
+      setMintedCount(count)
+      setErr(null)
+      setMintProgress(null)
+      setStep('success')
+      // Debit locally so the Mint button reflects the recovered mint immediately.
+      applyMinted(count)
+      onRefresh()
+      void loadElig({ background: true })
+      return true
+    },
+    [walletStr, elig?.active_phase, postGen2Confirm, applyMinted, onRefresh, loadElig]
+  )
+
+  // Scan the chain for a mint that the wallet may have completed before disconnecting. Backs the
+  // "My NFT minted — check wallet" button and a silent auto-check after the session budget lapses.
+  const checkWalletForMint = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!walletStr || !candyMachineId) return false
+      setRecoveringMint(true)
+      try {
+        const recovered = await attemptOwlCenterMintRecovery({
+          walletB58: walletStr,
+          candyMachineB58: candyMachineId,
+          mintNetwork,
+          plannedMintB58s: lastPlannedMintB58sRef.current,
+        })
+        if (recovered?.txSignatures.length) {
+          return finalizeRecoveredMint(recovered)
+        }
+        if (!options?.silent) {
+          setErr('No mint found yet — check Collectibles in your wallet, then tap Mint to try again.')
+        }
+        return false
+      } finally {
+        setRecoveringMint(false)
+      }
+    },
+    [walletStr, candyMachineId, mintNetwork, finalizeRecoveredMint]
+  )
+
+  useEffect(() => {
+    if (!isMintInProgress(step)) return
+    const timer = window.setTimeout(() => {
+      if (walletStr && candyMachineId) void checkWalletForMint({ silent: true })
+    }, MINT_SESSION_OUTER_MAX_MS)
+    return () => window.clearTimeout(timer)
+  }, [step, walletStr, candyMachineId, checkWalletForMint])
+
+  // Mobile wallets often background/close the page when they return from approval, killing any
+  // in-flight confirm. On unload (after a mint was attempted), beacon the server to reconcile this
+  // wallet's on-chain mints into the DB so nothing is lost even if the client never finished.
+  useEffect(() => {
+    if (!walletStr) return
+    const fire = () => {
+      if (!mintAttemptedRef.current || typeof navigator === 'undefined') return
+      try {
+        const payload = JSON.stringify({ wallet: walletStr, network: mintNetwork })
+        navigator.sendBeacon?.(
+          '/api/owl-center/gen2/reconcile-wallet',
+          new Blob([payload], { type: 'application/json' })
+        )
+      } catch {
+        // best-effort
+      }
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') fire()
+    }
+    window.addEventListener('pagehide', fire)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', fire)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [walletStr, mintNetwork])
 
   const maxQ = useMemo(() => {
     if (!elig) return 1
@@ -206,6 +335,8 @@ export function Gen2MintPanel({
     }
 
     const n = Math.min(parseMintQuantityText(qtyText, maxQ), elig.max_mintable, remaining)
+    lastMintPhaseRef.current = phase
+    mintAttemptedRef.current = true
     const sessionDeadline = createMintSessionDeadline()
     const outerDeadline = createMintSessionDeadline(MINT_SESSION_OUTER_MAX_MS)
     try {
@@ -229,6 +360,10 @@ export function Gen2MintPanel({
         'Mint timed out — check Collectibles in your wallet, then refresh.'
       )
 
+      if (!minted.ok && minted.plannedMintB58s?.length) {
+        lastPlannedMintB58sRef.current = minted.plannedMintB58s
+      }
+
       const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
       const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
       if (!minted.ok && mintPks.length === 0 && sigs.length === 0) {
@@ -250,6 +385,7 @@ export function Gen2MintPanel({
               mintedNftMints,
               network: isDevnetMintEnabled() ? 'devnet' : 'mainnet',
             }),
+            keepalive: true,
           })
           const cj = (await conf.json()) as { error?: string }
           if (!conf.ok) {
@@ -276,6 +412,18 @@ export function Gen2MintPanel({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const low = msg.toLowerCase()
+      // Mobile wallets often land the mint on-chain then disconnect, surfacing as a "simulation
+      // failed" / blockhash / timeout error. Silently scan the chain before alarming the user.
+      if (
+        (e instanceof MintSessionTimeoutError ||
+          low.includes('timed out') ||
+          isLikelyWalletMintDisconnectError(msg)) &&
+        walletStr &&
+        candyMachineId
+      ) {
+        const recovered = await checkWalletForMint({ silent: true })
+        if (recovered) return
+      }
       if (e instanceof MintSessionTimeoutError || low.includes('timed out')) {
         setErr('That took longer than expected — check Collectibles in your wallet, then tap Mint to try again.')
       } else if (low.includes('user rejected') || low.includes('cancel')) {
@@ -553,6 +701,18 @@ export function Gen2MintPanel({
             <div className="border border-[#FF9C9C]/30 bg-[#FF9C9C]/5 px-3 py-2 text-sm text-[#FF9C9C]">
               {err}
             </div>
+          ) : null}
+
+          {step === 'error' && connected && cmConfigured ? (
+            <DeployButton
+              variant="ghost"
+              className="w-full sm:w-auto"
+              loading={recoveringMint}
+              disabled={recoveringMint || isMintInProgress(step)}
+              onClick={() => void checkWalletForMint()}
+            >
+              My NFT minted — check wallet
+            </DeployButton>
           ) : null}
 
           <p className="text-xs text-[#5C6773]">

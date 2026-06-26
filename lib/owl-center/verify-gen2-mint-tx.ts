@@ -96,6 +96,35 @@ function mintTxMatchesGuardGroup(
   return true
 }
 
+/**
+ * Decode which candy-guard group a confirmed tx's `mintV2` targeted (e.g. `gen1`/`pre`/`wl`/`pub`).
+ * Returns the FIRST candidate label whose encoded `Some(group)` tail matches a mintV2 instruction,
+ * or null when none match / no decodable mintV2 is present. Used by reconciliation to attribute an
+ * orphaned on-chain mint to the correct phase (the group it actually used), independent of which
+ * phase is live now.
+ */
+export function detectGen2MintV2GroupLabel(
+  parsed: { transaction: { message: { instructions?: unknown[] } } },
+  candidateLabels: readonly string[]
+): string | null {
+  const instructions = parsed.transaction.message.instructions ?? []
+  for (const ixRaw of instructions) {
+    const ix = ixRaw as { programId?: { toBase58?: () => string }; data?: unknown }
+    if (ix.programId?.toBase58?.() !== CANDY_GUARD_PROGRAM_ID || typeof ix.data !== 'string') continue
+    let bytes: Uint8Array
+    try {
+      bytes = bs58.decode(ix.data)
+    } catch {
+      continue
+    }
+    if (!dataStartsWith(bytes, MINT_V2_DISCRIMINATOR)) continue
+    for (const label of candidateLabels) {
+      if (dataEndsWith(bytes, expectedGroupTail(label))) return label
+    }
+  }
+  return null
+}
+
 type ParsedTokenBalance = {
   accountIndex: number
   owner?: string | null

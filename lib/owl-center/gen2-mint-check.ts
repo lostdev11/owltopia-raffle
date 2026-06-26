@@ -22,6 +22,7 @@ import {
   getWlClusterSummary,
 } from '@/lib/owl-center/gen2-mint-check-cluster'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
+import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
@@ -110,6 +111,37 @@ async function sumPhaseMintedForWallet(
   return (data ?? []).reduce((s, r) => s + Number((r as { quantity?: number }).quantity ?? 0), 0)
 }
 
+// Per-wallet on-chain → DB reconcile is best-effort and self-throttled so the allocation panel can
+// poll freely without RPC-storming: at most once per wallet per window, hard-capped in time, and
+// never allowed to fail the read. The cheap drift gate inside the reconcile skips the signature
+// scan entirely when the DB already matches the chain.
+const RECONCILE_THROTTLE_MS = 60_000
+const RECONCILE_TIME_BUDGET_MS = 6_000
+const lastWalletReconcileAt = new Map<string, number>()
+
+async function maybeReconcileGen2WalletMints(
+  launch: { id: string; slug: string } & Record<string, unknown>,
+  wallet: string,
+  network: 'mainnet' | 'devnet'
+): Promise<void> {
+  const key = `${launch.id}:${network}:${wallet}`
+  const now = Date.now()
+  if (now - (lastWalletReconcileAt.get(key) ?? 0) < RECONCILE_THROTTLE_MS) return
+  lastWalletReconcileAt.set(key, now)
+  try {
+    await Promise.race([
+      reconcileGen2WalletMints({
+        launch: launch as unknown as Parameters<typeof reconcileGen2WalletMints>[0]['launch'],
+        wallet,
+        network,
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, RECONCILE_TIME_BUDGET_MS)),
+    ])
+  } catch {
+    // best-effort — never block or fail the allocation read
+  }
+}
+
 export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2MintCheckResponse | null> {
   const launch = await getOwlCenterLaunchBySlug('gen2')
   if (!launch) return null
@@ -117,6 +149,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const w = walletRaw ? normalizeSolanaWalletAddress(walletRaw.trim()) ?? walletRaw.trim() : null
   const overageSupply = launch.presale_overage_supply ?? 13
+
+  // Self-heal this wallet's ledger from chain BEFORE reading counts, so the allocation panel reflects
+  // mints whose client-side confirm was cut short (mobile backgrounding / large batches).
+  if (w) await maybeReconcileGen2WalletMints(launch, w, network)
 
   const [pool, presaleStats, current, wallet_cluster, priceLamports] = await Promise.all([
     getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, overageSupply, network, { slug: launch.slug }),

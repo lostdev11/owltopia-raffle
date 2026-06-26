@@ -39,6 +39,9 @@ export async function postCollectionConfirmMintWithRetry(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        // Let the confirm finish even if the user navigates away / the mobile tab is backgrounded
+        // right after the wallet returns (small JSON, well under the 64KB keepalive cap).
+        keepalive: true,
       })
       const json = (await res.json()) as CollectionConfirmMintResponse
       lastJson = json

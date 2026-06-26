@@ -79,6 +79,32 @@ export async function replaceGen1Snapshot(
 }
 
 /**
+ * Frozen Gen1 NFT count for a single wallet from the snapshot allowlist — the exact
+ * per-wallet allocation the on-chain `gen1` candy guard enforces (merkle root + proof).
+ * Returns 0 when the wallet is not snapshotted or the table is missing (migration 142).
+ *
+ * Used as a floor for the live DAS holder scan so a flaky / rate-limited Helius response
+ * can't under-report a holder's count and wrongly block their remaining AIRDROP claims.
+ */
+export async function getGen1SnapshotCount(wallet: string): Promise<number> {
+  const normalized = normalizeSolanaWalletAddress(wallet)
+  if (!normalized) return 0
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from('gen2_gen1_airdrop_snapshot')
+    .select('gen1_nft_count')
+    .eq('wallet', normalized)
+    .maybeSingle()
+  if (error) {
+    // Migration 142 not applied yet — treat as no snapshot.
+    if (error.message.includes('gen2_gen1_airdrop_snapshot')) return 0
+    throw new Error(error.message)
+  }
+  const count = Number((data as { gen1_nft_count?: number } | null)?.gen1_nft_count ?? 0)
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+/**
  * Every snapshotted Gen1 holder wallet — canonical allowlist for the Candy Machine
  * `gen1` guard group (merkle root + proofs). Sorted ascending so the root is deterministic.
  */

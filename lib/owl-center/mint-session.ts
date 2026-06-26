@@ -67,20 +67,47 @@ export async function recordMintSessionConfirms(
     }
   }
 
+  // Record each single-mint tx independently and in parallel (bounded concurrency). One slow/failed
+  // confirm must not block or abort the others — sequential recording was the main reason large
+  // batches under-recorded when the mobile background budget ran out. Failures are collected and
+  // re-thrown only AFTER every confirm has been attempted, so partial success is still persisted.
+  const CONFIRM_CONCURRENCY = 4
+  let confirmedCount = 0
   let lastSig: string | null = null
   let lastMintAddress: string | null = null
-  for (let i = 0; i < sigs.length; i++) {
-    const txSignature = sigs[i]!
-    const mintedNftMint = mintPks[i] ?? null
-    await confirmBatch({
-      txSignature,
-      quantity: 1,
-      mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
-    })
-    lastSig = txSignature
-    if (mintedNftMint) lastMintAddress = mintedNftMint
-    onProgress?.(i + 1, sigs.length)
+  let firstError: unknown = null
+  let nextIndex = 0
+  let completed = 0
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = nextIndex++
+      if (i >= sigs.length) return
+      const txSignature = sigs[i]!
+      const mintedNftMint = mintPks[i] ?? null
+      try {
+        await confirmBatch({
+          txSignature,
+          quantity: 1,
+          mintedNftMints: mintedNftMint ? [mintedNftMint] : [],
+        })
+        confirmedCount += 1
+        lastSig = txSignature
+        if (mintedNftMint) lastMintAddress = mintedNftMint
+      } catch (e) {
+        firstError = firstError ?? e
+      } finally {
+        completed += 1
+        onProgress?.(completed, sigs.length)
+      }
+    }
   }
 
-  return { confirmedCount: mintPks.length, lastSig, lastMintAddress }
+  await Promise.all(Array.from({ length: Math.min(CONFIRM_CONCURRENCY, sigs.length) }, () => worker()))
+
+  if (firstError && confirmedCount === 0) {
+    throw firstError instanceof Error ? firstError : new Error(String(firstError))
+  }
+
+  return { confirmedCount, lastSig, lastMintAddress }
 }

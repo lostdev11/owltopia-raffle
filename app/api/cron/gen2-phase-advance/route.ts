@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { advanceGen2PhaseIfScheduled } from '@/lib/owl-center/gen2-phase-advance'
+import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
+import { reconcileGen2LaunchMintsFromChain } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -29,7 +31,21 @@ export async function GET(request: NextRequest) {
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 500 })
     }
-    return NextResponse.json(result)
+
+    // Best-effort: backfill any on-chain Gen2 mints whose client-side confirm was cut short, so the
+    // DB ledger (and the per-phase / supply counters derived from it) self-heals server-side. Never
+    // let a reconcile failure fail the phase-advance cron.
+    let reconciled = 0
+    try {
+      const adminLaunch = await getOwlCenterLaunchBySlugAdmin('gen2')
+      if (adminLaunch) {
+        reconciled = (await reconcileGen2LaunchMintsFromChain(adminLaunch)).recorded
+      }
+    } catch (e) {
+      console.error('gen2-phase-advance reconcile', e)
+    }
+
+    return NextResponse.json({ ...result, reconciled })
   } catch (e) {
     console.error('gen2-phase-advance cron', e)
     return NextResponse.json({ error: 'server error' }, { status: 500 })

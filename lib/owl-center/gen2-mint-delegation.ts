@@ -1,4 +1,5 @@
 import { getDelegationByMintWallet, getDelegationBySourceWallet } from '@/lib/db/gen2-gen1-delegations'
+import { getGen1SnapshotCount } from '@/lib/db/gen2-gen1-snapshot'
 import { getOwltopiaGen1Snapshot, type OwltopiaGen1Snapshot } from '@/lib/owl-center/owltopia-gen1'
 
 /**
@@ -42,6 +43,31 @@ export function decideGen1Delegation(
   return { kind: 'self' }
 }
 
+/**
+ * Floor the live DAS holder count with the frozen Gen1 snapshot for the wallet that the
+ * on-chain `gen1` candy guard actually gates (`merkleWallet` — the mint wallet, since the
+ * snapshot rewrites delegated source wallets to their mint wallet). The snapshot is the exact
+ * allocation the merkle proof enforces on-chain, so trusting it as a floor means a flaky or
+ * rate-limited Helius scan (which silently falls back to a count of 1) can no longer
+ * under-report holdings and block a holder from claiming their remaining free Gen2s.
+ *
+ * Only ever raises the count — never lowers it — so it can't shrink anyone's allocation.
+ */
+async function applyFrozenSnapshotFloor(
+  live: ResolvedGen1Snapshot,
+  merkleWallet: string
+): Promise<ResolvedGen1Snapshot> {
+  const frozen = await getGen1SnapshotCount(merkleWallet)
+  if (frozen <= live.gen1_nft_count) return live
+  return {
+    ...live,
+    is_holder: true,
+    gen1_nft_count: frozen,
+    collection_configured: true,
+    holder_check_available: true,
+  }
+}
+
 export async function resolveGen1SnapshotForMint(connectedWallet: string): Promise<ResolvedGen1Snapshot> {
   const [asMint, asSource] = await Promise.all([
     getDelegationByMintWallet(connectedWallet),
@@ -62,12 +88,19 @@ export async function resolveGen1SnapshotForMint(connectedWallet: string): Promi
     }
   }
 
-  // Connected wallet mints on behalf of a source wallet — credit the source's live count.
+  // Connected wallet mints on behalf of a source wallet — credit the source's live count,
+  // floored by the frozen snapshot keyed to the connected (mint) wallet.
   if (decision.kind === 'on_behalf') {
     const snapshot = await getOwltopiaGen1Snapshot(decision.source_wallet)
-    return { ...snapshot, delegated_from: decision.source_wallet, delegated_away_to: null }
+    return applyFrozenSnapshotFloor(
+      { ...snapshot, delegated_from: decision.source_wallet, delegated_away_to: null },
+      connectedWallet
+    )
   }
 
   const snapshot = await getOwltopiaGen1Snapshot(connectedWallet)
-  return { ...snapshot, delegated_from: null, delegated_away_to: null }
+  return applyFrozenSnapshotFloor(
+    { ...snapshot, delegated_from: null, delegated_away_to: null },
+    connectedWallet
+  )
 }

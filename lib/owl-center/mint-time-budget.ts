@@ -12,6 +12,19 @@ export const MINT_PREP_MAX_MS = 5_000
 export const MINT_SEND_MIN_MS = 5_000
 export const MINT_RECOVERY_RESERVE_MS = 2_000
 export const MINT_CONFIRM_BACKGROUND_MAX_MS = 10_000
+/** Hard ceiling for the (now parallel) background confirm phase, even for very large batches. */
+export const MINT_CONFIRM_BACKGROUND_HARD_MAX_MS = 45_000
+
+/**
+ * Background recording budget scaled to batch size. A single mint records well within the base
+ * window; large batches record in parallel but still need extra headroom (per-signature on-chain
+ * verification) so they don't get cut off mid-batch — the dominant cause of DB undercounting vs the
+ * wallet on mobile.
+ */
+export function mintConfirmBackgroundBudgetMs(quantity: number): number {
+  const extra = Math.max(0, Math.floor(quantity) - 1) * 2_000
+  return Math.min(MINT_CONFIRM_BACKGROUND_HARD_MAX_MS, MINT_CONFIRM_BACKGROUND_MAX_MS + extra)
+}
 
 export type MintSessionDeadline = {
   /** Unix ms — automated work must finish by this time (unless wallet-paused). */
