@@ -182,6 +182,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         reserved_mints: 0,
         phase_note: null,
         reason: 'wallet_required',
+        minted_in_phase: 0,
       })
       continue
     }
@@ -252,6 +253,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null),
         reason: gen1Gate.reason,
+        minted_in_phase,
         gen1: {
           is_holder: gen1.is_holder,
           gen1_nft_count: gen1.gen1_nft_count,
@@ -268,6 +270,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     if (phase === 'PRESALE') {
       const overage = await getPresaleOverageAllocation(w)
       const bal = await getBalanceByWallet(w)
+      const presaleMinted = await sumPhaseMintedForWallet(launch.id, w, 'PRESALE', network)
       const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
       const presaleCredits = gen2PresalePhaseCreditsAvailable(bal, overage)
       const max = presaleRedemptionMaxMintable({
@@ -309,6 +312,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: presaleGate.reason,
+        minted_in_phase: presaleMinted,
         presale: {
           purchased_mints: allowance.purchased_mints,
           gifted_mints: allowance.gifted_mints,
@@ -367,6 +371,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: overageGate.reason,
+        minted_in_phase: Math.max(0, Math.floor(overage?.used_mints ?? 0)),
         presale: bal
           ? {
               purchased_mints: bal.purchased_mints,
@@ -439,6 +444,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: wlGate.reason,
+        minted_in_phase: used,
         wl: {
           allowed_mints: allowed,
           used_mints: used,
@@ -481,6 +487,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
           ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
           : null,
       reason: publicGate.reason,
+      minted_in_phase: mintedPublic,
     })
   }
 

@@ -42,10 +42,11 @@ function shortWallet(w: string): string {
   return w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w
 }
 
-/** A phase the connected wallet can mint in now or has reserved for a later phase. */
+/** A phase the connected wallet can mint in now, has reserved for later, or already minted in. */
 function phaseHasAllocation(p: Gen2MintCheckPhasePreview): boolean {
   if (p.reserved_mints > 0) return true
   if (p.is_eligible && p.max_mintable > 0) return true
+  if (p.minted_in_phase > 0) return true
   return false
 }
 
@@ -56,6 +57,9 @@ function phaseHeaderRight(p: Gen2MintCheckPhasePreview, connected: boolean): str
   }
   if (p.reserved_mints > 0) {
     return `${p.reserved_mints} reserved`
+  }
+  if (p.minted_in_phase > 0) {
+    return `${p.minted_in_phase} minted`
   }
   return '—'
 }
@@ -184,6 +188,8 @@ export function Gen2MintCheckCard({
                         <span className="ml-2 text-[#00FF9C]">· {activeTag}</span>
                       ) : !active && hasUserAllocation ? (
                         <span className="ml-2 text-[#9BA8B4]">· Your allocation</span>
+                      ) : p.minted_in_phase > 0 ? (
+                        <span className="ml-2 text-[#00FF9C]">· Minted</span>
                       ) : null}
                     </span>
                     <span
@@ -192,7 +198,9 @@ export function Gen2MintCheckCard({
                           ? eligible && active
                             ? 'text-[#00FF9C]'
                             : 'text-[#9BA8B4]'
-                          : 'text-[#5C6773]'
+                          : connected && p.minted_in_phase > 0
+                            ? 'text-[#00FF9C]'
+                            : 'text-[#5C6773]'
                       }
                     >
                       {phaseHeaderRight(p, connected)}
@@ -205,6 +213,12 @@ export function Gen2MintCheckCard({
                     · cap {p.phase_supply}
                   </p>
 
+                  {connected && p.minted_in_phase > 0 ? (
+                    <p className="mt-1 text-[#00FF9C]">
+                      You minted {p.minted_in_phase} in this phase
+                    </p>
+                  ) : null}
+
                   {p.phase === 'AIRDROP' && p.gen1 ? (
                     <div className="mt-2 space-y-1 text-[#9BA8B4]">
                       <p>
@@ -214,7 +228,6 @@ export function Gen2MintCheckCard({
                           : p.gen1.is_holder
                             ? ' · none left to mint'
                             : ''}
-                        {p.gen1.minted_in_phase > 0 ? ` · minted ${p.gen1.minted_in_phase} in GEN1 phase` : ''}
                       </p>
                       {(p.gen1.cluster_gen1_nft_count ?? 0) > p.gen1.gen1_nft_count ? (
                         <p className="text-[#5C6773]">

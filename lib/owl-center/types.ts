@@ -247,6 +247,8 @@ export type Gen2MintCheckPhasePreview = {
   phase_note: string | null
   /** Scheduled open time for this phase (if configured). */
   phase_starts_at?: string | null
+  /** NFTs this wallet has already minted in this phase (recorded mint events). */
+  minted_in_phase: number
   gen1?: {
     is_holder: boolean
     gen1_nft_count: number
