@@ -226,17 +226,18 @@ export async function POST(request: NextRequest) {
   const securityRemaining = Math.max(0, entitlement - onChainMinted)
   const effectiveCap = Math.min(eligibility.max_mintable, securityRemaining)
   const quantity = txsB64.length
-  if (quantity > effectiveCap) {
+  // If the wallet has zero remaining, there is nothing to co-sign. Otherwise co-sign the portion
+  // they ARE still entitled to (the first `signCount` txs) rather than rejecting the whole batch:
+  // the off-chain ledger can briefly lag the chain (mobile confirms drop), making the UI request
+  // more than the on-chain remainder. Signing the subset lets a multi-claim holder always mint
+  // exactly their entitlement in one tap — over-minting stays impossible (the cap is on-chain).
+  if (effectiveCap <= 0) {
     return NextResponse.json(
-      {
-        error:
-          securityRemaining <= 0
-            ? 'You have already minted all your allotted spots in this phase.'
-            : `You can mint ${effectiveCap} more in this phase, not ${quantity}.`,
-      },
+      { error: 'You have already minted all your allotted spots in this phase.' },
       { status: 403 }
     )
   }
+  const signCount = Math.min(quantity, effectiveCap)
 
   const db = getSupabaseAdmin()
   const { data: holdData, error: holdError } = await db.rpc('gen2_cosign_hold', {
@@ -244,7 +245,7 @@ export async function POST(request: NextRequest) {
     p_wallet: wallet,
     p_phase: phase,
     p_network: network,
-    p_quantity: quantity,
+    p_quantity: signCount,
     p_max_allowed: effectiveCap,
   })
   if (holdError) {
@@ -265,10 +266,13 @@ export async function POST(request: NextRequest) {
   }
 
   // Deserialize + verify each tx (exactly one mintV2 for OUR CM + EXPECTED group, paid by wallet),
-  // so a single co-signature can never authorize an extra or out-of-group mint.
+  // so a single co-signature can never authorize an extra or out-of-group mint. Only the first
+  // `signCount` txs (the wallet's remaining entitlement) are co-signed and returned.
   let deserialized: Transaction[]
   try {
-    deserialized = txsB64.map((b64) => umi.transactions.deserialize(new Uint8Array(Buffer.from(b64, 'base64'))))
+    deserialized = txsB64
+      .slice(0, signCount)
+      .map((b64) => umi.transactions.deserialize(new Uint8Array(Buffer.from(b64, 'base64'))))
   } catch {
     return NextResponse.json({ error: 'Malformed transaction(s)' }, { status: 400 })
   }
@@ -289,7 +293,7 @@ export async function POST(request: NextRequest) {
   try {
     const cosigned = await signer.signAllTransactions(deserialized)
     const out = cosigned.map((tx) => Buffer.from(umi.transactions.serialize(tx)).toString('base64'))
-    return NextResponse.json({ ok: true, transactions: out, phase })
+    return NextResponse.json({ ok: true, transactions: out, phase, signed: out.length, requested: quantity })
   } catch (e) {
     console.error('cosign sign failed', e)
     return NextResponse.json({ error: 'Co-sign failed — try again' }, { status: 500 })

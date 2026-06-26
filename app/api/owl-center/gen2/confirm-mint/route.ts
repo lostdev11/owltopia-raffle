@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { waitUntil } from '@vercel/functions'
 
+import { runGen2WalletSafeMetadataFix } from '@/lib/owl-center/wallet-safe-onchain-metadata'
 
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 
@@ -342,6 +344,23 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: human[err] ?? err }, { status })
 
+  }
+
+
+
+  // Best-effort: immediately re-point the freshly minted NFT(s) at wallet-safe metadata so Solflare
+  // can render the art (Sugar config-line JSON uses arweave.net `image` URLs Solflare won't follow via
+  // arweave.net's 302 → subdomain redirect). The gen2-metadata-fix cron is the catch-all if this
+  // background task is cut short. Never blocks or fails the mint confirmation.
+  if (mintedList.length > 0) {
+    waitUntil(
+      runGen2WalletSafeMetadataFix({
+        network,
+        mints: mintedList,
+        max: mintedList.length,
+        timeBudgetMs: 45_000,
+      }).catch((e) => console.error('[confirm-mint] wallet-safe metadata fix', e))
+    )
   }
 
 

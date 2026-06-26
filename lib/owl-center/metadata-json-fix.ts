@@ -34,6 +34,20 @@ export function buildWalletImageSetFromUpload(
 ): WalletImageSet | null {
   const raw = uploaded[assetPath]?.trim()
   if (!raw) return null
+  return buildWalletImageSetFromImageUrl(raw, network)
+}
+
+/**
+ * Build the wallet-safe image set from any existing Arweave/Irys image URL (e.g. the `image`
+ * field already on-chain). Used to repair mints deployed outside the in-app upload job (Sugar CLI),
+ * where there is no `uploaded` map to look up — we derive everything from the current image URL.
+ */
+export function buildWalletImageSetFromImageUrl(
+  rawImageUrl: string,
+  network: 'mainnet' | 'devnet'
+): WalletImageSet | null {
+  const raw = rawImageUrl?.trim()
+  if (!raw) return null
 
   const id = arweaveTxIdFromHttps(raw)
   if (!id) return null
@@ -52,7 +66,26 @@ export function buildWalletImageSetFromUpload(
   }
 }
 
-function rewriteJsonImageFields(
+/** Best existing image URL from an off-chain metadata JSON (`image`, else first `properties.files` uri). */
+export function imageUrlFromMetadataJson(json: Record<string, unknown>): string | null {
+  const image = typeof json.image === 'string' ? json.image.trim() : ''
+  if (image) return image
+  const props = json.properties
+  if (props && typeof props === 'object') {
+    const files = (props as Record<string, unknown>).files
+    if (Array.isArray(files)) {
+      for (const entry of files) {
+        if (entry && typeof entry === 'object') {
+          const uri = (entry as Record<string, unknown>).uri
+          if (typeof uri === 'string' && uri.trim()) return uri.trim()
+        }
+      }
+    }
+  }
+  return null
+}
+
+export function rewriteJsonImageFields(
   json: Record<string, unknown>,
   images: WalletImageSet,
   collectionName?: string | null

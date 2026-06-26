@@ -333,7 +333,10 @@ async function cosignGatedMintTransactions(
     if (!res.ok || !body?.ok || !Array.isArray(body.transactions)) {
       return { ok: false, error: body?.error || 'Mint authorization failed — refresh and try again.' }
     }
-    if (body.transactions.length !== signedTransactions.length) {
+    // The server co-signs only the wallet's remaining on-chain entitlement, so it may return FEWER
+    // txs than sent (when the off-chain ledger briefly lags the chain). Accept any non-empty subset
+    // up to what we sent — the caller mints exactly the co-signed ones and reports that as success.
+    if (body.transactions.length < 1 || body.transactions.length > signedTransactions.length) {
       return { ok: false, error: 'Mint authorization returned an unexpected response — try again.' }
     }
     const cosigned = body.transactions.map((b64) => umi.transactions.deserialize(base64ToUint8(b64)))
@@ -645,6 +648,9 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     // Free phases (gen1/presale) require a server co-signature (thirdPartySigner) gated on remaining
     // credits — round the wallet-signed mint txs through the co-sign endpoint before sending. The
     // allowList proof tx is NOT co-signed (it carries no mintV2).
+    // May shrink below `quantity` when the server only co-signs the wallet's remaining entitlement
+    // (off-chain ledger lagging the chain). From here on the pipeline operates on `effectiveQuantity`.
+    let effectiveQuantity = quantity
     if (plan.thirdPartySignerKey) {
       const cosignRes = await cosignGatedMintTransactions(umi, signedTransactions, {
         wallet: walletB58,
@@ -655,7 +661,11 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         return { ok: false, error: cosignRes.error, plannedMintB58s: plannedB58s }
       }
       signedTransactions = cosignRes.transactions
+      effectiveQuantity = signedTransactions.length
     }
+    // The first `effectiveQuantity` planned mints align 1:1 with the co-signed (and only sent) txs;
+    // any extras the wallet pre-signed are simply dropped (never sent, no on-chain effect).
+    const activePlannedB58s = plannedB58s.slice(0, effectiveQuantity)
 
     // Send + confirm via HTTP polling (the mint RPC proxy has no websocket, so UMI
     // sendAndConfirm would block until blockhash expiry even after the tx lands).
@@ -701,7 +711,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(quantity)
+    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(effectiveQuantity)
     const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
     all.forEach((r, i) => {
       sendResults[i] = r
@@ -709,26 +719,26 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []
-    for (let i = 0; i < quantity; i++) {
+    for (let i = 0; i < effectiveQuantity; i++) {
       const r = sendResults[i]
       if (r?.confirmed && r.sig) {
         confirmedSigs.push(r.sig)
-        confirmedMints.push(plannedB58s[i]!)
+        confirmedMints.push(activePlannedB58s[i]!)
       }
     }
 
     // Mobile wallets (Phantom/Solflare) often disconnect after the mint actually lands.
     // Verify the exact mint pubkeys WE generated this attempt — never a stale earlier mint.
-    const pendingIdx = Array.from({ length: quantity }, (_, i) => i).filter(
+    const pendingIdx = Array.from({ length: effectiveQuantity }, (_, i) => i).filter(
       (i) => !(sendResults[i]?.confirmed && sendResults[i]?.sig)
     )
     if (pendingIdx.length > 0 && mintSessionRemainingMs(sessionDeadline) > 400) {
-      const pendingB58s = pendingIdx.map((i) => plannedB58s[i]!)
+      const pendingB58s = pendingIdx.map((i) => activePlannedB58s[i]!)
       const onChain = new Set(
         await detectPlannedMintAccounts(rpcUrl, pendingB58s, { attempts: 3, delayMs: 600 })
       )
       for (const i of pendingIdx) {
-        const b58 = plannedB58s[i]!
+        const b58 = activePlannedB58s[i]!
         if (!onChain.has(b58)) continue
         const sig =
           sendResults[i]?.sig ??
@@ -740,7 +750,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    if (confirmedMints.length >= quantity) {
+    if (confirmedMints.length >= effectiveQuantity) {
       return { ok: true, txSignatures: confirmedSigs, mintedNftMints: confirmedMints }
     }
 
@@ -753,14 +763,14 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           'Your wallet reported an error, but your mint appears on-chain — saving it now. Open your wallet Collectibles if the reveal is slow.',
         txSignatures: confirmedSigs,
         mintedNftMints: confirmedMints,
-        plannedMintB58s: plannedB58s.filter((b) => !confirmedMints.includes(b)),
+        plannedMintB58s: activePlannedB58s.filter((b) => !confirmedMints.includes(b)),
       }
     }
 
     const msg =
       firstSendError instanceof Error ? firstSendError.message : String(firstSendError ?? 'mint_failed')
     if (firstSendError instanceof MintSessionTimeoutError) {
-      return { ok: false, error: msg, plannedMintB58s: plannedB58s }
+      return { ok: false, error: msg, plannedMintB58s: activePlannedB58s }
     }
     const error = isBlockhashExpiredError(firstSendError)
       ? friendlyBlockhashExpiredError()
@@ -769,7 +779,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         : friendlyMintSimulationError(msg, collectPlatformMintFee) ??
           friendlySolanaRpcErrorMessage(firstSendError) ??
           msg
-    return { ok: false, error, plannedMintB58s: plannedB58s }
+    return { ok: false, error, plannedMintB58s: activePlannedB58s }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (e instanceof MintSessionTimeoutError) {
