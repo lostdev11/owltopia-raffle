@@ -42,6 +42,37 @@ function shortWallet(w: string): string {
   return w.length > 12 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w
 }
 
+/** Slim per-phase supply progress bar — shows how much of the phase cap is left to mint. */
+function PhaseSupplyBar({ minted, total }: { minted: number; total: number }) {
+  const safeTotal = Math.max(0, total)
+  const safeMinted = Math.max(0, Math.min(minted, safeTotal || minted))
+  const pct = safeTotal > 0 ? Math.min(100, (safeMinted / safeTotal) * 100) : safeMinted > 0 ? 100 : 0
+  const remaining = Math.max(0, safeTotal - safeMinted)
+  const soldOut = safeTotal > 0 && remaining === 0
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="h-1.5 w-full overflow-hidden border border-[#1A222B] bg-[#0B0F14]">
+        <div
+          className={cn(
+            'h-full transition-[width] duration-300 motion-reduce:transition-none',
+            soldOut ? 'bg-[#FFD769]/80' : 'bg-[#00FF9C]/70'
+          )}
+          style={{ width: `${pct}%` }}
+          role="progressbar"
+          aria-valuenow={safeMinted}
+          aria-valuemin={0}
+          aria-valuemax={safeTotal || safeMinted}
+          aria-label="Phase mint progress"
+        />
+      </div>
+      <p className="text-[10px] tabular-nums text-[#5C6773]">
+        <span className={soldOut ? 'text-[#FFD769]' : 'text-[#00FF9C]'}>{safeMinted}</span>
+        {safeTotal > 0 ? ` / ${safeTotal} minted · ${remaining} left` : ' minted'}
+      </p>
+    </div>
+  )
+}
+
 /** A phase the connected wallet can mint in now, has reserved for later, or already minted in. */
 function phaseHasAllocation(p: Gen2MintCheckPhasePreview): boolean {
   if (p.reserved_mints > 0) return true
@@ -212,6 +243,8 @@ export function Gen2MintCheckCard({
                     })}{' '}
                     · cap {p.phase_supply}
                   </p>
+
+                  <PhaseSupplyBar minted={p.phase_minted} total={p.phase_supply} />
 
                   {connected && p.minted_in_phase > 0 ? (
                     <p className="mt-1 text-[#00FF9C]">

@@ -15,6 +15,7 @@ import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
   presaleRedemptionMaxMintable,
+  publicMaxMintable,
   whitelistMaxMintable,
 } from '@/lib/owl-center/phase-allowance'
 import {
@@ -26,6 +27,16 @@ import type { Gen2EligibilityResponse, OwlCenterLaunchPublic, OwlCenterPhase } f
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isOwlCenterMintGloballyDisabled, isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
+import {
+  OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS,
+  formatOwlCenterPlatformMintFeeSolLabel,
+  isOwlCenterPlatformMintFeeEnabled,
+  owlCenterPlatformMintFeeUsd,
+} from '@/lib/owl-center/platform-mint-fee'
+import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
+import { resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
+import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
+import { Connection, PublicKey } from '@solana/web3.js'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -138,6 +149,27 @@ export async function buildGen2Eligibility(
   const remaining = Math.max(0, launch.total_supply - launch.minted_count)
   const overageSupply = launch.presale_overage_supply ?? 13
 
+  // Platform mint fee (~$1, collected as SOL to the treasury in the same tx as each mint). Surfaced
+  // on every phase so the client can attach the fee transfer + pre-check the wallet's SOL balance.
+  const platformFeeEnabled = isOwlCenterPlatformMintFeeEnabled()
+  const platform_treasury_wallet = getOwlCenterPlatformTreasuryWallet()
+  const platformFeeQuote = platformFeeEnabled ? await resolveOwlCenterPlatformMintFeeLamports() : null
+  const platform_mint_fee_lamports_estimate =
+    platformFeeQuote?.ok === true ? platformFeeQuote.lamports.toString() : null
+  let wallet_sol_balance_lamports: string | null = null
+  if (w) {
+    try {
+      const conn = new Connection(getLaunchSolanaRpcUrl(network), 'confirmed')
+      wallet_sol_balance_lamports = String(await conn.getBalance(new PublicKey(w), 'confirmed'))
+    } catch {
+      wallet_sol_balance_lamports = null
+    }
+  }
+  const mint_sol_needed_lamports =
+    platformFeeEnabled && platformFeeQuote?.ok === true
+      ? String(platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS)
+      : null
+
   const base: Gen2EligibilityResponse = {
     active_phase: phase,
     status: launch.status,
@@ -148,6 +180,14 @@ export async function buildGen2Eligibility(
     unit_lamports_estimate: null,
     sol_usd_price: null,
     price_usdc: null,
+    platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
+    platform_mint_fee_lamports_estimate,
+    platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(
+      platform_mint_fee_lamports_estimate != null ? BigInt(platform_mint_fee_lamports_estimate) : null
+    ),
+    wallet_sol_balance_lamports,
+    mint_sol_needed_lamports,
+    platform_treasury_wallet,
   }
 
   if (isOwlCenterMintGloballyDisabled(launch.is_paused)) {
@@ -328,13 +368,19 @@ export async function buildGen2Eligibility(
     const usdc = launch.public_price_usdc ?? 40
     const quote = await getOptionalLamportsQuoteForUsdc(usdc)
     const usedSum = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
+    const publicMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'PUBLIC', network)
+    const publicPoolRemaining = Math.max(0, launch.public_supply - publicMintedGlobal)
     const cap = Math.max(0, launch.wallet_mint_limit - usedSum)
-    const max = Math.min(cap, remaining)
+    const max = publicMaxMintable({
+      walletLimitRemaining: cap,
+      publicPoolRemaining,
+      supplyRemaining: remaining,
+    })
     return {
       ...base,
       is_eligible: max > 0,
       max_mintable: max,
-      reason: max <= 0 ? 'wallet_mint_limit' : null,
+      reason: max <= 0 ? (publicPoolRemaining <= 0 ? 'public_pool_exhausted' : 'wallet_mint_limit') : null,
       unit_lamports_estimate: quote ? quote.unitLamports.toString() : null,
       sol_usd_price: quote?.solUsdPrice ?? null,
       price_usdc: usdc,

@@ -33,6 +33,7 @@ import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { Gen2MintCheckPhasePreview, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
+import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import {
   getGen2CandyMachineId,
   getGen2CollectionMint,
@@ -352,6 +353,16 @@ export function Gen2MintPanel({
           phase,
           launch,
           sessionDeadline,
+          // Attach the ~$1 Owltopia platform fee (SOL) to each mint tx when a treasury is configured.
+          collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+          platformFeeLamports:
+            elig?.platform_mint_fee_lamports_estimate != null
+              ? BigInt(elig.platform_mint_fee_lamports_estimate)
+              : undefined,
+          prefetchedWalletBalanceLamports:
+            elig?.wallet_sol_balance_lamports != null
+              ? BigInt(elig.wallet_sol_balance_lamports)
+              : undefined,
           onMintProgress: (_current, total) => {
             setStep('awaiting_signature')
             setMintProgress({ current: 0, total, phase: 'chain' })

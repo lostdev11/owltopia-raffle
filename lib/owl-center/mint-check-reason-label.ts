@@ -18,6 +18,7 @@ const REASON_LABELS: Record<string, string> = {
   wl_on_linked_wallet: 'WL spots are on a linked wallet — connect the wallet with your WL allocation',
   wl_pending_allocation: 'On Discord WL — mint slots not assigned yet (admin assigns spots before WL opens)',
   wallet_mint_limit: 'Wallet mint limit reached',
+  public_pool_exhausted: 'Public mint cap reached — remaining supply is reserved for the team',
 }
 
 export function reasonLabel(reason: string | null): string {

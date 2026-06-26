@@ -29,6 +29,7 @@ import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
   presaleRedemptionMaxMintable,
+  publicMaxMintable,
   whitelistMaxMintable,
 } from '@/lib/owl-center/phase-allowance'
 import {
@@ -173,7 +174,32 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   const presale_purchases_closed = presaleStats ? !canPurchaseGen2PresaleSpots(presaleStats) : true
   const presale_sold_out = presaleStats?.presale_sold_out === true
   const mint_operational = isOwlCenterMintOperational(launch)
-  const airdrop_minted_global = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
+
+  // Global minted-per-phase counts power the per-phase supply progress bars in the UI.
+  const [
+    airdropMintedGlobal,
+    presaleMintedGlobal,
+    overageMintedGlobal,
+    wlMintedGlobal,
+    publicMintedGlobal,
+  ] = await Promise.all([
+    sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network),
+    sumOwlCenterPhaseMinted(launch.id, 'PRESALE', network),
+    sumOwlCenterPhaseMinted(launch.id, 'PRESALE_OVERAGE', network),
+    sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network),
+    sumOwlCenterPhaseMinted(launch.id, 'PUBLIC', network),
+  ])
+  const phaseMintedGlobal: Record<OwlCenterPhase, number> = {
+    AIRDROP: airdropMintedGlobal,
+    PRESALE: presaleMintedGlobal,
+    PRESALE_OVERAGE: overageMintedGlobal,
+    WHITELIST: wlMintedGlobal,
+    PUBLIC: publicMintedGlobal,
+    SOLD_OUT: 0,
+    TRADING_ACTIVE: 0,
+  }
+
+  const airdrop_minted_global = airdropMintedGlobal
   const airdrop_phase_complete = airdrop_minted_global >= launch.airdrop_supply
 
   const phaseOrder: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC']
@@ -214,6 +240,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc: price_usdc > 0 ? price_usdc : null,
         unit_lamports_estimate: unitLamportsForPhase(phase),
         phase_supply,
+        phase_minted: phaseMintedGlobal[phase],
         phase_starts_at,
         is_active: isPhaseMintLive(phase),
         is_eligible: false,
@@ -229,7 +256,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     if (phase === 'AIRDROP') {
       const [gen1, gen1Cluster] = await Promise.all([resolveGen1SnapshotForMint(w), getGen1ClusterSummary(w)])
       const minted_in_phase = await sumPhaseMintedForWallet(launch.id, w, 'AIRDROP', network)
-      const airdropMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'AIRDROP', network)
       const airdropRemaining = Math.max(0, launch.airdrop_supply - airdropMintedGlobal)
       const supplyRemaining = Math.max(0, launch.total_supply - launch.minted_count)
       const gen1Remaining = Math.max(0, gen1.gen1_nft_count - minted_in_phase)
@@ -281,6 +307,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_minted: phaseMintedGlobal[phase],
         phase_starts_at,
         is_active: isActive,
         is_eligible: gen1Gate.is_eligible,
@@ -341,6 +368,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_minted: phaseMintedGlobal[phase],
         phase_starts_at,
         is_active: isActive,
         is_eligible: presaleGate.is_eligible,
@@ -400,6 +428,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc: null,
         unit_lamports_estimate: null,
         phase_supply,
+        phase_minted: phaseMintedGlobal[phase],
         phase_starts_at,
         is_active: isActive,
         is_eligible: overageGate.is_eligible,
@@ -438,7 +467,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const availWl = wlCluster.connected_available
       const wlOnLinked =
         wlCluster.cluster_available > wlCluster.connected_available && wlCluster.connected_available === 0
-      const wlMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network)
       const wlPoolRemaining = Math.max(0, launch.wl_supply - wlMintedGlobal)
       const supplyRemaining = Math.max(0, launch.total_supply - launch.minted_count)
       const max = whitelistMaxMintable({
@@ -473,6 +501,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         price_usdc,
         unit_lamports_estimate: unitLamportsForPhase(phase),
         phase_supply,
+        phase_minted: phaseMintedGlobal[phase],
         phase_starts_at,
         is_active: isActive,
         is_eligible: wlGate.is_eligible,
@@ -499,11 +528,18 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     const mintedPublic = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
+    const publicPoolRemaining = Math.max(0, launch.public_supply - publicMintedGlobal)
     const cap = Math.max(0, launch.wallet_mint_limit - mintedPublic)
-    const max = Math.min(cap, Math.max(0, launch.total_supply - launch.minted_count))
+    const max = publicMaxMintable({
+      walletLimitRemaining: cap,
+      publicPoolRemaining,
+      supplyRemaining: Math.max(0, launch.total_supply - launch.minted_count),
+    })
     const isActive = isPhaseMintLive(phase)
-    const reserved_mints = cap
-    const publicReason = reserved_mints <= 0 ? 'wallet_mint_limit' : null
+    // Public is bounded by its own supply — leftover from earlier phases stays reserved for admins.
+    const reserved_mints = Math.min(cap, publicPoolRemaining)
+    const publicReason =
+      reserved_mints <= 0 ? (publicPoolRemaining <= 0 ? 'public_pool_exhausted' : 'wallet_mint_limit') : null
     const publicGate = applyPhaseScheduleGate(
       isActive,
       scheduleOpen,
@@ -516,6 +552,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       price_usdc,
       unit_lamports_estimate: unitLamportsForPhase(phase),
       phase_supply,
+      phase_minted: phaseMintedGlobal[phase],
       phase_starts_at,
       is_active: isActive,
       is_eligible: publicGate.is_eligible,

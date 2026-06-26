@@ -59,3 +59,20 @@ export function whitelistMaxMintable(input: {
   )
 }
 
+/**
+ * PUBLIC phase: bounded by the per-wallet limit AND the public phase's own supply.
+ * Unminted supply left over from earlier phases does NOT roll into PUBLIC — it stays
+ * unminted in its phase for admins to claim, so PUBLIC never exceeds `public_supply`.
+ */
+export function publicMaxMintable(input: {
+  walletLimitRemaining: number
+  publicPoolRemaining: number
+  supplyRemaining: number
+}): number {
+  return Math.min(
+    Math.max(0, input.walletLimitRemaining),
+    Math.max(0, input.publicPoolRemaining),
+    Math.max(0, input.supplyRemaining)
+  )
+}
+

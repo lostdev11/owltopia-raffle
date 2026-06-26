@@ -18,6 +18,8 @@ import type { OwlCenterPhase } from '@/lib/owl-center/types'
 
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 
+import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
+
 import { getGen2CandyMachineId, owlMintNetworkFromParam, type OwlMintNetwork } from '@/lib/solana/network'
 
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -166,6 +168,13 @@ export async function POST(request: NextRequest) {
 
     network,
 
+    // Enforce the SOL platform fee credit to the treasury in the same tx (when configured), so
+    // every recorded gen2 mint actually paid the ~$1 Owltopia fee. One fee transfer per mint tx
+    // (gen2 builds one tx per NFT), so the expected amount scales with this call's quantity.
+    requirePlatformMintFee: shouldRequireOwlCenterPlatformMintFeeServer(),
+
+    mintQuantity: qty,
+
     minMintedNfts: qty,
 
     expectedGuardGroupLabel,
@@ -183,6 +192,8 @@ export async function POST(request: NextRequest) {
       fee_payer_mismatch: 'Fee payer does not match wallet',
 
       candy_machine_missing: 'Transaction does not reference the configured Candy Machine',
+
+      platform_fee_missing: 'Transaction must include the SOL platform mint fee to the Owltopia treasury',
 
       no_nft_minted:
         'No NFT was minted in this transaction — the mint did not go through (you may have only paid the bot tax). Tap Mint to try again.',

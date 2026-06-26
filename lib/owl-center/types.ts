@@ -230,6 +230,18 @@ export type Gen2EligibilityResponse = {
   price_usdc: number | null
   /** Scheduled open time for the active phase (if configured). */
   phase_starts_at?: string | null
+  /** Owltopia platform fee per mint (USD notional; collected as SOL on-chain). */
+  platform_mint_fee_usdc?: number
+  /** Live lamports quote for the platform fee (SOL/USD); null when fee disabled or unpriced. */
+  platform_mint_fee_lamports_estimate?: string | null
+  /** Human-readable platform fee label for the mint UI. */
+  platform_mint_fee_label?: string
+  /** Connected wallet SOL balance (lamports) when a wallet is provided. */
+  wallet_sol_balance_lamports?: string | null
+  /** Platform fee + rent reserve for one mint (lamports), when the fee is enabled. */
+  mint_sol_needed_lamports?: string | null
+  /** Treasury that receives the platform fee; null when not configured. */
+  platform_treasury_wallet?: string | null
 }
 
 export type Gen2MintCheckPhasePreview = {
@@ -239,6 +251,8 @@ export type Gen2MintCheckPhasePreview = {
   /** Live SOL quote (lamports string) for paid phases. */
   unit_lamports_estimate: string | null
   phase_supply: number
+  /** NFTs minted in this phase across all wallets — drives the per-phase progress bar. */
+  phase_minted: number
   is_active: boolean
   is_eligible: boolean
   max_mintable: number
