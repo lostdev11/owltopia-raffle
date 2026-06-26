@@ -35,10 +35,11 @@ function MintedPieceCard({
         const raw = json?.image?.trim()
         const n = json?.name?.trim()
         if (n) setName(n)
-        if (raw) setImageAttemptChain(buildOwlCenterHubCardImageChain(raw, { includeFallback: false }))
+        // Always end on a fallback so an image renders even if metadata can't be resolved.
+        setImageAttemptChain(buildOwlCenterHubCardImageChain(raw ?? null))
       })
       .catch(() => {
-        if (!cancelled) setImageAttemptChain([])
+        if (!cancelled) setImageAttemptChain(buildOwlCenterHubCardImageChain(null))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
