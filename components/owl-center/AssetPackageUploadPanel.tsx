@@ -124,12 +124,22 @@ export function AssetPackageUploadPanel({
         body: JSON.stringify({ job_id: jobId, action }),
       }
     )
-    const j = (await res.json()) as {
+    // A serverless OOM/timeout on a very large collection returns a non-JSON
+    // 502/504 body; raw res.json() would throw an opaque "The string did not
+    // match the expected pattern." (WebKit). readApiJsonResponse surfaces the
+    // real platform error instead.
+    if (res.status === 502 || res.status === 504) {
+      throw new Error(
+        'The server timed out uploading this batch (large collections exceed serverless limits). ' +
+          'For very large sets, upload from your machine with `node --env-file=.env.local scripts/upload-gen2-irys.mjs` then `npm run sugar:deploy`.'
+      )
+    }
+    const j = await readApiJsonResponse<{
       error?: string
       result?: { ok?: boolean; error?: string; status?: string; remaining_files?: number }
       job?: OwlCenterAssetUploadJob
       progress?: { total_files: number; uploaded_files: number; percent: number }
-    }
+    }>(res)
     if (!res.ok) throw new Error(j.error || j.result?.error || 'process_failed')
     return j
   }

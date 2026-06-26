@@ -49,19 +49,26 @@ try {
 mkdirSync(join(ROOT, '.secrets'), { recursive: true })
 writeFileSync(KEYPAIR_PATH, JSON.stringify(Array.from(kp.secretKey)))
 
-const setUrl = spawnSync('solana', ['config', 'set', '--url', rpc], { encoding: 'utf8' })
+// On Windows, spawnSync can't resolve the `solana` executable without a shell,
+// which fails silently (status null, stdout/stderr undefined). Use a shell on
+// win32 and quote dynamic args so RPC URLs / paths survive shell parsing.
+const WIN = process.platform === 'win32'
+const q = (s) => (WIN ? `"${s}"` : s)
+const solana = (args) => spawnSync('solana', args, { encoding: 'utf8', shell: WIN })
+
+const setUrl = solana(['config', 'set', '--url', q(rpc)])
 if (setUrl.status !== 0) {
-  console.error(setUrl.stderr || setUrl.stdout)
+  console.error(setUrl.stderr || setUrl.stdout || setUrl.error?.message || 'solana not found on PATH')
   process.exit(setUrl.status ?? 1)
 }
 
-const setKey = spawnSync('solana', ['config', 'set', '--keypair', KEYPAIR_PATH], { encoding: 'utf8' })
+const setKey = solana(['config', 'set', '--keypair', q(KEYPAIR_PATH)])
 if (setKey.status !== 0) {
-  console.error(setKey.stderr || setKey.stdout)
+  console.error(setKey.stderr || setKey.stdout || setKey.error?.message || 'solana not found on PATH')
   process.exit(setKey.status ?? 1)
 }
 
-const bal = spawnSync('solana', ['balance'], { encoding: 'utf8' })
+const bal = solana(['balance'])
 console.log('Solana CLI configured for mainnet.')
 console.log('Deployer:', kp.publicKey.toBase58())
 console.log('Keypair:', KEYPAIR_PATH)
