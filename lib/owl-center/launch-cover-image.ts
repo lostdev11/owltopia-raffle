@@ -69,7 +69,19 @@ export function listUploadedNftCoverCandidates(progress: AssetUploadProgress): L
   return out
 }
 
-export async function listLaunchCoverCandidates(launchId: string): Promise<LaunchCoverCandidate[]> {
+/**
+ * Cap on per-token NFT thumbnails returned to the cover picker. The grid renders
+ * one image per candidate, so an unbounded list (e.g. a 2,000-NFT collection)
+ * would flood the page — especially on mobile, where most users are. Explicit /
+ * collection / logo candidates are always kept; only `token` candidates are capped.
+ */
+const MAX_TOKEN_COVER_CANDIDATES = 60
+
+export async function listLaunchCoverCandidates(
+  launchId: string,
+  opts: { maxTokens?: number } = {}
+): Promise<LaunchCoverCandidate[]> {
+  const maxTokens = opts.maxTokens ?? MAX_TOKEN_COVER_CANDIDATES
   const [launch, pkg, job] = await Promise.all([
     getOwlCenterLaunchByIdAdmin(launchId),
     getAssetPackageByLaunchId(launchId),
@@ -108,8 +120,12 @@ export async function listLaunchCoverCandidates(launchId: string): Promise<Launc
   }
 
   if (job && (job.status === 'completed' || job.status === 'uploading')) {
+    let tokenCount = 0
     for (const c of listUploadedNftCoverCandidates(job.upload_progress)) {
-      if (!candidates.some((x) => x.url === c.url)) candidates.push(c)
+      if (c.kind === 'token' && tokenCount >= maxTokens) continue
+      if (candidates.some((x) => x.url === c.url)) continue
+      candidates.push(c)
+      if (c.kind === 'token') tokenCount += 1
     }
   }
 

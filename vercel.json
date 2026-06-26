@@ -36,6 +36,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/gen2-treasury-split",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/owl-center-asset-upload",
       "schedule": "*/2 * * * *"
     },

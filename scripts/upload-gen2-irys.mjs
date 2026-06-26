@@ -21,6 +21,10 @@ const STATE_PATH = join(COLLECTION_DIR, '.irys-uploaded.json')
 const CACHE_PATH = join(COLLECTION_DIR, 'cache.json')
 const GATEWAY = 'https://arweave.net'
 const FUND_MULTIPLIER = 120n // fund 1.2x the quoted data price to absorb per-item overhead
+// Irys charges a flat per-transaction minimum that the byte-only getPrice() quote on the
+// summed size never captures. With thousands of tiny JSON uploads that floor dominates
+// (empirically ~2.5e-5 SOL/file), so fund against a per-remaining-file floor too.
+const PER_FILE_FLOOR_LAMPORTS = 100_000n // ~0.0001 SOL/file (observed ~5.5e-5), with safety margin
 const SAVE_EVERY = 20
 const DRY_RUN = process.argv.includes('--dry-run')
 const LAMPORTS_PER_SOL = 1_000_000_000
@@ -64,8 +68,14 @@ async function buildIrys() {
   if (!rpc) throw new Error('NEXT_PUBLIC_SOLANA_RPC_URL missing')
   const { Uploader } = await import('@irys/upload')
   const { Solana } = await import('@irys/upload-solana')
-  // No .devnet() => Irys mainnet node (node1.irys.xyz). Pays from the wallet via .withRpc.
-  const irys = await Uploader(Solana).withWallet(key).withRpc(rpc)
+  // The SDK's default mainnet endpoint (uploader.irys.xyz) is SNI-blocked on some
+  // networks/security suites (consistent ECONNRESET) while the canonical mainnet
+  // node (node1.irys.xyz) — same Irys mainnet, same Arweave permanence — is reachable.
+  // Pin the node explicitly so the upload works without disabling local protection.
+  const node = process.env.IRYS_NODE_URL?.trim() || 'https://node1.irys.xyz'
+  // Pays from the wallet via .withRpc.
+  const irys = await Uploader(Solana).withWallet(key).withRpc(rpc).bundlerUrl(node)
+  console.log(`Irys node: ${node}`)
   return irys
 }
 
@@ -91,19 +101,38 @@ function remainingBytes(indices) {
   return total
 }
 
+/** Count of individual files (png + json) still needing an upload (each = one Irys tx). */
+function remainingFileCount(indices) {
+  let n = 0
+  for (const i of indices) {
+    if (!uploaded[`assets/${i}.png`]) n += 1
+    if (!uploaded[`assets/${i}.json`]) n += 1
+  }
+  for (const name of ['collection.png', 'collection.json']) {
+    const p = join(ASSETS_DIR, name)
+    if (existsSync(p) && !uploaded[`assets/${name}`]) n += 1
+  }
+  return n
+}
+
 async function loadedBalance(irys) {
   if (typeof irys.getLoadedBalance === 'function') return BigInt(String(await irys.getLoadedBalance()))
   if (typeof irys.getBalance === 'function') return BigInt(String(await irys.getBalance()))
   return 0n
 }
 
-async function ensureFunded(irys, bytes) {
+async function ensureFunded(irys, bytes, fileCount) {
   const priceRaw = await irys.getPrice(bytes)
   const price = BigInt(String(priceRaw))
   const loaded = await loadedBalance(irys)
-  const target = (price * FUND_MULTIPLIER) / 100n
+  const byteTarget = (price * FUND_MULTIPLIER) / 100n
+  const floorTarget = BigInt(fileCount) * PER_FILE_FLOOR_LAMPORTS
+  // Use whichever is larger: the byte-based quote (for big files) or the per-file
+  // floor (for many tiny files, where the flat per-tx minimum dominates).
+  const target = byteTarget > floorTarget ? byteTarget : floorTarget
   console.log(`Quote for ${(bytes / 1e6).toFixed(1)} MB: ~${sol(price)} SOL`)
-  console.log(`Irys loaded balance: ${sol(loaded)} SOL · fund target (1.2x): ${sol(target)} SOL`)
+  console.log(`Per-file floor for ${fileCount} files: ~${sol(floorTarget)} SOL`)
+  console.log(`Irys loaded balance: ${sol(loaded)} SOL · fund target: ${sol(target)} SOL`)
   if (loaded >= target) {
     console.log('Already funded enough — no deposit needed.')
     return
@@ -241,8 +270,9 @@ async function main() {
   console.log(`Irys payer: ${String(irys.address)}`)
 
   const bytes = remainingBytes(indices)
-  if (bytes > 0) {
-    await ensureFunded(irys, bytes)
+  const fileCount = remainingFileCount(indices)
+  if (fileCount > 0) {
+    await ensureFunded(irys, bytes, fileCount)
   } else {
     console.log('All files already uploaded — building cache.json only.')
   }

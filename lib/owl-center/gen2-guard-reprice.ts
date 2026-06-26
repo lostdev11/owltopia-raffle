@@ -187,10 +187,20 @@ export async function repriceGen2GuardIfDrifted(): Promise<Gen2GuardRepriceResul
 
   const nextGroups = candyGuard.groups.map((group) => {
     const usd = usdByLabel.get(group.label)
+    // Support either payment guard — Gen2 mints frozen NFTs via freezeSolPayment, but the
+    // logic is identical for a plain solPayment group (whichever this group uses).
     const sp = group.guards.solPayment
-    if (usd == null || !isSome(sp)) return group
+    const fsp = group.guards.freezeSolPayment
+    const paymentKind: 'solPayment' | 'freezeSolPayment' | null = isSome(sp)
+      ? 'solPayment'
+      : isSome(fsp)
+        ? 'freezeSolPayment'
+        : null
+    if (usd == null || paymentKind == null) return group
 
-    const current = sp.value.lamports.basisPoints
+    const payment = isSome(sp) ? sp.value : isSome(fsp) ? fsp.value : null
+    if (payment == null) return group
+    const current = payment.lamports.basisPoints
     const target = usdToLamports(usd, solUsd)
     const driftBps =
       current > 0n
@@ -208,11 +218,12 @@ export async function repriceGen2GuardIfDrifted(): Promise<Gen2GuardRepriceResul
     })
 
     if (!willUpdate) return group
+    const nextPayment = some({ ...payment, lamports: { ...payment.lamports, basisPoints: target } })
     return {
       ...group,
       guards: {
         ...group.guards,
-        solPayment: some({ ...sp.value, lamports: { ...sp.value.lamports, basisPoints: target } }),
+        ...(paymentKind === 'solPayment' ? { solPayment: nextPayment } : { freezeSolPayment: nextPayment }),
       },
     }
   })
