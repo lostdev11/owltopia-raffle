@@ -9,6 +9,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
+import { PhaseSupplyBreakdown, type PhaseSupplyRow } from '@/components/owl-center/PhaseSupplyBreakdown'
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { Gen2DevnetMintChecklist } from '@/components/owl-center/Gen2DevnetMintChecklist'
@@ -34,6 +35,7 @@ import { isDevnetMintEnabled } from '@/lib/solana/network'
 type StatePayload = {
   launch: OwlCenterLaunchPublic
   supply: { minted: number; total: number; remaining: number }
+  phaseBreakdown: PhaseSupplyRow[]
   terminal: MintTerminalLine[]
 }
 
@@ -85,9 +87,15 @@ export default function AdminOwlCenterPage() {
     setLoading(true)
     try {
       const res = await fetch('/api/owl-center/gen2/state', { cache: 'no-store' })
-      const j = (await res.json()) as StatePayload & { error?: string }
+      const j = (await res.json()) as {
+        launch: OwlCenterLaunchPublic
+        supply: { minted: number; total: number; remaining: number }
+        phase_breakdown?: PhaseSupplyRow[]
+        terminal: MintTerminalLine[]
+        error?: string
+      }
       if (!res.ok) throw new Error(j.error || 'load_failed')
-      setState({ launch: j.launch, supply: j.supply, terminal: j.terminal })
+      setState({ launch: j.launch, supply: j.supply, phaseBreakdown: j.phase_breakdown ?? [], terminal: j.terminal })
       const L = j.launch
       setCm(L.candy_machine_id ?? '')
       setCol(L.collection_mint ?? '')
@@ -398,6 +406,14 @@ export default function AdminOwlCenterPage() {
           <>
             <CommandCard label="launch_snapshot.sys">
               <SupplyProgress minted={state.supply.minted} total={state.supply.total} />
+              {state.phaseBreakdown.length > 0 ? (
+                <div className="mt-6 border-t border-[#1A222B] pt-6">
+                  <p className="mb-4 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+                    Per-phase progress
+                  </p>
+                  <PhaseSupplyBreakdown rows={state.phaseBreakdown} />
+                </div>
+              ) : null}
               <p className="mt-4 font-mono text-xs text-[#5C6773]">
                 slug={state.launch.slug} · featured={String(state.launch.is_featured)} · mint opens=
                 {state.launch.launch_deadline_at ?? '—'}

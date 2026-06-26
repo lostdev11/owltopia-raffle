@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
-import { getPresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import { getPresaleMintPoolSnapshot, sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
+import { gen2PhasePoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
@@ -97,6 +99,21 @@ export async function GET(request: NextRequest) {
   ])
   const presale_sold_out = isGen2PresaleSoldOut(presaleStats)
 
+  // Per-phase mint progress (minted vs the phase's supply pool cap) so the admin
+  // console can show how many spots remain in each phase, not just total supply.
+  const phase_breakdown = await Promise.all(
+    OWL_CENTER_MINTABLE_PHASES.map(async (phase) => {
+      const phaseMinted = await sumOwlCenterPhaseMinted(launch.id, phase, network)
+      const cap = gen2PhasePoolCap(launch, phase)
+      return {
+        phase,
+        minted: phaseMinted,
+        cap,
+        remaining: Math.max(0, cap - phaseMinted),
+      }
+    })
+  )
+
   const mint_controls = buildOwlCenterMintControls(launch.is_paused)
 
   return NextResponse.json({
@@ -119,6 +136,7 @@ export async function GET(request: NextRequest) {
       whitelist: launch.wl_supply,
       public: launch.public_supply,
     },
+    phase_breakdown,
     prices_usdc: {
       presale: null,
       whitelist: launch.wl_price_usdc,
