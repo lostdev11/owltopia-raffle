@@ -100,18 +100,21 @@ function MintedPieceCard({
 export function CollectionMintedGrid({
   mints,
   preferMainnet = true,
+  label,
+  description = 'Pieces already minted from this drop. Pull to refresh in your wallet if you just minted — new entries appear here after confirm-mint records the tx.',
 }: {
   mints: string[]
   preferMainnet?: boolean
+  /** Override the card label (defaults to MINTED // n). */
+  label?: string
+  /** Override the intro copy above the grid. */
+  description?: string
 }) {
   if (!mints.length) return null
 
   return (
-    <CommandCard label={`MINTED // ${mints.length}`}>
-      <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">
-        Pieces already minted from this drop. Pull to refresh in your wallet if you just minted — new entries appear
-        here after confirm-mint records the tx.
-      </p>
+    <CommandCard label={label ?? `MINTED // ${mints.length}`}>
+      <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">{description}</p>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4">
         {mints.map((mint, index) => (
           <li key={mint}>

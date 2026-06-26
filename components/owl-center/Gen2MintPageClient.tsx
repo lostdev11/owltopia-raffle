@@ -142,6 +142,9 @@ export function Gen2MintPageClient() {
 
   const [adminTradingWarn, setAdminTradingWarn] = useState(false)
 
+  const [myMints, setMyMints] = useState<string[]>([])
+  const [myMintsLoading, setMyMintsLoading] = useState(false)
+
   const userMintPhase =
     connected && mintCheck
       ? (mintCheck.phases.find((p) => p.is_active && p.is_eligible && p.max_mintable > 0)?.phase ?? null)
@@ -195,6 +198,32 @@ export function Gen2MintPageClient() {
     return () => clearInterval(id)
 
   }, [load])
+
+  const loadMyMints = useCallback(async () => {
+    if (!connected || !sessionWallet) {
+      setMyMints([])
+      return
+    }
+    setMyMintsLoading(true)
+    try {
+      const res = await fetch('/api/owl-center/gen2/my-mints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: sessionWallet }),
+        cache: 'no-store',
+      })
+      const j = (await res.json()) as { mints?: string[] }
+      if (res.ok && Array.isArray(j.mints)) setMyMints(j.mints)
+    } catch {
+      /* keep prior list on transient error */
+    } finally {
+      setMyMintsLoading(false)
+    }
+  }, [connected, sessionWallet])
+
+  useEffect(() => {
+    void loadMyMints()
+  }, [loadMyMints])
 
 
 
@@ -467,7 +496,10 @@ export function Gen2MintPageClient() {
               remaining={supply.remaining}
               presaleSoldOut={presaleSoldOut}
               mintControls={mintControls}
-              onRefresh={() => void load()}
+              onRefresh={() => {
+                void load()
+                void loadMyMints()
+              }}
               embedded
             />
           </div>
@@ -527,6 +559,44 @@ export function Gen2MintPageClient() {
           </div>
 
         ) : null}
+
+      </section>
+
+
+
+      <section className="mb-12 space-y-4">
+
+        <SectionHeading
+          id="my-minted"
+          title="My mints"
+          hint="The owls this wallet (and any linked wallets) minted in this drop."
+        />
+
+        {!connected ? (
+          <CommandCard label="MY MINTS">
+            <p className="text-sm leading-relaxed text-[#9BA8B4]">
+              Connect your wallet in the site header to see exactly which owls you minted.
+            </p>
+          </CommandCard>
+        ) : myMintsLoading && !myMints.length ? (
+          <CommandCard label="MY MINTS">
+            <p className="text-sm leading-relaxed text-[#9BA8B4]">Loading your mints…</p>
+          </CommandCard>
+        ) : myMints.length ? (
+          <CollectionMintedGrid
+            mints={myMints}
+            preferMainnet={preferMainnet}
+            label={`MY MINTS // ${myMints.length}`}
+            description="Owls you minted in this drop. Just minted? It appears here once confirm-mint records the tx — tap Refresh in the mint console if it's not showing yet."
+          />
+        ) : (
+          <CommandCard label="MY MINTS // 0">
+            <p className="text-sm leading-relaxed text-[#9BA8B4]">
+              You haven&apos;t minted any owls from this drop yet. After you mint, your owls show up here once the
+              transaction is confirmed on-chain.
+            </p>
+          </CommandCard>
+        )}
 
       </section>
 
