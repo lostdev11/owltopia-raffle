@@ -88,7 +88,7 @@ export function AssetStepForm({
                   No staged ZIP yet — go back to the generator and tap Stage latest export.
                 </p>
               )}
-              {stagedJob?.error_message ? (
+              {stagedJob?.status === 'failed' && stagedJob.error_message ? (
                 <p className="mt-2 text-xs text-[#FF9C9C]">{stagedJob.error_message}</p>
               ) : null}
             </div>

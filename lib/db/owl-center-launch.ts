@@ -14,6 +14,21 @@ import type {
   OwlCenterStatus,
 } from '@/lib/owl-center/types'
 
+/**
+ * Normalize a DB timestamptz value to a clean ISO string.
+ *
+ * Postgres returns timestamptz as e.g. `2026-06-26 16:00:00+00` (space
+ * separator, `+00` offset), which is non-standard for `new Date()` and parses
+ * inconsistently across JS engines. `phase_schedule` is already normalized via
+ * `parsePhaseSchedule`, so normalize standalone timestamps the same way to keep
+ * every wall-clock display (e.g. "Mint opens" vs phase open times) in agreement.
+ */
+function normalizeTimestamp(raw: unknown): string | null {
+  if (raw == null) return null
+  const ms = new Date(String(raw)).getTime()
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+}
+
 function parseRevealMode(raw: unknown): OwlCenterRevealMode | null {
   if (raw === 'reveal_day') return 'reveal_day'
   if (raw === 'standard') return 'standard'
@@ -98,7 +113,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     tensor_url: data.tensor_url != null ? String(data.tensor_url) : null,
     is_featured: Boolean(data.is_featured),
     is_paused: Boolean(data.is_paused),
-    launch_deadline_at: data.launch_deadline_at != null ? String(data.launch_deadline_at) : null,
+    launch_deadline_at: normalizeTimestamp(data.launch_deadline_at),
     phase_schedule: parsePhaseSchedule(data.phase_schedule),
     updated_at: String(data.updated_at ?? ''),
     metadata_ready: Boolean(data.metadata_ready),
@@ -114,7 +129,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
         ? Number(data.creator_mint_price)
         : null,
     creator_mint_currency: data.creator_mint_currency != null ? String(data.creator_mint_currency) : null,
-    creator_launch_date: data.creator_launch_date != null ? String(data.creator_launch_date) : null,
+    creator_launch_date: normalizeTimestamp(data.creator_launch_date),
     mint_mode: (String(data.mint_mode ?? 'gen2_full') === 'public_simple' ? 'public_simple' : 'gen2_full') as OwlCenterMintMode,
     mint_network:
       data.mint_network === 'devnet' || data.mint_network === 'mainnet'

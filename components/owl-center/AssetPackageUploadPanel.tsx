@@ -335,7 +335,7 @@ export function AssetPackageUploadPanel({
               </dd>
             </div>
           ) : null}
-          {job.error_message ? (
+          {job.status === 'failed' && job.error_message ? (
             <div className="sm:col-span-2">
               <dt className="text-[#5C6773]">Error</dt>
               <dd className="text-[#FF9C9C]">{job.error_message}</dd>

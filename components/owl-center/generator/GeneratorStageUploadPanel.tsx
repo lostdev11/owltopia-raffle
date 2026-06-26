@@ -195,7 +195,7 @@ export function GeneratorStageUploadPanel({
             )}
             {STATUS_LABEL[job.status] ?? job.status}
           </p>
-          {job.error_message ? (
+          {job.status === 'failed' && job.error_message ? (
             <p className="mt-2 text-xs text-[#FF9C9C]">{job.error_message}</p>
           ) : null}
           {job.status === 'queued' ? (

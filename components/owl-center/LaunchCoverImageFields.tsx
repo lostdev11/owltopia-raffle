@@ -32,15 +32,19 @@ export function LaunchCoverImageFields({
     setCoverUrl(initialCoverUrl ?? '')
   }, [initialCoverUrl])
 
+  const [optionsErr, setOptionsErr] = useState<string | null>(null)
+
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true)
+    setOptionsErr(null)
     try {
       const res = await fetch(coverOptionsPath, { credentials: 'include', cache: 'no-store' })
       const j = (await res.json()) as { candidates?: LaunchCoverCandidate[]; error?: string }
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setCandidates(j.candidates ?? [])
-    } catch {
+    } catch (e) {
       setCandidates([])
+      setOptionsErr(e instanceof Error ? e.message : 'load_failed')
     } finally {
       setLoadingOptions(false)
     }
@@ -84,27 +88,44 @@ export function LaunchCoverImageFields({
         Hub card cover — shown on Owl Center home and drops. Pick an uploaded NFT image or paste an Arweave/HTTPS URL.
       </p>
 
-      {candidates.length > 0 ? (
-        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+      <div className="grid gap-2">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Pick from uploaded assets
-          <select
-            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            value=""
-            disabled={loadingOptions}
-            onChange={(e) => {
-              const url = e.target.value
-              if (url) setCoverUrl(url)
-            }}
-          >
-            <option value="">{loadingOptions ? 'Loading…' : 'Choose NFT or collection image…'}</option>
-            {candidates.map((c) => (
-              <option key={c.id} value={c.url}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
+        </p>
+
+        {loadingOptions ? (
+          <p className="font-mono text-xs text-[#9BA8B4]">Loading NFT images…</p>
+        ) : candidates.length > 0 ? (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {candidates.map((c) => {
+              const selected = coverUrl.trim() === c.url
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCoverUrl(c.url)}
+                  title={c.label}
+                  className={[
+                    'group relative aspect-square touch-manipulation overflow-hidden border bg-[#0F1419] text-left',
+                    selected ? 'border-[#00FF9C] ring-1 ring-[#00FF9C]' : 'border-[#1A222B] hover:border-[#2A3540]',
+                  ].join(' ')}
+                >
+                  <HubCardCoverImage imageUrl={c.url} fit="cover" />
+                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1 py-0.5 font-mono text-[9px] text-[#F4FBF8]">
+                    {c.label}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="font-mono text-xs text-[#9BA8B4]">
+            {optionsErr
+              ? `Could not load NFT images (${optionsErr}). Try Refresh, or paste a URL below.`
+              : 'No uploaded NFT images found yet. Upload assets for this launch, or paste an Arweave/HTTPS URL below.'}
+          </p>
+        )}
+      </div>
 
       <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         Cover image URL

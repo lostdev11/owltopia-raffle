@@ -158,7 +158,13 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   if (presale_enabled && presale_start) phase_schedule.PRESALE = presale_start
   if (wl_enabled && wl_start) phase_schedule.WHITELIST = wl_start
   if (public_start) phase_schedule.PUBLIC = public_start
-  else if (launch_deadline_at && !phase_schedule.PUBLIC) phase_schedule.PUBLIC = launch_deadline_at
+  // Only auto-default PUBLIC to the kickoff time for simple single-phase launches.
+  // When there are earlier phases (presale/WL), defaulting PUBLIC to the kickoff would
+  // mislabel it as opening at the same wall-clock time as the first phase. Leave it
+  // unset so it shows as opening after the prior phase (or set an explicit public start).
+  else if (launch_deadline_at && !phase_schedule.PUBLIC && !presale_enabled && !wl_enabled) {
+    phase_schedule.PUBLIC = launch_deadline_at
+  }
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
 
