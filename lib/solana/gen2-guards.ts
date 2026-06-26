@@ -1,5 +1,6 @@
 import bs58 from 'bs58'
 import { isSome, some, type Option, type PublicKey, type TransactionBuilder, type Umi } from '@metaplex-foundation/umi'
+import { createGen2CosignerNoopSigner } from '@/lib/solana/gen2-cosigner'
 import {
   fetchCandyMachine,
   safeFetchCandyGuard,
@@ -76,13 +77,22 @@ export type Gen2GuardMintPlan = {
   mintArgs: Partial<DefaultGuardSetMintArgs>
   /** Set when the resolved guard set has an allowList — caller must ensure the proof PDA first. */
   allowListMerkleRoot: Uint8Array | null
+  /**
+   * Set (base58) when the group has a `thirdPartySigner` guard. The mint must be co-signed by this
+   * server-held key, so the client signs with a placeholder slot and rounds the txs through
+   * `/api/owl-center/gen2/cosign-mint` to have the server fill it (see `lib/solana/gen2-cosigner.ts`).
+   */
+  thirdPartySignerKey: string | null
 }
 
 export type Gen2GuardPlanResult = { ok: true; plan: Gen2GuardMintPlan } | { ok: false; error: string }
 
-/** Guards the in-app minter cannot satisfy (need extra signers / token accounts we do not wire). */
+/**
+ * Guards the in-app minter cannot satisfy (need extra signers / token accounts we do not wire).
+ * `thirdPartySigner` is intentionally NOT here: it IS supported, via the server co-sign round-trip
+ * (the free gen1/presale phases use it to enforce per-wallet limits the chain can't express).
+ */
 const UNSUPPORTED_GUARDS: ReadonlyArray<keyof DefaultGuardSet> = [
-  'thirdPartySigner',
   'tokenPayment',
   'token2022Payment',
   'tokenGate',
@@ -158,7 +168,15 @@ export async function buildGen2GuardMintPlan(
 
   const mintArgs: Partial<DefaultGuardSetMintArgs> = {}
   let allowListMerkleRoot: Uint8Array | null = null
+  let thirdPartySignerKey: string | null = null
 
+  if (isSome(guards.thirdPartySigner)) {
+    // Placeholder signer reserves the co-signer's signature slot; the server fills it in the
+    // cosign-mint round-trip after verifying the wallet's remaining credits.
+    const signerKey = guards.thirdPartySigner.value.signerKey
+    thirdPartySignerKey = String(signerKey)
+    mintArgs.thirdPartySigner = some({ signer: createGen2CosignerNoopSigner(signerKey) })
+  }
   if (isSome(guards.solPayment)) {
     mintArgs.solPayment = some({ destination: guards.solPayment.value.destination })
   }
@@ -174,7 +192,10 @@ export async function buildGen2GuardMintPlan(
   }
   // botTax / startDate / endDate / redeemedAmount / addressGate / programGate need no mintArgs.
 
-  return { ok: true, plan: { candyMachine, candyGuard, groupLabel, mintArgs, allowListMerkleRoot } }
+  return {
+    ok: true,
+    plan: { candyMachine, candyGuard, groupLabel, mintArgs, allowListMerkleRoot, thirdPartySignerKey },
+  }
 }
 
 type WlProofResponse = {

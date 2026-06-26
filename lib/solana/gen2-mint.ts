@@ -296,6 +296,53 @@ function resolveMintIds(params: Pick<MintGen2Params, 'candyMachineId' | 'collect
   return { cmId: cmCheck.pubkey, colMint: colCheck.pubkey, network }
 }
 
+function uint8ToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!)
+  return btoa(bin)
+}
+
+function base64ToUint8(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/**
+ * Free-phase (gen1/presale) mints carry a `thirdPartySigner` guard, so the wallet-signed txs must
+ * be co-signed by the server before they can land. Send them to `/api/owl-center/gen2/cosign-mint`,
+ * which verifies the wallet's remaining credits (the per-wallet limit the chain can't express) and
+ * returns the txs with its signature added.
+ */
+async function cosignGatedMintTransactions(
+  umi: ReturnType<typeof createOwlCenterUmi>,
+  signedTransactions: Transaction[],
+  args: { wallet: string; network: OwlMintNetwork }
+): Promise<{ ok: true; transactions: Transaction[] } | { ok: false; error: string }> {
+  try {
+    const payload = signedTransactions.map((tx) => uint8ToBase64(umi.transactions.serialize(tx)))
+    const res = await fetch('/api/owl-center/gen2/cosign-mint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet: args.wallet, network: args.network, transactions: payload }),
+    })
+    const body = (await res.json().catch(() => null)) as
+      | { ok?: boolean; transactions?: string[]; error?: string }
+      | null
+    if (!res.ok || !body?.ok || !Array.isArray(body.transactions)) {
+      return { ok: false, error: body?.error || 'Mint authorization failed — refresh and try again.' }
+    }
+    if (body.transactions.length !== signedTransactions.length) {
+      return { ok: false, error: 'Mint authorization returned an unexpected response — try again.' }
+    }
+    const cosigned = body.transactions.map((b64) => umi.transactions.deserialize(base64ToUint8(b64)))
+    return { ok: true, transactions: cosigned }
+  } catch {
+    return { ok: false, error: 'Mint authorization failed — check your connection and retry.' }
+  }
+}
+
 /** Prefetch CM guard plan + collection metadata while the user is on the mint page. */
 export async function warmGen2MintPrep(
   params: Pick<
@@ -564,6 +611,19 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         return { ok: false, error: 'Mint transaction rejected in wallet' }
       }
       return { ok: false, error: friendlySolanaRpcErrorMessage(e) ?? msg }
+    }
+
+    // Free phases (gen1/presale) require a server co-signature (thirdPartySigner) gated on remaining
+    // credits — round the wallet-signed txs through the co-sign endpoint before sending.
+    if (plan.thirdPartySignerKey) {
+      const cosignRes = await cosignGatedMintTransactions(umi, signedTransactions, {
+        wallet: walletB58,
+        network,
+      })
+      if (!cosignRes.ok) {
+        return { ok: false, error: cosignRes.error, plannedMintB58s: plannedB58s }
+      }
+      signedTransactions = cosignRes.transactions
     }
 
     // Send + confirm via HTTP polling (the mint RPC proxy has no websocket, so UMI
