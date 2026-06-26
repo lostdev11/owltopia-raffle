@@ -49,8 +49,15 @@ scripts/phantom-devnet-keypair.json
 # Local Sugar candy-machine test projects (assets + dev wallets)
 test-collection-*/
 
-# Large generated Sugar assets (reproduce locally via `npm run prepare:sugar-deploy -- --pre-upload`)
-collections/owltopia-gen2/assets/
+# Large generated Sugar assets + candy-machine artifacts (reproduce locally via
+# `npm run prepare:sugar-deploy -- --pre-upload`). Ignore the whole collection
+# output folder, plus generic Sugar artifacts for any future collection.
+collections/owltopia-gen2/
+collections/*/assets/
+collections/*/cache.json
+collections/*/config.json
+collections/*/sugar.log
+collections/*/.irys-uploaded.json
 
 # Anchor / Rust build output (local only)
 governance-anchor/target/
