@@ -44,6 +44,8 @@ export default function AdminOwlCenterPage() {
   const [loading, setLoading] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [giftMsg, setGiftMsg] = useState<string | null>(null)
+  const [pauseToggling, setPauseToggling] = useState(false)
+  const [pauseMsg, setPauseMsg] = useState<string | null>(null)
 
   const [cm, setCm] = useState('')
   const [col, setCol] = useState('')
@@ -164,6 +166,33 @@ export default function AdminOwlCenterPage() {
       void load()
     } catch (e) {
       setSaveMsg(e instanceof Error ? e.message : 'save_failed')
+    }
+  }
+
+  async function togglePauseMint() {
+    if (!state) return
+    if (isOwlCenterMintEnvKillSwitchEnabled()) {
+      setPauseMsg('OWL_CENTER_MINT_DISABLED is set — clear the deployment env to control pause here.')
+      return
+    }
+    const next = !state.launch.is_paused
+    setPauseToggling(true)
+    setPauseMsg(null)
+    try {
+      const res = await fetch('/api/admin/owl-center/gen2/update', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_paused: next }),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || 'pause_failed')
+      setPauseMsg(next ? 'Mint paused' : 'Mint resumed')
+      await load()
+    } catch (e) {
+      setPauseMsg(e instanceof Error ? e.message : 'pause_failed')
+    } finally {
+      setPauseToggling(false)
     }
   }
 
@@ -292,6 +321,21 @@ export default function AdminOwlCenterPage() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Reload telemetry
           </DeployButton>
+          {state ? (
+            <button
+              type="button"
+              onClick={() => void togglePauseMint()}
+              disabled={!connected || pauseToggling || isOwlCenterMintEnvKillSwitchEnabled()}
+              className={`inline-flex min-h-[44px] touch-manipulation items-center gap-2 border px-4 text-sm font-bold uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-50 ${
+                state.launch.is_paused
+                  ? 'border-[#00FF9C]/45 bg-[#00FF9C]/10 text-[#00FF9C] hover:bg-[#00FF9C]/15'
+                  : 'border-[#FF9C9C]/45 bg-[#FF9C9C]/10 text-[#FF9C9C] hover:bg-[#FF9C9C]/15'
+              }`}
+            >
+              {pauseToggling ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {state.launch.is_paused ? 'Resume mint' : 'Pause mint'}
+            </button>
+          ) : null}
           <Link href="/admin/gen2-presale" className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35">
             Gen2 presale admin
           </Link>
@@ -324,6 +368,25 @@ export default function AdminOwlCenterPage() {
             </>
           ) : null}
         </div>
+
+        {state ? (
+          <p className="font-mono text-xs">
+            <span className="text-[#5C6773]">Mint status: </span>
+            {isOwlCenterMintEnvKillSwitchEnabled() ? (
+              <span className="text-[#FFD769]">PAUSED (env kill switch — OWL_CENTER_MINT_DISABLED)</span>
+            ) : state.launch.is_paused ? (
+              <span className="text-[#FF9C9C]">PAUSED</span>
+            ) : (
+              <span className="text-[#00FF9C]">LIVE</span>
+            )}
+            {pauseMsg ? (
+              <span className={pauseMsg === 'Mint paused' || pauseMsg === 'Mint resumed' ? ' text-[#00FF9C]' : ' text-[#FF9C9C]'}>
+                {' · '}
+                {pauseMsg}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
 
         {state ? (
           <>

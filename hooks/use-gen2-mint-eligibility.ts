@@ -38,5 +38,26 @@ export function useGen2MintEligibility(wallet: string | null, connected: boolean
     void refresh()
   }, [refresh])
 
-  return { elig, loading, error, refresh }
+  /**
+   * Optimistically debit the wallet's allocation right after an on-chain mint confirms, so the
+   * Mint button disables immediately instead of staying enabled on stale data while the server
+   * eligibility refresh is in flight. Once a wallet has consumed its allocation it cannot mint
+   * again until the next phase it is eligible for opens (the server refresh then confirms this).
+   */
+  const applyMinted = useCallback((quantity: number) => {
+    const debit = Math.max(0, Math.floor(quantity))
+    if (debit <= 0) return
+    setElig((prev) => {
+      if (!prev) return prev
+      const nextMax = Math.max(0, prev.max_mintable - debit)
+      return {
+        ...prev,
+        max_mintable: nextMax,
+        is_eligible: prev.is_eligible && nextMax > 0,
+        reason: nextMax > 0 ? prev.reason : 'allocation_minted',
+      }
+    })
+  }, [])
+
+  return { elig, loading, error, refresh, applyMinted }
 }

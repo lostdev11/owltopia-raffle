@@ -17,11 +17,13 @@ export type OptimisticMintFinalizeArgs = {
     warning: string | null
   }) => void
   onRecordWarning?: (message: string) => void
+  /** Fires after the background DB record completes — safe point to reconcile server eligibility. */
+  onRecordSuccess?: () => void
 }
 
 /** Show mint success as soon as the chain tx is done; record to DB in the background (≤12s). */
 export function finalizeMintSessionOptimistic(args: OptimisticMintFinalizeArgs): void {
-  const { minted, requestedQuantity, confirmBatch, onSuccess, onRecordWarning } = args
+  const { minted, requestedQuantity, confirmBatch, onSuccess, onRecordWarning, onRecordSuccess } = args
 
   const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])
   const mintPks = minted.ok ? minted.mintedNftMints : (minted.mintedNftMints ?? [])
@@ -50,6 +52,7 @@ export function finalizeMintSessionOptimistic(args: OptimisticMintFinalizeArgs):
         recordMintSessionConfirms(sigs, mintPks, confirmBatch),
         'Saving mint timed out'
       )
+      onRecordSuccess?.()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'confirm_failed'
       onRecordWarning?.(

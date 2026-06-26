@@ -95,7 +95,7 @@ export function Gen2MintPanel({
   const adapter = wallet?.adapter
 
   const [qtyText, setQtyText] = useState('1')
-  const { elig, loading: eligLoading, refresh: loadElig } = useGen2MintEligibility(walletStr, connected)
+  const { elig, loading: eligLoading, refresh: loadElig, applyMinted } = useGen2MintEligibility(walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
@@ -234,10 +234,17 @@ export function Gen2MintPanel({
           setMintedCount(mintedCount)
           setMintProgress(null)
           setStep('success')
+          // Debit the allocation locally so the Mint button disables immediately — prevents a
+          // re-mint during the window before the mint is recorded server-side.
+          applyMinted(mintedCount)
+        },
+        // Reconcile against the server only AFTER the DB record lands; refreshing earlier would
+        // read stale (still-eligible) data and undo the optimistic debit above.
+        onRecordSuccess: () => {
+          onRefresh()
+          void loadElig({ background: true })
         },
       })
-      onRefresh()
-      void loadElig()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const low = msg.toLowerCase()
@@ -288,7 +295,7 @@ export function Gen2MintPanel({
     ? owlCenterMintPhaseStatusLabel(elig.active_phase, { presaleSoldOut })
     : '—'
   const wrongPhaseHint =
-    elig && !elig.is_eligible
+    elig && !elig.is_eligible && elig.reason !== 'allocation_minted'
       ? owlCenterMintWrongPhaseHint({
           activePhase: launch.active_phase,
           presaleSoldOut,
@@ -391,6 +398,13 @@ export function Gen2MintPanel({
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
               {elig.gen1_snapshot.gen1_nft_count} detected). Approve once in your wallet to mint your selected quantity.
+            </p>
+          ) : null}
+
+          {elig?.reason === 'allocation_minted' ? (
+            <p className="text-sm text-[#00FF9C]">
+              You’ve minted your full allocation for this phase. You can mint again when the next phase you’re eligible
+              for opens.
             </p>
           ) : null}
 
