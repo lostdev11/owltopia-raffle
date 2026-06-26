@@ -19,14 +19,15 @@ import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { AdminGen1WalletSwitch } from '@/components/admin/AdminGen1WalletSwitch'
 import { AdminGen1SnapshotPanel } from '@/components/admin/AdminGen1SnapshotPanel'
 import { PhaseScheduleEditor } from '@/components/owl-center/PhaseScheduleEditor'
-import { GEN2_WL_COLLAB_COMMUNITIES } from '@/lib/owl-center/phase-display'
+import { GEN2_WL_COLLAB_COMMUNITIES, owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
   datetimeLocalToIso,
   isoToDatetimeLocal,
+  OWL_CENTER_MINTABLE_PHASES,
   type OwlCenterPhaseSchedule,
 } from '@/lib/owl-center/phase-schedule'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
-import type { MintTerminalLine, OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import type { MintTerminalLine, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { isOwlCenterMintEnvKillSwitchEnabled } from '@/lib/owl-center/mint-policy'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 
@@ -69,6 +70,7 @@ export default function AdminOwlCenterPage() {
   const [resetMsg, setResetMsg] = useState<string | null>(null)
   const [mintStartsAt, setMintStartsAt] = useState('')
   const [phaseSchedule, setPhaseSchedule] = useState<OwlCenterPhaseSchedule>({})
+  const [activePhases, setActivePhases] = useState<OwlCenterPhase[]>([])
 
   const [wlSummary, setWlSummary] = useState<{
     wl_cap: number
@@ -100,6 +102,7 @@ export default function AdminOwlCenterPage() {
       setLoadedMintedCount(String(L.minted_count))
       setMintStartsAt(isoToDatetimeLocal(L.launch_deadline_at))
       setPhaseSchedule(L.phase_schedule ?? {})
+      setActivePhases(L.active_phases ?? [])
     } catch (e) {
       setState(null)
       setSaveMsg(e instanceof Error ? e.message : 'load_failed')
@@ -158,6 +161,7 @@ export default function AdminOwlCenterPage() {
       }
       body.launch_deadline_at = mintStartsAt.trim() ? datetimeLocalToIso(mintStartsAt) : null
       body.phase_schedule = phaseSchedule
+      body.active_phases = activePhases
 
       const res = await fetch('/api/admin/owl-center/gen2/update', {
         method: 'POST',
@@ -349,9 +353,6 @@ export default function AdminOwlCenterPage() {
             className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/15"
           >
             Upload WL wallets
-          </Link>
-          <Link href="/admin/owl-center/demo" className="inline-flex min-h-[44px] items-center border border-[#00FF9C]/35 px-4 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10">
-            Demo mint launchpad
           </Link>
           <Link href="/owl-center/collection/gen2" className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35">
             Public mint page
@@ -579,6 +580,71 @@ export default function AdminOwlCenterPage() {
                     })
                   }}
                 />
+                <div className="mt-6 border-t border-[#1A222B] pt-6">
+                  <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+                    Live phases (concurrent)
+                  </p>
+                  <p className="mb-4 text-xs text-[#9BA8B4]">
+                    Tap a phase to make it <strong className="text-[#EAFBF4]">live right now</strong>, in addition to the
+                    primary active phase above. Multiple phases can be open at once (e.g. WHITELIST + PUBLIC) — eligible
+                    wallets pick which one to mint in. Save launch to apply.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {OWL_CENTER_MINTABLE_PHASES.map((p) => {
+                      const isPrimary = phase === p
+                      const isOn = isPrimary || activePhases.includes(p)
+                      const startIso =
+                        phaseSchedule[p] ?? (p === 'AIRDROP' && mintStartsAt.trim() ? datetimeLocalToIso(mintStartsAt) : null)
+                      const startMs = startIso ? new Date(startIso).getTime() : null
+                      const startsInFuture = startMs != null && Number.isFinite(startMs) && startMs > Date.now()
+                      const warnOnchain = isOn && !isPrimary && startsInFuture
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          disabled={isPrimary}
+                          onClick={() =>
+                            setActivePhases((prev) =>
+                              prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
+                            )
+                          }
+                          title={
+                            isPrimary
+                              ? 'Primary active phase — always live (set via Active phase dropdown above).'
+                              : warnOnchain
+                                ? 'On-chain start time has not passed — the candy guard may reject mints until then. Re-run scripts/gen2-cm-setup.ts guards to open it earlier.'
+                                : undefined
+                          }
+                          className={`inline-flex min-h-[44px] touch-manipulation items-center gap-2 border px-3 py-1.5 font-mono text-xs font-bold uppercase tracking-widest disabled:cursor-not-allowed ${
+                            isOn
+                              ? 'border-[#00FF9C]/55 bg-[#00FF9C]/10 text-[#00FF9C]'
+                              : 'border-[#1A222B] bg-[#0F1419] text-[#9BA8B4] hover:border-[#00FF9C]/35'
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${isOn ? 'bg-[#00FF9C]' : 'bg-[#5C6773]'}`}
+                            aria-hidden
+                          />
+                          {owlCenterPhaseLabel(p)}
+                          {isPrimary ? <span className="text-[9px] text-[#5C6773]">(primary)</span> : null}
+                          {warnOnchain ? <span className="text-[9px] text-[#FFD769]">⚠ on-chain</span> : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {activePhases.some((p) => {
+                    const startIso =
+                      phaseSchedule[p] ?? (p === 'AIRDROP' && mintStartsAt.trim() ? datetimeLocalToIso(mintStartsAt) : null)
+                    const startMs = startIso ? new Date(startIso).getTime() : null
+                    return p !== phase && startMs != null && Number.isFinite(startMs) && startMs > Date.now()
+                  }) ? (
+                    <p className="mt-3 border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-xs text-[#FFD769]">
+                      ⚠ One or more live phases have an on-chain start time still in the future. The candy guard will
+                      reject those mints until their <code className="text-[11px]">startDate</code> passes — re-run{' '}
+                      <code className="text-[11px]">scripts/gen2-cm-setup.ts guards</code> to open them earlier on-chain.
+                    </p>
+                  ) : null}
+                </div>
               </div>
               <DeployButton type="button" className="mt-6" onClick={() => void savePatch()} disabled={!connected}>
                 Save Gen2 launch

@@ -1,6 +1,6 @@
 import { getOwlCenterLaunchBySlugAdmin, updateOwlCenterLaunchAdmin } from '@/lib/db/owl-center-launch'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
-import { getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
+import { getPhaseStartsAt, OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import type { OwlCenterLaunchPublic, OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
@@ -264,8 +264,15 @@ export async function advanceGen2PhaseIfScheduled(nowMs: number = Date.now()): P
   }
 
   const activatedAt = new Date(nowMs).toISOString()
+  // Additive rollout: keep the outgoing phase open concurrently with the new primary so earlier
+  // phases stay live (admins can still close them manually via the live-phase toggles). The new
+  // primary phase is always live, so it is excluded from the concurrent set to avoid duplication.
+  const carriedPhases = Array.from(new Set<OwlCenterPhase>([...(launch.active_phases ?? []), current])).filter(
+    (p) => OWL_CENTER_MINTABLE_PHASES.includes(p) && p !== decision.to
+  )
   const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, {
     active_phase: decision.to,
+    active_phases: carriedPhases,
     status: nextStatus,
     phase_schedule: { ...launch.phase_schedule, [decision.to]: activatedAt } as Record<string, string>,
   })

@@ -117,13 +117,23 @@ async function buildGen1AirdropEligibility(
   }
 }
 
-export async function buildGen2Eligibility(walletRaw: string | null): Promise<Gen2EligibilityResponse | null> {
+/**
+ * Eligibility for the connected wallet in a single phase. By default this evaluates the launch's
+ * primary `active_phase`. Pass `phaseOverride` to evaluate a SPECIFIC live phase instead — used
+ * when multiple phases are live concurrently and the wallet (or a server endpoint) targets one of
+ * them. The override skips the Gen1-airdrop concurrent precedence so it reports exactly the asked
+ * phase.
+ */
+export async function buildGen2Eligibility(
+  walletRaw: string | null,
+  phaseOverride?: OwlCenterPhase
+): Promise<Gen2EligibilityResponse | null> {
   const launch = await getOwlCenterLaunchBySlug('gen2')
   if (!launch) return null
 
   const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const w = walletRaw ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const phase = launch.active_phase as OwlCenterPhase
+  const phase = (phaseOverride ?? launch.active_phase) as OwlCenterPhase
   const nowMs = Date.now()
   const remaining = Math.max(0, launch.total_supply - launch.minted_count)
   const overageSupply = launch.presale_overage_supply ?? 13
@@ -178,7 +188,8 @@ export async function buildGen2Eligibility(walletRaw: string | null): Promise<Ge
   // GEN1 holders keep their free claim for the full 7-day airdrop window, concurrently with later
   // phases. Take precedence: a connected Gen1 holder with remaining allocation always mints their
   // free Gen2 first (after exhausting it they fall through to whatever phase is currently active).
-  if (phase !== 'AIRDROP' && isGen1AirdropWindowOpen(launch, nowMs)) {
+  // Skipped when an explicit phase is requested — the caller wants exactly that phase's eligibility.
+  if (!phaseOverride && phase !== 'AIRDROP' && isGen1AirdropWindowOpen(launch, nowMs)) {
     const gen1Concurrent = await buildGen1AirdropEligibility(launch, w, network, remaining, base)
     if (gen1Concurrent.is_eligible && gen1Concurrent.max_mintable > 0) {
       return gen1Concurrent

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getOwlCenterLaunchBySlugAdmin, updateOwlCenterLaunchAdmin } from '@/lib/db/owl-center-launch'
-import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { datetimeLocalToIso, parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -49,6 +49,12 @@ export async function POST(request: NextRequest) {
     const p = body.active_phase.toUpperCase() as OwlCenterPhase
     if (!PHASES.includes(p)) return NextResponse.json({ error: 'Invalid active_phase' }, { status: 400 })
     patch.active_phase = p
+  }
+  if (body.active_phases !== undefined) {
+    if (!Array.isArray(body.active_phases)) {
+      return NextResponse.json({ error: 'Invalid active_phases' }, { status: 400 })
+    }
+    patch.active_phases = parseActivePhases(body.active_phases)
   }
   if (typeof body.status === 'string') {
     const s = body.status.toUpperCase() as OwlCenterStatus

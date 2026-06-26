@@ -12,6 +12,7 @@ import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import {
   owlCenterMintPhaseStatusLabel,
   owlCenterMintWrongPhaseHint,
+  owlCenterPhaseLabel,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
 import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
@@ -24,7 +25,7 @@ import {
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
-import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import type { Gen2MintCheckPhasePreview, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
 import {
   getGen2CandyMachineId,
@@ -80,6 +81,7 @@ export function Gen2MintPanel({
   mintControls,
   onRefresh,
   embedded = false,
+  mintCheckPhases,
 }: {
   launch: OwlCenterLaunchPublic
   remaining: number
@@ -89,13 +91,39 @@ export function Gen2MintPanel({
   onRefresh: () => void
   /** When true, render inline inside supply_and_phases (no nested CommandCard). */
   embedded?: boolean
+  /** Per-phase previews (from the mint-check). Drives the phase picker when >1 phase is live. */
+  mintCheckPhases?: Gen2MintCheckPhasePreview[]
 }) {
   const { publicKey, connected, wallet } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
   const adapter = wallet?.adapter
 
+  // Phases the wallet can mint in RIGHT NOW (live + eligible). When more than one, the user picks.
+  const selectablePhases = useMemo(
+    () => (mintCheckPhases ?? []).filter((p) => p.is_active && p.is_eligible && p.max_mintable > 0),
+    [mintCheckPhases]
+  )
+  const [selectedPhase, setSelectedPhase] = useState<OwlCenterPhase | null>(null)
+
+  // Default / reconcile the selection: keep the user's pick if still valid, else prefer the primary
+  // active phase, else the cheapest eligible live phase.
+  useEffect(() => {
+    if (selectablePhases.length === 0) {
+      if (selectedPhase !== null) setSelectedPhase(null)
+      return
+    }
+    if (selectedPhase && selectablePhases.some((p) => p.phase === selectedPhase)) return
+    const primary = selectablePhases.find((p) => p.phase === launch.active_phase)
+    const cheapest = [...selectablePhases].sort((a, b) => (a.price_usdc ?? 0) - (b.price_usdc ?? 0))[0]
+    setSelectedPhase((primary ?? cheapest).phase)
+  }, [selectablePhases, selectedPhase, launch.active_phase])
+
   const [qtyText, setQtyText] = useState('1')
-  const { elig, loading: eligLoading, refresh: loadElig, applyMinted } = useGen2MintEligibility(walletStr, connected)
+  const { elig, loading: eligLoading, refresh: loadElig, applyMinted } = useGen2MintEligibility(
+    walletStr,
+    connected,
+    selectedPhase
+  )
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
@@ -460,6 +488,39 @@ export function Gen2MintPanel({
 
           {!cmConfigured ? (
             <p className="text-xs text-[#FFD769]">Mint infrastructure is not fully configured yet — check back soon.</p>
+          ) : null}
+
+          {selectablePhases.length > 1 ? (
+            <div className="space-y-2">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Choose mint phase — {selectablePhases.length} are live for you right now
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {selectablePhases.map((p) => {
+                  const active = p.phase === selectedPhase
+                  return (
+                    <button
+                      key={p.phase}
+                      type="button"
+                      onClick={() => setSelectedPhase(p.phase)}
+                      aria-pressed={active}
+                      className={`inline-flex min-h-[44px] touch-manipulation flex-col items-start justify-center gap-0.5 border px-3 py-1.5 text-left transition-colors ${
+                        active
+                          ? 'border-[#00FF9C]/60 bg-[#00FF9C]/10 text-[#00FF9C]'
+                          : 'border-[#1A222B] bg-[#0F1419] text-[#9BA8B4] hover:border-[#00FF9C]/35'
+                      }`}
+                    >
+                      <span className="font-mono text-xs font-bold uppercase tracking-widest">
+                        {owlCenterPhaseLabel(p.phase)}
+                      </span>
+                      <span className="font-mono text-[10px] tracking-wide">
+                        {p.price_usdc && p.price_usdc > 0 ? `$${p.price_usdc}` : 'Free'} · up to {p.max_mintable}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ) : null}
 
           <div className="flex flex-wrap items-end gap-4">

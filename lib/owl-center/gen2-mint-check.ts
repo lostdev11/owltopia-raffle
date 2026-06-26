@@ -37,7 +37,7 @@ import {
 } from '@/lib/owl-center/presale-mint-pool'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
+import { getLivePhases, getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -144,7 +144,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   const phases: Gen2MintCheckPhasePreview[] = []
   // GEN1 holder mint is optional — the admin phase flip alone opens presale/overage;
   // unminted airdrop supply just rolls into the remaining total supply.
-  const isPhaseMintLive = (p: OwlCenterPhase) => launch.active_phase === p && mint_operational
+  // A phase is "live" when it is in the launch's live set (primary active_phase, any admin-toggled
+  // concurrent phase, or the Gen1 7-day window) AND the mint is operational.
+  const livePhases = getLivePhases(launch)
+  const isPhaseMintLive = (p: OwlCenterPhase) => livePhases.has(p) && mint_operational
 
   for (const phase of phaseOrder) {
     const label = owlCenterPhaseLabel(phase)

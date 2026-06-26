@@ -496,9 +496,11 @@ export function Gen2MintPageClient() {
               remaining={supply.remaining}
               presaleSoldOut={presaleSoldOut}
               mintControls={mintControls}
+              mintCheckPhases={mintCheck?.phases}
               onRefresh={() => {
                 void load()
                 void loadMyMints()
+                void refreshMintCheck()
               }}
               embedded
             />

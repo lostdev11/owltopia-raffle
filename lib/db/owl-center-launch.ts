@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
-import { parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 import type {
   OwlCenterFreezeProgress,
@@ -99,6 +99,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     total_supply: Number(data.total_supply ?? 0),
     minted_count: Number(data.minted_count ?? 0),
     active_phase: String(data.active_phase) as OwlCenterPhase,
+    active_phases: parseActivePhases(data.active_phases),
     status: String(data.status) as OwlCenterStatus,
     presale_supply: Number(data.presale_supply ?? 0),
     wl_supply: Number(data.wl_supply ?? 0),
@@ -228,6 +229,7 @@ export async function updateOwlCenterLaunchAdmin(
   slug: string,
   patch: Partial<{
     active_phase: OwlCenterPhase
+    active_phases: OwlCenterPhase[]
     status: OwlCenterStatus
     is_paused: boolean
     candy_machine_id: string | null
@@ -263,6 +265,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
   id: string,
   patch: Partial<{
     active_phase: OwlCenterPhase
+    active_phases: OwlCenterPhase[]
     status: OwlCenterStatus
     is_paused: boolean
     candy_machine_id: string | null

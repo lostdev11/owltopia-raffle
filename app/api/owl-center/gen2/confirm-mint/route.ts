@@ -8,6 +8,10 @@ import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/eva
 
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 
+import { getLivePhases } from '@/lib/owl-center/phase-schedule'
+
+import { gen2GuardGroupLabel, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
+
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
@@ -146,6 +150,10 @@ export async function POST(request: NextRequest) {
 
 
 
+  // Bind the confirmed on-chain tx to the guard group of the claimed phase, so a wallet cannot mint
+  // in one (cheaper / free) group on-chain and record it under a different live phase.
+  const expectedGuardGroupLabel = isGen2MintablePhase(phase) ? gen2GuardGroupLabel(phase) : null
+
   const verified = await verifyGen2MintTransaction({
 
     txSignature: txSig,
@@ -155,6 +163,10 @@ export async function POST(request: NextRequest) {
     candyMachineId,
 
     network,
+
+    minMintedNfts: qty,
+
+    expectedGuardGroupLabel,
 
   })
 
@@ -169,6 +181,11 @@ export async function POST(request: NextRequest) {
       fee_payer_mismatch: 'Fee payer does not match wallet',
 
       candy_machine_missing: 'Transaction does not reference the configured Candy Machine',
+
+      no_nft_minted:
+        'No NFT was minted in this transaction — the mint did not go through (you may have only paid the bot tax). Tap Mint to try again.',
+
+      wrong_guard_group: 'Mint phase mismatch — the on-chain mint used a different phase. Refresh and try again.',
 
     }
 
@@ -186,17 +203,22 @@ export async function POST(request: NextRequest) {
 
 
 
-  const eligibilityPre = await buildGen2Eligibility(wallet)
+  // Coarse gate: the requested phase must be live right now (primary active_phase, an admin-toggled
+  // concurrent phase, or the Gen1 7-day window). Replaces the legacy single-active_phase check so
+  // wallets can mint in any concurrently-open phase.
+  if (!getLivePhases(launch).has(phase)) {
+
+    return NextResponse.json({ error: 'That phase is not live — refresh and try again' }, { status: 400 })
+
+  }
+
+  // Fine gate: evaluate eligibility for THAT specific phase (not just the primary active_phase).
+
+  const eligibilityPre = await buildGen2Eligibility(wallet, phase)
 
   if (!eligibilityPre) {
 
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
-
-  }
-
-  if (eligibilityPre.active_phase !== phase) {
-
-    return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
 
   }
 

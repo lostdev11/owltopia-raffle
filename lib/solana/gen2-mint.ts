@@ -318,14 +318,14 @@ function base64ToUint8(b64: string): Uint8Array {
 async function cosignGatedMintTransactions(
   umi: ReturnType<typeof createOwlCenterUmi>,
   signedTransactions: Transaction[],
-  args: { wallet: string; network: OwlMintNetwork }
+  args: { wallet: string; network: OwlMintNetwork; phase: OwlCenterPhase }
 ): Promise<{ ok: true; transactions: Transaction[] } | { ok: false; error: string }> {
   try {
     const payload = signedTransactions.map((tx) => uint8ToBase64(umi.transactions.serialize(tx)))
     const res = await fetch('/api/owl-center/gen2/cosign-mint', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet: args.wallet, network: args.network, transactions: payload }),
+      body: JSON.stringify({ wallet: args.wallet, network: args.network, phase: args.phase, transactions: payload }),
     })
     const body = (await res.json().catch(() => null)) as
       | { ok?: boolean; transactions?: string[]; error?: string }
@@ -649,6 +649,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       const cosignRes = await cosignGatedMintTransactions(umi, signedTransactions, {
         wallet: walletB58,
         network,
+        phase,
       })
       if (!cosignRes.ok) {
         return { ok: false, error: cosignRes.error, plannedMintB58s: plannedB58s }

@@ -8,6 +8,7 @@ import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { gen2GuardGroupLabel, type Gen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { createGen2CosignerSigner, isGen2CosignerConfigured } from '@/lib/solana/gen2-cosigner'
+import { getLivePhases } from '@/lib/owl-center/phase-schedule'
 import { getGen2CandyMachineId, getSolanaRpcUrl, isDevnetMintEnabled } from '@/lib/solana/network'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Mint co-signer not configured' }, { status: 503 })
   }
 
-  let body: { wallet?: string; transactions?: unknown }
+  let body: { wallet?: string; transactions?: unknown; phase?: string }
   try {
     body = await request.json()
   } catch {
@@ -130,6 +131,15 @@ export async function POST(request: NextRequest) {
   if (!wallet) {
     return NextResponse.json({ error: 'Invalid wallet' }, { status: 400 })
   }
+
+  // Optional explicit phase (sent when multiple phases are live concurrently). Validated below
+  // against the live set + per-phase eligibility. Falls back to the primary active_phase when absent.
+  const requestedPhaseRaw = body.phase?.trim().toUpperCase()
+  const MINTABLE_PHASES: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC']
+  const requestedPhase =
+    requestedPhaseRaw && MINTABLE_PHASES.includes(requestedPhaseRaw as OwlCenterPhase)
+      ? (requestedPhaseRaw as OwlCenterPhase)
+      : undefined
 
   const txsB64 = Array.isArray(body.transactions)
     ? body.transactions.filter((t): t is string => typeof t === 'string' && t.length > 0)
@@ -151,12 +161,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing Candy Machine ID' }, { status: 400 })
   }
 
-  // The active phase (server-authoritative) decides eligibility + whether co-signing applies.
-  const eligibility = await buildGen2Eligibility(wallet)
+  // Server-authoritative phase: the requested phase (when sent) must be live; otherwise fall back
+  // to the primary active_phase. Eligibility is then computed for THAT exact phase.
+  const eligibility = await buildGen2Eligibility(wallet, requestedPhase)
   if (!eligibility) {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }
   const phase = eligibility.active_phase
+  if (!getLivePhases(launch).has(phase)) {
+    return NextResponse.json({ error: 'That phase is not live' }, { status: 400 })
+  }
   if (!COSIGNED_PHASES.includes(phase)) {
     return NextResponse.json({ error: 'Co-sign not required for this phase' }, { status: 400 })
   }

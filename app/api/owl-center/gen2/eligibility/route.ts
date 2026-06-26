@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
+import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
+
+const MINTABLE_PHASES: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC']
+
+/** Optional explicit phase — when multiple phases are live, eligibility is computed for this one. */
+function parsePhase(raw: string | null | undefined): OwlCenterPhase | undefined {
+  const p = raw?.trim().toUpperCase()
+  return p && MINTABLE_PHASES.includes(p as OwlCenterPhase) ? (p as OwlCenterPhase) : undefined
+}
 
 function walletFromRequest(request: NextRequest): string | null {
   const q = request.nextUrl.searchParams.get('wallet')?.trim()
@@ -20,7 +29,8 @@ export async function GET(request: NextRequest) {
   }
 
   const wallet = walletFromRequest(request)
-  const payload = await buildGen2Eligibility(wallet)
+  const phase = parsePhase(request.nextUrl.searchParams.get('phase'))
+  const payload = await buildGen2Eligibility(wallet, phase)
   if (!payload) {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }
@@ -35,15 +45,17 @@ export async function POST(request: NextRequest) {
   }
 
   let wallet: string | null = null
+  let phase: OwlCenterPhase | undefined
   try {
-    const body = (await request.json()) as { wallet?: string }
+    const body = (await request.json()) as { wallet?: string; phase?: string }
     const w = body.wallet?.trim()
     wallet = w ? normalizeSolanaWalletAddress(w) ?? w : null
+    phase = parsePhase(body.phase)
   } catch {
     wallet = null
   }
 
-  const payload = await buildGen2Eligibility(wallet)
+  const payload = await buildGen2Eligibility(wallet, phase)
   if (!payload) {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }

@@ -19,7 +19,6 @@ const QUICK_LINKS = [
   { href: '/admin/owl-center/gen2#wl-upload', label: 'Upload WL wallets', hint: 'Bulk add collab whitelist' },
   { href: '/admin/owl-center/gen2', label: 'Gen2 console', hint: 'Phases, schedule, CM, WL' },
   { href: '/admin/gen2-presale', label: 'Gen2 presale', hint: 'Credits, gifts, purchases' },
-  { href: '/admin/owl-center/demo', label: 'Demo launchpad', hint: 'Partner-style public mint' },
   { href: '/owl-center/generator', label: 'Generator', hint: 'Traits & Sugar export' },
   { href: '/owl-center/launch', label: 'Review queue', hint: 'Creator submissions' },
   { href: '/admin/owl-center/marketplaces', label: 'Marketplaces', hint: 'ME / Tensor readiness' },

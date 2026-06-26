@@ -16,7 +16,6 @@
     "generate:funds-escrow-key": "node scripts/generate-funds-escrow-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
     "mint:devnet-nft": "node scripts/mint-devnet-nft.mjs",
-    "prepare:owl-center-demo": "node scripts/prepare-owl-center-demo-collection.mjs",
     "prepare:sugar-deploy": "node --env-file=.env.local scripts/prepare-sugar-deploy-from-launch.mjs",
     "sugar:deploy": "node --env-file=.env.local scripts/sugar-deploy-collection.mjs",
     "sugar:sync-ids": "node --env-file=.env.local scripts/sugar-sync-ids-to-owl-center.mjs",

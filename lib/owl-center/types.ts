@@ -81,6 +81,8 @@ export type OwlCenterLaunchPublic = {
   total_supply: number
   minted_count: number
   active_phase: OwlCenterPhase
+  /** Extra phases live concurrently with active_phase (empty = legacy single-phase behavior). */
+  active_phases: OwlCenterPhase[]
   status: OwlCenterStatus
   presale_supply: number
   wl_supply: number
