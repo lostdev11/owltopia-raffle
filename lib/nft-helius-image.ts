@@ -32,8 +32,13 @@ export function pickImageFromHeliusAsset(result: unknown): string | null {
 
   const files = content.files as Array<{ uri?: string; cdn_uri?: string }> | undefined
   const first = files?.[0]
-  const fromFile = first?.uri ?? first?.cdn_uri
-  if (typeof fromFile === 'string' && fromFile.trim()) return fromFile.trim()
+  // Prefer Helius' CDN copy (Cloudflare-backed) over the raw Arweave/Irys gateway URL.
+  // gateway.irys.xyz frequently RSTs and arweave.net mirrors often return an app shell,
+  // which leaves minted-owl cards stuck on the placeholder; the CDN copy resolves reliably.
+  const cdn = first?.cdn_uri?.trim()
+  const direct = first?.uri?.trim()
+  if (cdn) return cdn
+  if (direct) return direct
 
   const metadata = content.metadata as Record<string, unknown> | undefined
 

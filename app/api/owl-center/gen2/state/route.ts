@@ -4,6 +4,7 @@ import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { getPresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
+import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
 import { listGen2PresaleParticipants } from '@/lib/gen2-presale/db'
@@ -71,8 +72,13 @@ export async function GET(request: NextRequest) {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 50)
 
-  const remaining = Math.max(0, launch.total_supply - launch.minted_count)
-  const pct = launch.total_supply > 0 ? (launch.minted_count / launch.total_supply) * 100 : 0
+  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  // Source of truth = recorded mint events. Self-heals the stored counter if it has
+  // drifted (e.g. emergency override or devnet test mints) so the supply always matches.
+  const minted = await reconcileLaunchMintedCount(launch.id, network)
+  launch.minted_count = minted
+  const remaining = Math.max(0, launch.total_supply - minted)
+  const pct = launch.total_supply > 0 ? (minted / launch.total_supply) * 100 : 0
 
   const { data: mpRow } = await db
     .from('owl_center_marketplace_readiness')
@@ -81,8 +87,6 @@ export async function GET(request: NextRequest) {
     .maybeSingle()
 
   const mp = mpRow as { trading_links_active?: boolean; magic_eden_url?: string | null; tensor_url?: string | null } | null
-
-  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const [presale_pool, presale_participants, presaleStats, prices_lamports] = await Promise.all([
     getPresaleMintPoolSnapshot(launch.id, launch.presale_supply, launch.presale_overage_supply ?? 13, network, {
       slug: 'gen2',
@@ -105,7 +109,7 @@ export async function GET(request: NextRequest) {
     },
     supply: {
       total: launch.total_supply,
-      minted: launch.minted_count,
+      minted,
       remaining,
       percent_minted: pct,
     },

@@ -55,6 +55,7 @@ export default function AdminOwlCenterPage() {
   const [status, setStatus] = useState<string>('PRESALE')
   const [paused, setPaused] = useState(false)
   const [mintedOverride, setMintedOverride] = useState('')
+  const [loadedMintedCount, setLoadedMintedCount] = useState('')
   const [giftWallet, setGiftWallet] = useState('')
   const [giftQty, setGiftQty] = useState(1)
 
@@ -96,6 +97,7 @@ export default function AdminOwlCenterPage() {
       setStatus(L.status)
       setPaused(L.is_paused)
       setMintedOverride(String(L.minted_count))
+      setLoadedMintedCount(String(L.minted_count))
       setMintStartsAt(isoToDatetimeLocal(L.launch_deadline_at))
       setPhaseSchedule(L.phase_schedule ?? {})
     } catch (e) {
@@ -147,7 +149,10 @@ export default function AdminOwlCenterPage() {
         magic_eden_url: me.trim() || null,
         tensor_url: tensor.trim() || null,
       }
-      if (mintedOverride.trim() !== '') {
+      // Only send minted_count when the admin actually edited the emergency field.
+      // The field is prefilled from the live counter, so blindly sending it on every
+      // save would clobber mint increments that landed after the page was loaded.
+      if (mintedOverride.trim() !== '' && mintedOverride.trim() !== loadedMintedCount.trim()) {
         const mo = Number(mintedOverride)
         if (Number.isInteger(mo)) body.minted_count = mo
       }
@@ -594,6 +599,7 @@ export default function AdminOwlCenterPage() {
               />
             </CommandCard>
 
+            {isDevnetMintEnabled() ? (
             <CommandCard label="gen2_devnet_test.sys">
               <p className="mb-4 text-sm text-[#9BA8B4]">
                 Isolated devnet CM proof — uses{' '}
@@ -712,8 +718,9 @@ export default function AdminOwlCenterPage() {
                 </ul>
               ) : null}
             </CommandCard>
+            ) : null}
 
-            <Gen2DevnetMintChecklist launch={state.launch} />
+            {isDevnetMintEnabled() ? <Gen2DevnetMintChecklist launch={state.launch} /> : null}
 
             <CommandCard label="gift_presale.sys">
               <p className="mb-3 text-xs text-[#9BA8B4]">Uses audited gift RPC (actor wallet recorded).</p>
