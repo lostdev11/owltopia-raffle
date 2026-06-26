@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
+import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { getPresaleMintPoolSnapshot } from '@/lib/owl-center/presale-mint-pool'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const db = getSupabaseAdmin()
-  const [mintRows, logRows] = await Promise.all([
+  const [mintRows, logRows, minted_mints] = await Promise.all([
     db
       .from('owl_center_mint_events')
       .select('id,wallet_address,quantity,phase,tx_signature,network,created_at')
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
       .eq('launch_id', launch.id)
       .order('created_at', { ascending: false })
       .limit(25),
+    collectMintedNftMintsForLaunch(launch.id),
   ])
 
   const mintLines: MintTerminalLine[] = (mintRows.data ?? []).map((r) => {
@@ -122,6 +124,8 @@ export async function GET(request: NextRequest) {
     presale_pool,
     presale_sold_out,
     presale_participant_count: presale_participants.length,
+    minted_mints,
+    mint_network: network,
     terminal,
   })
 }

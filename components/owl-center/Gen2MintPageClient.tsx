@@ -16,6 +16,8 @@ import { HeroVideoBackground } from '@/components/HeroVideoBackground'
 
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 
+import { CollectionMintedGrid } from '@/components/owl-center/CollectionMintedGrid'
+
 import { CommandCard } from '@/components/owl-center/CommandCard'
 
 import { Gen2MintCheckCard } from '@/components/owl-center/Gen2MintCheckCard'
@@ -94,6 +96,10 @@ type Gen2StateApi = {
   presale_sold_out?: boolean
 
   mint_controls?: OwlCenterMintControls
+
+  minted_mints?: string[]
+
+  mint_network?: 'mainnet' | 'devnet'
 
   terminal: MintTerminalLine[]
 
@@ -245,6 +251,8 @@ export function Gen2MintPageClient() {
 
 
   const { launch, supply, terminal, mint_controls } = state
+  const mintedMints = state.minted_mints ?? []
+  const preferMainnet = state.mint_network ? state.mint_network === 'mainnet' : !isDevnetMintEnabled()
   const mintCountdown = getMintCountdownInfo(launch)
   const mintControls: OwlCenterMintControls = mint_controls ?? {
     disabled: launch.is_paused,
@@ -519,6 +527,33 @@ export function Gen2MintPageClient() {
           </div>
 
         ) : null}
+
+      </section>
+
+
+
+      <section className="mb-12 space-y-4">
+
+        <SectionHeading
+          id="minted"
+          title="Minted owls"
+          hint={
+            mintedMints.length
+              ? 'Owls already minted from this drop. New owls appear here after confirm-mint records the tx.'
+              : 'Minted owls will appear here once the first mints are confirmed on-chain.'
+          }
+        />
+
+        {mintedMints.length ? (
+          <CollectionMintedGrid mints={mintedMints} preferMainnet={preferMainnet} />
+        ) : (
+          <CommandCard label="MINTED // 0">
+            <p className="text-sm leading-relaxed text-[#9BA8B4]">
+              No owls minted yet. Once minting opens and the first transactions confirm, the minted owls will show up
+              here.
+            </p>
+          </CommandCard>
+        )}
 
       </section>
 
