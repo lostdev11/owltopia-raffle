@@ -488,16 +488,26 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       )
     }
 
-    if (collectPlatformMintFee && platformFeeLamports > 0n) {
-      const totalFee = platformFeeLamports * BigInt(quantity)
-      const needed = totalFee + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(quantity)
+    // The wallet must cover the on-chain mint PRICE (candy-guard solPayment/freeze, e.g. WL/public)
+    // in ADDITION to the platform fee + rent. Checking only the fee let under-funded WL/public
+    // wallets sign a mint that bot-taxes — charging the platform fee + bot tax while never taking the
+    // mint price or minting an NFT. Include the price so we fail fast with a clear message instead.
+    const mintPriceLamports = plan.mintPriceLamports > 0n ? plan.mintPriceLamports : 0n
+    if ((collectPlatformMintFee && platformFeeLamports > 0n) || mintPriceLamports > 0n) {
+      const totalFee = collectPlatformMintFee ? platformFeeLamports * BigInt(quantity) : 0n
+      const totalPrice = mintPriceLamports * BigInt(quantity)
+      const needed =
+        totalFee + totalPrice + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(quantity)
       if (prefetchedWalletBalanceLamports != null) {
         if (prefetchedWalletBalanceLamports < needed) {
+          const priceSol = Number(totalPrice) / 1_000_000_000
           const feeSol = Number(totalFee) / 1_000_000_000
           const haveSol = Number(prefetchedWalletBalanceLamports) / 1_000_000_000
+          const needSol = priceSol + feeSol + 0.02 * quantity
+          const priceCopy = priceSol > 0 ? `the ${priceSol.toFixed(3)} SOL mint price plus ` : ''
           return {
             ok: false,
-            error: `Not enough SOL — need ~${(feeSol + 0.02 * quantity).toFixed(3)} SOL for ${quantity} mint${quantity === 1 ? '' : 's'} (you have ~${haveSol.toFixed(3)} SOL).`,
+            error: `Not enough SOL — need ~${needSol.toFixed(3)} SOL for ${priceCopy}fees on ${quantity} mint${quantity === 1 ? '' : 's'} (you have ~${haveSol.toFixed(3)} SOL).`,
           }
         }
       } else {
@@ -510,7 +520,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
                 platformFeeLamports,
                 getLaunchSolanaRpcUrl(network),
                 quantity,
-                prefetchedWalletBalanceLamports
+                prefetchedWalletBalanceLamports,
+                mintPriceLamports
               ),
             MINT_SOLANA_RPC_RETRY
           ).then((feeBal) => {

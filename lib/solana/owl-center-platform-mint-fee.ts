@@ -50,38 +50,50 @@ export function appendOwlCenterPlatformMintFeeSol(
   return { ok: true, builder: next }
 }
 
-/** Fail fast before wallet simulation when platform SOL fee + mint rent cannot be paid. */
+/**
+ * Fail fast before wallet simulation when the platform SOL fee + mint rent + the on-chain mint
+ * PRICE cannot be paid. `mintPriceLamportsPerNft` is the candy-guard `solPayment` (+ any
+ * `freezeSolPayment` deposit) for the active phase — 0 for free phases. Omitting it would let an
+ * under-funded WL/public wallet sign a mint that bot-taxes (platform fee + bot tax charged, no NFT,
+ * mint price never taken), which is exactly the "charged fees but got nothing" failure.
+ */
 export async function assertOwlCenterPlatformMintFeeSolBalance(
   wallet: string,
   network: OwlMintNetwork,
   feeLamports: bigint,
   rpcUrl?: string,
   mintQuantity = 1,
-  prefetchedBalanceLamports?: bigint | null
+  prefetchedBalanceLamports?: bigint | null,
+  mintPriceLamportsPerNft: bigint = 0n
 ): Promise<{ ok: true; balance: bigint } | { ok: false; error: string; balance: bigint }> {
-  if (!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) {
+  const pricePerNft = mintPriceLamportsPerNft > 0n ? mintPriceLamportsPerNft : 0n
+  if ((!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) && pricePerNft <= 0n) {
     return { ok: true, balance: prefetchedBalanceLamports ?? 0n }
   }
 
   const qty = Math.max(1, Math.floor(mintQuantity))
-  const totalFee = feeLamports * BigInt(qty)
+  const feeEnabled = isOwlCenterPlatformMintFeeEnabled() && feeLamports > 0n
+  const totalFee = feeEnabled ? feeLamports * BigInt(qty) : 0n
+  const totalPrice = pricePerNft * BigInt(qty)
 
   try {
     const owner = new PublicKey(wallet)
     const conn = new Connection(rpcUrl?.trim() || getLaunchSolanaRpcUrl(network), 'confirmed')
     const balance =
       prefetchedBalanceLamports ?? BigInt(await conn.getBalance(owner, 'confirmed'))
-    const needed = totalFee + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(qty)
+    const needed = totalFee + totalPrice + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(qty)
     if (balance < needed) {
+      const priceSol = Number(totalPrice) / LAMPORTS_PER_SOL
       const feeSol = Number(totalFee) / LAMPORTS_PER_SOL
       const reserveSol = (Number(OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS) * qty) / LAMPORTS_PER_SOL
       const haveSol = Number(balance) / LAMPORTS_PER_SOL
       const usd = owlCenterPlatformMintFeeUsd()
       const perNft = qty > 1 ? ` (${qty} NFTs)` : ''
+      const priceCopy = priceSol > 0 ? `the ${priceSol.toFixed(3)} SOL mint price${perNft}, ` : ''
       return {
         ok: false,
         balance,
-        error: `Need ~${(feeSol + reserveSol).toFixed(3)} SOL for the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${perNft} and rent (your wallet has ~${haveSol.toFixed(3)} SOL).`,
+        error: `Need ~${(priceSol + feeSol + reserveSol).toFixed(3)} SOL for ${priceCopy}the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${priceSol > 0 ? '' : perNft} and rent (your wallet has ~${haveSol.toFixed(3)} SOL).`,
       }
     }
     return { ok: true, balance }

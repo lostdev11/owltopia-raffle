@@ -15,7 +15,7 @@ import {
   owlCenterPhaseLabel,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
-import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
+import { finalizeMintSessionOptimistic, isHardMintConfirmFailure } from '@/lib/owl-center/mint-finalize-client'
 import {
   attemptOwlCenterMintRecovery,
   isLikelyWalletMintDisconnectError,
@@ -24,6 +24,7 @@ import { recordMintSessionConfirms, type MintConfirmBatchPayload } from '@/lib/o
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import {
   createMintSessionDeadline,
+  mintConfirmBackgroundBudgetMs,
   MINT_SESSION_OUTER_MAX_MS,
   MintSessionTimeoutError,
   raceMintSessionBudget,
@@ -188,24 +189,65 @@ export function Gen2MintPanel({
 
       setStep('recording_mint')
       setMintProgress({ current: 0, total: 1, phase: 'record' })
-      const recorded = await recordMintSessionConfirms(
-        sigs,
-        mintPks,
-        (payload) => postGen2Confirm(payload, phaseForConfirm),
-        () => setMintProgress({ current: 1, total: 1, phase: 'record' })
-      )
-      const count = recorded.confirmedCount || mintPks.length || 1
-      setLastSig(recorded.lastSig ?? sigs[sigs.length - 1] ?? null)
-      setMintedAddresses(mintPks.length ? mintPks : [])
-      setMintedCount(count)
-      setErr(null)
-      setMintProgress(null)
-      setStep('success')
-      // Debit locally so the Mint button reflects the recovered mint immediately.
-      applyMinted(count)
-      onRefresh()
-      void loadElig({ background: true })
-      return true
+      try {
+        // The scan can surface a bot-tax tx (touched the Candy Machine, minted nothing) — the
+        // confirm route proves no NFT and rejects it, which used to throw here with the overlay
+        // still on `recording_mint`, hanging forever on "Saving your mint…". Bound the confirm with
+        // a budget and always resolve to a terminal step (success or error) below.
+        const recordDeadline = createMintSessionDeadline(mintConfirmBackgroundBudgetMs(sigs.length))
+        const recorded = await raceMintSessionBudget(
+          recordDeadline,
+          recordMintSessionConfirms(
+            sigs,
+            mintPks,
+            (payload) => postGen2Confirm(payload, phaseForConfirm),
+            () => setMintProgress({ current: 1, total: 1, phase: 'record' })
+          ),
+          'Saving mint timed out'
+        )
+        const count = recorded.confirmedCount || mintPks.length || 1
+        setLastSig(recorded.lastSig ?? sigs[sigs.length - 1] ?? null)
+        setMintedAddresses(mintPks.length ? mintPks : [])
+        setMintedCount(count)
+        setErr(null)
+        setMintProgress(null)
+        setStep('success')
+        // Debit locally so the Mint button reflects the recovered mint immediately.
+        applyMinted(count)
+        onRefresh()
+        void loadElig({ background: true })
+        return true
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setMintProgress(null)
+        // Hard failure (server verify proved no NFT minted) OR nothing concrete to show: the scan
+        // matched a bot-tax / fees-only tx. Clear the overlay and tell the user only fees were
+        // charged so they can retry — never leave them stuck on "Saving your mint…".
+        if (isHardMintConfirmFailure(msg) || mintPks.length === 0) {
+          setMintedAddresses([])
+          setMintedCount(0)
+          setLastSig(null)
+          setErr(
+            isHardMintConfirmFailure(msg)
+              ? 'That didn’t go through — no NFT was minted (you were only charged the network + platform fee, not the mint price). Your allocation is intact; tap Mint to try again.'
+              : 'Couldn’t confirm a mint — check Collectibles in your wallet, then tap Mint to try again if it isn’t there.'
+          )
+          setStep('error')
+          void loadElig()
+          return false
+        }
+        // Soft failure (RPC lag / save timeout) but an NFT WAS detected on-chain — keep the win and
+        // let the unload beacon + reconcile cron persist it to the DB.
+        setLastSig(sigs[sigs.length - 1] ?? null)
+        setMintedAddresses(mintPks)
+        setMintedCount(mintPks.length || 1)
+        setErr(null)
+        setStep('success')
+        applyMinted(mintPks.length || 1)
+        onRefresh()
+        void loadElig({ background: true })
+        return true
+      }
     },
     [walletStr, elig?.active_phase, postGen2Confirm, applyMinted, onRefresh, loadElig]
   )
@@ -701,7 +743,7 @@ export function Gen2MintPanel({
                         {owlCenterPhaseLabel(p.phase)}
                       </span>
                       <span className="font-mono text-[10px] tracking-wide">
-                        {p.price_usdc && p.price_usdc > 0 ? `$${p.price_usdc}` : 'Free'} · up to {p.max_mintable}
+                        {p.price_usdc && p.price_usdc > 0 ? `$${p.price_usdc} + fees` : 'Free + fees'} · up to {p.max_mintable}
                       </span>
                     </button>
                   )
@@ -755,7 +797,8 @@ export function Gen2MintPanel({
           ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: approve once to mint your selected quantity.
+            Phantom / Solflare: approve once to mint your selected quantity. Mint price is shown in
+            USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
           </p>
         </div>
     </MintPanelShell>

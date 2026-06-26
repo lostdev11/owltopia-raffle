@@ -75,6 +75,13 @@ export type Gen2GuardMintPlan = {
   /** Group label to pass to `mintV2` / `route`; null = default guard set. */
   groupLabel: string | null
   mintArgs: Partial<DefaultGuardSetMintArgs>
+  /**
+   * Total enforced SOL the wallet pays the candy guard per NFT (lamports): `solPayment` price plus
+   * any `freezeSolPayment` deposit. Free phases are 0. Used to size the pre-sign balance check so an
+   * under-funded WL/public mint is blocked BEFORE signing instead of bot-taxing (fees charged, no
+   * NFT, mint price never taken).
+   */
+  mintPriceLamports: bigint
   /** Set when the resolved guard set has an allowList — caller must ensure the proof PDA first. */
   allowListMerkleRoot: Uint8Array | null
   /**
@@ -169,6 +176,7 @@ export async function buildGen2GuardMintPlan(
   const mintArgs: Partial<DefaultGuardSetMintArgs> = {}
   let allowListMerkleRoot: Uint8Array | null = null
   let thirdPartySignerKey: string | null = null
+  let mintPriceLamports = 0n
 
   if (isSome(guards.thirdPartySigner)) {
     // Placeholder signer reserves the co-signer's signature slot; the server fills it in the
@@ -179,9 +187,11 @@ export async function buildGen2GuardMintPlan(
   }
   if (isSome(guards.solPayment)) {
     mintArgs.solPayment = some({ destination: guards.solPayment.value.destination })
+    mintPriceLamports += guards.solPayment.value.lamports.basisPoints
   }
   if (isSome(guards.freezeSolPayment)) {
     mintArgs.freezeSolPayment = some({ destination: guards.freezeSolPayment.value.destination })
+    mintPriceLamports += guards.freezeSolPayment.value.lamports.basisPoints
   }
   if (isSome(guards.mintLimit)) {
     mintArgs.mintLimit = some({ id: guards.mintLimit.value.id })
@@ -194,7 +204,7 @@ export async function buildGen2GuardMintPlan(
 
   return {
     ok: true,
-    plan: { candyMachine, candyGuard, groupLabel, mintArgs, allowListMerkleRoot, thirdPartySignerKey },
+    plan: { candyMachine, candyGuard, groupLabel, mintArgs, mintPriceLamports, allowListMerkleRoot, thirdPartySignerKey },
   }
 }
 
