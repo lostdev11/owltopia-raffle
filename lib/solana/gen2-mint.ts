@@ -540,25 +540,37 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     // the wallet's signAllTransactions is invoked once).
     const includeAllowListRoute = allowListRoutePlan.includeRoute && Boolean(plan.candyGuard)
 
-    const buildSingleMintBuilder = (
-      nftMint: (typeof nftMints)[number],
-      withRoute: boolean
-    ): { ok: true; builder: TransactionBuilder } | { ok: false; error: string } => {
-      const routeInThisTx = withRoute && includeAllowListRoute
-      let builder = transactionBuilder().add(
-        setComputeUnitLimit(umi, { units: computeUnitsForBatch(1, routeInThisTx) })
-      )
+    // A single `mintV2` already nearly fills the 1232-byte legacy tx limit. The allowList `route`
+    // (proof) instruction carries the wallet's merkle proof, whose node count VARIES per wallet (the
+    // snapshot is not a power of two), so batching it into the mint tx pushes longer-proof wallets
+    // over the size limit ("transaction too large"). Send the proof as its OWN tx that lands first
+    // (creating the proof PDA); every `mintV2` tx then stays small and fits for all wallets/proofs.
+    const buildRouteBuilder = (): { ok: true; builder: TransactionBuilder } | { ok: false; error: string } => {
+      if (!allowListRoutePlan.includeRoute || !plan.candyGuard) {
+        return { ok: false, error: 'Allowlist proof unavailable — refresh and try again.' }
+      }
+      let builder = transactionBuilder().add(setComputeUnitLimit(umi, { units: 200_000 }))
       if (priorityFee > 0) {
         builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
-      if (routeInThisTx && allowListRoutePlan.includeRoute && plan.candyGuard) {
-        builder = appendGen2AllowListRouteInstruction(umi, builder, {
-          candyMachine,
-          candyGuard: plan.candyGuard.publicKey,
-          groupLabel: plan.groupLabel,
-          merkleRoot: allowListRoutePlan.merkleRoot,
-          merkleProof: allowListRoutePlan.merkleProof,
-        })
+      builder = appendGen2AllowListRouteInstruction(umi, builder, {
+        candyMachine,
+        candyGuard: plan.candyGuard.publicKey,
+        groupLabel: plan.groupLabel,
+        merkleRoot: allowListRoutePlan.merkleRoot,
+        merkleProof: allowListRoutePlan.merkleProof,
+      })
+      return { ok: true, builder }
+    }
+
+    const buildSingleMintBuilder = (
+      nftMint: (typeof nftMints)[number]
+    ): { ok: true; builder: TransactionBuilder } | { ok: false; error: string } => {
+      let builder = transactionBuilder().add(
+        setComputeUnitLimit(umi, { units: computeUnitsForBatch(1, false) })
+      )
+      if (priorityFee > 0) {
+        builder = builder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
       }
       if (collectPlatformMintFee && platformFeeLamports > 0n) {
         const feeRes = appendOwlCenterPlatformMintFeeSol(umi, platformFeeLamports, builder)
@@ -581,28 +593,45 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       return { ok: true, builder }
     }
 
+    let routeBuilder: TransactionBuilder | null = null
+    if (includeAllowListRoute) {
+      const routeRes = buildRouteBuilder()
+      if (!routeRes.ok) return { ok: false, error: routeRes.error }
+      routeBuilder = routeRes.builder
+    }
+
     const builders: TransactionBuilder[] = []
     for (let i = 0; i < quantity; i++) {
-      // The allowlist `route` proof PDA only needs creating once, so it rides in the first tx.
-      const res = buildSingleMintBuilder(nftMints[i]!, i === 0)
+      const res = buildSingleMintBuilder(nftMints[i]!)
       if (!res.ok) return { ok: false, error: res.error }
       builders.push(res.builder)
     }
 
     onMintProgress?.(quantity, quantity)
     pauseMintSessionDeadline(sessionDeadline)
+    // The optional allowList proof tx (if any) is signed in the SAME wallet prompt as the mints —
+    // UMI's signAllTransactions invokes the wallet once — then split out so it can be sent first and
+    // kept OUT of the co-sign round-trip (the cosign endpoint requires exactly one mintV2 per tx).
+    let routeSignedTx: Transaction | null = null
     let signedTransactions: Transaction[]
     try {
       const blockhash = await withSolanaRpcRetry(
         () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
         MINT_SOLANA_SEND_RETRY
       )
-      const toSign = builders.map((b) => {
+      const orderedBuilders = routeBuilder ? [routeBuilder, ...builders] : builders
+      const toSign = orderedBuilders.map((b) => {
         const withBlockhash = b.setBlockhash(blockhash)
         return { transaction: withBlockhash.build(umi), signers: withBlockhash.getSigners(umi) }
       })
-      signedTransactions = await signAllTransactions(toSign)
+      const signed = await signAllTransactions(toSign)
       resumeMintSessionDeadline(sessionDeadline)
+      if (routeBuilder) {
+        routeSignedTx = signed[0]!
+        signedTransactions = signed.slice(1)
+      } else {
+        signedTransactions = signed
+      }
     } catch (e) {
       resumeMintSessionDeadline(sessionDeadline)
       const msg = e instanceof Error ? e.message : String(e)
@@ -614,7 +643,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     }
 
     // Free phases (gen1/presale) require a server co-signature (thirdPartySigner) gated on remaining
-    // credits — round the wallet-signed txs through the co-sign endpoint before sending.
+    // credits — round the wallet-signed mint txs through the co-sign endpoint before sending. The
+    // allowList proof tx is NOT co-signed (it carries no mintV2).
     if (plan.thirdPartySignerKey) {
       const cosignRes = await cosignGatedMintTransactions(umi, signedTransactions, {
         wallet: walletB58,
@@ -653,21 +683,28 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(quantity)
-    if (includeAllowListRoute) {
-      // The first tx creates the allowlist proof PDA; the rest depend on it, so it must land
-      // before they are sent.
-      sendResults[0] = await sendOneMint(signedTransactions[0]!)
-      const rest = await Promise.all(signedTransactions.slice(1).map((tx) => sendOneMint(tx)))
-      rest.forEach((r, i) => {
-        sendResults[i + 1] = r
-      })
-    } else {
-      const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
-      all.forEach((r, i) => {
-        sendResults[i] = r
-      })
+    // The allowList proof tx creates the PDA that every mintV2 reads, so it must land FIRST. Send
+    // it on its own and confirm before the mints. If it doesn't confirm, bail with a retry hint —
+    // a retry will see the PDA exists (or not) and rebuild accordingly; no mints are at risk yet.
+    if (routeSignedTx) {
+      const routeResult = await sendOneMint(routeSignedTx)
+      if (!routeResult.confirmed) {
+        return {
+          ok: false,
+          error:
+            isBlockhashExpiredError(firstSendError)
+              ? friendlyBlockhashExpiredError()
+              : 'Allowlist setup didn’t confirm — tap Mint again to finish (your spots are still reserved).',
+          plannedMintB58s: plannedB58s,
+        }
+      }
     }
+
+    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(quantity)
+    const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
+    all.forEach((r, i) => {
+      sendResults[i] = r
+    })
 
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []
