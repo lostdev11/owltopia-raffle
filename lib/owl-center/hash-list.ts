@@ -5,13 +5,24 @@ import type { OwlMintNetwork } from '@/lib/solana/network'
 /** Collect unique minted NFT addresses from owl_center_mint_events for a launch. */
 export async function collectMintedNftMintsForLaunch(launchId: string): Promise<string[]> {
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('owl_center_mint_events')
-    .select('minted_nft_mints, tx_signature, network')
-    .eq('launch_id', launchId)
-    .order('created_at', { ascending: true })
-
-  if (error || !data) return []
+  // Paginate past PostgREST's 1000-row default cap so the hash list still covers every mint event
+  // once the collection exceeds 1000 recorded mints.
+  const pageSize = 1000
+  let from = 0
+  const data: Array<Record<string, unknown>> = []
+  for (;;) {
+    const { data: rows, error } = await db
+      .from('owl_center_mint_events')
+      .select('minted_nft_mints, tx_signature, network')
+      .eq('launch_id', launchId)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) return []
+    const batch = rows ?? []
+    data.push(...(batch as Array<Record<string, unknown>>))
+    if (batch.length < pageSize) break
+    from += pageSize
+  }
 
   const seen = new Set<string>()
   const out: string[] = []
@@ -61,15 +72,25 @@ export async function collectMintedNftMintsForWallets(
   if (!walletList.length) return []
 
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('owl_center_mint_events')
-    .select('minted_nft_mints, tx_signature, network')
-    .eq('launch_id', launchId)
-    .eq('network', network)
-    .in('wallet_address', walletList)
-    .order('created_at', { ascending: false })
-
-  if (error || !data) return []
+  // Paginate past PostgREST's 1000-row default cap so a large cluster's mints aren't truncated.
+  const pageSize = 1000
+  let from = 0
+  const data: Array<Record<string, unknown>> = []
+  for (;;) {
+    const { data: rows, error } = await db
+      .from('owl_center_mint_events')
+      .select('minted_nft_mints, tx_signature, network')
+      .eq('launch_id', launchId)
+      .eq('network', network)
+      .in('wallet_address', walletList)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1)
+    if (error) return []
+    const batch = rows ?? []
+    data.push(...(batch as Array<Record<string, unknown>>))
+    if (batch.length < pageSize) break
+    from += pageSize
+  }
 
   const seen = new Set<string>()
   const out: string[] = []

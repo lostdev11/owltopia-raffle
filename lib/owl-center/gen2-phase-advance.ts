@@ -21,12 +21,14 @@ const TERMINAL_PHASES: ReadonlySet<OwlCenterPhase> = new Set(['SOLD_OUT', 'TRADI
  * - 16:00–16:25 AIRDROP (Gen1, free)        — 25-min self-mint window or sellout
  * - 16:25–16:50 PRESALE (free, prepaid)      — 25-min self-mint window or sellout
  * - 16:50–17:00 PRESALE_OVERAGE (free, +13)  — 10-min self-mint window or sellout
- * - 17:00–18:00 WHITELIST ($30)              — opens at +1h floor, 1-hour window or sellout
- * - 18:00+      PUBLIC ($40)                  — opens at +2h floor, absorbs remaining supply
- * The early windows cascade so WHITELIST opens ~17:00 and PUBLIC ~18:00. Sellout advances
- * earlier within the early block, but the WHITELIST/PUBLIC open floors hold those phases to
- * their wall-clock times. Anyone eligible for Gen1/Presale who does not self-mint in their
- * window is handled off-chain by the team's airdrop backstop (mint + send within 7 days).
+ * - 17:00–(+48h) WHITELIST ($30)             — opens at +1h floor, 48-hour window or sellout
+ * - after WL    PUBLIC ($40)                  — opens once WL is done, absorbs leftover WL supply
+ * The early windows cascade so WHITELIST opens ~17:00 and runs 48h; PUBLIC opens when WL sells
+ * out or its 48h window elapses, and its pool absorbs whatever WL left unminted (see
+ * {@link gen2PublicPoolCap}). Sellout advances earlier, but the WHITELIST/PUBLIC open floors hold
+ * those phases to their wall-clock minimums. Anyone eligible for Gen1/Presale who does not
+ * self-mint in their window is handled off-chain by the team's airdrop backstop (mint + send
+ * within 7 days).
  */
 export const GEN2_SEQUENTIAL_PHASES: readonly OwlCenterPhase[] = [
   'AIRDROP',
@@ -39,17 +41,20 @@ export const GEN2_SEQUENTIAL_PHASES: readonly OwlCenterPhase[] = [
 const MINUTE_MS = 60 * 1000
 const ONE_HOUR_MS = 60 * MINUTE_MS
 
+/** WHITELIST stays open for 48 hours (if it never sells out) before its leftover rolls into PUBLIC. */
+const WHITELIST_WINDOW_MS = 48 * ONE_HOUR_MS
+
 /**
  * @deprecated Per-phase windows are now defined by {@link gen2PhaseWindowMs}.
- * Kept as the WHITELIST window length (1h) for back-compat / dashboard hints.
+ * Kept as the WHITELIST window length for back-compat / dashboard hints.
  */
-export const GEN2_PHASE_MAX_DURATION_MS = ONE_HOUR_MS
+export const GEN2_PHASE_MAX_DURATION_MS = WHITELIST_WINDOW_MS
 
 /**
  * How long a phase stays open if it never sells out (fixed clock). The early windows
- * (25 + 25 + 10 = 60 min) cascade so WHITELIST opens ~17:00; WHITELIST runs 1h to ~18:00.
+ * (25 + 25 + 10 = 60 min) cascade so WHITELIST opens ~17:00; WHITELIST then runs 48h.
  * Sellout can advance earlier within the early block, but the WHITELIST/PUBLIC open floors
- * hold those phases to their wall-clock times. PUBLIC/terminal never window-advance here.
+ * hold those phases to their wall-clock minimums. PUBLIC/terminal never window-advance here.
  */
 export function gen2PhaseWindowMs(phase: OwlCenterPhase): number {
   switch (phase) {
@@ -60,7 +65,7 @@ export function gen2PhaseWindowMs(phase: OwlCenterPhase): number {
     case 'PRESALE_OVERAGE':
       return 10 * MINUTE_MS
     case 'WHITELIST':
-      return ONE_HOUR_MS
+      return WHITELIST_WINDOW_MS
     default:
       return Number.POSITIVE_INFINITY
   }
@@ -116,6 +121,50 @@ export function gen2PhasePoolCap(
     default:
       return 0
   }
+}
+
+/** Sequential phases at/after which WHITELIST is considered closed (its leftover may roll into PUBLIC). */
+const GEN2_WHITELIST_CLOSED_PHASES: ReadonlySet<OwlCenterPhase> = new Set([
+  'PUBLIC',
+  'SOLD_OUT',
+  'TRADING_ACTIVE',
+])
+
+/**
+ * True once the sequential timeline has moved past WHITELIST — i.e. WHITELIST has either sold out or
+ * its 48h window elapsed and the launch advanced to PUBLIC (or a terminal phase). Until then, WL is
+ * still its own phase and its unminted spots are NOT rolled into PUBLIC.
+ */
+export function isGen2WhitelistClosed(launch: Pick<OwlCenterLaunchPublic, 'active_phase'>): boolean {
+  return GEN2_WHITELIST_CLOSED_PHASES.has(launch.active_phase)
+}
+
+/**
+ * WL spots that went unminted (`wl_supply − wl_minted`). Per community feedback, WL rarely mints
+ * 100%, so once WL closes (48h window or sellout) its leftover rolls into the PUBLIC pool (see
+ * {@link gen2PublicPoolCap}) instead of being stranded. AIRDROP/PRESALE leftover is intentionally
+ * NOT rolled in — it stays reserved for the team's 7-day airdrop backstop.
+ */
+export function gen2WlLeftoverForPublic(
+  launch: Pick<OwlCenterLaunchPublic, 'wl_supply'>,
+  wlMintedGlobal: number
+): number {
+  return Math.max(0, launch.wl_supply - Math.max(0, wlMintedGlobal))
+}
+
+/**
+ * PUBLIC pool cap = its own `public_supply`, plus whatever WL left unminted ONCE WL has closed
+ * ({@link isGen2WhitelistClosed}). While WHITELIST is still its own live phase the leftover is held
+ * back so PUBLIC buyers cannot take spots out from under WL holders. Still globally bounded by total
+ * supply (`total_supply − minted_count`), enforced by the callers and the confirm-mint RPC.
+ */
+export function gen2PublicPoolCap(
+  launch: Pick<OwlCenterLaunchPublic, 'public_supply' | 'wl_supply' | 'active_phase'>,
+  wlMintedGlobal: number
+): number {
+  const base = Math.max(0, launch.public_supply)
+  if (!isGen2WhitelistClosed(launch)) return base
+  return base + gen2WlLeftoverForPublic(launch, wlMintedGlobal)
 }
 
 /** Maps auto-advanced mint phase → launch status column. */

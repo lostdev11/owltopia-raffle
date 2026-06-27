@@ -91,14 +91,29 @@ export async function sumOwlCenterPhaseMinted(
   network: 'mainnet' | 'devnet'
 ): Promise<number> {
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('owl_center_mint_events')
-    .select('quantity')
-    .eq('launch_id', launchId)
-    .eq('phase', phase)
-    .eq('network', network)
-  if (error) throw new Error(error.message)
-  return (data ?? []).reduce((s, r) => s + Number((r as { quantity?: number }).quantity ?? 0), 0)
+  // Paginate past PostgREST's 1000-row default cap so the per-phase sum stays correct once a phase
+  // records more than 1000 mint events.
+  const pageSize = 1000
+  let from = 0
+  let sum = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('owl_center_mint_events')
+      .select('quantity')
+      .eq('launch_id', launchId)
+      .eq('phase', phase)
+      .eq('network', network)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    for (const r of rows) {
+      sum += Number((r as { quantity?: number }).quantity ?? 0)
+    }
+    if (rows.length < pageSize) break
+    from += pageSize
+  }
+  return sum
 }
 
 export async function sumPresalePhaseMinted(

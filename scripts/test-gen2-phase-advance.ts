@@ -5,8 +5,8 @@
  * - 16:00–16:25 AIRDROP (Gen1, free)       — 25-min window or sellout
  * - 16:25–16:50 PRESALE (free, prepaid)    — 25-min window or sellout
  * - 16:50–17:00 PRESALE_OVERAGE (+13, free)— 10-min window or sellout
- * - 17:00–18:00 WHITELIST ($30)            — +1h open floor, 1h window or sellout
- * - 18:00+      PUBLIC ($40)               — +2h open floor, terminal (SOLD_OUT via mint RPC)
+ * - 17:00–(+48h) WHITELIST ($30)           — +1h open floor, 48h window or sellout
+ * - after WL    PUBLIC ($40)               — +2h open floor, absorbs WL leftover, terminal (SOLD_OUT via mint RPC)
  *
  * Run: npx --yes tsx scripts/test-gen2-phase-advance.ts
  */
@@ -15,6 +15,8 @@ import {
   gen2PhaseOpenFloorOffsetMs,
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
+  gen2PublicPoolCap,
+  isGen2WhitelistClosed,
 } from '@/lib/owl-center/gen2-phase-advance'
 
 let failures = 0
@@ -37,7 +39,7 @@ console.log('Per-phase windows & floors:')
 check('AIRDROP window = 25 min', gen2PhaseWindowMs('AIRDROP') === 25 * MIN)
 check('PRESALE window = 25 min', gen2PhaseWindowMs('PRESALE') === 25 * MIN)
 check('PRESALE_OVERAGE window = 10 min', gen2PhaseWindowMs('PRESALE_OVERAGE') === 10 * MIN)
-check('WHITELIST window = 1 hour', gen2PhaseWindowMs('WHITELIST') === HOUR)
+check('WHITELIST window = 48 hours', gen2PhaseWindowMs('WHITELIST') === 48 * HOUR)
 check('PUBLIC window = Infinity (never window-advances)', gen2PhaseWindowMs('PUBLIC') === Number.POSITIVE_INFINITY)
 check('early windows cascade to 60 min', gen2PhaseWindowMs('AIRDROP') + gen2PhaseWindowMs('PRESALE') + gen2PhaseWindowMs('PRESALE_OVERAGE') === HOUR)
 check('AIRDROP has no open floor', gen2PhaseOpenFloorOffsetMs('AIRDROP') === null)
@@ -96,10 +98,16 @@ check(
   decideGen2PhaseTransition({ currentPhase: 'WHITELIST', activationMs: WL_FLOOR, mintedInPhase: 800, poolCap: 800, nowMs: WL_FLOOR + 30 * MIN, nextFloorMs: PUBLIC_FLOOR }).advance === false
 )
 
-// WHITELIST 1h window + 18:00 floor → advance to PUBLIC.
+// WHITELIST still within its 48h window (past the +2h PUBLIC floor) → hold.
+check(
+  'WHITELIST within 48h window (after +2h floor) → hold',
+  decideGen2PhaseTransition({ currentPhase: 'WHITELIST', activationMs: WL_FLOOR, mintedInPhase: 10, poolCap: 800, nowMs: PUBLIC_FLOOR, nextFloorMs: PUBLIC_FLOOR }).advance === false
+)
+
+// WHITELIST 48h window elapses (PUBLIC floor long passed) → advance to PUBLIC.
 {
-  const d = decideGen2PhaseTransition({ currentPhase: 'WHITELIST', activationMs: WL_FLOOR, mintedInPhase: 10, poolCap: 800, nowMs: PUBLIC_FLOOR, nextFloorMs: PUBLIC_FLOOR })
-  check('WHITELIST 1h window + 18:00 floor → advance to PUBLIC', d.advance === true && d.to === 'PUBLIC' && d.trigger === 'window_elapsed')
+  const d = decideGen2PhaseTransition({ currentPhase: 'WHITELIST', activationMs: WL_FLOOR, mintedInPhase: 10, poolCap: 800, nowMs: WL_FLOOR + 48 * HOUR, nextFloorMs: PUBLIC_FLOOR })
+  check('WHITELIST 48h window elapsed → advance to PUBLIC', d.advance === true && d.to === 'PUBLIC' && d.trigger === 'window_elapsed')
 }
 
 // PUBLIC is terminal for this logic (SOLD_OUT handled by mint RPC on total supply).
@@ -121,7 +129,26 @@ check('AIRDROP cap = 343', gen2PhasePoolCap(launch, 'AIRDROP') === 343)
 check('PRESALE cap = 657', gen2PhasePoolCap(launch, 'PRESALE') === 657)
 check('PRESALE_OVERAGE cap = 13', gen2PhasePoolCap(launch, 'PRESALE_OVERAGE') === 13)
 check('WHITELIST cap = 800', gen2PhasePoolCap(launch, 'WHITELIST') === 800)
-check('PUBLIC cap = 200', gen2PhasePoolCap(launch, 'PUBLIC') === 200)
+check('PUBLIC base cap = 200', gen2PhasePoolCap(launch, 'PUBLIC') === 200)
+
+console.log('Public pool absorbs WL leftover (only after WL closes):')
+// While WHITELIST is the active phase, leftover is held back — PUBLIC pool = public_supply only.
+check(
+  'WL still active → PUBLIC pool = 200 (no rollover)',
+  gen2PublicPoolCap({ ...launch, active_phase: 'WHITELIST' }, 300) === 200
+)
+check('isGen2WhitelistClosed false while active_phase=WHITELIST', isGen2WhitelistClosed({ active_phase: 'WHITELIST' }) === false)
+check('isGen2WhitelistClosed true once active_phase=PUBLIC', isGen2WhitelistClosed({ active_phase: 'PUBLIC' }) === true)
+// WL closed, 300/800 minted → 500 leftover rolls into PUBLIC: 200 + 500 = 700.
+check(
+  'WL closed (300/800 minted) → PUBLIC pool = 200 + 500 = 700',
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 300) === 700
+)
+// WL fully minted → no leftover: PUBLIC pool = 200.
+check(
+  'WL closed (800/800 minted) → PUBLIC pool = 200 (no leftover)',
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 200
+)
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`)

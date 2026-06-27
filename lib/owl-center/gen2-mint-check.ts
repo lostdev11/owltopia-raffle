@@ -25,6 +25,7 @@ import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegatio
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
+import { gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -224,7 +225,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
             ? overageSupply
             : phase === 'WHITELIST'
               ? launch.wl_supply
-              : launch.public_supply
+              : gen2PublicPoolCap(launch, wlMintedGlobal)
 
     const price_usdc =
       phase === 'WHITELIST'
@@ -528,7 +529,9 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     const mintedPublic = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
-    const publicPoolRemaining = Math.max(0, launch.public_supply - publicMintedGlobal)
+    // Public pool absorbs unminted WL leftover (airdrop/presale leftover stays reserved for the team).
+    const publicPoolCap = gen2PublicPoolCap(launch, wlMintedGlobal)
+    const publicPoolRemaining = Math.max(0, publicPoolCap - publicMintedGlobal)
     const cap = Math.max(0, launch.wallet_mint_limit - mintedPublic)
     const max = publicMaxMintable({
       walletLimitRemaining: cap,
@@ -536,7 +539,6 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       supplyRemaining: Math.max(0, launch.total_supply - launch.minted_count),
     })
     const isActive = isPhaseMintLive(phase)
-    // Public is bounded by its own supply — leftover from earlier phases stays reserved for admins.
     const reserved_mints = Math.min(cap, publicPoolRemaining)
     const publicReason =
       reserved_mints <= 0 ? (publicPoolRemaining <= 0 ? 'public_pool_exhausted' : 'wallet_mint_limit') : null

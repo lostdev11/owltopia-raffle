@@ -4,7 +4,7 @@ import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { getPresaleMintPoolSnapshot, sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
-import { gen2PhasePoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PhasePoolCap, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
@@ -101,18 +101,27 @@ export async function GET(request: NextRequest) {
 
   // Per-phase mint progress (minted vs the phase's supply pool cap) so the admin
   // console can show how many spots remain in each phase, not just total supply.
-  const phase_breakdown = await Promise.all(
-    OWL_CENTER_MINTABLE_PHASES.map(async (phase) => {
-      const phaseMinted = await sumOwlCenterPhaseMinted(launch.id, phase, network)
-      const cap = gen2PhasePoolCap(launch, phase)
-      return {
-        phase,
-        minted: phaseMinted,
-        cap,
-        remaining: Math.max(0, cap - phaseMinted),
-      }
-    })
-  )
+  const phaseMintedByPhase = Object.fromEntries(
+    await Promise.all(
+      OWL_CENTER_MINTABLE_PHASES.map(async (phase) => [phase, await sumOwlCenterPhaseMinted(launch.id, phase, network)] as const)
+    )
+  ) as Record<(typeof OWL_CENTER_MINTABLE_PHASES)[number], number>
+
+  const phase_breakdown = OWL_CENTER_MINTABLE_PHASES.map((phase) => {
+    const phaseMinted = phaseMintedByPhase[phase] ?? 0
+    // Public absorbs unminted WL leftover so the collection can mint out (airdrop/presale leftover
+    // stays reserved for the team backstop).
+    const cap =
+      phase === 'PUBLIC'
+        ? gen2PublicPoolCap(launch, phaseMintedByPhase.WHITELIST ?? 0)
+        : gen2PhasePoolCap(launch, phase)
+    return {
+      phase,
+      minted: phaseMinted,
+      cap,
+      remaining: Math.max(0, cap - phaseMinted),
+    }
+  })
 
   const mint_controls = buildOwlCenterMintControls(launch.is_paused)
 

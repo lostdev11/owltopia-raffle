@@ -198,12 +198,26 @@ export async function reconcileGen2LaunchMintsFromChain(
   if (!supply.ok || supply.itemsRedeemed <= launch.minted_count) return { recorded: 0 }
 
   const db = getSupabaseAdmin()
-  const { data: existing } = await db
-    .from('owl_center_mint_events')
-    .select('tx_signature')
-    .eq('launch_id', launch.id)
-    .eq('network', network)
-  const knownSigs = new Set((existing ?? []).map((r) => String((r as { tx_signature: string }).tx_signature)))
+  // Paginate past PostgREST's 1000-row default cap; an incomplete dedupe set would re-record
+  // already-known signatures and inflate minted_count once a launch passes 1000 mint events.
+  const knownSigs = new Set<string>()
+  {
+    const pageSize = 1000
+    let from = 0
+    for (;;) {
+      const { data: existing } = await db
+        .from('owl_center_mint_events')
+        .select('tx_signature')
+        .eq('launch_id', launch.id)
+        .eq('network', network)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1)
+      const batch = existing ?? []
+      for (const r of batch) knownSigs.add(String((r as { tx_signature: string }).tx_signature))
+      if (batch.length < pageSize) break
+      from += pageSize
+    }
+  }
 
   const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(network), 'confirmed')
   let sigInfos

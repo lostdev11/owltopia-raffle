@@ -88,13 +88,27 @@ export async function reconcileOrphanCandyMachineMints(
   let recorded = 0
 
   if (supply.itemsRedeemed > launch.minted_count && MINTABLE_PHASES.has(launch.active_phase)) {
-    const { data: existing } = await db
-      .from('owl_center_mint_events')
-      .select('tx_signature')
-      .eq('launch_id', launch.id)
-      .eq('network', network)
-
-    const knownSigs = new Set((existing ?? []).map((r) => String((r as { tx_signature: string }).tx_signature)))
+    // Paginate past PostgREST's 1000-row default cap; otherwise once a launch has >1000 mint
+    // events the dedupe set is incomplete and already-recorded signatures get re-recorded,
+    // inflating minted_count.
+    const knownSigs = new Set<string>()
+    {
+      const pageSize = 1000
+      let from = 0
+      for (;;) {
+        const { data: existing } = await db
+          .from('owl_center_mint_events')
+          .select('tx_signature')
+          .eq('launch_id', launch.id)
+          .eq('network', network)
+          .order('created_at', { ascending: true })
+          .range(from, from + pageSize - 1)
+        const batch = existing ?? []
+        for (const r of batch) knownSigs.add(String((r as { tx_signature: string }).tx_signature))
+        if (batch.length < pageSize) break
+        from += pageSize
+      }
+    }
     const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(network), 'confirmed')
     const sigs = await connection.getSignaturesForAddress(new PublicKey(cmId), {
       limit: Math.min(500, Math.max(50, opts?.maxSignatures ?? 200)),
