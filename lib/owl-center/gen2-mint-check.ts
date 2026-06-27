@@ -25,7 +25,7 @@ import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegatio
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
-import { gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PhaseWindowMs, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -567,6 +567,17 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       reason: publicGate.reason,
       minted_in_phase: mintedPublic,
     })
+  }
+
+  // Stamp each phase's window close time (start + window) so the UI can show a countdown
+  // (e.g. the WHITELIST 48h timer). Open-ended phases (PUBLIC) have an infinite window → null.
+  for (const p of phases) {
+    const startMs = p.phase_starts_at ? new Date(p.phase_starts_at).getTime() : null
+    const windowMs = gen2PhaseWindowMs(p.phase)
+    p.window_ends_at =
+      startMs != null && Number.isFinite(startMs) && Number.isFinite(windowMs)
+        ? new Date(startMs + windowMs).toISOString()
+        : null
   }
 
   return {

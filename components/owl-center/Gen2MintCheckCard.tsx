@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { useWallet } from '@solana/wallet-adapter-react'
 
@@ -70,6 +70,43 @@ function PhaseSupplyBar({ minted, total }: { minted: number; total: number }) {
         {safeTotal > 0 ? ` / ${safeTotal} minted · ${remaining} left` : ' minted'}
       </p>
     </div>
+  )
+}
+
+/** Live countdown to a phase's window close (e.g. the WHITELIST 48h timer). */
+function PhaseWindowCountdown({ endsAt, active }: { endsAt: string; active: boolean }) {
+  // Start null so server render and first client paint match (no hydration mismatch), then tick.
+  const [now, setNow] = useState<number | null>(null)
+  useEffect(() => {
+    setNow(Date.now())
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const end = new Date(endsAt).getTime()
+  if (now == null || !Number.isFinite(end)) return null
+
+  const msLeft = end - now
+  if (msLeft <= 0) {
+    return (
+      <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[#FFD769]">
+        WL window closed · leftover rolls into Public
+      </p>
+    )
+  }
+
+  const totalSec = Math.floor(msLeft / 1000)
+  const d = Math.floor(totalSec / 86_400)
+  const h = Math.floor((totalSec % 86_400) / 3_600)
+  const m = Math.floor((totalSec % 3_600) / 60)
+  const s = totalSec % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text = d > 0 ? `${d}d ${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(h)}:${pad(m)}:${pad(s)}`
+  return (
+    <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C]">
+      {active ? 'WL closes in' : 'WL window ends in'}{' '}
+      <span className="tabular-nums text-[#EAFBF4]">{text}</span>
+    </p>
   )
 }
 
@@ -245,6 +282,10 @@ export function Gen2MintCheckCard({
                   </p>
 
                   <PhaseSupplyBar minted={p.phase_minted} total={p.phase_supply} />
+
+                  {p.phase === 'WHITELIST' && p.window_ends_at ? (
+                    <PhaseWindowCountdown endsAt={p.window_ends_at} active={active} />
+                  ) : null}
 
                   {connected && p.minted_in_phase > 0 ? (
                     <p className="mt-1 text-[#00FF9C]">

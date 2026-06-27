@@ -263,6 +263,12 @@ export type Gen2MintCheckPhasePreview = {
   phase_note: string | null
   /** Scheduled open time for this phase (if configured). */
   phase_starts_at?: string | null
+  /**
+   * When this phase's open window closes (ISO), for phases with a finite window (e.g. WHITELIST's
+   * 48h). Computed as `phase_starts_at + window`. Null for open-ended phases (PUBLIC) or when no
+   * start time is configured. Drives the WL countdown timer in the mint UI.
+   */
+  window_ends_at?: string | null
   /** NFTs this wallet has already minted in this phase (recorded mint events). */
   minted_in_phase: number
   gen1?: {
