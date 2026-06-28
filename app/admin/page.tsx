@@ -30,6 +30,7 @@ import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
 import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTerminal'
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
+import { AdminGen2MintersSection } from '@/components/admin/AdminGen2MintersSection'
 
 interface DeletedEntry {
   id: string
@@ -2495,6 +2496,21 @@ export default function AdminDashboardPage() {
             }
           >
             <AdminReferralPerformanceSection />
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="green"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Users className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                Gen2 minter wallets
+              </span>
+            }
+          >
+            <AdminGen2MintersSection />
           </OwlVisionDisclosure>
         )}
 
