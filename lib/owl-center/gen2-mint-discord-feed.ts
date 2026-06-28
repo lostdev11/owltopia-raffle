@@ -22,6 +22,10 @@ import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { fetchNftMintMetaFromHelius } from '@/lib/nft-helius-image'
+import { fetchMetadataJsonFromUri, imageUrlFromMetadataJson } from '@/lib/owl-center/metadata-json-fix'
+import { getMetaplexTokenMetadata } from '@/lib/solana/metaplex-mint-onchain-metadata'
+import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
+import { Connection, PublicKey } from '@solana/web3.js'
 import { getSiteBaseUrl } from '@/lib/site-config'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
@@ -96,6 +100,48 @@ function proxyImageUrl(rawImageUri: string | null | undefined): string | undefin
   const trimmed = rawImageUri?.trim()
   if (!trimmed) return undefined
   return `${getSiteBaseUrl().replace(/\/$/, '')}/api/proxy-image?url=${encodeURIComponent(trimmed)}`
+}
+
+type MintFeedMeta = { name: string | null; image: string | null }
+
+/**
+ * Resolve a just-minted owl's name + image for the Discord card.
+ *
+ * Helius DAS (`getAsset`) is the fast path, but it lags behind the chain by a few seconds, so a
+ * freshly minted NFT — especially the later ones when a wallet mints several in quick succession —
+ * is often not indexed yet and DAS returns nothing. That left those cards stuck on the "GEN2 Owl"
+ * fallback title with no art. When DAS is missing either field we read the on-chain Metaplex
+ * metadata account directly (available the instant the mint confirms) for the name + JSON URI and
+ * resolve the image from that JSON. Best-effort: any failure just leaves the DAS result as-is.
+ */
+async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
+  const das = await fetchNftMintMetaFromHelius(mint, { preferMainnet: true })
+  let name = das?.name ?? null
+  let image = das?.image ?? null
+  if (name && image) return { name, image }
+
+  try {
+    const rpcUrl = getHeliusMainnetRpcUrl()
+    if (!rpcUrl) return { name, image }
+    const connection = new Connection(rpcUrl, 'confirmed')
+    const onChain = await getMetaplexTokenMetadata(connection, new PublicKey(mint))
+    if (!onChain) return { name, image }
+
+    if (!name && onChain.name) name = onChain.name
+
+    if (!image && onChain.uri) {
+      const json = await fetchMetadataJsonFromUri(onChain.uri, 'mainnet')
+      if (json) {
+        const fromJson = imageUrlFromMetadataJson(json)
+        if (fromJson) image = fromJson
+        if (!name && typeof json.name === 'string' && json.name.trim()) name = json.name.trim()
+      }
+    }
+  } catch {
+    /* best-effort: keep whatever DAS resolved */
+  }
+
+  return { name, image }
 }
 
 function buildMintEmbed(input: {
@@ -231,13 +277,14 @@ export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> 
   if (mints.length > 0) {
     const embeds: DiscordIncomingEmbed[] = []
     for (const mint of mints) {
-      // Resolve on mainnet DAS explicitly so art shows even if the app RPC is pointed at devnet.
-      const meta = await fetchNftMintMetaFromHelius(mint, { preferMainnet: true })
+      // Mainnet DAS first (so art shows even if the app RPC is devnet), then on-chain fallback for
+      // freshly minted owls DAS hasn't indexed yet — otherwise the card has no name/image.
+      const meta = await resolveMintFeedMeta(mint)
       embeds.push(
         buildMintEmbed({
           mint,
-          name: meta?.name ?? null,
-          imageUrl: proxyImageUrl(meta?.image),
+          name: meta.name,
+          imageUrl: proxyImageUrl(meta.image),
           wallet: input.wallet,
           phase: input.phase,
           txSig: input.txSignature,
@@ -268,11 +315,11 @@ export async function sendGen2MintFeedPreview(input: {
   if (!launch) return { ok: false, reason: 'launch_not_found' }
 
   const snapshot = await buildProgressSnapshot(launch, 'mainnet')
-  const meta = await fetchNftMintMetaFromHelius(input.mint, { preferMainnet: true })
+  const meta = await resolveMintFeedMeta(input.mint)
   const embed = buildMintEmbed({
     mint: input.mint,
-    name: meta?.name ?? null,
-    imageUrl: proxyImageUrl(meta?.image),
+    name: meta.name,
+    imageUrl: proxyImageUrl(meta.image),
     wallet: input.wallet,
     phase: input.phase,
     txSig: input.txSignature,
