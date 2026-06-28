@@ -74,9 +74,10 @@ const PHASE_START_ISO = {
   pub: '2026-06-26T18:00:00Z',
 } as const
 
-// Gen1 holder phase stays open 7 days (per Gembird). The 343 gen1 items are RESERVED (public is
-// capped at 200, so all four caps sum to 2000 and public can't eat the gen1 pool). Whatever Gen1
-// holders don't mint in 7 days, the team mints afterwards via `guards --gen1-team` (see below).
+// Gen1 holder phase stays open 7 days (per Gembird). The 343 gen1 items are RESERVED, but that is
+// enforced OFF-CHAIN (gen2PublicPoolCap reserves the gen1 remainder; see gen2-eligibility.ts) — NOT
+// by redeemedAmount, which is a global guard (see TOTAL_SUPPLY note). Whatever Gen1 holders don't
+// mint in 7 days, the team mints afterwards via `guards --gen1-team` (see below).
 const PHASE_END_ISO = {
   gen1: '2026-07-03T16:00:00Z', // gen1 start + 7 days (holder window)
   pre: '2026-07-03T16:00:00Z', // presale start + 7 days (matches gen1 holder window)
@@ -96,9 +97,16 @@ const TEST_GROUP_MODE = process.argv.includes('--with-test-group')
 const TEST_GROUP_CAP = 5
 
 const PHASE_SUPPLY = { gen1: 343, pre: 657, wl: 800, pub: 200 } as const
+// IMPORTANT: `redeemedAmount` is a GLOBAL candy-guard guard — it compares the candy machine's TOTAL
+// itemsRedeemed against `maximum`, NOT a per-group/per-phase counter. So every group's redeemedAmount
+// MUST be the full supply, otherwise that phase bot-taxes once the COLLECTION's total mints pass its
+// per-phase number (e.g. pub=200 bot-taxed all public mints once the CM passed 200 total). Per-phase
+// supply caps are enforced OFF-CHAIN (gen2PublicPoolCap + presale/WL pools in gen2-eligibility.ts),
+// per-wallet caps by `mintLimit`, and the hard total cap by the CM's itemsAvailable.
+const TOTAL_SUPPLY = Object.values(PHASE_SUPPLY).reduce((a, b) => a + b, 0) // 2000
 const PHASE_PRICE_USD = { wl: 30, pub: 40 } as const
 const GEN1_MINT_LIMIT = 25 // flat cap >= largest Gen1 holding (23 at snapshot); exact per-NFT count enforced server-side
-const PUB_MINT_LIMIT = 10 // launch wallet_mint_limit
+const PUB_MINT_LIMIT = 20 // launch wallet_mint_limit
 const WL_MINT_LIMIT = 2 // every WL wallet's owl_center_wl_allocations.allowed_mints is 2; hard-cap on-chain too
 // Flat backstop >= largest pre-group entitlement (max purchased+gifted is 20). Its real purpose is
 // to create the on-chain mint-counter PDA the cosign endpoint reads to enforce the EXACT per-wallet
@@ -227,7 +235,7 @@ async function setGuards(confirm: boolean) {
               mintLimit: some({ id: 1, limit: GEN1_MINT_LIMIT }),
               thirdPartySigner: some({ signerKey: cosignerPk }),
             }),
-        redeemedAmount: some({ maximum: BigInt(PHASE_SUPPLY.gen1) }),
+        redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),
         // Free mint (only $1 platform fee + rent + network); frozen via 0-deposit freezeSolPayment.
         freezeSolPayment: freezeGuard(FREEZE_DEPOSIT_SOL, DEST),
       },
@@ -242,7 +250,7 @@ async function setGuards(confirm: boolean) {
       startDate: some({ date: dateTime(PHASE_START_ISO.pre) }),
       endDate: some({ date: dateTime(PHASE_END_ISO.pre) }),
       allowList: some({ merkleRoot: getMerkleRoot(preWallets) }),
-      redeemedAmount: some({ maximum: BigInt(PHASE_SUPPLY.pre) }),
+      redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),
       // Free redemption (already paid in USDC); only $1 platform fee + rent + network at mint.
       freezeSolPayment: freezeGuard(FREEZE_DEPOSIT_SOL, DEST),
       // Flat backstop + on-chain per-wallet mint counter (PDA) read by the cosign endpoint to
@@ -261,7 +269,7 @@ async function setGuards(confirm: boolean) {
       // Per-wallet cap hard-enforced on-chain (matches the 2 allowed_mints every WL wallet has).
       // Unique id (gen1=1, pub=2) so the on-chain counter PDA does not collide.
       mintLimit: some({ id: 3, limit: WL_MINT_LIMIT }),
-      redeemedAmount: some({ maximum: BigInt(PHASE_SUPPLY.wl) }),
+      redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),
       // Enforced price -> distribution wallet NOW (solPayment) + 0-deposit freeze (freezeSolPayment).
       solPayment: solGuard(Number(wlSol.toFixed(6)), DEST),
       freezeSolPayment: freezeGuard(FREEZE_DEPOSIT_SOL, DEST),
@@ -274,7 +282,7 @@ async function setGuards(confirm: boolean) {
       // pool. Any unminted gen1/pre/wl remainder is minted by the team, not by public.
       startDate: some({ date: dateTime(PHASE_START_ISO.pub) }),
       mintLimit: some({ id: 2, limit: PUB_MINT_LIMIT }),
-      redeemedAmount: some({ maximum: BigInt(PHASE_SUPPLY.pub) }),
+      redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),
       solPayment: solGuard(Number(pubSol.toFixed(6)), DEST),
       freezeSolPayment: freezeGuard(FREEZE_DEPOSIT_SOL, DEST),
     },
