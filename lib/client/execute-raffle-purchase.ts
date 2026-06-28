@@ -15,6 +15,7 @@ import {
   getMint,
   getAccount,
   createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   type Mint,
 } from '@solana/spl-token'
 import type { Raffle, RaffleCurrency } from '@/lib/types'
@@ -452,6 +453,103 @@ export async function buildPurchaseTransactionFromPaymentDetails(
   return transaction
 }
 
+// Rent-exempt minimum for a token account (~0.00203928 SOL) charged when we create a
+// recipient's associated token account, plus a small buffer for the network fee.
+const ATA_RENT_LAMPORTS = 2_039_280
+const FEE_BUFFER_LAMPORTS = 15_000
+
+function isTokenAccountNotFound(error: unknown): boolean {
+  const e = error as { name?: string; message?: string }
+  const name = e?.name || ''
+  const msg = e?.message || ''
+  return (
+    name.includes('TokenAccountNotFound') ||
+    msg.includes('TokenAccountNotFoundError') ||
+    msg.includes('could not find account')
+  )
+}
+
+/**
+ * Best-effort balance check before handing the tx to the wallet. Mobile wallets
+ * (notably Solflare) surface a generic "Unexpected error" when their simulation
+ * fails, hiding the real cause. Catching the common cases here lets us show an
+ * actionable message instead. Any RPC/network failure here returns null so the
+ * purchase is never blocked by the preflight itself.
+ */
+async function checkPurchaseBalancesPreflight(
+  connection: Connection,
+  publicKey: PublicKey,
+  raffleCurrency: string,
+  paymentDetails: PurchasePaymentDetails,
+  transaction: Transaction
+): Promise<string | null> {
+  try {
+    const payments = resolvePaymentsFromPurchaseDetails(paymentDetails)
+    const totalAmount = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+
+    const ataCreations = transaction.instructions.filter(ix =>
+      ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)
+    ).length
+
+    let requiredLamports = FEE_BUFFER_LAMPORTS + ataCreations * ATA_RENT_LAMPORTS
+    if (raffleCurrency === 'SOL') {
+      requiredLamports += Math.round(totalAmount * LAMPORTS_PER_SOL)
+    }
+
+    let solBalance: number
+    try {
+      solBalance = await connection.getBalance(publicKey, 'confirmed')
+    } catch {
+      return null
+    }
+
+    if (solBalance < requiredLamports) {
+      const needSol = (requiredLamports / LAMPORTS_PER_SOL).toFixed(5)
+      if (raffleCurrency === 'SOL') {
+        return `Not enough SOL. You need about ${needSol} SOL to cover the ticket cost plus the network fee. Add SOL and try again.`
+      }
+      const rentNote = ataCreations > 0 ? ' and a one-time token-account rent (~0.002 SOL each)' : ''
+      return `Not enough SOL for the network fee${rentNote}. Your ${raffleCurrency} balance is fine, but the wallet still needs about ${needSol} SOL to send the payment. Add a little SOL and try again.`
+    }
+
+    if (raffleCurrency !== 'SOL') {
+      const mint = resolveSplPaymentMint(raffleCurrency, paymentDetails)
+      if (!mint) return null
+      const decimals = Number.isFinite(paymentDetails.tokenDecimals) ? paymentDetails.tokenDecimals : 6
+      const mintPk = new PublicKey(mint)
+      const senderAta = await getAssociatedTokenAddress(mintPk, publicKey)
+
+      let tokenRaw = 0n
+      try {
+        const acct = await getAccount(connection, senderAta)
+        tokenRaw = acct.amount
+      } catch (e) {
+        if (isTokenAccountNotFound(e)) {
+          tokenRaw = 0n
+        } else {
+          return null
+        }
+      }
+
+      const requiredRaw = payments.reduce(
+        (sum, p) => sum + BigInt(Math.round((Number(p.amount) || 0) * Math.pow(10, decimals))),
+        0n
+      )
+      if (tokenRaw < requiredRaw) {
+        const have = Number(tokenRaw) / Math.pow(10, decimals)
+        if (raffleCurrency === 'OWL') {
+          return `Not enough OWL. This costs ${totalAmount} OWL but your wallet holds ${have}. Staked OWL is counted separately — unwrap or add OWL so your wallet balance covers the total, then try again.`
+        }
+        return `Not enough ${raffleCurrency}. This costs ${totalAmount} ${raffleCurrency} but your wallet holds ${have}. Add ${raffleCurrency} and try again.`
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Runs create → wallet pay → verify for one raffle line item (used by card, detail page, cart checkout).
  */
@@ -602,6 +700,20 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       paymentDetails
     )
 
+    // Catch the common "I have OWL but no SOL for fees / OWL is staked" cases before
+    // the wallet runs its own simulation — mobile wallets otherwise hide these behind
+    // a generic "Unexpected error".
+    const balanceIssue = await checkPurchaseBalancesPreflight(
+      connection,
+      publicKey,
+      String(payCurrency),
+      paymentDetails,
+      transaction
+    )
+    if (balanceIssue) {
+      throw new Error(balanceIssue)
+    }
+
     let signature: string
     try {
       if (transaction.instructions.length === 0) {
@@ -656,6 +768,20 @@ export async function executeRafflePurchase(opts: ExecuteRafflePurchaseOptions):
       if (errorMessage.toLowerCase().includes('solflare')) {
         throw new Error(
           'Solflare wallet error. Please try: 1) Refreshing the page and reconnecting Solflare, 2) Updating the Solflare extension to the latest version, 3) Using Solflare in a different browser if the issue persists.'
+        )
+      }
+      // Solflare (and some other mobile wallets) report a generic "Unexpected error"
+      // when their internal simulation fails — most often not enough SOL for the
+      // network fee / token-account rent, or not enough spendable (un-staked) OWL.
+      if (errorMessage.toLowerCase().includes('unexpected error')) {
+        const owlNote =
+          String(payCurrency) === 'OWL'
+            ? ' Also confirm your OWL is in your wallet (staked OWL is separate).'
+            : ''
+        throw new Error(
+          `Your wallet couldn't complete the payment. This usually means you need a little SOL for the network fee${
+            isMobile ? ' (even when paying with a token)' : ''
+          }.${owlNote} Add a small amount of SOL, refresh the page, and try again.`
         )
       }
       if (errorMessage.includes('Something went wrong') || errorMessage.includes('wallet')) {
