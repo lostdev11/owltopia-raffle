@@ -8,6 +8,8 @@ import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 
 import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/evaluate'
 
+import { postGen2MintFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
+
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 
 import { getLivePhases } from '@/lib/owl-center/phase-schedule'
@@ -371,6 +373,24 @@ export async function POST(request: NextRequest) {
         max: mintedList.length,
         timeBudgetMs: 45_000,
       }).catch((e) => console.error('[confirm-mint] wallet-safe metadata fix', e))
+    )
+  }
+
+
+
+  // Best-effort: post the freshly minted owl(s) + a live phase/total progress bar to the GEN2
+  // mint-tracker Discord channel. Mainnet only; no-ops when the webhook env is unset. Never blocks
+  // or fails the mint confirmation.
+  if (network === 'mainnet') {
+    waitUntil(
+      postGen2MintFeed({
+        wallet,
+        phase,
+        quantity: qty,
+        txSignature: txSig,
+        mints: mintedList,
+        network,
+      }).catch((e) => console.error('[confirm-mint] discord mint feed', e))
     )
   }
 
