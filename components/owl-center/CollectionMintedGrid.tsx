@@ -5,6 +5,7 @@ import { Download, ExternalLink, Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
+import { useSaveImage } from '@/components/use-save-image'
 
 function MintedPieceCard({
   mint,
@@ -20,6 +21,7 @@ function MintedPieceCard({
   const [imageAttemptIdx, setImageAttemptIdx] = useState(0)
   const [imageAttemptChain, setImageAttemptChain] = useState<string[]>([])
   const [downloading, setDownloading] = useState(false)
+  const { saveImage, savePngOverlay } = useSaveImage()
 
   useEffect(() => {
     let cancelled = false
@@ -66,14 +68,7 @@ function MintedPieceCard({
       const res = await fetch(imageSrc, { mode: 'cors' })
       if (!res.ok) throw new Error('fetch failed')
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = downloadName
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      await saveImage(blob, downloadName, { title: name ?? 'Owl artwork' })
     } catch {
       // Cross-origin gateways may block fetch — open the image so users can long-press to save (esp. on mobile).
       window.open(imageSrc, '_blank', 'noopener,noreferrer')
@@ -135,6 +130,7 @@ function MintedPieceCard({
           </button>
         </div>
       </div>
+      {savePngOverlay}
     </article>
   )
 }

@@ -5,6 +5,7 @@ import { ImageDown, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
 import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
+import { useSaveImage } from '@/components/use-save-image'
 
 type RaffleWinnerPngButtonProps = {
   title: string
@@ -58,19 +59,6 @@ function watermarkIconUrl(): string {
   return new URL('/icon.png', window.location.origin).href
 }
 
-function downloadBlob(blob: Blob, fileName: string) {
-  const blobUrl = window.URL.createObjectURL(blob)
-  const download = document.createElement('a')
-  download.href = blobUrl
-  download.download = fileName
-  download.rel = 'noopener'
-  download.style.display = 'none'
-  document.body.appendChild(download)
-  download.click()
-  download.remove()
-  window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 15_000)
-}
-
 export function RaffleWinnerPngButton({
   title,
   slug,
@@ -84,14 +72,11 @@ export function RaffleWinnerPngButton({
 }: RaffleWinnerPngButtonProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const { saveImage, savePngOverlay } = useSaveImage()
 
   const clearMessageSoon = () => {
     window.setTimeout(() => setMessage(null), 2200)
   }
-
-  const isLikelyMobile = () =>
-    (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
-    (typeof window.matchMedia === 'function' && window.matchMedia('(hover: none), (pointer: coarse)').matches)
 
   const onGenerate = async () => {
     if (typeof window === 'undefined') return
@@ -253,36 +238,14 @@ export function RaffleWinnerPngButton({
         }, 'image/png')
       })
 
-      const nav = typeof navigator !== 'undefined' ? navigator : null
-      const winnerFile =
-        typeof File !== 'undefined' ? new File([pngBlob], fileName, { type: 'image/png' }) : null
-      const canShareFile =
-        isLikelyMobile() &&
-        !!winnerFile &&
-        !!nav &&
-        typeof nav.share === 'function' &&
-        typeof nav.canShare === 'function' &&
-        nav.canShare({ files: [winnerFile] })
-
-      if (canShareFile && winnerFile) {
-        try {
-          await nav.share({
-            title: safeTitle,
-            text: 'Save this winner PNG',
-            files: [winnerFile],
-          })
-          setMessage('Use Save Image in the share sheet')
-          return
-        } catch (shareErr) {
-          if (shareErr instanceof DOMException && shareErr.name === 'AbortError') {
-            setMessage('Save cancelled')
-            return
-          }
-        }
-      }
-
-      downloadBlob(pngBlob, fileName)
-      setMessage('Winner PNG download started')
+      const result = await saveImage(pngBlob, fileName, {
+        title: safeTitle,
+        text: 'Save this winner PNG',
+      })
+      if (result === 'shared') setMessage('Use Save Image in the share sheet')
+      else if (result === 'preview') setMessage('Long-press the image to save')
+      else if (result === 'downloaded') setMessage('Winner PNG download started')
+      else setMessage('Save cancelled')
     } catch {
       setMessage('Could not generate winner PNG')
     } finally {
@@ -306,6 +269,7 @@ export function RaffleWinnerPngButton({
         {busy ? 'Generating…' : buttonLabel}
       </Button>
       {message ? <p className="mt-1 text-xs text-muted-foreground">{message}</p> : null}
+      {savePngOverlay}
     </div>
   )
 }

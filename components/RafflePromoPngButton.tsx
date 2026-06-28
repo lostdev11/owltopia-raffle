@@ -5,6 +5,7 @@ import { ImageDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
 import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
+import { useSaveImage } from '@/components/use-save-image'
 
 type RafflePromoPngButtonProps = {
   title: string
@@ -188,14 +189,11 @@ export function RafflePromoPngButton({
 }: RafflePromoPngButtonProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const { saveImage, savePngOverlay } = useSaveImage()
 
   const clearMessageSoon = () => {
     window.setTimeout(() => setMessage(null), 2200)
   }
-
-  const isLikelyMobile = () =>
-    (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
-    (typeof window.matchMedia === 'function' && window.matchMedia('(hover: none), (pointer: coarse)').matches)
 
   const onGenerate = async () => {
     if (typeof window === 'undefined') return
@@ -431,47 +429,14 @@ export function RafflePromoPngButton({
         }, 'image/png')
       })
 
-      const nav = typeof navigator !== 'undefined' ? navigator : null
-      const shareCapable = !!nav && typeof nav.share === 'function'
-      const canShareFile =
-        shareCapable &&
-        typeof nav.canShare === 'function' &&
-        nav.canShare({
-          files: [new File([pngBlob], fileName, { type: 'image/png' })],
-        })
-
-      if (canShareFile) {
-        try {
-          await nav.share({
-            title: safeTitle,
-            text: 'Save this PNG and post it on X',
-            files: [new File([pngBlob], fileName, { type: 'image/png' })],
-          })
-          setMessage('Use Save Image in the share sheet')
-          return
-        } catch (shareErr) {
-          if (shareErr instanceof DOMException && shareErr.name === 'AbortError') {
-            setMessage('Save cancelled')
-            return
-          }
-        }
-      }
-
-      const blobUrl = window.URL.createObjectURL(pngBlob)
-      if (isLikelyMobile()) {
-        window.open(blobUrl, '_blank', 'noopener,noreferrer')
-        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000)
-        setMessage('Image opened - long-press to save')
-      } else {
-        const download = document.createElement('a')
-        download.href = blobUrl
-        download.download = fileName
-        document.body.appendChild(download)
-        download.click()
-        download.remove()
-        window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10_000)
-        setMessage('PNG downloaded')
-      }
+      const result = await saveImage(pngBlob, fileName, {
+        title: safeTitle,
+        text: 'Save this PNG and post it on X',
+      })
+      if (result === 'shared') setMessage('Use Save Image in the share sheet')
+      else if (result === 'preview') setMessage('Long-press the image to save')
+      else if (result === 'downloaded') setMessage('PNG downloaded')
+      else setMessage('Save cancelled')
     } catch {
       setMessage('Could not generate PNG')
     } finally {
@@ -494,6 +459,7 @@ export function RafflePromoPngButton({
         {busy ? 'Generating…' : buttonLabel}
       </Button>
       {message ? <p className="mt-1 text-xs text-muted-foreground">{message}</p> : null}
+      {savePngOverlay}
     </div>
   )
 }
