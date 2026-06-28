@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Download, ExternalLink, Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
@@ -19,6 +19,7 @@ function MintedPieceCard({
   const [loading, setLoading] = useState(true)
   const [imageAttemptIdx, setImageAttemptIdx] = useState(0)
   const [imageAttemptChain, setImageAttemptChain] = useState<string[]>([])
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -56,6 +57,31 @@ function MintedPieceCard({
     ? `https://solscan.io/token/${mint}`
     : `https://solscan.io/token/${mint}?cluster=devnet`
 
+  const downloadName = `${(name ?? `owl-${mint.slice(0, 8)}`).replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'owl'}.png`
+
+  async function handleDownload() {
+    if (!imageSrc || downloading) return
+    setDownloading(true)
+    try {
+      const res = await fetch(imageSrc, { mode: 'cors' })
+      if (!res.ok) throw new Error('fetch failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = downloadName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // Cross-origin gateways may block fetch — open the image so users can long-press to save (esp. on mobile).
+      window.open(imageSrc, '_blank', 'noopener,noreferrer')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <article className="overflow-hidden border border-[#1A222B] bg-[#10161C]/85">
       <div className="relative aspect-square w-full bg-[#0B0F13]">
@@ -84,15 +110,30 @@ function MintedPieceCard({
       </div>
       <div className="space-y-2 border-t border-[#1A222B] p-3">
         <p className="truncate font-mono text-xs text-[#E8EEF2]">{name ?? `Mint #${index + 1}`}</p>
-        <a
-          href={explorer}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-1.5 border border-[#1A222B] bg-[#0B0F13] px-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] hover:border-[#00FF9C]/35"
-        >
-          <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          View mint
-        </a>
+        <div className="flex gap-2">
+          <a
+            href={explorer}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center gap-1.5 border border-[#1A222B] bg-[#0B0F13] px-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] hover:border-[#00FF9C]/35"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            View mint
+          </a>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!imageSrc || downloading}
+            aria-label={name ? `Download ${name} image` : `Download minted NFT ${index + 1} image`}
+            className="inline-flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center border border-[#1A222B] bg-[#0B0F13] px-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] hover:border-[#00FF9C]/35 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {downloading ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            )}
+          </button>
+        </div>
       </div>
     </article>
   )
